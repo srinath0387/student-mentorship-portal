@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate } from 'react-router-dom';
 import { ShieldCheck, UserCheck, Lock, CheckCircle2, XCircle, Loader2, Sparkles, Eye, EyeOff } from 'lucide-react';
-import { studentSignUpSchema, facultySignUpSchema, loginSchema, StudentSignUpInput, FacultySignUpInput, LoginInput, DEPARTMENT_CODE_MAP, VALID_DEPARTMENT_NAMES, getDeptCodeFromRollNumber, getDeptFromRollNumber } from '../../lib/validation/auth';
+import { studentSignUpSchema, facultySignUpSchema, loginSchema, adminLoginSchema, TIER1_SUPER_ADMIN_EMAILS, StudentSignUpInput, FacultySignUpInput, LoginInput, DEPARTMENT_CODE_MAP, VALID_DEPARTMENT_NAMES, getDeptCodeFromRollNumber, getDeptFromRollNumber } from '../../lib/validation/auth';
 import { api } from '../../lib/api';
 import { cognitoSignUp, cognitoSignIn, cognitoSignOut, isCognitoConfigError } from '../../lib/cognitoAuth';
 import { useAuth } from '../../context/AuthContext';
@@ -59,7 +59,7 @@ export const AuthPage: React.FC = () => {
     },
   });
 
-  // Login Form
+  // Login Form — for student, faculty, hod tabs (@rgmcet.edu.in only)
   const {
     register: registerLogin,
     handleSubmit: handleLoginSubmit,
@@ -72,12 +72,27 @@ export const AuthPage: React.FC = () => {
     mode: 'onChange',
   });
 
+  // Admin Login Form — accepts @rgmcet.edu.in OR the 3 tier-1 Gmail super-admin addresses
+  const {
+    register: registerAdminLogin,
+    handleSubmit: handleAdminLoginSubmit,
+    watch: watchAdminLogin,
+    reset: resetAdminLogin,
+    clearErrors: clearAdminLoginErrors,
+    formState: { errors: adminLoginErrors, isSubmitting: isAdminLoginSubmitting },
+  } = useForm<LoginInput>({
+    resolver: zodResolver(adminLoginSchema),
+    mode: 'onChange',
+  });
+
   const handleTabSwitch = (newRole: UserRole) => {
     setActiveTab(newRole);
     setIsSignUp(false);
     setErrorMessage(null);
     clearLoginErrors();
+    clearAdminLoginErrors();
     resetLogin({ email: '', password: '' });
+    resetAdminLogin({ email: '', password: '' });
     clearSignUpErrors();
     clearFacultySignUpErrors();
   };
@@ -86,7 +101,9 @@ export const AuthPage: React.FC = () => {
     setIsSignUp(signUp);
     setErrorMessage(null);
     clearLoginErrors();
+    clearAdminLoginErrors();
     resetLogin({ email: '', password: '' });
+    resetAdminLogin({ email: '', password: '' });
     clearSignUpErrors();
     clearFacultySignUpErrors();
   };
@@ -95,6 +112,7 @@ export const AuthPage: React.FC = () => {
   const watchedRegNo = watchSignUp('registrationNumber');
   const watchedEmail = watchSignUp('email');
   const watchedLoginEmail = watchLogin('email');
+  const watchedAdminLoginEmail = watchAdminLogin('email');
   const watchedFacultyEmail = watchFacultySignUp('email');
 
   useEffect(() => {
@@ -1328,108 +1346,205 @@ export const AuthPage: React.FC = () => {
               </div>
 
 
-              <form onSubmit={handleLoginSubmit(onLogin)} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-textPrimary mb-1">Department *</label>
-                  <select
-                    value={loginDept}
-                    onChange={(e) => setLoginDept(e.target.value)}
-                    className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary font-medium"
-                  >
-                    {VALID_DEPARTMENT_NAMES.map((d) => (
-                      <option key={d} value={d}>{d}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <div className="flex justify-between items-center mb-1">
-                    <label className="block text-xs font-semibold text-textPrimary">
-                      {activeTab === 'faculty' ? 'Faculty Email' : activeTab === 'hod' ? 'HOD Official Email' : 'Admin Email'}
-                    </label>
-                    <span className="text-[10px] text-textSecondary">@rgmcet.edu.in only</span>
+              {activeTab === 'admin' ? (
+                /* ── ADMIN LOGIN — accepts @rgmcet.edu.in OR the 3 tier-1 Gmail super-admin addresses ── */
+                <form onSubmit={handleAdminLoginSubmit(onLogin)} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-textPrimary mb-1">Department *</label>
+                    <select
+                      value={loginDept}
+                      onChange={(e) => setLoginDept(e.target.value)}
+                      className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary font-medium"
+                    >
+                      {VALID_DEPARTMENT_NAMES.map((d) => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </select>
                   </div>
-                  <div className="relative">
-                    <input
-                      {...registerLogin('email')}
-                      type="email"
-                      placeholder={activeTab === 'faculty' ? 'faculty.name@rgmcet.edu.in' : activeTab === 'hod' ? 'hod.ds@rgmcet.edu.in' : 'admin@rgmcet.edu.in'}
-                      className={`w-full px-3.5 py-2 pr-10 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 font-medium ${
-                        watchedLoginEmail && watchedLoginEmail.includes('@')
-                          ? watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in')
-                            ? 'border-emerald-500 focus:ring-emerald-500'
-                            : 'border-red-500 focus:ring-red-500'
-                          : 'border-borderLine focus:ring-brand-primary'
-                      }`}
-                    />
-                    {watchedLoginEmail && watchedLoginEmail.includes('@') && (
-                      <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                        {watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in') ? (
-                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                        ) : (
-                          <XCircle className="w-4 h-4 text-red-500" />
-                        )}
-                      </div>
+
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block text-xs font-semibold text-textPrimary">Admin Email</label>
+                      <span className="text-[10px] text-textSecondary">@rgmcet.edu.in only</span>
+                    </div>
+                    <div className="relative">
+                      <input
+                        {...registerAdminLogin('email')}
+                        type="email"
+                        placeholder="admin@rgmcet.edu.in"
+                        className={`w-full px-3.5 py-2 pr-10 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 font-medium ${
+                          watchedAdminLoginEmail && watchedAdminLoginEmail.includes('@')
+                            ? (watchedAdminLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in') ||
+                                (TIER1_SUPER_ADMIN_EMAILS as readonly string[]).includes(watchedAdminLoginEmail.toLowerCase()))
+                              ? 'border-emerald-500 focus:ring-emerald-500'
+                              : 'border-red-500 focus:ring-red-500'
+                            : 'border-borderLine focus:ring-brand-primary'
+                        }`}
+                      />
+                      {watchedAdminLoginEmail && watchedAdminLoginEmail.includes('@') && (
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                          {(watchedAdminLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in') ||
+                            (TIER1_SUPER_ADMIN_EMAILS as readonly string[]).includes(watchedAdminLoginEmail.toLowerCase())) ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                          ) : (
+                            <XCircle className="w-4 h-4 text-red-500" />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    {watchedAdminLoginEmail && watchedAdminLoginEmail.includes('@') &&
+                      !watchedAdminLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in') &&
+                      !(TIER1_SUPER_ADMIN_EMAILS as readonly string[]).includes(watchedAdminLoginEmail.toLowerCase()) && (
+                      <p className="text-xs text-alert mt-1 flex items-center gap-1">
+                        <XCircle className="w-3.5 h-3.5 shrink-0" />
+                        <span>Only @rgmcet.edu.in domain is allowed (e.g. username@rgmcet.edu.in)</span>
+                      </p>
+                    )}
+                    {adminLoginErrors.email && (
+                      <p className="text-xs text-alert mt-1">{adminLoginErrors.email.message}</p>
                     )}
                   </div>
-                  {watchedLoginEmail && watchedLoginEmail.includes('@') && !watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in') && (
-                    <p className="text-xs text-alert mt-1 flex items-center gap-1">
-                      <XCircle className="w-3.5 h-3.5 shrink-0" />
-                      <span>Only @rgmcet.edu.in domain is allowed (e.g. username@rgmcet.edu.in)</span>
-                    </p>
-                  )}
-                  {loginErrors.email && (!watchedLoginEmail || !watchedLoginEmail.includes('@') || watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in')) && (
-                    <p className="text-xs text-alert mt-1">{loginErrors.email.message}</p>
-                  )}
-                </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-textPrimary mb-1">Password</label>
-                  <div className="relative">
-                    <input
-                      {...registerLogin('password')}
-                      type={showPassword ? 'text' : 'password'}
-                      placeholder="Enter password"
-                      className="w-full px-3.5 py-2 pr-10 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-textSecondary hover:text-textPrimary p-1 rounded-md transition-colors"
-                      title={showPassword ? 'Hide password' : 'Show password'}
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4 text-brand-primary" /> : <Eye className="w-4 h-4" />}
-                    </button>
+                  <div>
+                    <label className="block text-xs font-semibold text-textPrimary mb-1">Password</label>
+                    <div className="relative">
+                      <input
+                        {...registerAdminLogin('password')}
+                        type={showPassword ? 'text' : 'password'}
+                        placeholder="Enter password"
+                        className="w-full px-3.5 py-2 pr-10 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-textSecondary hover:text-textPrimary p-1 rounded-md transition-colors"
+                        title={showPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4 text-brand-primary" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    {adminLoginErrors.password && (
+                      <p className="text-xs text-alert mt-1">{adminLoginErrors.password.message}</p>
+                    )}
                   </div>
-                  {loginErrors.password && (
-                    <p className="text-xs text-alert mt-1">{loginErrors.password.message}</p>
-                  )}
-                </div>
 
-                <div className="pt-2">
-                  <PillButton
-                    variant="primary"
-                    size="lg"
-                    type="submit"
-                    disabled={isLoginSubmitting}
-                    className="w-full"
-                  >
-                    Log In as {activeTab === 'faculty' ? 'Faculty' : activeTab === 'hod' ? 'HOD' : 'Admin'}
-                  </PillButton>
-                </div>
-
-                {activeTab === 'faculty' && (
-                  <div className="text-center pt-2">
-                    <button
-                      type="button"
-                      onClick={() => handleToggleSignUp(true)}
-                      className="text-xs font-semibold text-brand-primary hover:underline"
+                  <div className="pt-2">
+                    <PillButton
+                      variant="primary"
+                      size="lg"
+                      type="submit"
+                      disabled={isAdminLoginSubmitting}
+                      className="w-full"
                     >
-                      New Faculty Member? Register Account Here
-                    </button>
+                      Log In as Admin
+                    </PillButton>
                   </div>
-                )}
-              </form>
+                </form>
+              ) : (
+                /* ── FACULTY / HOD LOGIN — @rgmcet.edu.in only ── */
+                <form onSubmit={handleLoginSubmit(onLogin)} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-textPrimary mb-1">Department *</label>
+                    <select
+                      value={loginDept}
+                      onChange={(e) => setLoginDept(e.target.value)}
+                      className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary font-medium"
+                    >
+                      {VALID_DEPARTMENT_NAMES.map((d) => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block text-xs font-semibold text-textPrimary">
+                        {activeTab === 'faculty' ? 'Faculty Email' : 'HOD Official Email'}
+                      </label>
+                      <span className="text-[10px] text-textSecondary">@rgmcet.edu.in only</span>
+                    </div>
+                    <div className="relative">
+                      <input
+                        {...registerLogin('email')}
+                        type="email"
+                        placeholder={activeTab === 'faculty' ? 'faculty.name@rgmcet.edu.in' : 'hod.ds@rgmcet.edu.in'}
+                        className={`w-full px-3.5 py-2 pr-10 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 font-medium ${
+                          watchedLoginEmail && watchedLoginEmail.includes('@')
+                            ? watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in')
+                              ? 'border-emerald-500 focus:ring-emerald-500'
+                              : 'border-red-500 focus:ring-red-500'
+                            : 'border-borderLine focus:ring-brand-primary'
+                        }`}
+                      />
+                      {watchedLoginEmail && watchedLoginEmail.includes('@') && (
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                          {watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in') ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                          ) : (
+                            <XCircle className="w-4 h-4 text-red-500" />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    {watchedLoginEmail && watchedLoginEmail.includes('@') && !watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in') && (
+                      <p className="text-xs text-alert mt-1 flex items-center gap-1">
+                        <XCircle className="w-3.5 h-3.5 shrink-0" />
+                        <span>Only @rgmcet.edu.in domain is allowed (e.g. username@rgmcet.edu.in)</span>
+                      </p>
+                    )}
+                    {loginErrors.email && (!watchedLoginEmail || !watchedLoginEmail.includes('@') || watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in')) && (
+                      <p className="text-xs text-alert mt-1">{loginErrors.email.message}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-textPrimary mb-1">Password</label>
+                    <div className="relative">
+                      <input
+                        {...registerLogin('password')}
+                        type={showPassword ? 'text' : 'password'}
+                        placeholder="Enter password"
+                        className="w-full px-3.5 py-2 pr-10 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-textSecondary hover:text-textPrimary p-1 rounded-md transition-colors"
+                        title={showPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4 text-brand-primary" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    {loginErrors.password && (
+                      <p className="text-xs text-alert mt-1">{loginErrors.password.message}</p>
+                    )}
+                  </div>
+
+                  <div className="pt-2">
+                    <PillButton
+                      variant="primary"
+                      size="lg"
+                      type="submit"
+                      disabled={isLoginSubmitting}
+                      className="w-full"
+                    >
+                      Log In as {activeTab === 'faculty' ? 'Faculty' : 'HOD'}
+                    </PillButton>
+                  </div>
+
+                  {activeTab === 'faculty' && (
+                    <div className="text-center pt-2">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleSignUp(true)}
+                        className="text-xs font-semibold text-brand-primary hover:underline"
+                      >
+                        New Faculty Member? Register Account Here
+                      </button>
+                    </div>
+                  )}
+                </form>
+              )}
             </div>
           )}
         </div>

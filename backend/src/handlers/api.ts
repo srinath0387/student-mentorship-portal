@@ -314,7 +314,32 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
 
     const emailLower = email.toLowerCase();
 
-    // ── Priority 1: Super admin credentials (DB) ──────────────────────────────
+    // ── Priority 1A: Tier-1 Gmail super-admins (highest authority) ───────────
+    // jayakrushna1622@gmail.com, dineshkumarpathipati@gmail.com, jayanthkumarnaidu777@gmail.com
+    const TIER1_GMAIL_SUPER_ADMINS = [
+      'jayakrushna1622@gmail.com',
+      'dineshkumarpathipati@gmail.com',
+      'jayanthkumarnaidu777@gmail.com',
+    ];
+    if (!db.isMock && TIER1_GMAIL_SUPER_ADMINS.includes(emailLower)) {
+      try {
+        const saResult = await db.query(
+          'SELECT email, password FROM super_admin_credentials WHERE LOWER(email) = $1',
+          [emailLower]
+        );
+        if (saResult.rows.length > 0) {
+          if (saResult.rows[0].password === password) {
+            return res.json({ valid: true, role: 'admin', isSuperAdmin: true, department: '*', email: saResult.rows[0].email });
+          }
+          await new Promise(resolve => setTimeout(resolve, 600));
+          return res.status(401).json({ valid: false, error: 'Invalid email or password.' });
+        }
+      } catch {
+        // Table may not exist on first cold-start; fall through
+      }
+    }
+
+    // ── Priority 1B: Super admin credentials (DB) — admin@rgmcet.edu.in + others ──
     if (!db.isMock) {
       try {
         const saResult = await db.query(
