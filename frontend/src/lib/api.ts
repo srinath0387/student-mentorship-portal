@@ -385,9 +385,9 @@ export const api = {
     return arr;
   },
 
-  // Get all faculty with mentee counts (admin)
-  getAllFaculty: async (): Promise<any[]> => {
-    return fetchWithAuth(`/faculty`);
+  // Get all faculty with mentee counts (admin/HOD)
+  getAllFaculty: async (department?: string): Promise<any[]> => {
+    return fetchWithAuth(`/faculty${department && department !== 'All' ? `?department=${encodeURIComponent(department)}` : ''}`);
   },
 
   // Link email to faculty record (admin)

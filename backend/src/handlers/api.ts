@@ -3358,14 +3358,40 @@ app.get('/faculty/mentees/by-email/:email', async (req: Request, res: Response) 
   }
 });
 
-// GET /faculty — List all faculty with mentee counts (admin view)
-app.get('/faculty', requireRole('admin', 'hod'), async (_req: Request, res: Response) => {
+// GET /faculty — List all faculty with mentee counts (admin/HOD view, scoped by department)
+app.get('/faculty', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
   try {
-    if (db.isMock) {
-      return res.json([
-        { faculty_id: 'FAC001', name: 'Dr. K. V. Subbaiah', email: 'kvsubbaiah@rgmcet.edu.in', department: 'CSE', role: 'mentor', mentee_count: 3 },
-      ]);
+    const callerDept = req.auth?.department;
+    const isSuper = req.auth?.isSuperAdmin || callerDept === '*';
+    const reqDept = req.query.department ? String(req.query.department) : undefined;
+
+    let targetDept: string | undefined;
+    if (!isSuper && callerDept) {
+      targetDept = callerDept;
+    } else if (reqDept && reqDept !== 'All' && reqDept !== 'undefined' && reqDept !== 'null') {
+      targetDept = reqDept;
     }
+
+    if (db.isMock) {
+      let list = [
+        { faculty_id: 'FAC001', name: 'Dr. K. V. Subbaiah', email: 'kvsubbaiah@rgmcet.edu.in', department: 'CSE (Data Science)', role: 'mentor', mentee_count: 3 },
+        { faculty_id: 'FAC002', name: 'Prof. M. Ramesh', email: 'mramesh@rgmcet.edu.in', department: 'ECE', role: 'mentor', mentee_count: 2 },
+      ];
+      if (targetDept) {
+        list = list.filter(f => f.department && f.department.toLowerCase() === targetDept!.toLowerCase());
+      }
+      return res.json(list);
+    }
+
+    const conditions: string[] = [];
+    const params: any[] = [];
+    if (targetDept) {
+      conditions.push(`LOWER(f.department) = LOWER($1)`);
+      params.push(targetDept);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
     const result = await db.query(`
       SELECT f.*,
              COUNT(ma.roll_number)::int                                           AS mentee_count,
@@ -3376,9 +3402,10 @@ app.get('/faculty', requireRole('admin', 'hod'), async (_req: Request, res: Resp
       FROM faculty f
       LEFT JOIN mentor_assignments ma ON UPPER(ma.faculty_id) = UPPER(f.faculty_id)
       LEFT JOIN students s ON UPPER(s.roll_number) = UPPER(ma.roll_number)
+      ${whereClause}
       GROUP BY f.faculty_id
       ORDER BY f.name
-    `);
+    `, params);
     res.json(result.rows);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
