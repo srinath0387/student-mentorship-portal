@@ -610,10 +610,13 @@ export const AuthPage: React.FC = () => {
             className="w-full h-full object-contain"
           />
         </div>
-        <h2 className="text-xl sm:text-2xl font-extrabold text-textPrimary tracking-tight">
-          <span>A</span><span className="text-brand-primary">D</span><span>VITIYAN</span><span className="text-brand-primary">S</span>
+        <h2 className="text-2xl sm:text-3xl font-black tracking-wider">
+          <span className="text-white drop-shadow-sm">A</span>
+          <span className="text-cyan-400 font-black drop-shadow-[0_0_14px_rgba(56,217,232,0.9)] inline-block">D</span>
+          <span className="text-white drop-shadow-sm">VITIYAN</span>
+          <span className="text-cyan-400 font-black drop-shadow-[0_0_14px_rgba(56,217,232,0.9)] inline-block">S</span>
         </h2>
-        <p className="mt-0.5 text-xs text-textSecondary">Student 360°, Faculty & Placement Cell Platform</p>
+        <p className="mt-1 text-xs text-slate-300 font-medium">Student 360°, Faculty & Placement Cell Platform</p>
       </div>
 
       {/* ── Session Kicked-Out Banner ── */}
