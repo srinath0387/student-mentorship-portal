@@ -3372,25 +3372,46 @@ app.get('/faculty', requireRole('admin', 'hod'), async (req: Request, res: Respo
       targetDept = reqDept;
     }
 
+    // Normalize department strings for flexible matching (handles 'CSE (Data Science)', 'CSE(Data Science)', 'Data Science')
+    const normalizeDeptKey = (dept: string): string => {
+      if (!dept) return '';
+      const d = dept.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (d.includes('datascience') || d.includes('cseds') || d === 'ds' || d.includes('data')) return 'cseds';
+      if (d.includes('aiml') || d.includes('aiandml') || d.includes('machinelearning')) return 'cseaiml';
+      if (d.includes('cyber')) return 'csecyber';
+      if (d.includes('business') || d === 'csebs' || d === 'bs') return 'csebs';
+      if (d === 'cse' || d.includes('computerscience')) return 'cse';
+      if (d === 'ece' || d.includes('electronicsandcomm')) return 'ece';
+      if (d === 'eee' || d.includes('electrical')) return 'eee';
+      if (d.includes('civil')) return 'civil';
+      if (d.includes('mech')) return 'mech';
+      return d;
+    };
+
+    // Auto-clean variations in DB asynchronously
+    db.query(`
+      UPDATE faculty SET department = 'CSE (Data Science)' 
+      WHERE LOWER(REPLACE(department, ' ', '')) IN ('cse(datascience)', 'datascience', 'cseds', 'cse(ds)');
+      UPDATE faculty SET department = 'CSE (AI & ML)' 
+      WHERE LOWER(REPLACE(department, ' ', '')) IN ('cse(ai&ml)', 'cse(aiml)', 'aiml', 'cseaiml');
+      UPDATE faculty SET department = 'CSE (Cyber Security)' 
+      WHERE LOWER(REPLACE(department, ' ', '')) IN ('cse(cybersecurity)', 'cybersecurity', 'csecyber');
+      UPDATE faculty SET department = 'ECE' 
+      WHERE LOWER(REPLACE(department, ' ', '')) IN ('ece', 'electronics');
+      UPDATE faculty SET department = 'CSE' 
+      WHERE LOWER(REPLACE(department, ' ', '')) IN ('cse', 'computerscience');
+    `).catch(() => {});
+
     if (db.isMock) {
       let list = [
         { faculty_id: 'FAC001', name: 'Dr. K. V. Subbaiah', email: 'kvsubbaiah@rgmcet.edu.in', department: 'CSE (Data Science)', role: 'mentor', mentee_count: 3 },
         { faculty_id: 'FAC002', name: 'Prof. M. Ramesh', email: 'mramesh@rgmcet.edu.in', department: 'ECE', role: 'mentor', mentee_count: 2 },
       ];
       if (targetDept) {
-        list = list.filter(f => f.department && f.department.toLowerCase() === targetDept!.toLowerCase());
+        list = list.filter(f => f.department && normalizeDeptKey(f.department) === normalizeDeptKey(targetDept!));
       }
       return res.json(list);
     }
-
-    const conditions: string[] = [];
-    const params: any[] = [];
-    if (targetDept) {
-      conditions.push(`LOWER(f.department) = LOWER($1)`);
-      params.push(targetDept);
-    }
-
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     // Count mentees from BOTH mentor_assignments AND students.faculty_mentor_id (union, deduplicated)
     const result = await db.query(`
@@ -3407,11 +3428,17 @@ app.get('/faculty', requireRole('admin', 'hod'), async (req: Request, res: Respo
         SELECT roll_number, faculty_mentor_id AS faculty_id FROM students WHERE faculty_mentor_id IS NOT NULL
       ) combined ON UPPER(combined.faculty_id) = UPPER(f.faculty_id)
       LEFT JOIN students s2 ON UPPER(s2.roll_number) = UPPER(combined.roll_number)
-      ${whereClause}
       GROUP BY f.faculty_id
       ORDER BY f.name
-    `, params);
-    res.json(result.rows);
+    `);
+
+    let finalRows = result.rows;
+    if (targetDept) {
+      const targetKey = normalizeDeptKey(targetDept);
+      finalRows = finalRows.filter((f: any) => normalizeDeptKey(f.department) === targetKey);
+    }
+
+    res.json(finalRows);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
