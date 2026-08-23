@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
-import { Mail, Users, Pencil, Check, X, Trash2, AlertTriangle, Link } from 'lucide-react';
+import { Mail, Users, Pencil, Check, X, Trash2, AlertTriangle, Link, Eye } from 'lucide-react';
+import { FacultyProfileInspectionModal } from '../../faculty/components/FacultyProfileInspectionModal';
 
 interface Props {
   onLinkEmail: (facultyId: string) => void;
@@ -14,6 +15,7 @@ export const FacultyRecordsTable: React.FC<Props> = ({ onLinkEmail }) => {
     queryFn: () => api.getAllFaculty(),
   });
 
+  const [inspectingFaculty, setInspectingFaculty] = useState<any | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [renameSaving, setRenameSaving] = useState(false);
@@ -145,6 +147,13 @@ export const FacultyRecordsTable: React.FC<Props> = ({ onLinkEmail }) => {
                         </>
                       ) : (
                         <>
+                          <button
+                            onClick={() => setInspectingFaculty(fac)}
+                            className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-brand-soft text-brand-primary border border-brand-primary/30 hover:bg-brand-primary hover:text-white transition-colors"
+                            title="View Complete 360° Faculty Profile"
+                          >
+                            <Eye className="w-3 h-3" /> View Profile
+                          </button>
                           <button onClick={() => startRename(fac)}
                             className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg border border-borderLine hover:bg-amber-50 hover:text-amber-700 hover:border-amber-300 transition-colors">
                             <Pencil className="w-3 h-3" />Rename
@@ -176,6 +185,14 @@ export const FacultyRecordsTable: React.FC<Props> = ({ onLinkEmail }) => {
           </tbody>
         </table>
       </div>
+
+      {/* ── Faculty 360° Profile Modal (HOD & Admin) ── */}
+      {inspectingFaculty && (
+        <FacultyProfileInspectionModal
+          faculty={inspectingFaculty}
+          onClose={() => setInspectingFaculty(null)}
+        />
+      )}
     </div>
   );
 };

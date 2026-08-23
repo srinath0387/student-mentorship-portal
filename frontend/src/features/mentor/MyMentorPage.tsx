@@ -67,6 +67,16 @@ export default function MyMentorPage() {
     staleTime: 1000 * 60 * 5,
   });
 
+  const { data: mentorFullProf } = useQuery({
+    queryKey: ['facultyFullProfile', mentor?.email],
+    queryFn: () => (mentor?.email ? api.getFacultyFullProfile(mentor.email) : Promise.resolve(null)),
+    enabled: Boolean(mentor?.email),
+  });
+
+  const mentorPhone = mentorFullProf?.personal?.phone || (mentor as any)?.phone;
+  const mentorDesignation = mentorFullProf?.personal?.designation || (mentor as any)?.designation || (mentor?.role === 'hod' ? 'Head of Department' : 'Faculty Mentor');
+  const mentorDomains = mentorFullProf?.domains?.length ? mentorFullProf.domains : ((mentor as any)?.domains || []);
+
   const studentName = user?.name ? user.name.replace(/^Parent of\s*/i, '') : activeRollNo;
 
   return (
@@ -143,12 +153,39 @@ export default function MyMentorPage() {
                   {/* Info grid */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <InfoCard icon="🏛️" label="Department" value={mentor.department || 'CSE (Data Science)'} />
-                    <InfoCard icon="👤" label="Designation" value={mentor.role === 'hod' ? 'Head of Department' : 'Faculty Mentor'} />
+                    <InfoCard icon="👤" label="Designation" value={mentorDesignation} />
                     {mentor.email && (
                       <InfoCard icon="✉️" label="Email" value={mentor.email} href={`mailto:${mentor.email}`} />
                     )}
+                    {mentorPhone ? (
+                      <InfoCard icon="📞" label="Mobile Number" value={mentorPhone} href={`tel:${mentorPhone}`} />
+                    ) : (
+                      <InfoCard icon="📞" label="Mobile Number" value="Contact via Email" />
+                    )}
                     <InfoCard icon="🆔" label="Faculty ID" value={mentor.faculty_id || '—'} />
+                    {mentorFullProf?.personal?.linkedin_url && (
+                      <InfoCard icon="🔗" label="LinkedIn" value="View LinkedIn Profile" href={mentorFullProf.personal.linkedin_url} />
+                    )}
                   </div>
+
+                  {/* Mentor Domain Expertise */}
+                  {mentorDomains.length > 0 && (
+                    <div className="mt-4 pt-4 border-t border-borderLine">
+                      <p className="text-[11px] font-bold text-textSecondary mb-2 uppercase tracking-wider">
+                        Domain &amp; Research Expertise
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {mentorDomains.map((d: string) => (
+                          <span
+                            key={d}
+                            className="px-2.5 py-0.5 rounded-md bg-brand-soft text-brand-primary text-xs font-semibold border border-brand-primary/20"
+                          >
+                            {d}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (

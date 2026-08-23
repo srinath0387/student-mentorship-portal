@@ -1557,11 +1557,43 @@ app.get('/student/mentor', async (req: Request, res: Response) => {
     }
 
     const mentor = facResult.rows[0];
+    let mentorPhone: string | null = null;
+    let mentorDesignation: string | null = null;
+    let mentorDomains: string[] = [];
+
+    if (mentor.email) {
+      try {
+        if (db.isMock) {
+          const mockProf = (db.mockStore as any).facultyFullProfiles?.get(mentor.email.toLowerCase().trim());
+          if (mockProf) {
+            mentorPhone = mockProf.personal?.phone || null;
+            mentorDesignation = mockProf.personal?.designation || null;
+            mentorDomains = mockProf.domains || [];
+          }
+        } else {
+          await ensureFacultyProfileTable();
+          const fullProfRes = await db.query(
+            'SELECT personal, domains FROM faculty_full_profiles WHERE LOWER(email) = $1 LIMIT 1',
+            [mentor.email.toLowerCase().trim()]
+          );
+          if (fullProfRes.rows.length > 0) {
+            const prof = fullProfRes.rows[0];
+            mentorPhone = prof.personal?.phone || null;
+            mentorDesignation = prof.personal?.designation || null;
+            mentorDomains = prof.domains || [];
+          }
+        }
+      } catch (_) {}
+    }
+
     return res.json({
       assigned: true,
       faculty_id: mentor.faculty_id,
       name: mentor.name,
       email: (mentor.email && !mentor.email.startsWith('pending_')) ? mentor.email : null,
+      phone: mentorPhone || null,
+      designation: mentorDesignation || (mentor.role === 'hod' ? 'Head of Department' : 'Faculty Mentor'),
+      domains: mentorDomains || [],
       department: mentor.department,
       role: mentor.role,
       remarks: student.faculty_remarks || null,

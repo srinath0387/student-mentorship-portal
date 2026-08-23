@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import { Search, Mail, Pencil, Link, Trash2, AlertTriangle, Users, Check, X, ShieldAlert, UserCheck, RefreshCw, UserPlus } from 'lucide-react';
+import { Search, Mail, Pencil, Link, Trash2, AlertTriangle, Users, Check, X, ShieldAlert, UserCheck, RefreshCw, UserPlus, Eye } from 'lucide-react';
 import { AddMenteeModal } from './components/AddMenteeModal';
+import { FacultyProfileInspectionModal } from '../faculty/components/FacultyProfileInspectionModal';
 
 interface FacultyRow {
   faculty_id: string;
@@ -36,6 +37,7 @@ interface BlockedEmail {
 export default function FacultyManagementPage() {
   const qc = useQueryClient();
   const [selectedFaculty, setSelectedFaculty] = useState<FacultyRow | null>(null);
+  const [inspectingFaculty, setInspectingFaculty] = useState<FacultyRow | null>(null);
   const [showAddMenteeModal, setShowAddMenteeModal] = useState(false);
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -356,6 +358,13 @@ export default function FacultyManagementPage() {
 
                     <div className="flex gap-1.5 mt-2.5 flex-wrap" onClick={e => e.stopPropagation()}>
                       <button
+                        onClick={() => setInspectingFaculty(f)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-brand-primary/30 bg-brand-soft text-brand-primary text-xs font-semibold hover:bg-brand-primary hover:text-white transition-colors"
+                        title="View Full 360° Profile"
+                      >
+                        <Eye className="w-3 h-3" /> Profile
+                      </button>
+                      <button
                         onClick={() => { setRenameId(f.faculty_id); setRenameValue(f.name); }}
                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-borderLine bg-surface text-textSecondary text-xs font-semibold hover:bg-background transition-colors"
                       >
@@ -414,14 +423,24 @@ export default function FacultyManagementPage() {
                     {selectedFaculty.faculty_id} &middot; {mentees.length} assigned mentees
                   </p>
                 </div>
-                <button
-                  id="admin-add-mentees-btn"
-                  onClick={() => setShowAddMenteeModal(true)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-brand-primary text-white text-xs font-bold hover:bg-brand-hover shadow-xs transition-colors shrink-0"
-                >
-                  <UserPlus className="w-3.5 h-3.5" />
-                  <span>Add Mentees</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setInspectingFaculty(selectedFaculty)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand-soft text-brand-primary text-xs font-bold border border-brand-primary/30 hover:bg-brand-primary hover:text-white shadow-xs transition-colors shrink-0"
+                    title="View Complete Faculty 360° Profile"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>View 360° Profile</span>
+                  </button>
+                  <button
+                    id="admin-add-mentees-btn"
+                    onClick={() => setShowAddMenteeModal(true)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-brand-primary text-white text-xs font-bold hover:bg-brand-hover shadow-xs transition-colors shrink-0"
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>Add Mentees</span>
+                  </button>
+                </div>
               </div>
               {/* Year breakdown bar */}
               {mentees.length > 0 && !menteesLoading && (() => {
@@ -502,6 +521,14 @@ export default function FacultyManagementPage() {
           }
         }}
       />
+
+      {/* ── Faculty 360° Profile Modal (HOD & Admin) ── */}
+      {inspectingFaculty && (
+        <FacultyProfileInspectionModal
+          faculty={inspectingFaculty}
+          onClose={() => setInspectingFaculty(null)}
+        />
+      )}
     </div>
   );
 }
