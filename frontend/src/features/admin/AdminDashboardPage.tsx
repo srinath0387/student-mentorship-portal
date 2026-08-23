@@ -58,9 +58,16 @@ const INITIAL_FACULTY = [
   { id: 'FAC002', name: 'Prof. M. Ramesh', email: 'mramesh@rgmcet.edu.in', department: 'ECE', designation: 'Mentor', menteesCount: 2 },
 ];
 
-// The 3 fixed super admin emails — used to derive isSuperAdmin flag from user.email
+// Tier 1B super admin emails (admin@rgmcet.edu.in + any added by Tier 1A)
 const SUPER_ADMIN_EMAILS = [
   'admin@rgmcet.edu.in',
+  'jayakrushna1622@gmail.com',
+  'dineshkumarpathipati@gmail.com',
+  'jayanthkumarnaidu777@gmail.com',
+];
+
+// Tier 1A — the 3 Gmail super-admins with highest authority
+const TIER1A_EMAILS = [
   'jayakrushna1622@gmail.com',
   'dineshkumarpathipati@gmail.com',
   'jayanthkumarnaidu777@gmail.com',
@@ -72,8 +79,9 @@ export const AdminDashboardPage: React.FC = () => {
   const activeTab = searchParams.get('tab') || 'students';
   const { user } = useAuth();
 
-  // Detect super admin from user email — zero AuthContext changes needed
+  // Detect super admin + tier level from user email
   const isSuperAdmin = user?.role === 'admin' && SUPER_ADMIN_EMAILS.includes(user?.email ?? '');
+  const isTier1A = user?.role === 'admin' && TIER1A_EMAILS.includes(user?.email ?? '');
 
   // HOD Credentials panel state
   const [hodDept, setHodDept] = useState(user?.isSuperAdmin ? 'CSE (Data Science)' : (user?.department || 'CSE (Data Science)'));
@@ -141,6 +149,17 @@ export const AdminDashboardPage: React.FC = () => {
   const [myNewPwdConfirm, setMyNewPwdConfirm] = useState('');
   const [myPwdSaving, setMyPwdSaving] = useState(false);
   const [myPwdMsg, setMyPwdMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Tier 1B management state (Tier 1A only)
+  type Tier1BRow = { email: string; password: string; created_at: string };
+  const [tier1BList, setTier1BList] = useState<Tier1BRow[]>([]);
+  const [tier1BLoading, setTier1BLoading] = useState(false);
+  const [showTier1BPwdMap, setShowTier1BPwdMap] = useState<Record<string, boolean>>({});
+  const [showAddTier1B, setShowAddTier1B] = useState(false);
+  const [newTier1BEmail, setNewTier1BEmail] = useState('');
+  const [newTier1BPassword, setNewTier1BPassword] = useState('');
+  const [tier1BSaving, setTier1BSaving] = useState(false);
+  const [tier1BMsg, setTier1BMsg] = useState<{ key: string; type: 'success' | 'error'; text: string } | null>(null);
 
   // Add/Edit form state
   const [formName, setFormName] = useState('');
@@ -1807,7 +1826,157 @@ export const AdminDashboardPage: React.FC = () => {
             )}
           </div>
 
-          {/* ——— Section B: Change My Password (super admin self-service) ——— */}
+          {/* ——— Section B: Tier 1B Super-Admin Management (Tier 1A only) ——— */}
+          {isTier1A && (
+            <div className="bg-surface border border-amber-200 dark:border-amber-900/40 rounded-xl p-6 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                <div>
+                  <h3 className="text-base font-bold text-textPrimary flex items-center gap-2">
+                    <Crown className="w-5 h-5 text-amber-500" /> Tier 1B Super-Admin Management
+                  </h3>
+                  <p className="text-xs text-textSecondary mt-0.5">
+                    Add or remove Tier 1B super-admins (e.g. <span className="font-semibold">admin@rgmcet.edu.in</span>). Only visible to Tier 1A accounts.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setTier1BLoading(true);
+                      api.getTier1BAdmins(user!.email).then((rows) => { setTier1BList(rows); setTier1BLoading(false); }).catch(() => setTier1BLoading(false));
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-borderLine hover:bg-background transition-all"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${tier1BLoading ? 'animate-spin' : ''}`} /> Refresh
+                  </button>
+                  <button
+                    onClick={() => { if (!showAddTier1B) setTier1BMsg(null); setShowAddTier1B((v) => !v); }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-500 text-white hover:bg-amber-600 transition-all"
+                  >
+                    <UserPlus className="w-3.5 h-3.5" /> Add Tier 1B
+                  </button>
+                </div>
+              </div>
+
+              {/* Add Tier 1B Inline Form */}
+              {showAddTier1B && (
+                <div className="mb-5 p-4 rounded-xl border border-amber-300/50 bg-amber-50/10 dark:bg-amber-900/10 space-y-3">
+                  <p className="text-xs font-bold text-amber-600 dark:text-amber-400">New Tier 1B Super-Admin</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <input type="email" placeholder="Email address" value={newTier1BEmail} onChange={(e) => setNewTier1BEmail(e.target.value)}
+                      className="px-3 py-2 text-xs rounded-lg border border-borderLine bg-background focus:outline-none focus:border-amber-500" />
+                    <input type="text" placeholder="Password (min 4 chars)" value={newTier1BPassword} onChange={(e) => setNewTier1BPassword(e.target.value)}
+                      className="px-3 py-2 text-xs rounded-lg border border-borderLine bg-background focus:outline-none focus:border-amber-500 font-mono" />
+                  </div>
+                  {tier1BMsg?.key === 'add' && (
+                    <p className={`text-[10px] font-semibold ${tier1BMsg.type === 'success' ? 'text-green-600' : 'text-red-500'}`}>{tier1BMsg.text}</p>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={async () => {
+                        if (!newTier1BEmail || !newTier1BPassword) { setTier1BMsg({ key: 'add', type: 'error', text: 'Email and password required.' }); return; }
+                        if (newTier1BPassword.length < 4) { setTier1BMsg({ key: 'add', type: 'error', text: 'Password min 4 chars.' }); return; }
+                        setTier1BSaving(true);
+                        try {
+                          await api.createTier1BAdmin(user!.email, newTier1BEmail, newTier1BPassword);
+                          const rows = await api.getTier1BAdmins(user!.email);
+                          setTier1BList(rows);
+                          setNewTier1BEmail(''); setNewTier1BPassword('');
+                          setShowAddTier1B(false);
+                          setTier1BMsg({ key: 'add', type: 'success', text: '✓ Tier 1B admin added!' });
+                          setTimeout(() => setTier1BMsg(null), 3000);
+                        } catch (e: any) {
+                          setTier1BMsg({ key: 'add', type: 'error', text: e.message || 'Failed to add Tier 1B admin.' });
+                        } finally { setTier1BSaving(false); }
+                      }}
+                      disabled={tier1BSaving}
+                      className="px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 flex items-center gap-1"
+                    >
+                      {tier1BSaving ? <RefreshCw className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />} Create
+                    </button>
+                    <button onClick={() => { setShowAddTier1B(false); setNewTier1BEmail(''); setNewTier1BPassword(''); }}
+                      className="px-3 py-1.5 text-xs rounded-lg border border-borderLine text-textSecondary hover:text-textPrimary">Cancel</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Tier 1B Table */}
+              {tier1BLoading ? (
+                <div className="flex items-center justify-center py-8 gap-2 text-textSecondary text-xs">
+                  <RefreshCw className="w-4 h-4 animate-spin" /> Loading…
+                </div>
+              ) : tier1BList.length === 0 ? (
+                <div className="text-center py-8 text-textSecondary text-xs">Click Refresh to load Tier 1B accounts.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-borderLine text-[11px] font-semibold text-textSecondary uppercase tracking-wider">
+                        <th className="py-3 px-4">Email</th>
+                        <th className="py-3 px-4">Password</th>
+                        <th className="py-3 px-4">Added On</th>
+                        <th className="py-3 px-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-borderLine text-sm">
+                      {tier1BList.map((row) => {
+                        const isTier1ARow = TIER1A_EMAILS.includes(row.email.toLowerCase());
+                        const isVisible = showTier1BPwdMap[row.email] ?? false;
+                        const rowMsg = tier1BMsg?.key === row.email ? tier1BMsg : null;
+                        return (
+                          <tr key={row.email} className="hover:bg-background/50 transition-colors">
+                            <td className="py-3.5 px-4">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-amber-600 dark:text-amber-400">{row.email}</span>
+                                {isTier1ARow && (
+                                  <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400">TIER 1A</span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-4">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-xs text-textPrimary">{isVisible ? (row.password || '(not set)') : '••••••••'}</span>
+                                <button onClick={() => setShowTier1BPwdMap((p) => ({ ...p, [row.email]: !isVisible }))}
+                                  className="p-1 text-textSecondary hover:text-textPrimary" title={isVisible ? 'Hide' : 'Show'}>
+                                  {isVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                </button>
+                              </div>
+                              {rowMsg && (
+                                <p className={`text-[10px] font-semibold mt-1 ${rowMsg.type === 'success' ? 'text-green-600' : 'text-red-500'}`}>{rowMsg.text}</p>
+                              )}
+                            </td>
+                            <td className="py-3.5 px-4 text-xs text-textSecondary">{row.created_at ? new Date(row.created_at).toLocaleDateString() : '—'}</td>
+                            <td className="py-3.5 px-4 text-right">
+                              {isTier1ARow ? (
+                                <span className="text-[10px] text-textSecondary italic">Protected</span>
+                              ) : (
+                                <button
+                                  onClick={async () => {
+                                    if (!confirm(`Remove Tier 1B admin ${row.email}? They will lose super-admin access.`)) return;
+                                    try {
+                                      await api.deleteTier1BAdmin(user!.email, row.email);
+                                      setTier1BList((prev) => prev.filter((r) => r.email !== row.email));
+                                    } catch (e: any) {
+                                      setTier1BMsg({ key: row.email, type: 'error', text: e.message || 'Delete failed.' });
+                                      setTimeout(() => setTier1BMsg(null), 4000);
+                                    }
+                                  }}
+                                  className="p-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition-colors" title="Remove Tier 1B admin"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ——— Section C: Change My Password (super admin self-service) ——— */}
           <div className="bg-surface border border-borderLine rounded-xl p-6 shadow-sm">
             <h3 className="text-base font-bold text-textPrimary flex items-center gap-2 mb-1">
               <Lock className="w-5 h-5 text-brand-primary" /> Change My Super Admin Password
