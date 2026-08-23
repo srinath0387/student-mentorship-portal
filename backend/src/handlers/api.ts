@@ -3019,6 +3019,140 @@ app.get('/faculty/by-email/:email', async (req: Request, res: Response) => {
   }
 });
 
+// ============================================================================
+// Faculty Full Profile (Personal, Education, Certs, Activities, Publications, Domains)
+// ============================================================================
+const ensureFacultyProfileTable = async () => {
+  if (db.isMock) return;
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS faculty_full_profiles (
+      email TEXT PRIMARY KEY,
+      faculty_id TEXT,
+      personal JSONB DEFAULT '{}',
+      education JSONB DEFAULT '{}',
+      certifications JSONB DEFAULT '[]',
+      activities JSONB DEFAULT '[]',
+      publications JSONB DEFAULT '[]',
+      domains JSONB DEFAULT '[]',
+      updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+};
+
+app.get('/faculty/full-profile/:email', async (req: Request, res: Response) => {
+  try {
+    const email = req.params.email.toLowerCase().trim();
+    if (db.isMock) {
+      const mockProfile = (db.mockStore as any).facultyFullProfiles?.get(email);
+      if (mockProfile) return res.json(mockProfile);
+      return res.json({
+        personal: { email, faculty_id: `FAC_${email.split('@')[0].toUpperCase()}`, name: email.split('@')[0], department: 'CSE (Data Science)' },
+        education: {},
+        certifications: [],
+        activities: [],
+        publications: [],
+        domains: [],
+      });
+    }
+
+    await ensureFacultyProfileTable();
+
+    // Fetch existing faculty record for base info (Name, Department, ID)
+    const facRes = await db.query('SELECT * FROM faculty WHERE LOWER(email) = $1', [email]);
+    const fac = facRes.rows[0] || { faculty_id: `FAC_${email.split('@')[0].toUpperCase()}`, name: email.split('@')[0], email, department: 'CSE (Data Science)' };
+
+    const profileRes = await db.query('SELECT * FROM faculty_full_profiles WHERE LOWER(email) = $1', [email]);
+    if (profileRes.rows.length > 0) {
+      const p = profileRes.rows[0];
+      return res.json({
+        personal: {
+          ...p.personal,
+          name: fac.name,
+          email: fac.email,
+          department: fac.department,
+          faculty_id: fac.faculty_id,
+        },
+        education: p.education || {},
+        certifications: p.certifications || [],
+        activities: p.activities || [],
+        publications: p.publications || [],
+        domains: p.domains || [],
+      });
+    }
+
+    // Default structure if not saved yet
+    res.json({
+      personal: {
+        faculty_id: fac.faculty_id,
+        name: fac.name,
+        email: fac.email,
+        department: fac.department,
+      },
+      education: {},
+      certifications: [],
+      activities: [],
+      publications: [],
+      domains: [],
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/faculty/full-profile/:email', async (req: Request, res: Response) => {
+  try {
+    const email = req.params.email.toLowerCase().trim();
+    const data = req.body;
+
+    if (db.isMock) {
+      if (!(db.mockStore as any).facultyFullProfiles) {
+        (db.mockStore as any).facultyFullProfiles = new Map();
+      }
+      (db.mockStore as any).facultyFullProfiles.set(email, data);
+      return res.json({ message: 'Faculty profile updated successfully', profile: data });
+    }
+
+    await ensureFacultyProfileTable();
+
+    // Preserve locked fields (Name, Email, Dept) from base faculty table
+    const facRes = await db.query('SELECT * FROM faculty WHERE LOWER(email) = $1', [email]);
+    const fac = facRes.rows[0];
+    const facultyId = fac?.faculty_id || data.personal?.faculty_id || `FAC_${email.split('@')[0].toUpperCase()}`;
+
+    // If designation was provided, mark designation_locked = true
+    if (data.personal?.designation) {
+      data.personal.designation_locked = true;
+    }
+
+    await db.query(
+      `INSERT INTO faculty_full_profiles (email, faculty_id, personal, education, certifications, activities, publications, domains, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
+       ON CONFLICT (email) DO UPDATE SET
+         personal = EXCLUDED.personal,
+         education = EXCLUDED.education,
+         certifications = EXCLUDED.certifications,
+         activities = EXCLUDED.activities,
+         publications = EXCLUDED.publications,
+         domains = EXCLUDED.domains,
+         updated_at = CURRENT_TIMESTAMP`,
+      [
+        email,
+        facultyId,
+        JSON.stringify(data.personal || {}),
+        JSON.stringify(data.education || {}),
+        JSON.stringify(data.certifications || []),
+        JSON.stringify(data.activities || []),
+        JSON.stringify(data.publications || []),
+        JSON.stringify(data.domains || []),
+      ]
+    );
+
+    res.json({ message: 'Faculty profile updated successfully', profile: data });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /faculty/mentees/by-email/:email — Returns ALL mentees across ALL faculty records for this person
 // Solves the multi-record problem (e.g., HOD_CSEDS + FAC_BBHASKARARAO both belong to Bhaskara Rao)
 app.get('/faculty/mentees/by-email/:email', async (req: Request, res: Response) => {

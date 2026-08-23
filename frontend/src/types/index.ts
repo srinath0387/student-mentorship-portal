@@ -130,3 +130,74 @@ export interface ScoreBreakdown {
   achievementsScore: number;
   feedback: string[];
 }
+
+// ── Faculty Profile Types ──────────────────────────────────────────────────
+export type BloodGroup = 'A+' | 'A-' | 'B+' | 'B-' | 'O+' | 'O-' | 'AB+' | 'AB-';
+export type FacultyDesignation = 'Assistant Professor' | 'Associate Professor' | 'Professor';
+export type ActivityType = 'Conference' | 'Workshop' | 'FDP';
+export type ActivityLevel = 'International' | 'National' | 'State';
+export type PublicationCategory = 'SCI' | 'SCOPUS' | 'WoS' | 'Patent';
+
+export interface FacultyPersonalDetails {
+  faculty_id: string;
+  name: string;
+  email: string;
+  department: string;
+  phone?: string;
+  blood_group?: BloodGroup;
+  linkedin_url?: string;
+  joining_date?: string; // YYYY-MM-DD
+  prior_experience_years?: number;
+  prior_experience_months?: number;
+  designation?: FacultyDesignation;
+  designation_locked?: boolean;
+}
+
+export interface FacultyEducation {
+  highest_qualification?: string;
+  university?: string;
+  year_of_passing?: number;
+  specialization?: string;
+}
+
+export interface FacultyCertificationRecord {
+  id: string;
+  title: string;
+  issuing_body: string;
+  completion_date: string; // YYYY-MM-DD
+  academic_year: string;  // e.g. "2024–25"
+  certificate_file_url?: string;
+  created_at?: string;
+}
+
+export interface FacultyActivityRecord {
+  id: string;
+  title: string;
+  type: ActivityType;
+  organizer: string;
+  date: string; // YYYY-MM-DD
+  level: ActivityLevel;
+  academic_year: string; // e.g. "2024–25"
+  document_url?: string;
+}
+
+export interface FacultyPublicationRecord {
+  id: string;
+  category: PublicationCategory;
+  title: string;
+  journal_name: string;
+  year: number;
+  doi_link?: string;
+  co_authors?: string;
+  document_url?: string;
+}
+
+export interface FacultyFullProfile {
+  personal: FacultyPersonalDetails;
+  education: FacultyEducation;
+  certifications: FacultyCertificationRecord[];
+  activities: FacultyActivityRecord[];
+  publications: FacultyPublicationRecord[];
+  domains: string[];
+}
+

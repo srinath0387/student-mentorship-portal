@@ -22,6 +22,8 @@ import {
   X,
   Plus,
   Upload,
+  AlertCircle,
+  User,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { StudentProfile } from '../../types';
@@ -37,6 +39,8 @@ import { AchievementsTab } from '../profile/tabs/AchievementsTab';
 import { PlacementPreferencesTab } from '../profile/tabs/PlacementPreferencesTab';
 import { BulkImportModal } from '../admin/components/BulkImportModal';
 import { PlacementEligibilitySection } from '../hod/components/PlacementEligibilitySection';
+import { FacultyProfileTab } from './tabs/FacultyProfileTab';
+import { calculateFacultyProfileCompletion } from '../../lib/facultyUtils';
 
 // Helper: compute academic standing from CGPA
 const getStanding = (cgpa: number | string | undefined | null) => {
@@ -75,6 +79,17 @@ export const FacultyDashboardPage: React.FC = () => {
     queryFn: () => user?.email ? api.getMenteesByEmail(user.email) : Promise.resolve([]),
     enabled: Boolean(user?.email),
   });
+
+  const { data: facultyProfile } = useQuery({
+    queryKey: ['facultyFullProfile', user?.email],
+    queryFn: () => (user?.email ? api.getFacultyFullProfile(user.email) : Promise.resolve(null)),
+    enabled: Boolean(user?.email),
+  });
+
+  const completionInfo = useMemo(
+    () => calculateFacultyProfileCompletion(facultyProfile),
+    [facultyProfile]
+  );
 
   const { data: deptReport } = useQuery({
     queryKey: ['deptReport', user?.department],
@@ -203,6 +218,36 @@ export const FacultyDashboardPage: React.FC = () => {
         </PillButton>
       </div>
 
+      {/* ── Incomplete Profile Prompt Banner ── */}
+      {!completionInfo.isComplete && activeTab !== 'profile' && (
+        <div className="bg-gradient-to-r from-amber-500/10 via-brand-primary/10 to-indigo-500/10 border border-amber-500/30 dark:border-amber-500/20 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
+          <div className="flex items-start gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center font-bold shrink-0">
+              <AlertCircle className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-textPrimary">Your Profile is Incomplete</h3>
+                <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-300">
+                  {completionInfo.percentage}% Complete
+                </span>
+              </div>
+              <p className="text-xs text-textSecondary mt-0.5">
+                Please update your joining date, educational qualifications, NPTEL/industry certifications, and domain expertise.
+              </p>
+            </div>
+          </div>
+          <PillButton
+            variant="primary"
+            size="sm"
+            onClick={() => setSearchParams({ tab: 'profile' })}
+            icon={<User className="w-3.5 h-3.5" />}
+          >
+            Complete Profile Now
+          </PillButton>
+        </div>
+      )}
+
       {/* Sub-Tab Switcher */}
       <div className="bg-surface border border-borderLine rounded-2xl shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
@@ -216,6 +261,26 @@ export const FacultyDashboardPage: React.FC = () => {
               }`}
             >
               <span>Assigned Mentee Directory ({mentees.length})</span>
+            </button>
+            <button
+              onClick={() => setSearchParams({ tab: 'profile' })}
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold border-b-2 whitespace-nowrap transition-all rounded-t-lg ${
+                activeTab === 'profile'
+                  ? 'border-brand-primary text-brand-primary bg-brand-soft'
+                  : 'border-transparent text-textSecondary hover:text-textPrimary hover:bg-surface-2'
+              }`}
+            >
+              <User className="w-3.5 h-3.5" />
+              <span>My Faculty Profile</span>
+              <span
+                className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                  completionInfo.isComplete
+                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400'
+                    : 'bg-amber-500 text-white'
+                }`}
+              >
+                {completionInfo.percentage}%
+              </span>
             </button>
             <button
               onClick={() => setSearchParams({ tab: 'analytics' })}
@@ -241,8 +306,11 @@ export const FacultyDashboardPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Stat Cards — Total + Year Breakdown + Top GPA */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      {/* Tab 1: Assigned Mentee Directory */}
+      {activeTab === 'mentees' && (
+        <div className="space-y-6">
+          {/* Stat Cards — Total + Year Breakdown + Top GPA */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {/* Total Mentees */}
         <StatCard
           icon={<Users className="w-5 h-5" />}
@@ -343,8 +411,7 @@ export const FacultyDashboardPage: React.FC = () => {
         />
       </div>
 
-      {/* Tab 1: Mentee Directory — Year-Grouped */}
-      {activeTab === 'mentees' && (
+      {/* Mentee Directory — Year-Grouped */}
         <div className="bg-surface border border-borderLine rounded-xl p-6 shadow-sm">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
@@ -529,7 +596,11 @@ export const FacultyDashboardPage: React.FC = () => {
             })}
           </div>
         </div>
+        </div>
       )}
+
+      {/* Tab: My Faculty Profile */}
+      {activeTab === 'profile' && <FacultyProfileTab />}
 
       {/* Tab 2: Department Skill Analytics */}
       {activeTab === 'analytics' && (

@@ -81,6 +81,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
       title: 'FACULTY PORTAL',
       items: [
         { label: 'Faculty Dashboard', path: '/faculty/dashboard', icon: LayoutDashboard },
+        { label: 'My Faculty Profile', path: '/faculty/dashboard?tab=profile', icon: User },
         { label: 'Mentee Directory', path: '/faculty/dashboard?tab=mentees', icon: Users },
         { label: 'Dept CGPA Analytics', path: '/faculty/dashboard?tab=analytics', icon: FileBarChart },
       ],

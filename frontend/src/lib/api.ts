@@ -346,6 +346,18 @@ export const api = {
     return fetchWithAuth(`/faculty/by-email/${encodeURIComponent(email)}`);
   },
 
+  // Faculty Full Profile (Personal, Education, Certs, Activities, Publications, Domains)
+  getFacultyFullProfile: async (email: string): Promise<any> => {
+    return fetchWithAuth(`/faculty/full-profile/${encodeURIComponent(email)}`);
+  },
+
+  updateFacultyFullProfile: async (email: string, data: any): Promise<any> => {
+    return fetchWithAuth(`/faculty/full-profile/${encodeURIComponent(email)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
   // Faculty Mentees — by faculty_id
   getFacultyMentees: async (facultyId: string): Promise<any[]> => {
     return fetchWithAuth(`/faculty/${facultyId}/mentees`);
