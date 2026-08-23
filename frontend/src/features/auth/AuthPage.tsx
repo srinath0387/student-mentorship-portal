@@ -363,7 +363,7 @@ export const AuthPage: React.FC = () => {
 
         // Strict check: entered password must exactly match the registration number
         if (!expectedRollNo || enteredPass.toUpperCase() !== expectedRollNo) {
-          throw new Error('Incorrect password. Enter your ward\'s registration number as the password (e.g. 23091A3251).');
+          throw new Error('Incorrect password.');
         }
 
         let wardStudent: any = null;
@@ -381,7 +381,7 @@ export const AuthPage: React.FC = () => {
         }
 
         if (!wardStudent) {
-          throw new Error('No student found for this email. Please check the email address and try again.');
+          throw new Error('Incorrect password.');
         }
 
         const wardName = wardStudent.name || `Student (${expectedRollNo})`;
