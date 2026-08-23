@@ -126,6 +126,7 @@ export const HodDashboardPage: React.FC = () => {
 
   const [showBulkImportModal, setShowBulkImportModal] = useState(false);
   const [syncingCron, setSyncingCron] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // HOD as mentor — fetch their own mentees directly by email
   // Uses /faculty/mentees/by-email which resolves across ALL faculty records for this person
@@ -229,20 +230,21 @@ export const HodDashboardPage: React.FC = () => {
   }, [inspectStudent]);
 
   const { data: students = [], refetch } = useQuery({
-    queryKey: ['hodStudents'],
-    queryFn: () => api.getAllStudents(),
+    queryKey: ['hodStudents', user?.department],
+    queryFn: () => api.getAllStudents({ department: user?.department || undefined }),
     staleTime: 0,
     refetchOnMount: 'always',
   });
 
   const handleForceCronSync = async () => {
     setSyncingCron(true);
+    setSyncMessage(null);
     try {
       const res = await api.triggerCronSync();
-      alert(`Background Coding Sync Completed!\nProcessed: ${res.result?.totalProcessed || 0} handles.\nLeetCode Updated: ${res.result?.leetcodeUpdated || 0}\nGitHub Updated: ${res.result?.githubUpdated || 0}`);
+      setSyncMessage({ type: 'success', text: `Sync complete! Processed: ${res.result?.totalProcessed || 0} | LeetCode: ${res.result?.leetcodeUpdated || 0} | GitHub: ${res.result?.githubUpdated || 0}` });
       refetch();
     } catch (e: any) {
-      alert('Sync failed: ' + e.message);
+      setSyncMessage({ type: 'error', text: `Sync failed: ${e.message}` });
     } finally {
       setSyncingCron(false);
     }
@@ -307,10 +309,8 @@ export const HodDashboardPage: React.FC = () => {
   const yearCgpaSummary = useMemo(() => {
     const yearsList = ['1st Year', '2nd Year', '3rd Year', '4th Year'];
     return yearsList.map((yr) => {
-      const yrDigit = yr.slice(0, 1);
-      const yearStudents = mergedStudentDataset.filter(
-        (s) => s.year === yr || s.year?.startsWith(yrDigit)
-      );
+      // BUG-5 fix: exact year match only — no loose startsWith that can cross-match
+      const yearStudents = mergedStudentDataset.filter((s) => s.year === yr);
       const totalStudents = yearStudents.length;
       const validCgpaStudents = yearStudents.filter((s) => s.cgpa > 0);
       const avgCgpaVal = validCgpaStudents.length > 0
@@ -348,10 +348,16 @@ export const HodDashboardPage: React.FC = () => {
   const sectionCgpaSummary = useMemo(() => {
     const sectionsList = ['Section A', 'Section B', 'Section C'];
     return sectionsList.map((sec) => {
-      const secLetter = sec.slice(-1);
-      const secStudents = mergedStudentDataset.filter(
-        (s) => s.section.includes(secLetter) || s.section === sec
-      );
+      const secLetter = sec.slice(-1); // 'A', 'B', or 'C'
+      // BUG-6 fix: match only exact section values like 'Sec A', 'Section A', or secLetter alone
+      const secStudents = mergedStudentDataset.filter((s) => {
+        const normalized = s.section.trim();
+        return (
+          normalized === `Sec ${secLetter}` ||
+          normalized === sec ||
+          normalized === secLetter
+        );
+      });
       const totalStudents = secStudents.length;
       const validCgpaStudents = secStudents.filter((s) => s.cgpa > 0);
       const avgCgpaVal = validCgpaStudents.length > 0
@@ -419,16 +425,19 @@ export const HodDashboardPage: React.FC = () => {
       const entry: Record<string, any> = { semester: sem };
       yearsList.forEach((yr, yIdx) => {
         const key = `Year${4 - yIdx}`;
-        const yrDigit = yr.slice(0, 1);
-        // BUG-04 fix: semGpas is now [] for real students; fall back to cgpa when no per-sem data
+        const yrDigit = yr[0];
         const yearStuds = mergedStudentDataset.filter(
-          (s) => s.year === yr || s.year?.startsWith(yrDigit)
+          (s) => s.year === yr || (s.year?.length > 0 && s.year[0] === yrDigit && s.year.includes('Year'))
         );
         if (yearStuds.length > 0) {
-          const avg = yearStuds.reduce((acc, curr) =>
-            acc + (curr.semGpas[sIdx] !== undefined ? curr.semGpas[sIdx] : curr.cgpa ?? 0), 0
-          ) / yearStuds.length;
-          entry[key] = Number(avg.toFixed(2));
+          // Only use real per-sem GPA values — never fall back to cgpa (would make a flat fake line)
+          const studentsWithSemData = yearStuds.filter((s) => s.semGpas[sIdx] !== undefined && s.semGpas[sIdx] > 0);
+          if (studentsWithSemData.length > 0) {
+            const avg = studentsWithSemData.reduce((acc, curr) => acc + curr.semGpas[sIdx], 0) / studentsWithSemData.length;
+            entry[key] = Number(avg.toFixed(2));
+          } else {
+            entry[key] = null; // no data for this semester — recharts will gap the line
+          }
         } else {
           entry[key] = null;
         }
@@ -441,19 +450,19 @@ export const HodDashboardPage: React.FC = () => {
   useEffect(() => {
     if (activeTab !== 'analytics') return;
     if (progressionCache[progressionYear] !== undefined) return; // already fetched
-    if (mergedStudentDataset.length === 0) return; // wait for student list
+    if (mergedStudentDataset.length === 0) return;
 
-    const yr = progressionYear; // capture for async closure
-    const yrDigit = yr.slice(0, 1);
+    const yr = progressionYear;
+    const yrDigit = yr[0];
     const studentsInYear = mergedStudentDataset
-      .filter((s) => s.year === yr || s.year?.startsWith(yrDigit))
-      .slice(0, 60); // cap at 60 to avoid overwhelming the API
+      .filter((s) => s.year === yr || (s.year?.length > 0 && s.year[0] === yrDigit && s.year.includes('Year')))
+      .slice(0, 60);
 
-    // Set sentinel immediately to block concurrent fetches
-    setProgressionCache((prev) => ({ ...prev, [yr]: [] }));
+    // Do NOT set sentinel until we know we'll actually fetch
     setProgressionLoading(true);
 
     if (studentsInYear.length === 0) {
+      setProgressionCache((prev) => ({ ...prev, [yr]: [] }));
       setProgressionLoading(false);
       return;
     }
@@ -637,6 +646,18 @@ export const HodDashboardPage: React.FC = () => {
               </button>
             </div>
           </div>
+          {/* Sync feedback message */}
+          {syncMessage && (
+            <div className={`mx-6 mb-2 flex items-center gap-2 text-xs font-semibold px-3.5 py-2 rounded-xl border ${
+              syncMessage.type === 'success'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-900/20 dark:border-emerald-700 dark:text-emerald-300'
+                : 'bg-red-50 border-red-200 text-red-700 dark:bg-red-900/20 dark:border-red-700 dark:text-red-300'
+            }`}>
+              <span>{syncMessage.type === 'success' ? '✅' : '❌'}</span>
+              <span>{syncMessage.text}</span>
+              <button onClick={() => setSyncMessage(null)} className="ml-auto text-xs opacity-60 hover:opacity-100">✕</button>
+            </div>
+          )}
           {/* ── UNIFIED FILTER ROW ── */}
           <div className="bg-surface border border-borderLine rounded-2xl p-4 shadow-sm space-y-3">
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
@@ -1782,6 +1803,7 @@ export const HodDashboardPage: React.FC = () => {
                     const result = await api.updateHodCredentials(
                       settingsNewEmail || undefined,
                       settingsNewPassword || undefined,
+                      user?.department || undefined,
                     );
                     setSettingsMessage({ type: 'success', text: `Credentials updated! New login email: ${result.email}` });
                     setSettingsNewEmail('');

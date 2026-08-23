@@ -140,7 +140,7 @@ export const DashboardPage: React.FC = () => {
               label="Cumulative CGPA"
               value={cumulativeCgpa ? `${cumulativeCgpa} / 10.0` : '0.00 / 10.0'}
               subtext={validAcademics.length > 0 ? `Across ${validAcademics.length} semester${validAcademics.length > 1 ? 's' : ''}` : 'Click to add semester marks'}
-              onClick={() => navigate('/profile?tab=academics')}
+              onClick={role !== 'parent' ? () => navigate('/profile?tab=academics') : undefined}
             />
             <StatCard
               icon={<TrendingUp className="w-5 h-5" />}
@@ -149,7 +149,7 @@ export const DashboardPage: React.FC = () => {
               label="Employability Score"
               value={`${scoreData?.overallScore ?? 0}/100`}
               subtext="Computed from GPA & coding activity"
-              onClick={() => navigate('/profile?tab=placement-preferences')}
+              onClick={role !== 'parent' ? () => navigate('/profile?tab=placement-preferences') : undefined}
             />
             <StatCard
               icon={<BookOpen className="w-5 h-5" />}
@@ -158,7 +158,7 @@ export const DashboardPage: React.FC = () => {
               label="Latest Sem GPA"
               value={latestSemGpa ? `${latestSemGpa} GPA` : '0.00 GPA'}
               subtext={avgAttendance != null ? `Avg Attendance: ${avgAttendance}%` : 'Semester performance'}
-              onClick={() => navigate('/profile?tab=academics')}
+              onClick={role !== 'parent' ? () => navigate('/profile?tab=academics') : undefined}
             />
             <StatCard
               icon={<Code2 className="w-5 h-5" />}
@@ -167,7 +167,7 @@ export const DashboardPage: React.FC = () => {
               label="Coding Profiles"
               value={`${codingProfiles.length} / 6`}
               subtext="Linked technical handles"
-              onClick={() => navigate('/profile?tab=coding-profiles')}
+              onClick={role !== 'parent' ? () => navigate('/profile?tab=coding-profiles') : undefined}
             />
             <StatCard
               icon={<CheckCircle2 className="w-5 h-5" />}
@@ -176,7 +176,7 @@ export const DashboardPage: React.FC = () => {
               label="Certifications Earned"
               value={certifications.filter((c) => !c.suggested).length}
               subtext={`${certifications.filter((c) => c.suggested).length} recommended certs`}
-              onClick={() => navigate('/profile?tab=certifications')}
+              onClick={role !== 'parent' ? () => navigate('/profile?tab=certifications') : undefined}
             />
             <StatCard
               icon={<Award className="w-5 h-5" />}
@@ -185,7 +185,7 @@ export const DashboardPage: React.FC = () => {
               label="Tech Skills Tracked"
               value={techSkills.length}
               subtext="Self & faculty verified skills"
-              onClick={() => navigate('/profile?tab=tech-skills')}
+              onClick={role !== 'parent' ? () => navigate('/profile?tab=tech-skills') : undefined}
             />
           </div>
 
@@ -281,12 +281,14 @@ export const DashboardPage: React.FC = () => {
                 title="No Skills Added"
                 description="Add your technical skills and tools in your profile to render the radar chart snapshot."
                 action={
-                  <button
-                    onClick={() => navigate('/profile?tab=tech-skills')}
-                    className="px-4 py-2 text-xs font-semibold rounded-full bg-brand-primary text-white"
-                  >
-                    Add Skills Now
-                  </button>
+                  role !== 'parent' ? (
+                    <button
+                      onClick={() => navigate('/profile?tab=tech-skills')}
+                      className="px-4 py-2 text-xs font-semibold rounded-full bg-brand-primary text-white"
+                    >
+                      Add Skills Now
+                    </button>
+                  ) : undefined
                 }
               />
             )}
@@ -377,11 +379,13 @@ export const DashboardPage: React.FC = () => {
                   </div>
                 </div>
               ) : (
-                <button onClick={() => navigate('/profile?tab=coding-profiles')}
-                  className="w-full p-3 rounded-xl border border-dashed border-borderLine text-xs text-textSecondary hover:border-[#FFA116] hover:text-[#FFA116] transition-all text-left flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-lg bg-[#FFA116]/10 flex items-center justify-center text-[#FFA116] font-black text-[10px]">LC</div>
-                  Connect LeetCode &rarr;
-                </button>
+                role !== 'parent' && (
+                  <button onClick={() => navigate('/profile?tab=coding-profiles')}
+                    className="w-full p-3 rounded-xl border border-dashed border-borderLine text-xs text-textSecondary hover:border-[#FFA116] hover:text-[#FFA116] transition-all text-left flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-lg bg-[#FFA116]/10 flex items-center justify-center text-[#FFA116] font-black text-[10px]">LC</div>
+                    Connect LeetCode &rarr;
+                  </button>
+                )
               )}
               {codingProfiles.find((p) => p.platform === 'GitHub') ? (
                 <div className="p-3 rounded-xl bg-surface-2 border border-borderLine flex items-center justify-between">
@@ -400,13 +404,15 @@ export const DashboardPage: React.FC = () => {
                   </div>
                 </div>
               ) : (
-                <button onClick={() => navigate('/profile?tab=coding-profiles')}
-                  className="w-full p-3 rounded-xl border border-dashed border-borderLine text-xs text-textSecondary hover:border-borderStrong hover:text-textPrimary transition-all text-left flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-lg bg-surface-2 flex items-center justify-center">
-                    <Github className="w-3.5 h-3.5 text-textSecondary" />
-                  </div>
-                  Connect GitHub &rarr;
-                </button>
+                role !== 'parent' && (
+                  <button onClick={() => navigate('/profile?tab=coding-profiles')}
+                    className="w-full p-3 rounded-xl border border-dashed border-borderLine text-xs text-textSecondary hover:border-borderStrong hover:text-textPrimary transition-all text-left flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-lg bg-surface-2 flex items-center justify-center">
+                      <Github className="w-3.5 h-3.5 text-textSecondary" />
+                    </div>
+                    Connect GitHub &rarr;
+                  </button>
+                )
               )}
               <button onClick={() => navigate('/coding-analytics')}
                 className="w-full py-2 text-xs font-bold text-brand-primary hover:underline flex items-center justify-center gap-1">
@@ -415,7 +421,8 @@ export const DashboardPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Complete Your Profile nudges */}
+          {/* Complete Your Profile nudges — hidden for parent (read-only) */}
+          {role !== 'parent' && (
           <div className="bg-surface border border-borderLine rounded-2xl p-5 shadow-xs">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-bold text-textPrimary flex items-center gap-2">
@@ -447,6 +454,7 @@ export const DashboardPage: React.FC = () => {
               </div>
             )}
           </div>
+          )}
 
           {/* Announcements Card */}
           <div className="bg-surface border border-borderLine rounded-2xl p-5 shadow-xs">
