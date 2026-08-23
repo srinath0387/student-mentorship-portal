@@ -286,6 +286,11 @@ export const AdminDashboardPage: React.FC = () => {
   const cgpa65to8   = students.filter(s => { const c = Number((s as any).cgpa ?? 0); return c >= 6.5 && c < 8.0; }).length;
   const cgpa55to65  = students.filter(s => { const c = Number((s as any).cgpa ?? 0); return c >= 5.5 && c < 6.5; }).length;
   const cgpaPass    = students.filter(s => { const c = Number((s as any).cgpa ?? 0); return c > 4.5 && c < 5.5; }).length;
+  const avgCgpaRaw  = students.length > 0
+    ? students.reduce((sum, s) => sum + Number((s as any).cgpa ?? 0), 0) / students.length
+    : 0;
+  const avgCgpaDisplay = avgCgpaRaw > 0 ? `${avgCgpaRaw.toFixed(2)} / 10` : '—';
+  const leetcodeCount = students.filter(s => (s as any).leetcode_username).length;
 
   // Student CRUD handlers
   const openAddModal = () => {
@@ -574,9 +579,9 @@ export const AdminDashboardPage: React.FC = () => {
         <StatCard icon={<GraduationCap className="w-5 h-5" />} iconBgColor="bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
           accentColor="amber" label="CGPA ≥ 8.0 (Distinction)" value={`${cgpaAbove8} Students`} subtext="Academic distinction (≥ 75%)" />
         <StatCard icon={<BookOpen className="w-5 h-5" />} iconBgColor="bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400"
-          accentColor="indigo" label="Avg Institution CGPA" value="9.09 / 10" subtext="High academic standing" />
+          accentColor="indigo" label="Avg Institution CGPA" value={avgCgpaDisplay} subtext="Computed from student records" />
         <StatCard icon={<Code2 className="w-5 h-5" />} iconBgColor="bg-[#FFA116]/10 text-[#FFA116]"
-          accentColor="brand" label="LeetCode Profiles" value="Active Sync" subtext="Real-time platform stats" />
+          accentColor="brand" label="LeetCode Profiles" value={`${leetcodeCount} Linked`} subtext="Students with LeetCode connected" />
       </div>
 
       {/* ── TAB 1: Student Directory ── */}
