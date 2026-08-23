@@ -3252,38 +3252,88 @@ app.get('/faculty/mentees/by-email/:email', async (req: Request, res: Response) 
       }
     }
 
-    // Step 3: Union mentees across all matching faculty_ids
+    // Step 3: Union mentees from mentor_assignments AND from students.faculty_mentor_id directly
+    // This ensures HODs/faculty who have students pointing to them via faculty_mentor_id
+    // are shown even if those students are not in the mentor_assignments table.
     const placeholders = matchingIds.map((_, i) => `$${i + 1}`).join(',');
     const result = await db.query(
-      `SELECT
-         ma.roll_number,
-         ma.faculty_id AS assigned_faculty_id,
-         ma.assigned_at,
-         CASE WHEN s.roll_number IS NOT NULL THEN true ELSE false END AS registered,
-         s.name,
-         s.email,
-         s.year,
-         s.batch,
-         s.section,
-         s.department,
-         s.phone,
-         s.photo_url,
-         s.faculty_mentor_id,
-         COALESCE(ROUND(AVG(a.semester_gpa), 2), 0.00) AS cgpa,
-         MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN c.handle END) AS leetcode_handle,
-         COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN c.score_rating END), 0) AS leetcode_solved,
-         MAX(CASE WHEN LOWER(c.platform) = 'github' THEN c.handle END) AS github_handle,
-         COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'github' THEN c.repositories_count END), 0) AS github_repos
-       FROM mentor_assignments ma
-       LEFT JOIN students s ON UPPER(s.roll_number) = UPPER(ma.roll_number)
-       LEFT JOIN academics a ON a.student_id = s.roll_number
-       LEFT JOIN coding_profiles c ON c.student_id = s.roll_number
-       WHERE UPPER(ma.faculty_id) IN (${placeholders})
-       GROUP BY
-         ma.roll_number, ma.faculty_id, ma.assigned_at,
-         s.roll_number, s.name, s.email, s.year, s.batch, s.section,
-         s.department, s.phone, s.photo_url, s.faculty_mentor_id
-       ORDER BY registered DESC, s.year DESC NULLS LAST, ma.roll_number`,
+      `SELECT DISTINCT ON (roll_number)
+         roll_number,
+         assigned_faculty_id,
+         assigned_at,
+         registered,
+         name,
+         email,
+         year,
+         batch,
+         section,
+         department,
+         phone,
+         photo_url,
+         faculty_mentor_id,
+         cgpa,
+         leetcode_handle,
+         leetcode_solved,
+         github_handle,
+         github_repos
+       FROM (
+         -- Source 1: from mentor_assignments table
+         SELECT
+           COALESCE(s.roll_number, ma.roll_number) AS roll_number,
+           ma.faculty_id AS assigned_faculty_id,
+           ma.assigned_at,
+           CASE WHEN s.roll_number IS NOT NULL THEN true ELSE false END AS registered,
+           s.name,
+           s.email,
+           s.year,
+           s.batch,
+           s.section,
+           s.department,
+           s.phone,
+           s.photo_url,
+           s.faculty_mentor_id,
+           COALESCE(ROUND(AVG(a.semester_gpa), 2), 0.00) AS cgpa,
+           MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN c.handle END) AS leetcode_handle,
+           COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN c.score_rating END), 0) AS leetcode_solved,
+           MAX(CASE WHEN LOWER(c.platform) = 'github' THEN c.handle END) AS github_handle,
+           COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'github' THEN c.repositories_count END), 0) AS github_repos
+         FROM mentor_assignments ma
+         LEFT JOIN students s ON UPPER(s.roll_number) = UPPER(ma.roll_number)
+         LEFT JOIN academics a ON a.student_id = s.roll_number
+         LEFT JOIN coding_profiles c ON c.student_id = s.roll_number
+         WHERE UPPER(ma.faculty_id) IN (${placeholders})
+         GROUP BY ma.roll_number, ma.faculty_id, ma.assigned_at, s.roll_number, s.name, s.email, s.year, s.batch, s.section, s.department, s.phone, s.photo_url, s.faculty_mentor_id
+
+         UNION
+
+         -- Source 2: from students.faculty_mentor_id directly (covers HODs and manually-set mentors)
+         SELECT
+           s.roll_number AS roll_number,
+           s.faculty_mentor_id AS assigned_faculty_id,
+           s.updated_at AS assigned_at,
+           true AS registered,
+           s.name,
+           s.email,
+           s.year,
+           s.batch,
+           s.section,
+           s.department,
+           s.phone,
+           s.photo_url,
+           s.faculty_mentor_id,
+           COALESCE(ROUND(AVG(a.semester_gpa), 2), 0.00) AS cgpa,
+           MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN c.handle END) AS leetcode_handle,
+           COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN c.score_rating END), 0) AS leetcode_solved,
+           MAX(CASE WHEN LOWER(c.platform) = 'github' THEN c.handle END) AS github_handle,
+           COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'github' THEN c.repositories_count END), 0) AS github_repos
+         FROM students s
+         LEFT JOIN academics a ON a.student_id = s.roll_number
+         LEFT JOIN coding_profiles c ON c.student_id = s.roll_number
+         WHERE UPPER(s.faculty_mentor_id) IN (${placeholders})
+           AND s.roll_number IS NOT NULL
+         GROUP BY s.roll_number, s.faculty_mentor_id, s.updated_at, s.name, s.email, s.year, s.batch, s.section, s.department, s.phone, s.photo_url
+       ) combined
+       ORDER BY roll_number, registered DESC`,
       matchingIds.map(id => id.toUpperCase())
     );
 
