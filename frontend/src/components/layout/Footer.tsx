@@ -3,7 +3,7 @@ import { Heart, Sparkles } from 'lucide-react';
 
 export const Footer: React.FC = () => {
   return (
-    <footer className="w-full sticky bottom-0 z-10 py-2 sm:py-2.5 px-4 border-t border-borderLine bg-surface/95 dark:bg-[#0f172a]/95 backdrop-blur-md shrink-0">
+    <footer className="w-full sticky bottom-0 z-10 py-2 sm:py-2.5 px-4 border-t border-borderLine bg-surface dark:bg-[#0f172a] shrink-0">
       <div className="max-w-7xl mx-auto flex flex-col items-center gap-1 text-center">
         {/* Motto Banner */}
         <div className="flex items-center justify-center gap-1.5">
@@ -23,10 +23,10 @@ export const Footer: React.FC = () => {
             RGMCET
           </span>
           <span className="text-slate-500 dark:text-slate-400">by</span>
-          <span className="text-slate-800 dark:text-white font-extrabold">Jaya Krushna</span>,
-          <span className="text-slate-800 dark:text-white font-extrabold">Dinesh Kumar</span>
+          <span className="text-slate-900 dark:text-white dark:drop-shadow-[0_0_6px_rgba(255,255,255,0.3)] font-extrabold">Jaya Krushna</span>,
+          <span className="text-slate-900 dark:text-white dark:drop-shadow-[0_0_6px_rgba(255,255,255,0.3)] font-extrabold">Dinesh Kumar</span>
           <span className="text-slate-500 dark:text-slate-400">&amp;</span>
-          <span className="text-slate-800 dark:text-white font-extrabold">Jayanth Kumar Naidu</span>
+          <span className="text-slate-900 dark:text-white dark:drop-shadow-[0_0_6px_rgba(255,255,255,0.3)] font-extrabold">Jayanth Kumar Naidu</span>
           <span className="hidden sm:inline text-slate-300 dark:text-slate-600 mx-1 font-black">&bull;</span>
           <span className="w-full sm:w-auto mt-0.5 sm:mt-0 font-medium text-slate-500 dark:text-slate-400">
             Guided by <strong className="text-brand-primary dark:text-indigo-400 font-black">Mr. Y.P Srinath Reddy</strong>
