@@ -3392,16 +3392,21 @@ app.get('/faculty', requireRole('admin', 'hod'), async (req: Request, res: Respo
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
+    // Count mentees from BOTH mentor_assignments AND students.faculty_mentor_id (union, deduplicated)
     const result = await db.query(`
       SELECT f.*,
-             COUNT(ma.roll_number)::int                                           AS mentee_count,
-             COUNT(CASE WHEN s.year = '1st Year' THEN 1 END)::int                AS year1_count,
-             COUNT(CASE WHEN s.year = '2nd Year' THEN 1 END)::int                AS year2_count,
-             COUNT(CASE WHEN s.year = '3rd Year' THEN 1 END)::int                AS year3_count,
-             COUNT(CASE WHEN s.year = '4th Year' THEN 1 END)::int                AS year4_count
+             COUNT(DISTINCT combined.roll_number)::int                            AS mentee_count,
+             COUNT(DISTINCT CASE WHEN s2.year = '1st Year' THEN combined.roll_number END)::int AS year1_count,
+             COUNT(DISTINCT CASE WHEN s2.year = '2nd Year' THEN combined.roll_number END)::int AS year2_count,
+             COUNT(DISTINCT CASE WHEN s2.year = '3rd Year' THEN combined.roll_number END)::int AS year3_count,
+             COUNT(DISTINCT CASE WHEN s2.year = '4th Year' THEN combined.roll_number END)::int AS year4_count
       FROM faculty f
-      LEFT JOIN mentor_assignments ma ON UPPER(ma.faculty_id) = UPPER(f.faculty_id)
-      LEFT JOIN students s ON UPPER(s.roll_number) = UPPER(ma.roll_number)
+      LEFT JOIN (
+        SELECT roll_number, faculty_id FROM mentor_assignments
+        UNION
+        SELECT roll_number, faculty_mentor_id AS faculty_id FROM students WHERE faculty_mentor_id IS NOT NULL
+      ) combined ON UPPER(combined.faculty_id) = UPPER(f.faculty_id)
+      LEFT JOIN students s2 ON UPPER(s2.roll_number) = UPPER(combined.roll_number)
       ${whereClause}
       GROUP BY f.faculty_id
       ORDER BY f.name
@@ -3551,8 +3556,9 @@ app.get('/faculty/blocked', requireRole('admin'), async (_req: Request, res: Res
   }
 });
 
-// GET /faculty/:id/mentees-detail — Full mentee list for one faculty (for admin directory)
-app.get('/faculty/:id/mentees-detail', requireRole('admin'), async (req: Request, res: Response) => {
+// GET /faculty/:id/mentees-detail — Full mentee list for one faculty (for admin/HOD directory)
+// Unions mentor_assignments + students.faculty_mentor_id to avoid missing mentees
+app.get('/faculty/:id/mentees-detail', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
   try {
     const facId = req.params.id.toUpperCase();
     if (db.isMock) return res.json([]);
@@ -3560,23 +3566,45 @@ app.get('/faculty/:id/mentees-detail', requireRole('admin'), async (req: Request
     await db.query(`CREATE TABLE IF NOT EXISTS mentor_assignments (roll_number TEXT NOT NULL PRIMARY KEY, faculty_id TEXT NOT NULL, assigned_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)`).catch(() => {});
 
     const result = await db.query(
-      `SELECT
-         ma.roll_number,
-         ma.faculty_id,
-         ma.assigned_at,
-         CASE WHEN s.roll_number IS NOT NULL THEN true ELSE false END AS registered,
-         s.name,
-         s.email,
-         s.year,
-         s.batch,
-         s.section,
-         s.department,
-         s.phone,
-         s.cgpa
-       FROM mentor_assignments ma
-       LEFT JOIN students s ON UPPER(s.roll_number) = UPPER(ma.roll_number)
-       WHERE UPPER(ma.faculty_id) = $1
-       ORDER BY registered DESC, ma.roll_number`,
+      `SELECT DISTINCT ON (roll_number)
+         roll_number,
+         faculty_id,
+         assigned_at,
+         registered,
+         name,
+         email,
+         year,
+         batch,
+         section,
+         department,
+         phone,
+         cgpa
+       FROM (
+         -- Source 1: from mentor_assignments
+         SELECT
+           COALESCE(s.roll_number, ma.roll_number) AS roll_number,
+           ma.faculty_id,
+           ma.assigned_at,
+           CASE WHEN s.roll_number IS NOT NULL THEN true ELSE false END AS registered,
+           s.name, s.email, s.year, s.batch, s.section, s.department, s.phone, s.cgpa
+         FROM mentor_assignments ma
+         LEFT JOIN students s ON UPPER(s.roll_number) = UPPER(ma.roll_number)
+         WHERE UPPER(ma.faculty_id) = $1
+
+         UNION
+
+         -- Source 2: from students.faculty_mentor_id
+         SELECT
+           s.roll_number,
+           s.faculty_mentor_id AS faculty_id,
+           s.updated_at AS assigned_at,
+           true AS registered,
+           s.name, s.email, s.year, s.batch, s.section, s.department, s.phone, s.cgpa
+         FROM students s
+         WHERE UPPER(s.faculty_mentor_id) = $1
+           AND s.roll_number IS NOT NULL
+       ) combined
+       ORDER BY roll_number, registered DESC`,
       [facId]
     );
     res.json(result.rows);
