@@ -596,33 +596,33 @@ export const AuthPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col relative">
+    <div className="h-screen bg-background flex flex-col justify-between overflow-y-auto sm:overflow-hidden relative">
 
-      <div className="flex-1 flex flex-col justify-start sm:justify-center py-6 sm:py-10 sm:px-6 lg:px-8 z-10">
-      <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
-        <div className="inline-flex items-center justify-center w-14 h-14 sm:w-20 sm:h-20 rounded-2xl bg-[#031B33] p-1.5 shadow-xl shadow-brand-primary/30 mb-2 sm:mb-4 ring-1 ring-white/10 overflow-hidden">
+      <div className="flex-1 flex flex-col justify-center py-2 sm:py-3 px-4 sm:px-6 lg:px-8 z-10 min-h-0 overflow-y-auto">
+      <div className="sm:mx-auto sm:w-full sm:max-w-md text-center shrink-0">
+        <div className="inline-flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-[#031B33] p-1 shadow-md shadow-brand-primary/20 mb-1.5 sm:mb-2 ring-1 ring-white/10 overflow-hidden">
           <img
             src="/ds-logo.jpeg"
             alt="Data Science Logo"
             className="w-full h-full object-contain"
           />
         </div>
-        <h2 className="text-2xl sm:text-3xl font-extrabold text-textPrimary tracking-tight">
+        <h2 className="text-xl sm:text-2xl font-extrabold text-textPrimary tracking-tight">
           <span>A</span><span className="text-brand-primary">D</span><span>VITIYAN</span><span className="text-brand-primary">S</span>
         </h2>
-        <p className="mt-1 sm:mt-1.5 text-xs sm:text-sm text-textSecondary">Student 360°, Faculty & Placement Cell Platform</p>
+        <p className="mt-0.5 text-xs text-textSecondary">Student 360°, Faculty & Placement Cell Platform</p>
       </div>
 
       {/* ── Session Kicked-Out Banner ── */}
       {sessionKickedOut && (
-        <div className="mt-4 sm:mx-auto sm:w-full sm:max-w-lg px-4 sm:px-0">
-          <div className="bg-alert-soft border border-alert/30 rounded-xl p-4 flex items-start gap-3 shadow-sm">
-            <span className="text-xl shrink-0">⚠️</span>
+        <div className="mt-2 sm:mx-auto sm:w-full sm:max-w-lg px-4 sm:px-0 shrink-0">
+          <div className="bg-alert-soft border border-alert/30 rounded-xl p-3 flex items-start gap-2.5 shadow-sm">
+            <span className="text-lg shrink-0">⚠️</span>
             <div>
-              <p className="text-sm font-bold text-alert m-0">
+              <p className="text-xs font-bold text-alert m-0">
                 Session ended — another device signed in
               </p>
-              <p className="text-xs text-textSecondary mt-1">
+              <p className="text-[11px] text-textSecondary mt-0.5">
                 Your account was accessed from a different browser or device. For security, only one active session is allowed. Please log in again.
               </p>
             </div>
@@ -630,12 +630,12 @@ export const AuthPage: React.FC = () => {
         </div>
       )}
 
-      <div className="mt-4 sm:mt-8 sm:mx-auto sm:w-full sm:max-w-lg">
-        <div className="bg-surface py-6 sm:py-8 px-5 sm:px-10 shadow-md border border-borderLine rounded-2xl">
+      <div className="mt-2 sm:mt-3 sm:mx-auto sm:w-full sm:max-w-lg">
+        <div className="bg-surface py-4 sm:py-5 px-5 sm:px-8 shadow-md border border-borderLine rounded-2xl">
           {/* Inline Error Banner */}
           {errorMessage && (
-            <div className="mb-6 flex items-start gap-3 bg-red-950/60 border border-red-500/50 rounded-xl px-4 py-3 text-sm animate-pulse-once">
-              <span className="text-red-400 text-base mt-0.5 flex-shrink-0">✕</span>
+            <div className="mb-4 flex items-start gap-3 bg-red-950/60 border border-red-500/50 rounded-xl px-3.5 py-2.5 text-xs animate-pulse-once">
+              <span className="text-red-400 text-sm mt-0.5 flex-shrink-0">✕</span>
               <div>
                 <p className="font-semibold text-red-300 leading-snug">{errorMessage}</p>
               </div>
@@ -650,11 +650,11 @@ export const AuthPage: React.FC = () => {
             </div>
           )}
           {/* Role Switcher Pill Tabs */}
-          <div className="grid grid-cols-5 gap-1.5 bg-surface-2 p-1.5 rounded-2xl border border-borderLine mb-7">
+          <div className="grid grid-cols-5 gap-1 bg-surface-2 p-1 rounded-xl border border-borderLine mb-4">
             <button
               type="button"
               onClick={() => handleTabSwitch('student')}
-              className={`py-2 text-xs font-bold rounded-xl transition-all ${
+              className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
                 activeTab === 'student'
                   ? 'bg-brand-primary text-white shadow-sm shadow-brand/30'
                   : 'text-textSecondary hover:text-textPrimary hover:bg-surface'
@@ -665,7 +665,7 @@ export const AuthPage: React.FC = () => {
             <button
               type="button"
               onClick={() => handleTabSwitch('parent')}
-              className={`py-2 text-xs font-bold rounded-xl transition-all ${
+              className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
                 activeTab === 'parent'
                   ? 'bg-brand-primary text-white shadow-sm shadow-brand/30'
                   : 'text-textSecondary hover:text-textPrimary hover:bg-surface'
@@ -676,7 +676,7 @@ export const AuthPage: React.FC = () => {
             <button
               type="button"
               onClick={() => handleTabSwitch('faculty')}
-              className={`py-2 text-xs font-bold rounded-xl transition-all ${
+              className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
                 activeTab === 'faculty'
                   ? 'bg-brand-primary text-white shadow-sm shadow-brand/30'
                   : 'text-textSecondary hover:text-textPrimary hover:bg-surface'
@@ -687,7 +687,7 @@ export const AuthPage: React.FC = () => {
             <button
               type="button"
               onClick={() => handleTabSwitch('hod')}
-              className={`py-2 text-xs font-bold rounded-xl transition-all ${
+              className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
                 activeTab === 'hod'
                   ? 'bg-brand-primary text-white shadow-sm shadow-brand/30'
                   : 'text-textSecondary hover:text-textPrimary hover:bg-surface'
@@ -698,7 +698,7 @@ export const AuthPage: React.FC = () => {
             <button
               type="button"
               onClick={() => handleTabSwitch('admin')}
-              className={`py-2 text-xs font-bold rounded-xl transition-all ${
+              className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
                 activeTab === 'admin'
                   ? 'bg-brand-primary text-white shadow-sm shadow-brand/30'
                   : 'text-textSecondary hover:text-textPrimary hover:bg-surface'
@@ -1417,13 +1417,13 @@ export const AuthPage: React.FC = () => {
       </div>
       </div>
       {/* ── Glassmorphism Tagline Banner ── */}
-      <div className="w-full shrink-0 flex items-center justify-center py-3">
-        <div className="auth-glass-tag px-8 py-2.5 rounded-2xl backdrop-blur-xl bg-white/10 dark:bg-white/5 border border-white/20 dark:border-white/10 shadow-lg shadow-brand-primary/10">
+      <div className="w-full shrink-0 flex items-center justify-center py-1 sm:py-1.5">
+        <div className="auth-glass-tag px-6 py-1 rounded-xl backdrop-blur-xl bg-white/10 dark:bg-white/5 border border-white/20 dark:border-white/10 shadow-sm shadow-brand-primary/10">
           <div className="auth-tag-crossfade">
-            <span className="auth-tag-item text-sm font-extrabold tracking-wide bg-gradient-to-r from-brand-primary via-indigo-500 to-sky-500 bg-clip-text text-transparent">
+            <span className="auth-tag-item text-xs font-extrabold tracking-wide bg-gradient-to-r from-brand-primary via-indigo-500 to-sky-500 bg-clip-text text-transparent">
               Where ever the data, there is Data Science ✨
             </span>
-            <span className="auth-tag-item text-sm font-extrabold tracking-wide bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 bg-clip-text text-transparent">
+            <span className="auth-tag-item text-xs font-extrabold tracking-wide bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 bg-clip-text text-transparent">
               Celebrate every moment 🎉
             </span>
           </div>
