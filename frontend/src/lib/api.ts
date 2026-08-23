@@ -390,6 +390,14 @@ export const api = {
     return fetchWithAuth(`/faculty${department && department !== 'All' ? `?department=${encodeURIComponent(department)}` : ''}`);
   },
 
+  // Verify student password set by admin if Cognito rejects credentials
+  verifyStudentPassword: async (email: string, password: string): Promise<any> => {
+    return fetchWithAuth('/auth/verify-student-password', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+  },
+
   // Link email to faculty record (admin)
   patchFacultyEmail: async (facultyId: string, email: string): Promise<any> => {
     return fetchWithAuth(`/faculty/${facultyId}/email`, {

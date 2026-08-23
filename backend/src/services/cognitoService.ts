@@ -1,4 +1,4 @@
-import { CognitoIdentityProviderClient, AdminDeleteUserCommand, ListUsersCommand } from '@aws-sdk/client-cognito-identity-provider';
+import { CognitoIdentityProviderClient, AdminDeleteUserCommand, ListUsersCommand, AdminSetUserPasswordCommand } from '@aws-sdk/client-cognito-identity-provider';
 import { db } from '../db';
 
 const cognitoClient = new CognitoIdentityProviderClient({
@@ -143,3 +143,68 @@ export async function deleteAllCognitoUsers(): Promise<void> {
     console.warn('[Cognito] deleteAllCognitoUsers error:', err.message);
   }
 }
+
+/**
+ * Admin utility: update a user's password directly in AWS Cognito User Pool.
+ * Sets Permanent: true so password takes effect immediately without forced password reset prompt.
+ */
+export async function updateCognitoUserPassword(identifier: string, newPassword: string): Promise<boolean> {
+  const userPoolId = process.env.COGNITO_USER_POOL_ID;
+  if (!userPoolId || !identifier || !newPassword) return false;
+
+  const clean = identifier.trim().toLowerCase();
+  const targetEmail = clean.includes('@') ? clean : `${clean}@rgmcet.edu.in`;
+  const rollNo = clean.includes('@') ? clean.split('@')[0] : clean;
+
+  try {
+    let paginationToken: string | undefined = undefined;
+    let cognitoUsername: string | null = null;
+
+    do {
+      const res: any = await cognitoClient.send(
+        new ListUsersCommand({
+          UserPoolId: userPoolId,
+          PaginationToken: paginationToken,
+          Limit: 60,
+        })
+      );
+
+      for (const u of res.Users || []) {
+        const email = (u.Attributes?.find((a: any) => a.Name === 'email')?.Value || '').toLowerCase();
+        const regNo = (u.Attributes?.find((a: any) => a.Name === 'custom:reg_no')?.Value || '').toLowerCase();
+        const username = u.Username;
+
+        if (
+          username.toLowerCase() === clean ||
+          username.toLowerCase() === targetEmail ||
+          email === targetEmail ||
+          (regNo && regNo === rollNo)
+        ) {
+          cognitoUsername = username;
+          break;
+        }
+      }
+      if (cognitoUsername) break;
+      paginationToken = res.PaginationToken;
+    } while (paginationToken);
+
+    if (cognitoUsername) {
+      await cognitoClient.send(
+        new AdminSetUserPasswordCommand({
+          UserPoolId: userPoolId,
+          Username: cognitoUsername,
+          Password: String(newPassword),
+          Permanent: true,
+        })
+      );
+      console.log(`[Cognito] Updated password for user ${cognitoUsername} in Cognito User Pool ${userPoolId}`);
+      return true;
+    } else {
+      console.log(`[Cognito] User ${identifier} not found in Cognito User Pool.`);
+    }
+  } catch (err: any) {
+    console.warn(`[Cognito] Failed to update password for ${identifier} in Cognito:`, err.message);
+  }
+  return false;
+}
+

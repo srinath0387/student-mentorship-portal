@@ -5,7 +5,7 @@ import { db } from '../db';
 import { calculateEmployabilityScore } from '../services/employability';
 import { runCodingProfileCronSync, fetchLeetCodeStatsDirect, fetchGitHubStatsDirect } from '../services/cronSync';
 import { cachedFetch } from '../services/platformCache';
-import { deleteCognitoUsers, deleteAllCognitoUsers } from '../services/cognitoService';
+import { deleteCognitoUsers, deleteAllCognitoUsers, updateCognitoUserPassword } from '../services/cognitoService';
 import {
   studentProfileSchema,
   academicSchema,
@@ -872,7 +872,7 @@ app.get('/admin/student-passwords', requireRole('admin'), async (_req: Request, 
   }
 });
 
-// PUT /students/:id/password — admin sets a student's password (stored as bcrypt hash)
+// PUT /students/:id/password — admin sets a student's password (stored as bcrypt hash & synced to Cognito)
 app.put('/students/:id/password', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const rollNo = req.params.id.toUpperCase();
@@ -883,7 +883,7 @@ app.put('/students/:id/password', requireRole('admin'), async (req: Request, res
     if (db.isMock) {
       return res.json({ success: true, roll_number: rollNo });
     }
-    // Hash password before storage — plain text never hits the database
+    // 1. Hash password and save to student_passwords table
     const hashedPassword = await bcrypt.hash(String(password), BCRYPT_ROUNDS);
     await db.query(
       `INSERT INTO student_passwords (roll_number, password, updated_at)
@@ -891,9 +891,53 @@ app.put('/students/:id/password', requireRole('admin'), async (req: Request, res
        ON CONFLICT (roll_number) DO UPDATE SET password = $2, updated_at = NOW()`,
       [rollNo, hashedPassword]
     );
+
+    // 2. Also sync new password directly to AWS Cognito User Pool so student can log in seamlessly
+    const stuResult = await db.query('SELECT email FROM students WHERE UPPER(roll_number) = $1', [rollNo]);
+    const studentEmail = stuResult.rows[0]?.email || `${rollNo.toLowerCase()}@rgmcet.edu.in`;
+    await updateCognitoUserPassword(studentEmail, String(password)).catch(() => {});
+
     res.json({ success: true, roll_number: rollNo });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /auth/verify-student-password — Verifies a student's password against DB if Cognito credentials differ
+app.post('/auth/verify-student-password', async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ valid: false, error: 'Email and password required' });
+    const cleanEmail = String(email).toLowerCase().trim();
+    const rollNo = cleanEmail.includes('@') ? cleanEmail.split('@')[0].toUpperCase() : cleanEmail.toUpperCase();
+
+    if (db.isMock) {
+      return res.json({ valid: true, student: { roll_number: rollNo, name: 'Student', department: 'CSE (Data Science)' } });
+    }
+
+    const pwdResult = await db.query(
+      `SELECT sp.password, s.name, s.roll_number, s.department 
+       FROM student_passwords sp 
+       JOIN students s ON UPPER(s.roll_number) = UPPER(sp.roll_number)
+       WHERE LOWER(s.email) = $1 OR UPPER(s.roll_number) = $2`,
+      [cleanEmail, rollNo]
+    );
+
+    if (pwdResult.rows.length > 0) {
+      const match = await bcrypt.compare(String(password), pwdResult.rows[0].password);
+      if (match) {
+        // Asynchronously sync to Cognito to heal any Cognito mismatch
+        updateCognitoUserPassword(cleanEmail, String(password)).catch(() => {});
+        return res.json({
+          valid: true,
+          student: pwdResult.rows[0],
+        });
+      }
+    }
+
+    return res.json({ valid: false });
+  } catch (err: any) {
+    res.status(500).json({ valid: false, error: err.message });
   }
 });
 

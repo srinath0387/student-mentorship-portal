@@ -440,6 +440,19 @@ export const AuthPage: React.FC = () => {
         const msg = cognitoErr?.message || '';
 
         if (msg.includes('Incorrect username or password') || msg.includes('NotAuthorizedException')) {
+          if (activeTab === 'student') {
+            const serverAuth = await api.verifyStudentPassword(data.email, data.password).catch(() => null);
+            if (serverAuth && serverAuth.valid && serverAuth.student) {
+              const stu = serverAuth.student;
+              rollNo = stu.roll_number;
+              displayName = stu.name;
+              const studentDept = stu.department || (rollNo ? getDeptFromRollNumber(rollNo) : 'CSE (Data Science)');
+              login(data.email, 'student', rollNo, displayName, undefined, studentDept);
+              registerSession(data.email, 'student');
+              navigate('/dashboard');
+              return;
+            }
+          }
           throw new Error('Incorrect password. Please check your credentials and try again.');
         }
 

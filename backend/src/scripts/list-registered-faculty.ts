@@ -1,3 +1,4 @@
+export {};
 const { Pool } = require('pg');
 
 const DB_HOST    = process.env.DB_HOST     || 'advitiyans-db.chu8eggw0kny.ap-south-1.rds.amazonaws.com';
