@@ -5,6 +5,7 @@ import { StudentProfile, AcademicRecord } from '../../../types';
 import { api } from '../../../lib/api';
 import { useAuth } from '../../../context/AuthContext';
 import { PillButton } from '../../../components/common/PillButton';
+import { formatExternalUrl } from '../../../lib/urlUtils';
 
 interface PersonalInfoTabProps {
   student?: StudentProfile | null;
@@ -313,7 +314,12 @@ export const PersonalInfoTab: React.FC<PersonalInfoTabProps> = ({ student, acade
               <input {...register('linkedin_url')} placeholder="https://linkedin.com/in/yourprofile" className="w-full px-3 py-2 text-sm rounded-lg border border-borderLine bg-background" />
             ) : (
               s?.linkedin_url ? (
-                <a href={s.linkedin_url} target="_blank" rel="noreferrer" className="text-sm font-medium text-brand-primary hover:underline flex items-center gap-1">
+                <a
+                  href={formatExternalUrl(s.linkedin_url)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm font-medium text-brand-primary hover:underline flex items-center gap-1"
+                >
                   <span className="truncate">{s.linkedin_url}</span>
                   <ExternalLink className="w-3.5 h-3.5 shrink-0" />
                 </a>

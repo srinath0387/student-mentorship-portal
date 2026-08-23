@@ -48,6 +48,7 @@ import {
   calculateFacultyProfileCompletion,
 } from '../../../lib/facultyUtils';
 import { PillButton } from '../../../components/common/PillButton';
+import { formatExternalUrl } from '../../../lib/urlUtils';
 
 const BLOOD_GROUPS: BloodGroup[] = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'];
 const DESIGNATIONS: FacultyDesignation[] = ['Assistant Professor', 'Associate Professor', 'Professor'];
@@ -995,7 +996,7 @@ export const FacultyProfileTab: React.FC = () => {
                   </p>
                   {p.doi_link && (
                     <a
-                      href={p.doi_link}
+                      href={formatExternalUrl(p.doi_link)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs text-brand-primary hover:underline inline-flex items-center gap-1"

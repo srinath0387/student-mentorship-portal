@@ -27,6 +27,7 @@ import {
   calculateTotalExperience,
   calculateFacultyProfileCompletion,
 } from '../../../lib/facultyUtils';
+import { formatExternalUrl } from '../../../lib/urlUtils';
 
 interface Props {
   faculty: {
@@ -173,7 +174,7 @@ export const FacultyProfileInspectionModal: React.FC<Props> = ({ faculty, onClos
                   <span className="text-textSecondary block text-[11px]">LinkedIn Profile</span>
                   {personal.linkedin_url ? (
                     <a
-                      href={personal.linkedin_url}
+                      href={formatExternalUrl(personal.linkedin_url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="font-semibold text-brand-primary hover:underline inline-flex items-center gap-1"
@@ -314,7 +315,7 @@ export const FacultyProfileInspectionModal: React.FC<Props> = ({ faculty, onClos
                       </p>
                       {p.doi_link && (
                         <a
-                          href={p.doi_link}
+                          href={formatExternalUrl(p.doi_link)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-[11px] text-brand-primary hover:underline inline-flex items-center gap-1"

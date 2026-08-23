@@ -1,7 +1,9 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { ExternalLink } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
+import { formatExternalUrl } from '../../lib/urlUtils';
 
 function getInitials(name: string) {
   return name
@@ -164,7 +166,13 @@ export default function MyMentorPage() {
                     )}
                     <InfoCard icon="🆔" label="Faculty ID" value={mentor.faculty_id || '—'} />
                     {mentorFullProf?.personal?.linkedin_url && (
-                      <InfoCard icon="🔗" label="LinkedIn" value="View LinkedIn Profile" href={mentorFullProf.personal.linkedin_url} />
+                      <InfoCard
+                        icon="🔗"
+                        label="LinkedIn"
+                        value="View LinkedIn Profile"
+                        href={mentorFullProf.personal.linkedin_url}
+                        isExternal={true}
+                      />
                     )}
                   </div>
 
@@ -251,17 +259,25 @@ export default function MyMentorPage() {
   );
 }
 
-function InfoCard({ icon, label, value, href }: {
-  icon: string; label: string; value: string; href?: string;
+function InfoCard({ icon, label, value, href, isExternal }: {
+  icon: string; label: string; value: string; href?: string; isExternal?: boolean;
 }) {
+  const formattedHref = isExternal && href ? formatExternalUrl(href) : href;
+
   return (
     <div className="bg-surface-2 border border-borderLine rounded-xl px-4 py-3.5">
       <div className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1.5">
         {icon} {label}
       </div>
-      {href ? (
-        <a href={href} className="text-sm font-semibold text-brand-primary hover:underline">
-          {value}
+      {formattedHref ? (
+        <a
+          href={formattedHref}
+          target={isExternal ? '_blank' : undefined}
+          rel={isExternal ? 'noopener noreferrer' : undefined}
+          className="text-sm font-semibold text-brand-primary hover:underline inline-flex items-center gap-1"
+        >
+          <span>{value}</span>
+          {isExternal && <ExternalLink className="w-3 h-3 shrink-0" />}
         </a>
       ) : (
         <div className="text-sm font-semibold text-textPrimary">{value}</div>
