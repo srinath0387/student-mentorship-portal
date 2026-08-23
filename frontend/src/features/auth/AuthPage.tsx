@@ -355,14 +355,20 @@ export const AuthPage: React.FC = () => {
         const cleanEmail = data.email.trim().toLowerCase();
         const enteredPass = data.password.trim();
 
-        let targetRollNo = enteredPass.toUpperCase();
-        if (targetRollNo.length !== 10 && cleanEmail.includes('@')) {
-          targetRollNo = cleanEmail.split('@')[0].toUpperCase();
+        // The registration number is always the email prefix (before @)
+        // e.g. 23091a3251@rgmcet.edu.in → 23091A3251
+        const expectedRollNo = cleanEmail.includes('@')
+          ? cleanEmail.split('@')[0].toUpperCase()
+          : '';
+
+        // Strict check: entered password must exactly match the registration number
+        if (!expectedRollNo || enteredPass.toUpperCase() !== expectedRollNo) {
+          throw new Error('Incorrect password. Enter your ward\'s registration number as the password (e.g. 23091A3251).');
         }
 
         let wardStudent: any = null;
         try {
-          wardStudent = await api.getStudentProfile(targetRollNo);
+          wardStudent = await api.getStudentProfile(expectedRollNo);
         } catch {
           wardStudent = null;
         }
@@ -374,9 +380,13 @@ export const AuthPage: React.FC = () => {
           }
         }
 
-        const wardName = wardStudent?.name || `Student (${targetRollNo})`;
-        const wardDept = wardStudent?.department || (targetRollNo ? getDeptFromRollNumber(targetRollNo) : loginDept) || 'CSE (Data Science)';
-        const roll = wardStudent?.roll_number || targetRollNo;
+        if (!wardStudent) {
+          throw new Error('No student found for this email. Please check the email address and try again.');
+        }
+
+        const wardName = wardStudent.name || `Student (${expectedRollNo})`;
+        const wardDept = wardStudent.department || getDeptFromRollNumber(expectedRollNo) || 'CSE (Data Science)';
+        const roll = wardStudent.roll_number || expectedRollNo;
 
         login(cleanEmail, 'parent', roll, `Parent of ${wardName}`, undefined, wardDept);
         registerSession(cleanEmail, 'parent');
