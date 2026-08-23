@@ -84,7 +84,11 @@ export const loginSchema = z.object({
   email: z.string()
     .trim()
     .min(1, "Email is required")
-    .email("Enter a valid email address"),
+    .email("Enter a valid email address")
+    .regex(RGMCET_EMAIL_REGEX, {
+      message: "Only @rgmcet.edu.in domain is allowed (e.g. username@rgmcet.edu.in)",
+    })
+    .transform((val) => val.toLowerCase()),
   password: z.string().min(1, "Password is required"),
   department: z.string().optional(),
 });

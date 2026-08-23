@@ -46,6 +46,7 @@ export const AuthPage: React.FC = () => {
   const {
     register: registerFacultySignUp,
     handleSubmit: handleFacultySignUpSubmit,
+    watch: watchFacultySignUp,
     reset: resetFacultySignUp,
     clearErrors: clearFacultySignUpErrors,
     formState: { errors: facultySignUpErrors, isSubmitting: isFacultySignUpSubmitting },
@@ -61,11 +62,13 @@ export const AuthPage: React.FC = () => {
   const {
     register: registerLogin,
     handleSubmit: handleLoginSubmit,
+    watch: watchLogin,
     reset: resetLogin,
     clearErrors: clearLoginErrors,
     formState: { errors: loginErrors, isSubmitting: isLoginSubmitting },
   } = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
+    mode: 'onChange',
   });
 
   const handleTabSwitch = (newRole: UserRole) => {
@@ -90,6 +93,8 @@ export const AuthPage: React.FC = () => {
   // Watch fields for live debounce availability check
   const watchedRegNo = watchSignUp('registrationNumber');
   const watchedEmail = watchSignUp('email');
+  const watchedLoginEmail = watchLogin('email');
+  const watchedFacultyEmail = watchFacultySignUp('email');
 
   useEffect(() => {
     if (!watchedRegNo || watchedRegNo.length !== 10) {
@@ -126,13 +131,22 @@ export const AuthPage: React.FC = () => {
       return;
     }
 
+    if (!watchedEmail.toLowerCase().endsWith('@rgmcet.edu.in')) {
+      setEmailStatus({
+        loading: false,
+        available: false,
+        message: '✕ Only @rgmcet.edu.in domain is allowed (e.g. username@rgmcet.edu.in)',
+      });
+      return;
+    }
+
     if (watchedRegNo && watchedRegNo.length === 10) {
       const expectedEmail = `${watchedRegNo.toLowerCase()}@rgmcet.edu.in`;
       if (watchedEmail.toLowerCase() !== expectedEmail) {
         setEmailStatus({
           loading: false,
           available: false,
-          message: `Email must match registration number (${expectedEmail})`,
+          message: `✕ Email must match registration number (${expectedEmail})`,
         });
         return;
       }
@@ -142,9 +156,9 @@ export const AuthPage: React.FC = () => {
       setEmailStatus({ loading: true });
       try {
         const res = await api.checkAvailability('email', watchedEmail);
-        setEmailStatus({ loading: false, available: res.available, message: res.message });
+        setEmailStatus({ loading: false, available: res.available, message: res.available ? '✓ RGMCET Email available' : res.message });
       } catch (e) {
-        setEmailStatus({ loading: false, available: true, message: '✓ Domain valid' });
+        setEmailStatus({ loading: false, available: true, message: '✓ RGMCET domain valid' });
       }
     }, 400);
     return () => clearTimeout(timer);
@@ -725,15 +739,38 @@ export const AuthPage: React.FC = () => {
                 <div>
                   <div className="flex justify-between items-center mb-1">
                     <label className="block text-xs font-semibold text-textPrimary">Student RGMCET Email *</label>
-                    <span className="text-[10px] text-textSecondary">Username</span>
+                    <span className="text-[10px] text-textSecondary">@rgmcet.edu.in only</span>
                   </div>
-                  <input
-                    {...registerLogin('email')}
-                    type="email"
-                    placeholder="e.g. 23091a3252@rgmcet.edu.in"
-                    className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary font-medium"
-                  />
-                  {loginErrors.email && (
+                  <div className="relative">
+                    <input
+                      {...registerLogin('email')}
+                      type="email"
+                      placeholder="e.g. 23091a3252@rgmcet.edu.in"
+                      className={`w-full px-3.5 py-2 pr-10 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 font-medium ${
+                        watchedLoginEmail && watchedLoginEmail.includes('@')
+                          ? watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in')
+                            ? 'border-emerald-500 focus:ring-emerald-500'
+                            : 'border-red-500 focus:ring-red-500'
+                          : 'border-borderLine focus:ring-brand-primary'
+                      }`}
+                    />
+                    {watchedLoginEmail && watchedLoginEmail.includes('@') && (
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                        {watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in') ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                        ) : (
+                          <XCircle className="w-4 h-4 text-red-500" />
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {watchedLoginEmail && watchedLoginEmail.includes('@') && !watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in') && (
+                    <p className="text-xs text-alert mt-1 flex items-center gap-1">
+                      <XCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>Only @rgmcet.edu.in domain is allowed (e.g. 23091a3252@rgmcet.edu.in)</span>
+                    </p>
+                  )}
+                  {loginErrors.email && (!watchedLoginEmail || !watchedLoginEmail.includes('@') || watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in')) && (
                     <p className="text-xs text-alert mt-1">{loginErrors.email.message}</p>
                   )}
                 </div>
@@ -1007,14 +1044,40 @@ export const AuthPage: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-textPrimary mb-1">Student Email *</label>
-                  <input
-                    {...registerLogin('email')}
-                    type="email"
-                    placeholder="username@rgmcet.edu.in"
-                    className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
-                  />
-                  {loginErrors.email && (
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="block text-xs font-semibold text-textPrimary">Student Email *</label>
+                    <span className="text-[10px] text-textSecondary">@rgmcet.edu.in only</span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      {...registerLogin('email')}
+                      type="email"
+                      placeholder="username@rgmcet.edu.in"
+                      className={`w-full px-3.5 py-2 pr-10 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 ${
+                        watchedLoginEmail && watchedLoginEmail.includes('@')
+                          ? watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in')
+                            ? 'border-emerald-500 focus:ring-emerald-500'
+                            : 'border-red-500 focus:ring-red-500'
+                          : 'border-borderLine focus:ring-brand-primary'
+                      }`}
+                    />
+                    {watchedLoginEmail && watchedLoginEmail.includes('@') && (
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                        {watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in') ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                        ) : (
+                          <XCircle className="w-4 h-4 text-red-500" />
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {watchedLoginEmail && watchedLoginEmail.includes('@') && !watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in') && (
+                    <p className="text-xs text-alert mt-1 flex items-center gap-1">
+                      <XCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>Only @rgmcet.edu.in domain is allowed (e.g. username@rgmcet.edu.in)</span>
+                    </p>
+                  )}
+                  {loginErrors.email && (!watchedLoginEmail || !watchedLoginEmail.includes('@') || watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in')) && (
                     <p className="text-xs text-alert mt-1">{loginErrors.email.message}</p>
                   )}
                 </div>
@@ -1115,16 +1178,42 @@ export const AuthPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-textPrimary mb-1">
-                  {activeTab === 'hod' ? 'HOD Email (@rgmcet.edu.in) *' : 'Faculty Email (@rgmcet.edu.in) *'}
-                </label>
-                <input
-                  {...registerFacultySignUp('email')}
-                  type="email"
-                  placeholder={activeTab === 'hod' ? 'hod.cse@rgmcet.edu.in' : 'faculty@rgmcet.edu.in'}
-                  className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
-                />
-                {facultySignUpErrors.email && (
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-xs font-semibold text-textPrimary">
+                    {activeTab === 'hod' ? 'HOD Email (@rgmcet.edu.in) *' : 'Faculty Email (@rgmcet.edu.in) *'}
+                  </label>
+                  <span className="text-[10px] text-textSecondary">@rgmcet.edu.in only</span>
+                </div>
+                <div className="relative">
+                  <input
+                    {...registerFacultySignUp('email')}
+                    type="email"
+                    placeholder={activeTab === 'hod' ? 'hod.cse@rgmcet.edu.in' : 'faculty@rgmcet.edu.in'}
+                    className={`w-full px-3.5 py-2 pr-10 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 ${
+                      watchedFacultyEmail && watchedFacultyEmail.includes('@')
+                        ? watchedFacultyEmail.toLowerCase().endsWith('@rgmcet.edu.in')
+                          ? 'border-emerald-500 focus:ring-emerald-500'
+                          : 'border-red-500 focus:ring-red-500'
+                        : 'border-borderLine focus:ring-brand-primary'
+                    }`}
+                  />
+                  {watchedFacultyEmail && watchedFacultyEmail.includes('@') && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                      {watchedFacultyEmail.toLowerCase().endsWith('@rgmcet.edu.in') ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                      ) : (
+                        <XCircle className="w-4 h-4 text-red-500" />
+                      )}
+                    </div>
+                  )}
+                </div>
+                {watchedFacultyEmail && watchedFacultyEmail.includes('@') && !watchedFacultyEmail.toLowerCase().endsWith('@rgmcet.edu.in') && (
+                  <p className="text-xs text-alert mt-1 flex items-center gap-1">
+                    <XCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>Only @rgmcet.edu.in domain is allowed (e.g. faculty@rgmcet.edu.in)</span>
+                  </p>
+                )}
+                {facultySignUpErrors.email && (!watchedFacultyEmail || !watchedFacultyEmail.includes('@') || watchedFacultyEmail.toLowerCase().endsWith('@rgmcet.edu.in')) && (
                   <p className="text-xs text-alert mt-1">{facultySignUpErrors.email.message}</p>
                 )}
               </div>
@@ -1235,15 +1324,42 @@ export const AuthPage: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-textPrimary mb-1">
-                    {activeTab === 'faculty' ? 'Faculty Email' : activeTab === 'hod' ? 'HOD Official Email' : 'Admin Email'}
-                  </label>
-                  <input
-                    {...registerLogin('email')}
-                    type="email"
-                    className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary font-medium"
-                  />
-                  {loginErrors.email && (
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="block text-xs font-semibold text-textPrimary">
+                      {activeTab === 'faculty' ? 'Faculty Email' : activeTab === 'hod' ? 'HOD Official Email' : 'Admin Email'}
+                    </label>
+                    <span className="text-[10px] text-textSecondary">@rgmcet.edu.in only</span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      {...registerLogin('email')}
+                      type="email"
+                      placeholder={activeTab === 'faculty' ? 'faculty.name@rgmcet.edu.in' : activeTab === 'hod' ? 'hod.ds@rgmcet.edu.in' : 'admin@rgmcet.edu.in'}
+                      className={`w-full px-3.5 py-2 pr-10 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 font-medium ${
+                        watchedLoginEmail && watchedLoginEmail.includes('@')
+                          ? watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in')
+                            ? 'border-emerald-500 focus:ring-emerald-500'
+                            : 'border-red-500 focus:ring-red-500'
+                          : 'border-borderLine focus:ring-brand-primary'
+                      }`}
+                    />
+                    {watchedLoginEmail && watchedLoginEmail.includes('@') && (
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                        {watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in') ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                        ) : (
+                          <XCircle className="w-4 h-4 text-red-500" />
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {watchedLoginEmail && watchedLoginEmail.includes('@') && !watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in') && (
+                    <p className="text-xs text-alert mt-1 flex items-center gap-1">
+                      <XCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>Only @rgmcet.edu.in domain is allowed (e.g. username@rgmcet.edu.in)</span>
+                    </p>
+                  )}
+                  {loginErrors.email && (!watchedLoginEmail || !watchedLoginEmail.includes('@') || watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in')) && (
                     <p className="text-xs text-alert mt-1">{loginErrors.email.message}</p>
                   )}
                 </div>
