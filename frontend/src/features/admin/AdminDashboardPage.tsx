@@ -151,7 +151,7 @@ export const AdminDashboardPage: React.FC = () => {
   const [myPwdMsg, setMyPwdMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Tier 1B management state (Tier 1A only)
-  type Tier1BRow = { email: string; password: string; created_at: string };
+  type Tier1BRow = { email: string; password: string; updated_at: string };
   const [tier1BList, setTier1BList] = useState<Tier1BRow[]>([]);
   const [tier1BLoading, setTier1BLoading] = useState(false);
   const [showTier1BPwdMap, setShowTier1BPwdMap] = useState<Record<string, boolean>>({});
@@ -1944,7 +1944,7 @@ export const AdminDashboardPage: React.FC = () => {
                                 <p className={`text-[10px] font-semibold mt-1 ${rowMsg.type === 'success' ? 'text-green-600' : 'text-red-500'}`}>{rowMsg.text}</p>
                               )}
                             </td>
-                            <td className="py-3.5 px-4 text-xs text-textSecondary">{row.created_at ? new Date(row.created_at).toLocaleDateString() : '—'}</td>
+                            <td className="py-3.5 px-4 text-xs text-textSecondary">{row.updated_at ? new Date(row.updated_at).toLocaleDateString() : '—'}</td>
                             <td className="py-3.5 px-4 text-right">
                               {isTier1ARow ? (
                                 <span className="text-[10px] text-textSecondary italic">Protected</span>

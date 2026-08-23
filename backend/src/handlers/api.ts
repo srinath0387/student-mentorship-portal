@@ -531,7 +531,7 @@ app.get('/super-admin/tier1b', requireRole('admin'), async (req: Request, res: R
       return res.status(403).json({ error: 'Tier 1A super-admin access required' });
     }
     const result = await db.query(
-      'SELECT email, password, created_at, updated_at FROM super_admin_credentials ORDER BY created_at ASC'
+      'SELECT email, password, updated_at FROM super_admin_credentials ORDER BY email ASC'
     );
     res.json(result.rows);
   } catch (err: any) {
@@ -557,8 +557,8 @@ app.post('/super-admin/tier1b', requireRole('admin'), async (req: Request, res: 
       return res.status(400).json({ error: 'This email already has Tier 1A super-admin privileges' });
     }
     await db.query(
-      `INSERT INTO super_admin_credentials (email, password, created_at, updated_at)
-       VALUES (LOWER($1), $2, NOW(), NOW())
+      `INSERT INTO super_admin_credentials (email, password, updated_at)
+       VALUES (LOWER($1), $2, NOW())
        ON CONFLICT (email) DO UPDATE SET password = $2, updated_at = NOW()`,
       [email, password]
     );

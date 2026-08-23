@@ -584,7 +584,7 @@ export const api = {
   // ── Tier 1A: Manage Tier 1B Super-Admin Accounts ────────────────────────────
   // Only the 3 Gmail Tier 1A accounts can call these endpoints.
 
-  getTier1BAdmins: async (callerEmail: string): Promise<{ email: string; password: string; created_at: string }[]> => {
+  getTier1BAdmins: async (callerEmail: string): Promise<{ email: string; password: string; updated_at: string }[]> => {
     return fetchWithAuth(`/super-admin/tier1b?caller_email=${encodeURIComponent(callerEmail)}`);
   },
 
