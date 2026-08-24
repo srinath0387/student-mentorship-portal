@@ -681,21 +681,21 @@ export const AuthPage: React.FC = () => {
       <AuthAnimated3DBackground />
 
       <div className="flex-1 flex flex-col justify-center py-2 sm:py-3 px-4 sm:px-6 lg:px-8 z-10 min-h-0 overflow-y-auto relative">
-      <div className="sm:mx-auto sm:w-full sm:max-w-md text-center shrink-0">
-        <div className="inline-flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-[#031B33] p-1 shadow-md shadow-brand-primary/20 mb-1.5 sm:mb-2 ring-1 ring-white/10 overflow-hidden">
-          <img
-            src="/ds-logo.jpeg"
-            alt="Data Science Logo"
-            className="w-full h-full object-contain"
-          />
-        </div>
-        <h2 className="text-2xl sm:text-3xl font-black tracking-wider">
-          <span className="text-white drop-shadow-sm">A</span>
-          <span className="text-cyan-400 font-black drop-shadow-[0_0_14px_rgba(56,217,232,0.9)] inline-block">D</span>
-          <span className="text-white drop-shadow-sm">VITIYAN</span>
-          <span className="text-cyan-400 font-black drop-shadow-[0_0_14px_rgba(56,217,232,0.9)] inline-block">S</span>
-        </h2>
-        <p className="mt-1 text-xs text-slate-300 font-medium">Student 360°, Faculty & Placement Cell Platform</p>
+      <div className="sm:mx-auto sm:w-full sm:max-w-md text-center shrink-0 mb-1 sm:mb-2">
+        <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white drop-shadow-sm">
+          {activeTab === 'hod'
+            ? 'HOD Login'
+            : activeTab === 'admin'
+            ? 'Admin Login'
+            : activeTab === 'faculty'
+            ? 'Faculty Login'
+            : activeTab === 'parent'
+            ? 'Parent Login'
+            : 'Student Login'}
+        </h1>
+        <p className="mt-1 text-xs text-slate-300 font-medium">
+          Sign in to access your institutional portal
+        </p>
       </div>
 
       {/* ── Session Kicked-Out Banner ── */}
