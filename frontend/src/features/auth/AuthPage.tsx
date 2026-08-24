@@ -635,12 +635,7 @@ export const AuthPage: React.FC = () => {
         displayName = student.name;
         const studentDept = student.department || (rollNo ? getDeptFromRollNumber(rollNo) : 'CSE (Data Science)');
         
-        // Enforce department matching on student login
-        if (loginDept && studentDept && studentDept !== loginDept) {
-          cognitoSignOut();
-          throw new Error(`Department mismatch: Your account belongs to ${studentDept}, but you selected ${loginDept}. Please select ${studentDept} to log in.`);
-        }
-
+        // Department is always taken from the student's DB record / roll number — no manual selection needed
         login(data.email, 'student', rollNo, displayName, jwtToken, studentDept);
       } else if (activeTab === 'faculty') {
         let faculty = await api.getFacultyByEmail(data.email).catch(() => null);
@@ -1093,18 +1088,7 @@ export const AuthPage: React.FC = () => {
             ) : (
               /* STUDENT LOGIN FORM */
               <form onSubmit={handleLoginSubmit(onLogin)} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-textPrimary mb-1">Department *</label>
-                  <select
-                    value={loginDept}
-                    onChange={(e) => setLoginDept(e.target.value)}
-                    className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary font-medium"
-                  >
-                    {VALID_DEPARTMENT_NAMES.map((d) => (
-                      <option key={d} value={d}>{d}</option>
-                    ))}
-                  </select>
-                </div>
+
 
                 <div>
                   <div className="flex justify-between items-center mb-1">
