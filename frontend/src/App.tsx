@@ -142,6 +142,12 @@ export const App: React.FC = () => {
         <Router>
           <Routes>
             <Route path="/login" element={<AuthPage />} />
+            <Route path="/login/:role" element={<AuthPage />} />
+            <Route path="/student-login" element={<AuthPage />} />
+            <Route path="/faculty-login" element={<AuthPage />} />
+            <Route path="/hod-login" element={<AuthPage />} />
+            <Route path="/admin-login" element={<AuthPage />} />
+            <Route path="/parent-login" element={<AuthPage />} />
             <Route element={<MainLayout />}>
               <Route path="/dashboard" element={<RoleDashboardRedirect />} />
               <Route path="/profile" element={<ProfilePage />} />

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useNavigate } from 'react-router-dom';
-import { ShieldCheck, UserCheck, Lock, CheckCircle2, XCircle, Loader2, Sparkles, Eye, EyeOff } from 'lucide-react';
+import { useNavigate, useSearchParams, useLocation, useParams } from 'react-router-dom';
+import { ShieldCheck, UserCheck, Lock, CheckCircle2, XCircle, Loader2, Sparkles, Eye, EyeOff, ArrowLeft } from 'lucide-react';
 import { studentSignUpSchema, facultySignUpSchema, loginSchema, adminLoginSchema, TIER1_SUPER_ADMIN_EMAILS, StudentSignUpInput, FacultySignUpInput, LoginInput, DEPARTMENT_CODE_MAP, VALID_DEPARTMENT_NAMES, getDeptCodeFromRollNumber, getDeptFromRollNumber } from '../../lib/validation/auth';
 import { api } from '../../lib/api';
 import { cognitoSignUp, cognitoSignIn, cognitoSignOut, isCognitoConfigError } from '../../lib/cognitoAuth';
@@ -16,7 +16,54 @@ import { UserRole } from '../../types';
 // No admin email or password is stored in the frontend bundle.
 
 export const AuthPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<UserRole>('student');
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const params = useParams<{ role?: string }>();
+  const navigate = useNavigate();
+
+  // Determine active role strictly from search query (?role=faculty), route param (/login/:role), path, or window.location
+  const getInitialRole = (): UserRole => {
+    // 1. React Router searchParams (?role=...)
+    const queryRole = searchParams.get('role')?.toLowerCase().trim();
+    if (queryRole && ['student', 'parent', 'faculty', 'hod', 'admin'].includes(queryRole)) {
+      return queryRole as UserRole;
+    }
+
+    // 2. Route param (/login/:role)
+    const paramRole = params.role?.toLowerCase().trim();
+    if (paramRole && ['student', 'parent', 'faculty', 'hod', 'admin'].includes(paramRole)) {
+      return paramRole as UserRole;
+    }
+
+    // 3. Pathname checks (/faculty-login, /admin-login, /student-login, /hod-login, /parent-login)
+    const path = location.pathname.toLowerCase();
+    if (path.includes('faculty')) return 'faculty';
+    if (path.includes('hod')) return 'hod';
+    if (path.includes('admin')) return 'admin';
+    if (path.includes('parent')) return 'parent';
+    if (path.includes('student')) return 'student';
+
+    // 4. Fallback from window.location (handles both query strings and hash query strings)
+    try {
+      const urlObj = new URL(window.location.href);
+      const winRole = urlObj.searchParams.get('role')?.toLowerCase().trim();
+      if (winRole && ['student', 'parent', 'faculty', 'hod', 'admin'].includes(winRole)) {
+        return winRole as UserRole;
+      }
+      if (window.location.hash.includes('?')) {
+        const hashQuery = window.location.hash.split('?')[1];
+        const hashParams = new URLSearchParams(hashQuery);
+        const hashRole = hashParams.get('role')?.toLowerCase().trim();
+        if (hashRole && ['student', 'parent', 'faculty', 'hod', 'admin'].includes(hashRole)) {
+          return hashRole as UserRole;
+        }
+      }
+    } catch (_) {}
+
+    return 'student';
+  };
+
+  const activeTab: UserRole = getInitialRole();
   const [isSignUp, setIsSignUp] = useState(false);
   const [loginDept, setLoginDept] = useState<string>('CSE (Data Science)');
   const [regNoStatus, setRegNoStatus] = useState<{ loading: boolean; available?: boolean; message?: string }>({ loading: false });
@@ -27,7 +74,6 @@ export const AuthPage: React.FC = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const { login, registerSession, sessionKickedOut } = useAuth();
-  const navigate = useNavigate();
 
   // Student Sign Up Form
   const {
@@ -85,16 +131,12 @@ export const AuthPage: React.FC = () => {
     mode: 'onChange',
   });
 
-  const handleTabSwitch = (newRole: UserRole) => {
-    setActiveTab(newRole);
-    setIsSignUp(false);
-    setErrorMessage(null);
-    clearLoginErrors();
-    clearAdminLoginErrors();
-    resetLogin({ email: '', password: '' });
-    resetAdminLogin({ email: '', password: '' });
-    clearSignUpErrors();
-    clearFacultySignUpErrors();
+  const handleGoBack = () => {
+    if (window.history.length > 1) {
+      navigate(-1);
+    } else {
+      window.location.href = '/';
+    }
   };
 
   const handleToggleSignUp = (signUp: boolean) => {
@@ -696,62 +738,40 @@ export const AuthPage: React.FC = () => {
               </button>
             </div>
           )}
-          {/* Role Switcher Pill Tabs */}
-          <div className="grid grid-cols-5 gap-1 bg-surface-2 p-1 rounded-xl border border-borderLine mb-4">
+          {/* Header with Role Title and "Not a [Role]? Go back" */}
+          <div className="flex items-center justify-between pb-3.5 mb-4 border-b border-borderLine">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-brand-primary animate-pulse" />
+              <span className="text-xs font-extrabold uppercase tracking-wider text-brand-primary">
+                {activeTab === 'hod'
+                  ? 'HOD Portal Login'
+                  : activeTab === 'parent'
+                  ? 'Parent Portal Login'
+                  : activeTab === 'faculty'
+                  ? 'Faculty Portal Login'
+                  : activeTab === 'admin'
+                  ? 'Admin Portal Login'
+                  : 'Student Portal Login'}
+              </span>
+            </div>
             <button
               type="button"
-              onClick={() => handleTabSwitch('student')}
-              className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
-                activeTab === 'student'
-                  ? 'bg-brand-primary text-white shadow-sm shadow-brand/30'
-                  : 'text-textSecondary hover:text-textPrimary hover:bg-surface'
-              }`}
+              onClick={handleGoBack}
+              className="inline-flex items-center gap-1.5 text-xs text-textSecondary hover:text-brand-primary font-semibold transition-colors group cursor-pointer"
+              title="Return to landing page to select a different role"
             >
-              Student
-            </button>
-            <button
-              type="button"
-              onClick={() => handleTabSwitch('parent')}
-              className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
-                activeTab === 'parent'
-                  ? 'bg-brand-primary text-white shadow-sm shadow-brand/30'
-                  : 'text-textSecondary hover:text-textPrimary hover:bg-surface'
-              }`}
-            >
-              Parent
-            </button>
-            <button
-              type="button"
-              onClick={() => handleTabSwitch('faculty')}
-              className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
-                activeTab === 'faculty'
-                  ? 'bg-brand-primary text-white shadow-sm shadow-brand/30'
-                  : 'text-textSecondary hover:text-textPrimary hover:bg-surface'
-              }`}
-            >
-              Faculty
-            </button>
-            <button
-              type="button"
-              onClick={() => handleTabSwitch('hod')}
-              className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
-                activeTab === 'hod'
-                  ? 'bg-brand-primary text-white shadow-sm shadow-brand/30'
-                  : 'text-textSecondary hover:text-textPrimary hover:bg-surface'
-              }`}
-            >
-              HOD
-            </button>
-            <button
-              type="button"
-              onClick={() => handleTabSwitch('admin')}
-              className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
-                activeTab === 'admin'
-                  ? 'bg-brand-primary text-white shadow-sm shadow-brand/30'
-                  : 'text-textSecondary hover:text-textPrimary hover:bg-surface'
-              }`}
-            >
-              Admin
+              <ArrowLeft className="w-3.5 h-3.5 transition-transform group-hover:-translate-x-0.5" />
+              <span>
+                {activeTab === 'hod'
+                  ? 'Not HOD? Go back'
+                  : activeTab === 'admin'
+                  ? 'Not an Admin? Go back'
+                  : activeTab === 'faculty'
+                  ? 'Not Faculty? Go back'
+                  : activeTab === 'parent'
+                  ? 'Not a Parent? Go back'
+                  : 'Not a Student? Go back'}
+              </span>
             </button>
           </div>
 
@@ -770,19 +790,6 @@ export const AuthPage: React.FC = () => {
               </div>
 
               <form onSubmit={handleLoginSubmit(onLogin)} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-textPrimary mb-1">Department *</label>
-                  <select
-                    value={loginDept}
-                    onChange={(e) => setLoginDept(e.target.value)}
-                    className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary font-medium"
-                  >
-                    {VALID_DEPARTMENT_NAMES.map((d) => (
-                      <option key={d} value={d}>{d}</option>
-                    ))}
-                  </select>
-                </div>
-
                 <div>
                   <div className="flex justify-between items-center mb-1">
                     <label className="block text-xs font-semibold text-textPrimary">Student RGMCET Email *</label>
@@ -880,6 +887,12 @@ export const AuthPage: React.FC = () => {
                   >
                     Log In as Parent (View Only)
                   </PillButton>
+                </div>
+
+                <div className="text-center pt-2">
+                  <p className="text-xs text-textSecondary">
+                    Need assistance? Contact Department Mentor
+                  </p>
                 </div>
               </form>
             </div>
@@ -1357,21 +1370,8 @@ export const AuthPage: React.FC = () => {
 
 
               {activeTab === 'admin' ? (
-                /* ── ADMIN LOGIN — accepts @rgmcet.edu.in OR the 3 tier-1 Gmail super-admin addresses ── */
+                /* ── ADMIN LOGIN — accepts @rgmcet.edu.in OR the 3 tier-1 Gmail super-admin addresses (no department) ── */
                 <form onSubmit={handleAdminLoginSubmit(onLogin)} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-textPrimary mb-1">Department *</label>
-                    <select
-                      value={loginDept}
-                      onChange={(e) => setLoginDept(e.target.value)}
-                      className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary font-medium"
-                    >
-                      {VALID_DEPARTMENT_NAMES.map((d) => (
-                        <option key={d} value={d}>{d}</option>
-                      ))}
-                    </select>
-                  </div>
-
                   <div>
                     <div className="flex justify-between items-center mb-1">
                       <label className="block text-xs font-semibold text-textPrimary">Admin Email</label>
@@ -1448,6 +1448,12 @@ export const AuthPage: React.FC = () => {
                     >
                       Log In as Admin
                     </PillButton>
+                  </div>
+
+                  <div className="text-center pt-2">
+                    <p className="text-xs text-textSecondary">
+                      Need access? Contact Admin Office
+                    </p>
                   </div>
                 </form>
               ) : (
@@ -1547,10 +1553,17 @@ export const AuthPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => handleToggleSignUp(true)}
-                        className="text-xs font-semibold text-brand-primary hover:underline"
+                        className="text-xs font-semibold text-brand-primary hover:underline cursor-pointer"
                       >
                         New Faculty Member? Register Account Here
                       </button>
+                    </div>
+                  )}
+                  {activeTab === 'hod' && (
+                    <div className="text-center pt-2">
+                      <p className="text-xs text-textSecondary">
+                        Need access? Contact Admin Office
+                      </p>
                     </div>
                   )}
                 </form>
