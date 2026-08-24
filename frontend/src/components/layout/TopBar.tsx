@@ -57,7 +57,9 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
         .join('')
         .toUpperCase() || 'U';
 
-  const roleLabel = user?.role === 'hod' ? 'HOD(CSEDS)' : (user?.role?.toUpperCase() || 'STUDENT');
+  const roleLabel = user?.role === 'hod'
+    ? `HOD (${user.department || 'Department'})`
+    : (user?.role?.toUpperCase() || 'STUDENT');
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

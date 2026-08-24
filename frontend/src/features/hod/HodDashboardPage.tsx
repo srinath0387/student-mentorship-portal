@@ -229,8 +229,8 @@ export const HodDashboardPage: React.FC = () => {
   }, [inspectStudent]);
 
   const { data: students = [], refetch } = useQuery({
-    queryKey: ['hodStudents'],
-    queryFn: () => api.getAllStudents(),
+    queryKey: ['hodStudents', user?.email, user?.department],
+    queryFn: () => api.getAllStudents({ department: user?.department }),
     staleTime: 0,
     refetchOnMount: 'always',
   });

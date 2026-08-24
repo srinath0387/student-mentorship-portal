@@ -152,6 +152,14 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
             if (hodCheck.rows.length > 0) {
               hodDept = hodCheck.rows[0].department || undefined;
             }
+            if (!hodDept) {
+              const facCheck = await db.query(
+                'SELECT department FROM faculty WHERE LOWER(email) = LOWER($1)', [email]
+              );
+              if (facCheck.rows.length > 0) {
+                hodDept = facCheck.rows[0].department || undefined;
+              }
+            }
           } catch { /* ignore */ }
         }
         req.auth = {
