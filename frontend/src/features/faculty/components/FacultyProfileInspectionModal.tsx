@@ -296,10 +296,26 @@ export const FacultyProfileInspectionModal: React.FC<Props> = ({ faculty, onClos
 
             {/* ── 6. Research Publications & Patents ── */}
             <div className="bg-surface-2 border border-borderLine rounded-xl p-4 space-y-3">
-              <h3 className="text-xs font-bold text-textPrimary uppercase tracking-wider flex items-center gap-1.5">
-                <BookOpen className="w-4 h-4 text-emerald-500" />
-                <span>Research Publications &amp; Patents ({publications.length})</span>
-              </h3>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-xs font-bold text-textPrimary uppercase tracking-wider flex items-center gap-1.5">
+                  <BookOpen className="w-4 h-4 text-emerald-500" />
+                  <span>Research Publications &amp; Patents ({publications.length})</span>
+                </h3>
+                {(profile?.scopus_id || profile?.personal?.scopus_id || profile?.orcid_id || profile?.personal?.orcid_id) && (
+                  <div className="flex items-center gap-2 text-[11px]">
+                    {(profile?.scopus_id || profile?.personal?.scopus_id) && (
+                      <span className="px-2 py-0.5 rounded bg-blue-500/10 text-blue-500 dark:text-blue-400 border border-blue-500/20 font-semibold">
+                        Scopus: {profile.scopus_id || profile.personal?.scopus_id}
+                      </span>
+                    )}
+                    {(profile?.orcid_id || profile?.personal?.orcid_id) && (
+                      <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-semibold">
+                        ORCID: {profile.orcid_id || profile.personal?.orcid_id}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
               {publications.length > 0 ? (
                 <div className="space-y-2">
                   {publications.map((p) => (

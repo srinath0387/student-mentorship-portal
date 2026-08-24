@@ -104,6 +104,8 @@ export const FacultyProfileTab: React.FC = () => {
   const [certifications, setCertifications] = useState<FacultyCertificationRecord[]>([]);
   const [activities, setActivities] = useState<FacultyActivityRecord[]>([]);
   const [publications, setPublications] = useState<FacultyPublicationRecord[]>([]);
+  const [scopusId, setScopusId] = useState('');
+  const [orcidId, setOrcidId] = useState('');
   const [domains, setDomains] = useState<string[]>([]);
   const [customDomainInput, setCustomDomainInput] = useState('');
 
@@ -170,6 +172,8 @@ export const FacultyProfileTab: React.FC = () => {
       setPhone(p.phone || '');
       setBloodGroup(p.blood_group || '');
       setLinkedinUrl(p.linkedin_url || '');
+      setScopusId(profileData.scopus_id || p.scopus_id || '');
+      setOrcidId(profileData.orcid_id || p.orcid_id || '');
       setJoiningDate(p.joining_date || '');
       setPriorYears(p.prior_experience_years || 0);
       setPriorMonths(p.prior_experience_months || 0);
@@ -207,6 +211,8 @@ export const FacultyProfileTab: React.FC = () => {
         phone,
         blood_group: bloodGroup as BloodGroup,
         linkedin_url: linkedinUrl,
+        scopus_id: scopusId.trim() || undefined,
+        orcid_id: orcidId.trim() || undefined,
         joining_date: joiningDate,
         prior_experience_years: priorYears,
         prior_experience_months: priorMonths,
@@ -223,6 +229,8 @@ export const FacultyProfileTab: React.FC = () => {
       activities,
       publications,
       domains,
+      scopus_id: scopusId.trim() || undefined,
+      orcid_id: orcidId.trim() || undefined,
     };
   }, [
     profileData,
@@ -231,6 +239,8 @@ export const FacultyProfileTab: React.FC = () => {
     phone,
     bloodGroup,
     linkedinUrl,
+    scopusId,
+    orcidId,
     joiningDate,
     priorYears,
     priorMonths,
@@ -964,6 +974,35 @@ export const FacultyProfileTab: React.FC = () => {
           <PillButton variant="outline" size="sm" onClick={() => setShowPubModal(true)} icon={<Plus className="w-4 h-4" />}>
             Add Publication / Patent
           </PillButton>
+        </div>
+
+        {/* ── Scopus ID & Orcid ID Inputs (Optional) ── */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-2 border-b border-borderLine">
+          <div>
+            <label className="block text-xs font-semibold text-textPrimary mb-1">
+              Scopus ID <span className="text-textMuted text-[11px] font-normal">(Optional)</span>
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. 57210892341"
+              value={scopusId}
+              onChange={(e) => setScopusId(e.target.value)}
+              className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-textPrimary mb-1">
+              Orcid ID <span className="text-textMuted text-[11px] font-normal">(Optional)</span>
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. 0000-0002-1825-0097"
+              value={orcidId}
+              onChange={(e) => setOrcidId(e.target.value)}
+              className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+            />
+          </div>
         </div>
 
         {publications.length > 0 ? (

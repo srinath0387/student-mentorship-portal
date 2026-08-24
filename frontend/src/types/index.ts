@@ -146,6 +146,8 @@ export interface FacultyPersonalDetails {
   phone?: string;
   blood_group?: BloodGroup;
   linkedin_url?: string;
+  scopus_id?: string;
+  orcid_id?: string;
   joining_date?: string; // YYYY-MM-DD
   prior_experience_years?: number;
   prior_experience_months?: number;
@@ -199,5 +201,7 @@ export interface FacultyFullProfile {
   activities: FacultyActivityRecord[];
   publications: FacultyPublicationRecord[];
   domains: string[];
+  scopus_id?: string;
+  orcid_id?: string;
 }
 
