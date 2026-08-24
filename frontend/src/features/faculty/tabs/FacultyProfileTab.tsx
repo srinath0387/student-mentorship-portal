@@ -104,6 +104,8 @@ export const FacultyProfileTab: React.FC = () => {
   const [certifications, setCertifications] = useState<FacultyCertificationRecord[]>([]);
   const [activities, setActivities] = useState<FacultyActivityRecord[]>([]);
   const [publications, setPublications] = useState<FacultyPublicationRecord[]>([]);
+  const [scopusId, setScopusId] = useState('');
+  const [orcidId, setOrcidId] = useState('');
   const [domains, setDomains] = useState<string[]>([]);
   const [customDomainInput, setCustomDomainInput] = useState('');
 
@@ -141,9 +143,22 @@ export const FacultyProfileTab: React.FC = () => {
     level: 'National',
   });
 
-  // Publication Form Modal
+  // Publication Form Modal & Edit State
   const [showPubModal, setShowPubModal] = useState(false);
+  const [editingPubId, setEditingPubId] = useState<string | null>(null);
   const [isParsingPub, setIsParsingPub] = useState(false);
+  const [isFetchingOrcid, setIsFetchingOrcid] = useState(false);
+  const [orcidFetchMessage, setOrcidFetchMessage] = useState<{
+    type: 'success' | 'error' | 'info';
+    text: string;
+  } | null>(null);
+
+  // Validate ORCID format: XXXX-XXXX-XXXX-XXXX
+  const isOrcidValid = useMemo(() => {
+    const clean = orcidId.trim().replace(/^https?:\/\/orcid\.org\//i, '');
+    return /^\d{4}-\d{4}-\d{4}-[\dX]{4}$/i.test(clean);
+  }, [orcidId]);
+
   const [newPub, setNewPub] = useState<{
     category: PublicationCategory;
     title: string;
@@ -170,6 +185,8 @@ export const FacultyProfileTab: React.FC = () => {
       setPhone(p.phone || '');
       setBloodGroup(p.blood_group || '');
       setLinkedinUrl(p.linkedin_url || '');
+      setScopusId(profileData.scopus_id || p.scopus_id || '');
+      setOrcidId(profileData.orcid_id || p.orcid_id || '');
       setJoiningDate(p.joining_date || '');
       setPriorYears(p.prior_experience_years || 0);
       setPriorMonths(p.prior_experience_months || 0);
@@ -207,6 +224,8 @@ export const FacultyProfileTab: React.FC = () => {
         phone,
         blood_group: bloodGroup as BloodGroup,
         linkedin_url: linkedinUrl,
+        scopus_id: scopusId.trim() || undefined,
+        orcid_id: orcidId.trim() || undefined,
         joining_date: joiningDate,
         prior_experience_years: priorYears,
         prior_experience_months: priorMonths,
@@ -223,6 +242,8 @@ export const FacultyProfileTab: React.FC = () => {
       activities,
       publications,
       domains,
+      scopus_id: scopusId.trim() || undefined,
+      orcid_id: orcidId.trim() || undefined,
     };
   }, [
     profileData,
@@ -231,6 +252,8 @@ export const FacultyProfileTab: React.FC = () => {
     phone,
     bloodGroup,
     linkedinUrl,
+    scopusId,
+    orcidId,
     joiningDate,
     priorYears,
     priorMonths,
@@ -379,19 +402,167 @@ export const FacultyProfileTab: React.FC = () => {
     setActivities((prev) => prev.filter((a) => a.id !== id));
   };
 
+  // Auto-fetch publications from Public ORCID API
+  const handleFetchOrcidPublications = async () => {
+    const cleanId = orcidId.trim().replace(/^https?:\/\/orcid\.org\//i, '');
+    if (!/^\d{4}-\d{4}-\d{4}-[\dX]{4}$/i.test(cleanId)) {
+      setOrcidFetchMessage({
+        type: 'error',
+        text: 'Please enter a valid ORCID ID format (e.g. 0000-0002-1825-0097).',
+      });
+      return;
+    }
+
+    setIsFetchingOrcid(true);
+    setOrcidFetchMessage(null);
+
+    try {
+      const url = `https://pub.orcid.org/v3.0/${encodeURIComponent(cleanId)}/works`;
+      const response = await fetch(url, {
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error('No publications found for this ORCID ID, or the record is private — you can add publications manually below.');
+        }
+        throw new Error(`ORCID record could not be retrieved (${response.status}) — you can add publications manually below.`);
+      }
+
+      const data = await response.json();
+      const groups = data?.group || [];
+      if (groups.length === 0) {
+        setOrcidFetchMessage({
+          type: 'info',
+          text: 'No publications found for this ORCID ID, or the record is private — you can add publications manually below.',
+        });
+        setIsFetchingOrcid(false);
+        return;
+      }
+
+      const fetchedPubs: FacultyPublicationRecord[] = [];
+      const existingTitles = new Set(publications.map((p) => p.title.toLowerCase().trim()));
+
+      for (const group of groups) {
+        const summaries = group['work-summary'] || [];
+        if (summaries.length === 0) continue;
+        const summary = summaries[0];
+
+        const title = summary?.title?.title?.value || 'Untitled Publication';
+        if (existingTitles.has(title.toLowerCase().trim())) {
+          continue;
+        }
+
+        const journal = summary?.['journal-title']?.value || summary?.type?.replace(/_/g, ' ') || 'Journal / Conference Article';
+
+        const yearVal = summary?.['publication-date']?.year?.value;
+        const parsedYear = yearVal ? parseInt(yearVal, 10) : new Date().getFullYear();
+        const year = !isNaN(parsedYear) ? parsedYear : new Date().getFullYear();
+
+        let doiLink = '';
+        const externalIds = summary?.['external-ids']?.['external-id'] || [];
+        const doiObj = externalIds.find((ext: any) => ext?.['external-id-type']?.toLowerCase() === 'doi');
+        if (doiObj) {
+          const doiVal = doiObj['external-id-value'];
+          const doiUrl = doiObj['external-id-url']?.value;
+          if (doiUrl) {
+            doiLink = doiUrl;
+          } else if (doiVal) {
+            doiLink = doiVal.startsWith('http') ? doiVal : `https://doi.org/${doiVal}`;
+          }
+        }
+
+        fetchedPubs.push({
+          id: `orcid_${summary?.['put-code'] || Math.random().toString(36).substring(2, 9)}_${Date.now()}`,
+          category: 'Unclassified',
+          title,
+          journal_name: journal,
+          year,
+          doi_link: doiLink || undefined,
+          needs_review: true,
+        });
+      }
+
+      if (fetchedPubs.length === 0) {
+        setOrcidFetchMessage({
+          type: 'info',
+          text: 'All publications from this ORCID record are already in your publications list.',
+        });
+      } else {
+        setPublications((prev) => [...fetchedPubs, ...prev]);
+        setOrcidFetchMessage({
+          type: 'success',
+          text: `Retrieved ${fetchedPubs.length} publication(s) from ORCID. Please review, categorize each entry (SCI / SCOPUS / WoS / Patent), and click "Save Faculty Profile" below to save.`,
+        });
+      }
+    } catch (err: any) {
+      setOrcidFetchMessage({
+        type: 'error',
+        text: err?.message || 'No publications found for this ORCID ID, or the record is private — you can add publications manually below.',
+      });
+    } finally {
+      setIsFetchingOrcid(false);
+    }
+  };
+
+  // Quick category update for unclassified/reviewed publications
+  const handleUpdatePubCategory = (id: string, newCategory: PublicationCategory) => {
+    setPublications((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, category: newCategory, needs_review: false } : p))
+    );
+  };
+
+  const handleOpenEditPub = (p: FacultyPublicationRecord) => {
+    setEditingPubId(p.id);
+    setNewPub({
+      category: p.category === 'Unclassified' ? 'SCOPUS' : p.category,
+      title: p.title,
+      journal_name: p.journal_name,
+      year: p.year,
+      doi_link: p.doi_link || '',
+      co_authors: p.co_authors || '',
+    });
+    setShowPubModal(true);
+  };
+
   // Publication Modal actions
   const handleAddPublication = () => {
-    if (!newPub.title || !newPub.journal_name) return;
-    const record: FacultyPublicationRecord = {
-      id: `PUB_${Date.now()}`,
-      category: newPub.category,
-      title: newPub.title,
-      journal_name: newPub.journal_name,
-      year: Number(newPub.year) || new Date().getFullYear(),
-      doi_link: newPub.doi_link,
-      co_authors: newPub.co_authors,
-    };
-    setPublications((prev) => [record, ...prev]);
+    if (!newPub.title.trim() || !newPub.journal_name.trim()) return;
+
+    if (editingPubId) {
+      setPublications((prev) =>
+        prev.map((p) =>
+          p.id === editingPubId
+            ? {
+                ...p,
+                category: newPub.category,
+                title: newPub.title.trim(),
+                journal_name: newPub.journal_name.trim(),
+                year: Number(newPub.year) || new Date().getFullYear(),
+                doi_link: newPub.doi_link.trim() || undefined,
+                co_authors: newPub.co_authors.trim() || undefined,
+                needs_review: false,
+              }
+            : p
+        )
+      );
+      setEditingPubId(null);
+    } else {
+      const record: FacultyPublicationRecord = {
+        id: `PUB_${Date.now()}`,
+        category: newPub.category,
+        title: newPub.title.trim(),
+        journal_name: newPub.journal_name.trim(),
+        year: Number(newPub.year) || new Date().getFullYear(),
+        doi_link: newPub.doi_link.trim() || undefined,
+        co_authors: newPub.co_authors.trim() || undefined,
+        needs_review: false,
+      };
+      setPublications((prev) => [record, ...prev]);
+    }
+
     setShowPubModal(false);
     setNewPub({
       category: 'SCOPUS',
@@ -966,15 +1137,105 @@ export const FacultyProfileTab: React.FC = () => {
           </PillButton>
         </div>
 
+        {/* ── Scopus ID & Orcid ID Inputs (Optional) with Auto-Fetch ── */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-2 border-b border-borderLine">
+          <div>
+            <label className="block text-xs font-semibold text-textPrimary mb-1">
+              Scopus ID <span className="text-textMuted text-[11px] font-normal">(Optional)</span>
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. 57210892341"
+              value={scopusId}
+              onChange={(e) => setScopusId(e.target.value)}
+              className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+            />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-semibold text-textPrimary">
+                Orcid ID <span className="text-textMuted text-[11px] font-normal">(Optional)</span>
+              </label>
+              {isOrcidValid && (
+                <button
+                  type="button"
+                  onClick={handleFetchOrcidPublications}
+                  disabled={isFetchingOrcid}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-bold rounded-md bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-50 cursor-pointer shadow-xs"
+                  title="Auto-fetch publications linked to this ORCID record"
+                >
+                  {isFetchingOrcid ? (
+                    <>
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      <span>Fetching publications…</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3 h-3" />
+                      <span>Fetch Publications</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+            <input
+              type="text"
+              placeholder="e.g. 0000-0002-1825-0097"
+              value={orcidId}
+              onChange={(e) => {
+                setOrcidId(e.target.value);
+                if (orcidFetchMessage) setOrcidFetchMessage(null);
+              }}
+              className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+            />
+          </div>
+        </div>
+
+        {/* ── ORCID Fetch Feedback Banner ── */}
+        {orcidFetchMessage && (
+          <div
+            className={`p-3 rounded-xl border flex items-start gap-2.5 text-xs animate-fadeIn ${
+              orcidFetchMessage.type === 'success'
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800'
+                : orcidFetchMessage.type === 'error'
+                ? 'bg-red-50 text-red-800 border-red-300 dark:bg-red-950/40 dark:text-red-300 dark:border-red-800'
+                : 'bg-sky-50 text-sky-800 border-sky-300 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800'
+            }`}
+          >
+            {orcidFetchMessage.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+            ) : orcidFetchMessage.type === 'error' ? (
+              <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+            ) : (
+              <BookOpen className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0 mt-0.5" />
+            )}
+            <div className="flex-1">
+              <p className="font-semibold leading-relaxed">{orcidFetchMessage.text}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setOrcidFetchMessage(null)}
+              className="text-textMuted hover:text-textPrimary ml-auto text-xs"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {publications.length > 0 ? (
           <div className="space-y-3">
             {publications.map((p) => (
               <div
                 key={p.id}
-                className="p-4 rounded-xl bg-surface-2 border border-borderLine flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                className={`p-4 rounded-xl bg-surface-2 border transition-all ${
+                  p.category === 'Unclassified' || p.needs_review
+                    ? 'border-amber-300 dark:border-amber-700/60 bg-amber-50/20 dark:bg-amber-950/10 shadow-xs'
+                    : 'border-borderLine'
+                } flex flex-col sm:flex-row sm:items-start justify-between gap-3`}
               >
-                <div className="space-y-1 flex-1">
-                  <div className="flex items-center gap-2">
+                <div className="space-y-1.5 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span
                       className={`text-[10px] font-black px-2 py-0.5 rounded border ${
                         p.category === 'SCI'
@@ -983,17 +1244,23 @@ export const FacultyProfileTab: React.FC = () => {
                           ? 'bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-950/40 dark:text-blue-400'
                           : p.category === 'Patent'
                           ? 'bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950/40 dark:text-amber-400'
-                          : 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-400'
+                          : p.category === 'WoS'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-400'
+                          : 'bg-amber-100 text-amber-800 border-amber-400 dark:bg-amber-950/80 dark:text-amber-300 animate-pulse'
                       }`}
                     >
-                      {p.category}
+                      {p.category === 'Unclassified' || p.needs_review
+                        ? '⚠️ Unclassified (Needs Tag)'
+                        : p.category}
                     </span>
                     <span className="text-xs font-bold text-textPrimary">{p.title}</span>
                   </div>
+
                   <p className="text-xs text-textSecondary">
                     <strong className="text-textPrimary">{p.journal_name}</strong> ({p.year})
                     {p.co_authors && ` &bull; Authors: ${p.co_authors}`}
                   </p>
+
                   {p.doi_link && (
                     <a
                       href={formatExternalUrl(p.doi_link)}
@@ -1001,19 +1268,49 @@ export const FacultyProfileTab: React.FC = () => {
                       rel="noopener noreferrer"
                       className="text-xs text-brand-primary hover:underline inline-flex items-center gap-1"
                     >
-                      <span>DOI/Link</span>
+                      <span>DOI / Publication Link</span>
                       <ExternalLink className="w-3 h-3" />
                     </a>
                   )}
+
+                  {/* ── Category Quick-Selection for Unclassified / Fetched publications ── */}
+                  {(p.category === 'Unclassified' || p.needs_review) && (
+                    <div className="pt-2 flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400">
+                        Select Category:
+                      </span>
+                      {PUBLICATION_CATEGORIES.map((cat) => (
+                        <button
+                          key={cat}
+                          type="button"
+                          onClick={() => handleUpdatePubCategory(p.id, cat)}
+                          className="px-2.5 py-0.5 text-[11px] font-bold rounded-md border border-borderLine bg-surface hover:bg-brand-primary hover:text-white hover:border-brand-primary transition-colors cursor-pointer shadow-2xs"
+                        >
+                          {cat}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => handleDeletePub(p.id)}
-                  className="text-textMuted hover:text-alert p-1.5 transition-colors self-end sm:self-center"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-1 self-end sm:self-center shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEditPub(p)}
+                    className="text-textMuted hover:text-brand-primary p-1.5 transition-colors"
+                    title="Edit Publication"
+                  >
+                    <Edit3 className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeletePub(p.id)}
+                    className="text-textMuted hover:text-alert p-1.5 transition-colors"
+                    title="Delete Publication"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -1308,18 +1605,23 @@ export const FacultyProfileTab: React.FC = () => {
         </div>
       )}
 
-      {/* ── Modal: Add Publication / Patent ── */}
+      {/* ── Modal: Add / Edit Publication / Patent ── */}
       {showPubModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
           <div className="bg-surface border border-borderLine rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-borderLine pb-3">
               <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-bold">
                 <BookOpen className="w-5 h-5" />
-                <span className="text-sm">Add Research Publication / Patent</span>
+                <span className="text-sm">
+                  {editingPubId ? 'Edit Research Publication / Patent' : 'Add Research Publication / Patent'}
+                </span>
               </div>
               <button
                 type="button"
-                onClick={() => setShowPubModal(false)}
+                onClick={() => {
+                  setShowPubModal(false);
+                  setEditingPubId(null);
+                }}
                 className="text-textMuted hover:text-textPrimary"
               >
                 <X className="w-4 h-4" />
@@ -1396,17 +1698,24 @@ export const FacultyProfileTab: React.FC = () => {
                   placeholder="https://doi.org/10.1109/..."
                   value={newPub.doi_link}
                   onChange={(e) => setNewPub({ ...newPub, doi_link: e.target.value })}
-                  className="w-full px-3 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                  className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
                 />
               </div>
             </div>
 
             <div className="flex justify-end gap-2 pt-3 border-t border-borderLine">
-              <PillButton variant="outline" size="sm" onClick={() => setShowPubModal(false)}>
+              <PillButton
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setShowPubModal(false);
+                  setEditingPubId(null);
+                }}
+              >
                 Cancel
               </PillButton>
               <PillButton variant="primary" size="sm" onClick={handleAddPublication}>
-                Add Publication
+                {editingPubId ? 'Save Changes' : 'Add Publication'}
               </PillButton>
             </div>
           </div>

@@ -93,6 +93,29 @@ export const loginSchema = z.object({
   department: z.string().optional(),
 });
 
+// The 3 tier-1 super-admin Gmail addresses — bypass @rgmcet.edu.in restriction on admin tab only
+export const TIER1_SUPER_ADMIN_EMAILS = [
+  'jayakrushna1622@gmail.com',
+  'dineshkumarpathipati@gmail.com',
+  'jayanthkumarnaidu777@gmail.com',
+] as const;
+
+// Admin login schema — accepts @rgmcet.edu.in OR the 3 tier-1 super-admin Gmail addresses.
+// Used ONLY for the admin tab login form; all other tabs use loginSchema.
+export const adminLoginSchema = z.object({
+  email: z.string()
+    .trim()
+    .min(1, "Email is required")
+    .email("Enter a valid email address")
+    .transform((val) => val.toLowerCase())
+    .refine(
+      (val) => RGMCET_EMAIL_REGEX.test(val) || (TIER1_SUPER_ADMIN_EMAILS as readonly string[]).includes(val),
+      { message: "Only @rgmcet.edu.in domain is allowed (e.g. username@rgmcet.edu.in)" }
+    ),
+  password: z.string().min(1, "Password is required"),
+  department: z.string().optional(),
+});
+
 export const facultySignUpSchema = z.object({
   fullName: z.string()
     .min(2, "Full name must be at least 2 characters")

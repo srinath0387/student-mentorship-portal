@@ -136,7 +136,7 @@ export type BloodGroup = 'A+' | 'A-' | 'B+' | 'B-' | 'O+' | 'O-' | 'AB+' | 'AB-'
 export type FacultyDesignation = 'Assistant Professor' | 'Associate Professor' | 'Professor';
 export type ActivityType = 'Conference' | 'Workshop' | 'FDP';
 export type ActivityLevel = 'International' | 'National' | 'State';
-export type PublicationCategory = 'SCI' | 'SCOPUS' | 'WoS' | 'Patent';
+export type PublicationCategory = 'SCI' | 'SCOPUS' | 'WoS' | 'Patent' | 'Unclassified';
 
 export interface FacultyPersonalDetails {
   faculty_id: string;
@@ -146,6 +146,8 @@ export interface FacultyPersonalDetails {
   phone?: string;
   blood_group?: BloodGroup;
   linkedin_url?: string;
+  scopus_id?: string;
+  orcid_id?: string;
   joining_date?: string; // YYYY-MM-DD
   prior_experience_years?: number;
   prior_experience_months?: number;
@@ -190,6 +192,7 @@ export interface FacultyPublicationRecord {
   doi_link?: string;
   co_authors?: string;
   document_url?: string;
+  needs_review?: boolean;
 }
 
 export interface FacultyFullProfile {
@@ -199,5 +202,7 @@ export interface FacultyFullProfile {
   activities: FacultyActivityRecord[];
   publications: FacultyPublicationRecord[];
   domains: string[];
+  scopus_id?: string;
+  orcid_id?: string;
 }
 

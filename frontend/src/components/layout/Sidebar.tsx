@@ -43,7 +43,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
 
   const handleLogout = () => {
     logout();
-    navigate('/login');
+    navigate('/');
   };
 
   const isItemActive = (itemPath: string) => {
@@ -168,7 +168,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
         {/* ── Logo Header ── */}
         <div className="h-16 flex items-center border-b border-borderLine shrink-0 px-3.5 gap-3 overflow-hidden">
           <div className="w-8 h-8 rounded-xl bg-brand-primary flex items-center justify-center text-white font-black text-sm shrink-0 select-none shadow-brand">
-            A
+            R
           </div>
           <div
             className={[
@@ -177,10 +177,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
             ].join(' ')}
           >
             <p className="text-sm font-extrabold tracking-tight text-textPrimary whitespace-nowrap">
-              A<span className="text-brand-primary">D</span>VITIYAN<span className="text-brand-primary">S</span>
+              RGM <span className="text-brand-primary font-black">EDU</span><span className="text-textPrimary font-semibold tracking-wide">FLOW</span>
             </p>
             <p className="text-[9px] font-semibold text-textMuted uppercase tracking-widest whitespace-nowrap -mt-0.5">
-              Student 360° Platform
+              Institutional Platform
             </p>
           </div>
         </div>

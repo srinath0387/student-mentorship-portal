@@ -580,4 +580,25 @@ export const api = {
       body: JSON.stringify({ my_email: myEmail, new_password: newPassword }),
     });
   },
+
+  // ── Tier 1A: Manage Tier 1B Super-Admin Accounts ────────────────────────────
+  // Only the 3 Gmail Tier 1A accounts can call these endpoints.
+
+  getTier1BAdmins: async (callerEmail: string): Promise<{ email: string; password: string; updated_at: string }[]> => {
+    return fetchWithAuth(`/super-admin/tier1b?caller_email=${encodeURIComponent(callerEmail)}`);
+  },
+
+  createTier1BAdmin: async (callerEmail: string, email: string, password: string): Promise<{ success: boolean }> => {
+    return fetchWithAuth('/super-admin/tier1b', {
+      method: 'POST',
+      body: JSON.stringify({ caller_email: callerEmail, email, password }),
+    });
+  },
+
+  deleteTier1BAdmin: async (callerEmail: string, targetEmail: string): Promise<{ success: boolean }> => {
+    return fetchWithAuth(`/super-admin/tier1b/${encodeURIComponent(targetEmail)}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ caller_email: callerEmail }),
+    });
+  },
 };

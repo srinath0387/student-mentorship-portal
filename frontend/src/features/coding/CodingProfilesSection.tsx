@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   PLATFORM_CONFIGS,
   PlatformId,
@@ -28,7 +28,8 @@ export const CodingProfilesSection: React.FC<CodingProfilesSectionProps> = ({
   readOnly = false,
 }) => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user } = useAuth();
+  const { user, role } = useAuth();
+  const queryClient = useQueryClient();
 
   const activeRollNo = studentRollNumber || user?.rollNumber || '';
 
@@ -299,6 +300,13 @@ export const CodingProfilesSection: React.FC<CodingProfilesSectionProps> = ({
       handleSelectPlatform(targetId);
       setLinkingPlatformId(null);
       setHandleInput('');
+
+      // Backend fetches live LC/GitHub stats in background after save.
+      // Wait 4s then invalidate the leaderboard cache so ranks update automatically.
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ['leaderboardStudents'] });
+        queryClient.invalidateQueries({ queryKey: ['hodStudents'] });
+      }, 4000);
     } catch (e: any) {
       alert('Failed to save platform handle: ' + (e.message || e));
     } finally {

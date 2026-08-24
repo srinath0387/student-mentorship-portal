@@ -3,6 +3,7 @@ import { HashRouter as Router, Routes, Route, Navigate, Outlet, useLocation } fr
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthPage } from './features/auth/AuthPage';
+import { LandingPage } from './features/auth/LandingPage';
 import { Sidebar } from './components/layout/Sidebar';
 import { TopBar } from './components/layout/TopBar';
 import { DashboardSkeleton } from './components/layout/DashboardSkeleton';
@@ -67,6 +68,24 @@ const RoleDashboardRedirect: React.FC = () => {
   return <DashboardPage />;
 };
 
+const RootRedirect: React.FC = () => {
+  const { isAuthenticated, isLoading } = useAuth();
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-10 h-10 border-4 border-brand-primary border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+          <p className="text-sm text-textSecondary font-medium">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+  if (isAuthenticated) {
+    return <RoleDashboardRedirect />;
+  }
+  return <LandingPage />;
+};
+
 const MainLayout: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);  // mobile overlay
   const [collapsed, setCollapsed] = useState(false);           // desktop icon-rail
@@ -93,7 +112,7 @@ const MainLayout: React.FC = () => {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/" replace />;
   }
 
   return (
@@ -141,7 +160,15 @@ export const App: React.FC = () => {
         <CacheClearer />
         <Router>
           <Routes>
+            <Route path="/" element={<RootRedirect />} />
+            <Route path="/landing" element={<LandingPage />} />
             <Route path="/login" element={<AuthPage />} />
+            <Route path="/login/:role" element={<AuthPage />} />
+            <Route path="/student-login" element={<AuthPage />} />
+            <Route path="/faculty-login" element={<AuthPage />} />
+            <Route path="/hod-login" element={<AuthPage />} />
+            <Route path="/admin-login" element={<AuthPage />} />
+            <Route path="/parent-login" element={<AuthPage />} />
             <Route element={<MainLayout />}>
               <Route path="/dashboard" element={<RoleDashboardRedirect />} />
               <Route path="/profile" element={<ProfilePage />} />
@@ -153,8 +180,8 @@ export const App: React.FC = () => {
               <Route path="/mentor" element={<MyMentorPage />} />
               <Route path="/hod/dashboard" element={<HodDashboardPage />} />
               <Route path="/coding-analytics" element={<CodingAnalyticsPage />} />
-              <Route path="*" element={<RoleDashboardRedirect />} />
             </Route>
+            <Route path="*" element={<RootRedirect />} />
           </Routes>
         </Router>
       </AuthProvider>

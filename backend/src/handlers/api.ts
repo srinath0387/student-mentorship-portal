@@ -314,7 +314,32 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
 
     const emailLower = email.toLowerCase();
 
-    // ── Priority 1: Super admin credentials (DB) ──────────────────────────────
+    // ── Priority 1A: Tier-1 Gmail super-admins (highest authority) ───────────
+    // jayakrushna1622@gmail.com, dineshkumarpathipati@gmail.com, jayanthkumarnaidu777@gmail.com
+    const TIER1_GMAIL_SUPER_ADMINS = [
+      'jayakrushna1622@gmail.com',
+      'dineshkumarpathipati@gmail.com',
+      'jayanthkumarnaidu777@gmail.com',
+    ];
+    if (!db.isMock && TIER1_GMAIL_SUPER_ADMINS.includes(emailLower)) {
+      try {
+        const saResult = await db.query(
+          'SELECT email, password FROM super_admin_credentials WHERE LOWER(email) = $1',
+          [emailLower]
+        );
+        if (saResult.rows.length > 0) {
+          if (saResult.rows[0].password === password) {
+            return res.json({ valid: true, role: 'admin', isSuperAdmin: true, department: '*', email: saResult.rows[0].email });
+          }
+          await new Promise(resolve => setTimeout(resolve, 600));
+          return res.status(401).json({ valid: false, error: 'Invalid email or password.' });
+        }
+      } catch {
+        // Table may not exist on first cold-start; fall through
+      }
+    }
+
+    // ── Priority 1B: Super admin credentials (DB) — admin@rgmcet.edu.in + others ──
     if (!db.isMock) {
       try {
         const saResult = await db.query(
@@ -485,6 +510,82 @@ async function isSuperAdminCaller(callerEmail: string): Promise<boolean> {
     return false;
   }
 }
+
+// Tier 1A = the 3 Gmail super-admins — only they can manage Tier 1B accounts
+const TIER1A_EMAILS_LOWER = [
+  'jayakrushna1622@gmail.com',
+  'dineshkumarpathipati@gmail.com',
+  'jayanthkumarnaidu777@gmail.com',
+];
+
+/** Helper — verify caller_email is a Tier 1A Gmail super-admin */
+function isTier1ACaller(callerEmail: string): boolean {
+  return TIER1A_EMAILS_LOWER.includes(callerEmail.toLowerCase());
+}
+
+// GET /super-admin/tier1b — list all Tier 1B super-admin accounts (Tier 1A only)
+app.get('/super-admin/tier1b', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    const callerEmail = String(req.query.caller_email || '');
+    if (!isTier1ACaller(callerEmail)) {
+      return res.status(403).json({ error: 'Tier 1A super-admin access required' });
+    }
+    const result = await db.query(
+      'SELECT email, password, updated_at FROM super_admin_credentials ORDER BY email ASC'
+    );
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /super-admin/tier1b — add a new Tier 1B super-admin (Tier 1A only)
+app.post('/super-admin/tier1b', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    const { caller_email, email, password } = req.body;
+    if (!isTier1ACaller(caller_email)) {
+      return res.status(403).json({ error: 'Tier 1A super-admin access required' });
+    }
+    if (!email || !password) {
+      return res.status(400).json({ error: 'email and password are required' });
+    }
+    if (String(password).length < 4) {
+      return res.status(400).json({ error: 'Password must be at least 4 characters' });
+    }
+    // Prevent adding a Tier 1A address as Tier 1B (they are already hardcoded Tier 1A)
+    if (TIER1A_EMAILS_LOWER.includes(email.toLowerCase())) {
+      return res.status(400).json({ error: 'This email already has Tier 1A super-admin privileges' });
+    }
+    await db.query(
+      `INSERT INTO super_admin_credentials (email, password, updated_at)
+       VALUES (LOWER($1), $2, NOW())
+       ON CONFLICT (email) DO UPDATE SET password = $2, updated_at = NOW()`,
+      [email, password]
+    );
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /super-admin/tier1b/:email — remove a Tier 1B super-admin (Tier 1A only)
+app.delete('/super-admin/tier1b/:email', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    const { caller_email } = req.body;
+    if (!isTier1ACaller(caller_email)) {
+      return res.status(403).json({ error: 'Tier 1A super-admin access required' });
+    }
+    const targetEmail = req.params.email.toLowerCase();
+    // Cannot delete Tier 1A accounts
+    if (TIER1A_EMAILS_LOWER.includes(targetEmail)) {
+      return res.status(400).json({ error: 'Tier 1A super-admin accounts cannot be deleted' });
+    }
+    await db.query('DELETE FROM super_admin_credentials WHERE LOWER(email) = $1', [targetEmail]);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 const SUPER_ADMIN_EMAILS_LOWER = [
   'admin@rgmcet.edu.in',
