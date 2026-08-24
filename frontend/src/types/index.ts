@@ -206,3 +206,116 @@ export interface FacultyFullProfile {
   orcid_id?: string;
 }
 
+// ── Attendance Management Types ─────────────────────────────────────────────
+export type SemesterLabel = '2-1' | '2-2' | '3-1' | '3-2' | '4-1' | '4-2';
+export type SubjectType = 'Theory' | 'Lab';
+
+export interface SubjectAllotment {
+  id: string;
+  semester_label: SemesterLabel;
+  subject_name: string;
+  subject_type: SubjectType;
+  section: string;
+  faculty_email: string;
+  faculty_name: string;
+  department: string;
+  roster_count?: number;
+  sessions_count?: number;
+  created_at?: string;
+}
+
+export interface SubjectRosterEntry {
+  id: string;
+  allotment_id: string;
+  roll_number: string;
+  student_email: string;
+  student_name?: string;
+  student_department?: string;
+  student_section?: string;
+}
+
+export interface AttendanceSession {
+  id: string;
+  allotment_id: string;
+  session_date: string; // YYYY-MM-DD
+  num_periods: number;
+  period_start: number;
+  recorded_by: string;
+  subject_name?: string;
+  subject_type?: SubjectType;
+  section?: string;
+  semester_label?: SemesterLabel;
+  faculty_name?: string;
+  total_marked?: number;
+  present_count?: number;
+  created_at?: string;
+}
+
+export interface AttendanceRecordItem {
+  roll_number: string;
+  is_present: boolean;
+  student_name?: string;
+}
+
+export interface StudentSubjectAttendance {
+  allotment_id: string;
+  subject_name: string;
+  subject_type: SubjectType;
+  semester_label: SemesterLabel;
+  faculty_name: string;
+  periods_held: number;
+  periods_attended: number;
+  percentage: number;
+}
+
+export interface StudentAttendanceSummary {
+  student: {
+    roll_number: string;
+    name?: string;
+    department?: string;
+    batch?: string;
+    section?: string;
+  };
+  overall_percentage: number;
+  total_periods_held: number;
+  total_periods_attended: number;
+  subjects: StudentSubjectAttendance[];
+}
+
+export interface DayPeriodRecord {
+  is_present: boolean;
+  subject_name: string;
+  subject_type: SubjectType;
+  period: number;
+}
+
+export interface DaywiseAttendanceItem {
+  date: string;
+  periods: (DayPeriodRecord | null)[];
+}
+
+export interface StudentDaywiseAttendanceResponse {
+  rollNumber: string;
+  fromDate: string;
+  toDate: string;
+  days: DaywiseAttendanceItem[];
+}
+
+export interface SubjectAttendanceStudentSummary {
+  roll_number: string;
+  student_name: string;
+  section: string;
+  periods_attended: number;
+  periods_held: number;
+  percentage: number;
+}
+
+export interface SubjectAttendanceSummaryResponse {
+  allotment: SubjectAllotment;
+  total_periods_held: number;
+  sessions_count: number;
+  total_students: number;
+  students: SubjectAttendanceStudentSummary[];
+}
+
+

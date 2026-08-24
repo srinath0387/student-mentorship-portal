@@ -19,6 +19,7 @@ const CodingAnalyticsPage = lazy(() => import('./features/coding/CodingAnalytics
 const PlatformStatsRedirect = lazy(() => import('./features/coding/PlatformStatsRedirect').then(m => ({ default: m.PlatformStatsRedirect })));
 const FacultyManagementPage = lazy(() => import('./features/admin/FacultyManagementPage'));
 const MyMentorPage = lazy(() => import('./features/mentor/MyMentorPage'));
+const AttendancePage = lazy(() => import('./features/attendance/AttendancePage').then(m => ({ default: m.AttendancePage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -175,6 +176,7 @@ export const App: React.FC = () => {
               <Route path="/profile/coding-profiles/:platform" element={<PlatformStatsRedirect />} />
               <Route path="/program-stats/:platform" element={<PlatformStatsRedirect />} />
               <Route path="/faculty/dashboard" element={<FacultyDashboardPage />} />
+              <Route path="/attendance" element={<AttendancePage />} />
               <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
               <Route path="/admin/faculty" element={<FacultyManagementPage />} />
               <Route path="/mentor" element={<MyMentorPage />} />

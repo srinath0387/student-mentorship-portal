@@ -48,6 +48,7 @@ export const DashboardPage: React.FC = () => {
   const { data: achievements = [] } = useQuery({ queryKey: ['achievements', activeRollNo], queryFn: () => api.getAchievements(activeRollNo), enabled: Boolean(activeRollNo) });
   const { data: placement } = useQuery({ queryKey: ['placementProfile', activeRollNo], queryFn: () => api.getPlacementProfile(activeRollNo), enabled: Boolean(activeRollNo) });
   const { data: scoreData } = useQuery({ queryKey: ['employabilityScore', activeRollNo], queryFn: () => api.getEmployabilityScore(activeRollNo), enabled: Boolean(activeRollNo), staleTime: 0, refetchOnMount: 'always' });
+  const { data: attendanceSummary } = useQuery({ queryKey: ['studentAttendanceSummary', activeRollNo], queryFn: () => api.getStudentAttendance(activeRollNo), enabled: Boolean(activeRollNo) });
 
   // Calculate live completion % & signature nudge cards using shared util
   const completionStatus = calculateProfileCompletion(
@@ -70,7 +71,9 @@ export const DashboardPage: React.FC = () => {
     ? (validAcademics.reduce((sum, a) => sum + Number(a.semester_gpa), 0) / validAcademics.length).toFixed(2)
     : null;
 
-  const avgAttendance = validAcademics.length > 0
+  const avgAttendance = attendanceSummary?.overall_percentage != null
+    ? attendanceSummary.overall_percentage
+    : validAcademics.length > 0
     ? Math.round(
         validAcademics.reduce(
           (sum, a) => sum + (a.attendance_pct != null && !isNaN(Number(a.attendance_pct)) ? Number(a.attendance_pct) : 0),

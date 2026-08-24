@@ -48,6 +48,8 @@ import { PlacementPreferencesTab } from '../profile/tabs/PlacementPreferencesTab
 import { BulkImportModal } from './components/BulkImportModal';
 import { FacultyRecordsTable } from './components/FacultyRecordsTable';
 import { PlacementEligibilitySection } from '../hod/components/PlacementEligibilitySection';
+import { AttendanceManagementTab } from './tabs/AttendanceManagementTab';
+import { AttendanceTrackingTab } from '../attendance/AttendanceTrackingTab';
 
 const DEPARTMENTS = VALID_DEPARTMENT_NAMES;
 const YEARS = ['1st Year', '2nd Year', '3rd Year', '4th Year'] as const;
@@ -527,6 +529,7 @@ export const AdminDashboardPage: React.FC = () => {
           <nav className="flex px-2 pt-2 pb-0 gap-1 border-b border-borderLine">
             {[
               { key: 'students', label: 'Student Directory (CRUD)' },
+              { key: 'attendance', label: '📊 Attendance System' },
               { key: 'performance', label: 'CGPA & Coding Rankings' },
               { key: 'faculty', label: 'Faculty & Mentor Assignments' },
               { key: 'hod-credentials', label: '🔑 HOD Credentials' },
@@ -583,6 +586,16 @@ export const AdminDashboardPage: React.FC = () => {
         <StatCard icon={<Code2 className="w-5 h-5" />} iconBgColor="bg-[#FFA116]/10 text-[#FFA116]"
           accentColor="brand" label="LeetCode Profiles" value={`${leetcodeCount} Linked`} subtext="Students with LeetCode connected" />
       </div>
+
+      {/* ── TAB: Attendance Management & Tracking ── */}
+      {activeTab === 'attendance' && (
+        <div className="space-y-6">
+          <AttendanceManagementTab />
+          <div className="pt-4 border-t border-borderLine">
+            <AttendanceTrackingTab role="admin" />
+          </div>
+        </div>
+      )}
 
       {/* ── TAB 1: Student Directory ── */}
       {activeTab === 'students' && (
