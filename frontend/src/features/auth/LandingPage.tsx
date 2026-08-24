@@ -209,20 +209,18 @@ export const LandingPage: React.FC = () => {
         </div>
 
         <h1 className="text-3xl sm:text-4xl md:text-5xl font-black tracking-wider">
-          <span className="text-white drop-shadow-sm">A</span>
-          <span className="text-cyan-400 font-black drop-shadow-[0_0_16px_rgba(56,217,232,0.9)] inline-block">D</span>
-          <span className="text-white drop-shadow-sm">VITIYAN</span>
-          <span className="text-cyan-400 font-black drop-shadow-[0_0_16px_rgba(56,217,232,0.9)] inline-block">S</span>
+          <span className="text-white font-black drop-shadow-sm">RGM </span>
+          <span className="text-cyan-400 font-black drop-shadow-[0_0_16px_rgba(56,217,232,0.9)] inline-block tracking-tight font-sans">EDU</span>
+          <span className="text-white font-medium drop-shadow-sm tracking-widest inline-block font-sans">FLOW</span>
         </h1>
 
         <p className="mt-1.5 text-xs sm:text-sm text-slate-300 font-medium max-w-2xl mx-auto">
           Department of Computer Science & Engineering (Data Science) • RGMCET
         </p>
 
-        <div className="mt-2.5 inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-surface/80 border border-white/10 backdrop-blur-md text-xs text-textSecondary shadow-sm">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="font-semibold text-slate-200">Institutional Mentorship & 360° Portal</span>
-        </div>
+        <p className="mt-3 text-xs sm:text-sm text-slate-300/90 font-medium max-w-3xl mx-auto leading-relaxed px-4">
+          A digital initiative by the institute facilitating Faculty, Staff, Students, Parents and Alumni to access and process Academics, Research, Supporting services at one common platform.
+        </p>
       </div>
 
       {/* ── Role Selection Section ── */}
