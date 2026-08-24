@@ -1367,10 +1367,10 @@ app.get('/students', async (req: Request, res: Response) => {
     const callerDept = req.auth?.department;
     const isSuper = req.auth?.isSuperAdmin || callerDept === '*';
     if (!isSuper && callerDept && (req.auth?.role === 'admin' || req.auth?.role === 'hod' || req.auth?.role === 'student')) {
-      conditions.push(`LOWER(REPLACE(department, ' ', '')) = LOWER(REPLACE($${paramIndex++}, ' ', ''))`);
+      conditions.push(`(LOWER(REPLACE(s.department, ' ', '')) = LOWER(REPLACE($${paramIndex++}, ' ', '')))`);
       params.push(callerDept);
     } else if (department && String(department) !== 'All' && String(department) !== 'undefined' && String(department) !== 'null') {
-      conditions.push(`LOWER(REPLACE(department, ' ', '')) = LOWER(REPLACE($${paramIndex++}, ' ', ''))`);
+      conditions.push(`(LOWER(REPLACE(s.department, ' ', '')) = LOWER(REPLACE($${paramIndex++}, ' ', '')))`);
       params.push(String(department));
     }
 
