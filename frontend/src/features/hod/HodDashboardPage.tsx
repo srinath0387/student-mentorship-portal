@@ -38,6 +38,8 @@ import { CertificationsTab } from '../profile/tabs/CertificationsTab';
 import { SoftSkillsTab } from '../profile/tabs/SoftSkillsTab';
 import { AchievementsTab } from '../profile/tabs/AchievementsTab';
 import { PlacementPreferencesTab } from '../profile/tabs/PlacementPreferencesTab';
+import { AttendanceManagementTab } from '../admin/tabs/AttendanceManagementTab';
+import { AttendanceTrackingTab } from '../attendance/AttendanceTrackingTab';
 
 const YEARS = ['1st Year', '2nd Year', '3rd Year', '4th Year'] as const;
 const SECTIONS = ['Section A', 'Section B', 'Section C'] as const;
@@ -115,7 +117,7 @@ function mapStudentToHodEntry(student: any, index: number, liveSolved?: number):
 }
 
 export const HodDashboardPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'students' | 'rankings' | 'placement' | 'mentees' | 'settings'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'attendance' | 'analytics' | 'students' | 'rankings' | 'placement' | 'mentees' | 'settings'>('overview');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Interactive Filter Slicers
@@ -577,6 +579,7 @@ export const HodDashboardPage: React.FC = () => {
           <nav className="flex px-2 pt-2 pb-0 gap-1 border-b border-borderLine">
             {[
               { key: 'overview', label: '📊 Year-Wise Overview' },
+              { key: 'attendance', label: '📋 Attendance Tracker' },
               { key: 'analytics', label: '📈 Academic Analytics' },
               { key: 'placement', label: '🎯 Placement Eligibility Engine (T&P)' },
               { key: 'students', label: '👨‍🎓 Student Directory & Inspection' },
@@ -599,6 +602,16 @@ export const HodDashboardPage: React.FC = () => {
           </nav>
         </div>
       </div>
+
+      {/* ── TAB: Attendance Tracker & Management ── */}
+      {activeTab === 'attendance' && (
+        <div className="space-y-6">
+          <AttendanceTrackingTab role="hod" />
+          <div className="pt-4 border-t border-borderLine">
+            <AttendanceManagementTab />
+          </div>
+        </div>
+      )}
 
       {/* ── TAB 1: Department Overview ── */}
       {activeTab === 'overview' && (

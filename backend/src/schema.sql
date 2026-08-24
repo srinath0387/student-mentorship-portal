@@ -192,11 +192,58 @@ CREATE INDEX IF NOT EXISTS idx_tech_skills_student ON tech_skills(student_id);
 CREATE INDEX IF NOT EXISTS idx_certifications_student ON certifications(student_id);
 CREATE INDEX IF NOT EXISTS idx_achievements_student ON achievements(student_id);
 
--- Insert Faculty
-INSERT INTO faculty (faculty_id, name, email, department, role) VALUES
-('FAC001', 'Dr. K. V. Subbaiah', 'kvsubbaiah@rgmcet.edu.in', 'CSE', 'coordinator'),
-('FAC002', 'Prof. M. Ramesh', 'mramesh@rgmcet.edu.in', 'ECE', 'mentor')
-ON CONFLICT (faculty_id) DO NOTHING;
+-- 13. Subject Allotments (Faculty-Subject Allocation for Attendance)
+CREATE TABLE IF NOT EXISTS subject_allotments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    semester_label VARCHAR(5) NOT NULL,
+    subject_name VARCHAR(200) NOT NULL,
+    subject_type VARCHAR(10) NOT NULL CHECK (subject_type IN ('Theory', 'Lab')),
+    section VARCHAR(10) NOT NULL DEFAULT '',
+    faculty_email VARCHAR(100) NOT NULL,
+    faculty_name VARCHAR(100) NOT NULL DEFAULT '',
+    department VARCHAR(50) NOT NULL DEFAULT '',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(semester_label, subject_name, section, faculty_email)
+);
 
--- Insert Students
+-- 14. Subject Rosters (Students Enrolled in Subject)
+CREATE TABLE IF NOT EXISTS subject_rosters (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    allotment_id UUID NOT NULL REFERENCES subject_allotments(id) ON DELETE CASCADE,
+    roll_number VARCHAR(10) NOT NULL,
+    student_email VARCHAR(100) NOT NULL DEFAULT '',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(allotment_id, roll_number)
+);
+
+-- 15. Attendance Sessions (Session instance taken by faculty)
+CREATE TABLE IF NOT EXISTS attendance_sessions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    allotment_id UUID NOT NULL REFERENCES subject_allotments(id) ON DELETE CASCADE,
+    session_date DATE NOT NULL,
+    num_periods INT NOT NULL CHECK (num_periods BETWEEN 1 AND 3),
+    period_start INT NOT NULL CHECK (period_start BETWEEN 1 AND 7),
+    recorded_by VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(allotment_id, session_date, period_start)
+);
+
+-- 16. Attendance Records (Student presence per session)
+CREATE TABLE IF NOT EXISTS attendance_records (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    session_id UUID NOT NULL REFERENCES attendance_sessions(id) ON DELETE CASCADE,
+    roll_number VARCHAR(10) NOT NULL,
+    is_present BOOLEAN NOT NULL DEFAULT TRUE,
+    UNIQUE(session_id, roll_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_allotments_faculty ON subject_allotments(faculty_email);
+CREATE INDEX IF NOT EXISTS idx_allotments_semester ON subject_allotments(semester_label);
+CREATE INDEX IF NOT EXISTS idx_allotments_dept ON subject_allotments(department);
+CREATE INDEX IF NOT EXISTS idx_rosters_allotment ON subject_rosters(allotment_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_allotment ON attendance_sessions(allotment_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_date ON attendance_sessions(session_date);
+CREATE INDEX IF NOT EXISTS idx_records_session ON attendance_records(session_id);
+CREATE INDEX IF NOT EXISTS idx_records_roll ON attendance_records(roll_number);
+
 -- End of schema.sql

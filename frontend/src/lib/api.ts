@@ -601,4 +601,91 @@ export const api = {
       body: JSON.stringify({ caller_email: callerEmail }),
     });
   },
+
+  // ── Attendance Management System API ───────────────────────────────────────
+  uploadAllotments: async (semester: string, allotments: any[]) => {
+    return fetchWithAuth('/attendance/allotments/upload', {
+      method: 'POST',
+      body: JSON.stringify({ semester, allotments }),
+    });
+  },
+
+  getAllotments: async (semester?: string, department?: string) => {
+    const params = new URLSearchParams();
+    if (semester) params.append('semester', semester);
+    if (department) params.append('department', department);
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return fetchWithAuth(`/attendance/allotments${query}`);
+  },
+
+  deleteAllotment: async (id: string) => {
+    return fetchWithAuth(`/attendance/allotments/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  uploadRoster: async (allotmentId: string, roster: any[]) => {
+    return fetchWithAuth('/attendance/rosters/upload', {
+      method: 'POST',
+      body: JSON.stringify({ allotment_id: allotmentId, roster }),
+    });
+  },
+
+  getRoster: async (allotmentId: string) => {
+    return fetchWithAuth(`/attendance/rosters/${allotmentId}`);
+  },
+
+  getMyAttendanceSubjects: async (semester?: string) => {
+    const query = semester ? `?semester=${encodeURIComponent(semester)}` : '';
+    return fetchWithAuth(`/attendance/my-subjects${query}`);
+  },
+
+  saveAttendanceSession: async (data: {
+    allotment_id: string;
+    session_date: string;
+    num_periods: number;
+    period_start: number;
+    records: { roll_number: string; is_present: boolean }[];
+  }) => {
+    return fetchWithAuth('/attendance/sessions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  getAttendanceSessions: async (allotmentId?: string, dateFrom?: string, dateTo?: string) => {
+    const params = new URLSearchParams();
+    if (allotmentId) params.append('allotment_id', allotmentId);
+    if (dateFrom) params.append('date_from', dateFrom);
+    if (dateTo) params.append('date_to', dateTo);
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return fetchWithAuth(`/attendance/sessions${query}`);
+  },
+
+  getSessionDetails: async (sessionId: string) => {
+    return fetchWithAuth(`/attendance/sessions/${sessionId}`);
+  },
+
+  deleteAttendanceSession: async (sessionId: string) => {
+    return fetchWithAuth(`/attendance/sessions/${sessionId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  getStudentAttendance: async (rollNumber: string) => {
+    return fetchWithAuth(`/attendance/student/${encodeURIComponent(rollNumber)}`);
+  },
+
+  getStudentDaywiseAttendance: async (rollNumber: string, from?: string, to?: string) => {
+    const params = new URLSearchParams();
+    if (from) params.append('from', from);
+    if (to) params.append('to', to);
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return fetchWithAuth(`/attendance/student/${encodeURIComponent(rollNumber)}/daywise${query}`);
+  },
+
+  getSubjectAttendanceSummary: async (allotmentId: string) => {
+    return fetchWithAuth(`/attendance/subject/${encodeURIComponent(allotmentId)}/summary`);
+  },
 };
+

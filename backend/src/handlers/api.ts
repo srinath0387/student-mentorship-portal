@@ -4437,6 +4437,655 @@ app.get('/reports/placement-summary', async (_req: Request, res: Response) => {
   }
 });
 
+// ============================================================================
+// Attendance Management System Endpoints
+// ============================================================================
+
+// 1. Upload/Sync Faculty-Subject Allotments (Admin / HOD)
+app.post('/attendance/allotments/upload', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+  try {
+    const { semester, allotments } = req.body;
+    if (!semester || !Array.isArray(allotments) || allotments.length === 0) {
+      return res.status(400).json({ error: 'Semester and non-empty allotments array are required' });
+    }
+
+    const callerDept = req.auth?.department;
+    const isSuper = req.auth?.isSuperAdmin || callerDept === '*' || req.auth?.role === 'admin';
+
+    let addedCount = 0;
+    let updatedCount = 0;
+    const errors: { row: number; reason: string; item: any }[] = [];
+
+    for (let i = 0; i < allotments.length; i++) {
+      const row = allotments[i];
+      const facultyName = (row.faculty_name || row.facultyName || row['Faculty Name'] || '').trim();
+      const facultyEmail = (row.faculty_email || row.facultyEmail || row['Faculty Email'] || '').trim().toLowerCase();
+      const subjectName = (row.subject_name || row.subjectName || row['Subject Allotted'] || row['Subject Name'] || '').trim();
+      const section = (row.section || row['Section'] || 'A').trim().toUpperCase();
+      const subjectTypeRaw = (row.subject_type || row.subjectType || row['Subject Type'] || 'Theory').trim();
+      const subjectType = subjectTypeRaw.toLowerCase().includes('lab') ? 'Lab' : 'Theory';
+      const department = (row.department || row['Department'] || callerDept || '').trim();
+
+      if (!facultyEmail || !subjectName) {
+        errors.push({ row: i + 1, reason: 'Faculty Email and Subject Name are required', item: row });
+        continue;
+      }
+
+      if (!RGMCET_EMAIL_REGEX.test(facultyEmail) && !facultyEmail.endsWith('@rgmcet.edu.in')) {
+        errors.push({ row: i + 1, reason: 'Invalid RGMCET faculty email domain', item: row });
+        continue;
+      }
+
+      // Upsert faculty record if not exists
+      try {
+        const facCheck = await db.query('SELECT faculty_id FROM faculty WHERE LOWER(email) = LOWER($1)', [facultyEmail]);
+        if (facCheck.rows.length === 0) {
+          const newFacId = `FAC_${Date.now().toString().slice(-6)}_${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+          await db.query(
+            `INSERT INTO faculty (faculty_id, name, email, department, role)
+             VALUES ($1, $2, $3, $4, 'mentor')
+             ON CONFLICT (email) DO NOTHING`,
+            [newFacId, facultyName || facultyEmail.split('@')[0], facultyEmail, department || 'General']
+          );
+        }
+      } catch (err: any) {
+        // ignore conflict
+      }
+
+      try {
+        const existing = await db.query(
+          `SELECT id FROM subject_allotments 
+           WHERE semester_label = $1 AND LOWER(subject_name) = LOWER($2) AND section = $3 AND LOWER(faculty_email) = LOWER($4)`,
+          [semester, subjectName, section, facultyEmail]
+        );
+
+        if (existing.rows.length > 0) {
+          await db.query(
+            `UPDATE subject_allotments
+             SET subject_type = $1, faculty_name = $2, department = $3
+             WHERE id = $4`,
+            [subjectType, facultyName, department, existing.rows[0].id]
+          );
+          updatedCount++;
+        } else {
+          await db.query(
+            `INSERT INTO subject_allotments (semester_label, subject_name, subject_type, section, faculty_email, faculty_name, department)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [semester, subjectName, subjectType, section, facultyEmail, facultyName, department]
+          );
+          addedCount++;
+        }
+      } catch (err: any) {
+        errors.push({ row: i + 1, reason: err.message, item: row });
+      }
+    }
+
+    res.json({
+      message: `Allotments processed: ${addedCount} added, ${updatedCount} updated.`,
+      addedCount,
+      updatedCount,
+      errorsCount: errors.length,
+      errors,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Get Allotments (Admin, HOD, Faculty)
+app.get('/attendance/allotments', requireRole('admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
+  try {
+    const semester = (req.query.semester as string) || '';
+    const department = (req.query.department as string) || '';
+    const callerRole = req.auth?.role;
+    const callerEmail = req.auth?.email?.toLowerCase();
+    const callerDept = req.auth?.department;
+
+    let query = `
+      SELECT a.*, 
+        (SELECT COUNT(*) FROM subject_rosters r WHERE r.allotment_id = a.id) AS roster_count,
+        (SELECT COUNT(*) FROM attendance_sessions s WHERE s.allotment_id = a.id) AS sessions_count
+      FROM subject_allotments a
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+
+    if (semester) {
+      params.push(semester);
+      query += ` AND a.semester_label = $${params.length}`;
+    }
+
+    if (callerRole === 'faculty') {
+      params.push(callerEmail);
+      query += ` AND LOWER(a.faculty_email) = LOWER($${params.length})`;
+    } else if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+      params.push(`%${callerDept}%`);
+      query += ` AND a.department ILIKE $${params.length}`;
+    } else if (department && department !== 'All') {
+      params.push(`%${department}%`);
+      query += ` AND a.department ILIKE $${params.length}`;
+    }
+
+    query += ` ORDER BY a.semester_label, a.subject_name, a.section`;
+
+    const result = await db.query(query, params);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3. Delete an Allotment (Admin / HOD)
+app.delete('/attendance/allotments/:id', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    await db.query('DELETE FROM subject_allotments WHERE id = $1', [id]);
+    res.json({ success: true, message: 'Subject allotment deleted successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. Upload Student Roster for a Subject Allotment (Admin / HOD)
+app.post('/attendance/rosters/upload', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+  try {
+    const { allotment_id, roster } = req.body;
+    if (!allotment_id || !Array.isArray(roster) || roster.length === 0) {
+      return res.status(400).json({ error: 'Allotment ID and non-empty roster array are required' });
+    }
+
+    // Validate that allotment exists
+    const allotCheck = await db.query('SELECT * FROM subject_allotments WHERE id = $1', [allotment_id]);
+    if (allotCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Subject allotment not found for this roster' });
+    }
+
+    let addedCount = 0;
+    const errors: { row: number; reason: string; item: any }[] = [];
+    const seenRolls = new Set<string>();
+
+    for (let i = 0; i < roster.length; i++) {
+      const row = roster[i];
+      const rollNumber = (row.roll_number || row.rollNumber || row['Roll Number'] || '').trim().toUpperCase();
+      const studentEmail = (row.student_email || row.studentEmail || row['Student Email'] || (rollNumber ? `${rollNumber.toLowerCase()}@rgmcet.edu.in` : '')).trim().toLowerCase();
+
+      if (!rollNumber) {
+        errors.push({ row: i + 1, reason: 'Roll Number is required', item: row });
+        continue;
+      }
+
+      if (seenRolls.has(rollNumber)) {
+        errors.push({ row: i + 1, reason: `Duplicate roll number ${rollNumber} in upload file`, item: row });
+        continue;
+      }
+      seenRolls.add(rollNumber);
+
+      try {
+        await db.query(
+          `INSERT INTO subject_rosters (allotment_id, roll_number, student_email)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (allotment_id, roll_number) DO UPDATE
+           SET student_email = EXCLUDED.student_email`,
+          [allotment_id, rollNumber, studentEmail]
+        );
+        addedCount++;
+      } catch (err: any) {
+        errors.push({ row: i + 1, reason: err.message, item: row });
+      }
+    }
+
+    res.json({
+      message: `Roster upload complete: ${addedCount} students enrolled.`,
+      addedCount,
+      errorsCount: errors.length,
+      errors,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 5. Get Roster for an Allotment (Admin, HOD, Faculty)
+app.get('/attendance/rosters/:allotmentId', requireRole('admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
+  try {
+    const { allotmentId } = req.params;
+
+    // Check authorization for faculty
+    if (req.auth?.role === 'faculty') {
+      const allot = await db.query('SELECT faculty_email FROM subject_allotments WHERE id = $1', [allotmentId]);
+      if (allot.rows.length === 0 || allot.rows[0].faculty_email.toLowerCase() !== req.auth.email.toLowerCase()) {
+        return res.status(403).json({ error: 'Access denied. You can only view rosters for your allotted subjects.' });
+      }
+    }
+
+    const result = await db.query(
+      `SELECT r.*, s.name as student_name, s.department as student_department, s.section as student_section
+       FROM subject_rosters r
+       LEFT JOIN students s ON s.roll_number = r.roll_number
+       WHERE r.allotment_id = $1
+       ORDER BY r.roll_number`,
+      [allotmentId]
+    );
+
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 6. Faculty: Get My Allotted Subjects for a Semester
+app.get('/attendance/my-subjects', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const semester = (req.query.semester as string) || '';
+    const facultyEmail = req.auth?.email?.toLowerCase();
+
+    let query = `
+      SELECT a.*,
+        (SELECT COUNT(*) FROM subject_rosters r WHERE r.allotment_id = a.id) AS roster_count,
+        (SELECT COUNT(*) FROM attendance_sessions s WHERE s.allotment_id = a.id) AS sessions_count
+      FROM subject_allotments a
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+
+    if (req.auth?.role === 'faculty') {
+      params.push(facultyEmail);
+      query += ` AND LOWER(a.faculty_email) = LOWER($${params.length})`;
+    }
+
+    if (semester) {
+      params.push(semester);
+      query += ` AND a.semester_label = $${params.length}`;
+    }
+
+    query += ` ORDER BY a.semester_label, a.subject_name, a.section`;
+
+    const result = await db.query(query, params);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 7. Save Attendance Session + Records (Faculty, HOD, Admin)
+app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const { allotment_id, session_date, num_periods, period_start, records } = req.body;
+    if (!allotment_id || !session_date || !num_periods || !period_start || !Array.isArray(records)) {
+      return res.status(400).json({ error: 'All fields (allotment_id, session_date, num_periods, period_start, records) are required' });
+    }
+
+    // Verify allotment permissions
+    const allotRes = await db.query('SELECT * FROM subject_allotments WHERE id = $1', [allotment_id]);
+    if (allotRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Subject allotment not found' });
+    }
+    const allotment = allotRes.rows[0];
+
+    if (req.auth?.role === 'faculty' && allotment.faculty_email.toLowerCase() !== req.auth.email.toLowerCase()) {
+      return res.status(403).json({ error: 'Access denied: You can only take attendance for your own allotted subjects' });
+    }
+
+    const recordedBy = req.auth?.email?.toLowerCase() || allotment.faculty_email;
+
+    // Check if session already exists for this slot
+    const existing = await db.query(
+      `SELECT id FROM attendance_sessions 
+       WHERE allotment_id = $1 AND session_date = $2 AND period_start = $3`,
+      [allotment_id, session_date, period_start]
+    );
+
+    let sessionId: string;
+    if (existing.rows.length > 0) {
+      sessionId = existing.rows[0].id;
+      await db.query(
+        `UPDATE attendance_sessions 
+         SET num_periods = $1, recorded_by = $2 
+         WHERE id = $3`,
+        [num_periods, recordedBy, sessionId]
+      );
+    } else {
+      const ins = await db.query(
+        `INSERT INTO attendance_sessions (allotment_id, session_date, num_periods, period_start, recorded_by)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id`,
+        [allotment_id, session_date, num_periods, period_start, recordedBy]
+      );
+      sessionId = ins.rows[0].id;
+    }
+
+    // Insert or update individual student records
+    let presentCount = 0;
+    for (const rec of records) {
+      const rollNumber = rec.roll_number?.trim().toUpperCase();
+      const isPresent = Boolean(rec.is_present);
+      if (!rollNumber) continue;
+      if (isPresent) presentCount++;
+
+      await db.query(
+        `INSERT INTO attendance_records (session_id, roll_number, is_present)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (session_id, roll_number) DO UPDATE
+         SET is_present = EXCLUDED.is_present`,
+        [sessionId, rollNumber, isPresent]
+      );
+    }
+
+    res.json({
+      success: true,
+      message: `Attendance saved for ${allotment.subject_name} — ${num_periods} Session(s) — ${presentCount}/${records.length} present.`,
+      sessionId,
+      presentCount,
+      totalCount: records.length,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 8. Get Attendance Sessions (with filters)
+app.get('/attendance/sessions', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const allotmentId = req.query.allotment_id as string;
+    const dateFrom = req.query.date_from as string;
+    const dateTo = req.query.date_to as string;
+
+    let query = `
+      SELECT s.*, a.subject_name, a.subject_type, a.section, a.semester_label, a.faculty_name,
+        (SELECT COUNT(*) FROM attendance_records r WHERE r.session_id = s.id) AS total_marked,
+        (SELECT COUNT(*) FROM attendance_records r WHERE r.session_id = s.id AND r.is_present = true) AS present_count
+      FROM attendance_sessions s
+      JOIN subject_allotments a ON a.id = s.allotment_id
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+
+    if (allotmentId) {
+      params.push(allotmentId);
+      query += ` AND s.allotment_id = $${params.length}`;
+    }
+
+    if (req.auth?.role === 'faculty') {
+      params.push(req.auth.email.toLowerCase());
+      query += ` AND LOWER(a.faculty_email) = LOWER($${params.length})`;
+    } else if (req.auth?.role === 'hod' && req.auth.department && req.auth.department !== '*') {
+      params.push(`%${req.auth.department}%`);
+      query += ` AND a.department ILIKE $${params.length}`;
+    }
+
+    if (dateFrom) {
+      params.push(dateFrom);
+      query += ` AND s.session_date >= $${params.length}`;
+    }
+    if (dateTo) {
+      params.push(dateTo);
+      query += ` AND s.session_date <= $${params.length}`;
+    }
+
+    query += ` ORDER BY s.session_date DESC, s.period_start DESC`;
+
+    const result = await db.query(query, params);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 9. Get Single Session Details with Records (Faculty, HOD, Admin)
+app.get('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const sessRes = await db.query(
+      `SELECT s.*, a.subject_name, a.subject_type, a.section, a.semester_label, a.faculty_name, a.faculty_email
+       FROM attendance_sessions s
+       JOIN subject_allotments a ON a.id = s.allotment_id
+       WHERE s.id = $1`,
+      [id]
+    );
+    if (sessRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    const session = sessRes.rows[0];
+
+    const recordsRes = await db.query(
+      `SELECT r.roll_number, r.is_present, s.name as student_name
+       FROM attendance_records r
+       LEFT JOIN students s ON s.roll_number = r.roll_number
+       WHERE r.session_id = $1
+       ORDER BY r.roll_number`,
+      [id]
+    );
+
+    res.json({
+      session,
+      records: recordsRes.rows,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 10. Delete Attendance Session (Faculty, HOD, Admin)
+app.delete('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    await db.query('DELETE FROM attendance_sessions WHERE id = $1', [id]);
+    res.json({ success: true, message: 'Attendance session deleted successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 11. Student / Parent / General: Get Student Attendance Summary (Per-Subject % & Overall %)
+app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const rollNumber = req.params.rollNumber.toUpperCase();
+
+    // Security check: students can only view own attendance
+    if (req.auth?.role === 'student' && req.auth.regNo !== rollNumber) {
+      return res.status(403).json({ error: 'Access denied: Students can only view their own attendance.' });
+    }
+
+    // Get student details
+    const studentRes = await db.query('SELECT roll_number, name, department, batch, section FROM students WHERE roll_number = $1', [rollNumber]);
+    const student = studentRes.rows[0] || { roll_number: rollNumber };
+
+    // Query all subjects this student is enrolled in
+    const subjectsQuery = `
+      SELECT 
+        a.id AS allotment_id,
+        a.subject_name,
+        a.subject_type,
+        a.semester_label,
+        a.faculty_name,
+        COALESCE(SUM(s.num_periods), 0) AS total_periods_held,
+        COALESCE(SUM(CASE WHEN r.is_present = true THEN s.num_periods ELSE 0 END), 0) AS periods_attended
+      FROM subject_rosters sr
+      JOIN subject_allotments a ON a.id = sr.allotment_id
+      LEFT JOIN attendance_sessions s ON s.allotment_id = a.id
+      LEFT JOIN attendance_records r ON r.session_id = s.id AND r.roll_number = sr.roll_number
+      WHERE sr.roll_number = $1
+      GROUP BY a.id, a.subject_name, a.subject_type, a.semester_label, a.faculty_name
+      ORDER BY a.semester_label, a.subject_name
+    `;
+
+    const subjectsRes = await db.query(subjectsQuery, [rollNumber]);
+
+    let grandTotalHeld = 0;
+    let grandTotalAttended = 0;
+
+    const subjects = subjectsRes.rows.map((row: any) => {
+      const held = parseInt(row.total_periods_held || '0');
+      const attended = parseInt(row.periods_attended || '0');
+      grandTotalHeld += held;
+      grandTotalAttended += attended;
+      const pct = held > 0 ? Math.round((attended / held) * 1000) / 10 : 100;
+      return {
+        allotment_id: row.allotment_id,
+        subject_name: row.subject_name,
+        subject_type: row.subject_type,
+        semester_label: row.semester_label,
+        faculty_name: row.faculty_name,
+        periods_held: held,
+        periods_attended: attended,
+        percentage: pct,
+      };
+    });
+
+    const overallPercentage = grandTotalHeld > 0 
+      ? Math.round((grandTotalAttended / grandTotalHeld) * 1000) / 10 
+      : 100;
+
+    res.json({
+      student,
+      overall_percentage: overallPercentage,
+      total_periods_held: grandTotalHeld,
+      total_periods_attended: grandTotalAttended,
+      subjects,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 12. Student / Parent / Faculty / HOD / Admin: Day-wise 7-Period Attendance Dot Grid
+app.get('/attendance/student/:rollNumber/daywise', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const rollNumber = req.params.rollNumber.toUpperCase();
+
+    if (req.auth?.role === 'student' && req.auth.regNo !== rollNumber) {
+      return res.status(403).json({ error: 'Access denied: Students can only view their own attendance.' });
+    }
+
+    const fromDate = (req.query.from as string) || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const toDate = (req.query.to as string) || new Date().toISOString().split('T')[0];
+
+    const recordsQuery = `
+      SELECT 
+        s.session_date,
+        s.period_start,
+        s.num_periods,
+        r.is_present,
+        a.subject_name,
+        a.subject_type
+      FROM attendance_records r
+      JOIN attendance_sessions s ON s.id = r.session_id
+      JOIN subject_allotments a ON a.id = s.allotment_id
+      WHERE r.roll_number = $1
+        AND s.session_date >= $2
+        AND s.session_date <= $3
+      ORDER BY s.session_date DESC, s.period_start ASC
+    `;
+
+    const result = await db.query(recordsQuery, [rollNumber, fromDate, toDate]);
+
+    // Build map of date -> 7 periods (array of 7 slots)
+    const dayMap: Record<string, any[]> = {};
+
+    result.rows.forEach((row: any) => {
+      const dateStr = typeof row.session_date === 'string' 
+        ? row.session_date.split('T')[0] 
+        : new Date(row.session_date).toISOString().split('T')[0];
+
+      if (!dayMap[dateStr]) {
+        dayMap[dateStr] = [null, null, null, null, null, null, null]; // 7 periods (1-indexed mapping to 0-6)
+      }
+
+      const startIdx = Math.max(0, Math.min(6, parseInt(row.period_start) - 1));
+      const count = Math.min(parseInt(row.num_periods) || 1, 7 - startIdx);
+
+      for (let p = 0; p < count; p++) {
+        const slotIdx = startIdx + p;
+        if (slotIdx < 7) {
+          dayMap[dateStr][slotIdx] = {
+            is_present: row.is_present,
+            subject_name: row.subject_name,
+            subject_type: row.subject_type,
+            period: slotIdx + 1,
+          };
+        }
+      }
+    });
+
+    const days = Object.keys(dayMap).sort().reverse().map(date => ({
+      date,
+      periods: dayMap[date],
+    }));
+
+    res.json({
+      rollNumber,
+      fromDate,
+      toDate,
+      days,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 13. Subject Attendance Summary (Per-Student Attendance Table for Faculty/HOD/Admin)
+app.get('/attendance/subject/:allotmentId/summary', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const { allotmentId } = req.params;
+
+    const allotRes = await db.query('SELECT * FROM subject_allotments WHERE id = $1', [allotmentId]);
+    if (allotRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Subject allotment not found' });
+    }
+    const allotment = allotRes.rows[0];
+
+    // Total periods held for this subject
+    const heldRes = await db.query(
+      'SELECT COALESCE(SUM(num_periods), 0) as total_held, COUNT(*) as sessions_count FROM attendance_sessions WHERE allotment_id = $1',
+      [allotmentId]
+    );
+    const totalHeld = parseInt(heldRes.rows[0]?.total_held || '0');
+    const sessionsCount = parseInt(heldRes.rows[0]?.sessions_count || '0');
+
+    // Per-student attendance
+    const studentsRes = await db.query(
+      `SELECT 
+        r.roll_number,
+        COALESCE(st.name, r.roll_number) AS student_name,
+        COALESCE(st.section, allotment.section) AS section,
+        COALESCE(SUM(CASE WHEN ar.is_present = true THEN s.num_periods ELSE 0 END), 0) AS periods_attended
+       FROM subject_rosters r
+       CROSS JOIN (SELECT $1::uuid AS id, $2::text AS section) allotment
+       LEFT JOIN students st ON st.roll_number = r.roll_number
+       LEFT JOIN attendance_sessions s ON s.allotment_id = $1
+       LEFT JOIN attendance_records ar ON ar.session_id = s.id AND ar.roll_number = r.roll_number
+       WHERE r.allotment_id = $1
+       GROUP BY r.roll_number, st.name, st.section, allotment.section
+       ORDER BY r.roll_number`,
+      [allotmentId, allotment.section]
+    );
+
+    const students = studentsRes.rows.map((row: any) => {
+      const attended = parseInt(row.periods_attended || '0');
+      const pct = totalHeld > 0 ? Math.round((attended / totalHeld) * 1000) / 10 : 100;
+      return {
+        roll_number: row.roll_number,
+        student_name: row.student_name,
+        section: row.section,
+        periods_attended: attended,
+        periods_held: totalHeld,
+        percentage: pct,
+      };
+    });
+
+    res.json({
+      allotment,
+      total_periods_held: totalHeld,
+      sessions_count: sessionsCount,
+      total_students: students.length,
+      students,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Catch-all SPA route fallback for client-side React routes
 app.get('*', (_req: Request, res: Response) => {
   return sendIndexHtml(res);

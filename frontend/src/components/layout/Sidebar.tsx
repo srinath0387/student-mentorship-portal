@@ -14,6 +14,8 @@ import {
   PieChart,
   Building2,
   UserCheck,
+  CalendarCheck,
+  ClipboardCheck,
   LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -69,6 +71,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
       title: 'STUDENT PROFILE',
       items: [
         { label: 'My 360° Profile', path: '/profile?tab=personal-info', icon: User },
+        { label: 'My Attendance', path: '/profile?tab=attendance', icon: CalendarCheck },
         { label: 'My Mentor', path: '/mentor', icon: UserCheck },
         { label: 'Certificates', path: '/profile?tab=certifications', icon: CheckCircle2 },
         { label: 'Resume Builder', path: '/resume-builder', icon: FileText, soon: true },
@@ -81,6 +84,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
       title: 'FACULTY PORTAL',
       items: [
         { label: 'Faculty Dashboard', path: '/faculty/dashboard', icon: LayoutDashboard },
+        { label: 'Take Attendance', path: '/attendance', icon: ClipboardCheck },
+        { label: 'Attendance Records', path: '/faculty/dashboard?tab=attendance', icon: CalendarCheck },
         { label: 'My Faculty Profile', path: '/faculty/dashboard?tab=profile', icon: User },
         { label: 'Mentee Directory', path: '/faculty/dashboard?tab=mentees', icon: Users },
         { label: 'Dept CGPA Analytics', path: '/faculty/dashboard?tab=analytics', icon: FileBarChart },
@@ -93,6 +98,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
       title: 'ADMINISTRATION',
       items: [
         { label: 'Admin Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
+        { label: 'Attendance Mgmt', path: '/admin/dashboard?tab=attendance', icon: CalendarCheck },
         { label: 'Student Directory', path: '/admin/dashboard?tab=students', icon: Users },
         { label: 'CGPA & Top Performers', path: '/admin/dashboard?tab=performance', icon: Award },
         { label: 'Faculty & Mentors', path: '/admin/dashboard?tab=faculty', icon: ShieldCheck },
@@ -107,6 +113,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
       title: 'HOD PORTAL',
       items: [
         { label: 'Department Overview', path: '/hod/dashboard?tab=overview', icon: Building2 },
+        { label: 'Attendance Tracker', path: '/hod/dashboard?tab=attendance', icon: CalendarCheck },
         { label: 'Student Directory', path: '/hod/dashboard?tab=students', icon: Users },
         { label: 'CGPA & Rankings', path: '/hod/dashboard?tab=rankings', icon: Award },
         { label: 'Faculty Directory & 360°', path: '/admin/faculty', icon: ShieldCheck },
@@ -121,6 +128,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
       title: 'WARD OVERVIEW',
       items: [
         { label: 'Ward Dashboard', path: '/dashboard', icon: LayoutDashboard },
+        { label: 'Ward Attendance', path: '/profile?tab=attendance', icon: CalendarCheck },
         { label: 'Academics & CGPA', path: '/profile?tab=academics', icon: PieChart },
         { label: 'Coding & Platforms', path: '/profile?tab=coding-profiles', icon: BarChart2 },
         { label: 'Assigned Mentor', path: '/mentor', icon: UserCheck },

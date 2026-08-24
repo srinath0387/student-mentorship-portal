@@ -41,6 +41,7 @@ import { BulkImportModal } from '../admin/components/BulkImportModal';
 import { PlacementEligibilitySection } from '../hod/components/PlacementEligibilitySection';
 import { FacultyProfileTab } from './tabs/FacultyProfileTab';
 import { calculateFacultyProfileCompletion } from '../../lib/facultyUtils';
+import { AttendanceTrackingTab } from '../attendance/AttendanceTrackingTab';
 
 // Helper: compute academic standing from CGPA
 const getStanding = (cgpa: number | string | undefined | null) => {
@@ -263,6 +264,16 @@ export const FacultyDashboardPage: React.FC = () => {
               <span>Assigned Mentee Directory ({mentees.length})</span>
             </button>
             <button
+              onClick={() => setSearchParams({ tab: 'attendance' })}
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold border-b-2 whitespace-nowrap transition-all rounded-t-lg ${
+                activeTab === 'attendance'
+                  ? 'border-brand-primary text-brand-primary bg-brand-soft'
+                  : 'border-transparent text-textSecondary hover:text-textPrimary hover:bg-surface-2'
+              }`}
+            >
+              <span>📋 Attendance Records</span>
+            </button>
+            <button
               onClick={() => setSearchParams({ tab: 'profile' })}
               className={`flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold border-b-2 whitespace-nowrap transition-all rounded-t-lg ${
                 activeTab === 'profile'
@@ -305,6 +316,13 @@ export const FacultyDashboardPage: React.FC = () => {
           </nav>
         </div>
       </div>
+
+      {/* Tab: Attendance Records & Tracking */}
+      {activeTab === 'attendance' && (
+        <div className="space-y-6">
+          <AttendanceTrackingTab role="faculty" />
+        </div>
+      )}
 
       {/* Tab 1: Assigned Mentee Directory */}
       {activeTab === 'mentees' && (
