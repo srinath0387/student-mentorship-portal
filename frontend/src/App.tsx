@@ -3,6 +3,7 @@ import { HashRouter as Router, Routes, Route, Navigate, Outlet, useLocation } fr
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthPage } from './features/auth/AuthPage';
+import { LandingPage } from './features/auth/LandingPage';
 import { Sidebar } from './components/layout/Sidebar';
 import { TopBar } from './components/layout/TopBar';
 import { DashboardSkeleton } from './components/layout/DashboardSkeleton';
@@ -65,6 +66,14 @@ const RoleDashboardRedirect: React.FC = () => {
     return <Navigate to="/hod/dashboard" replace />;
   }
   return <DashboardPage />;
+};
+
+const RootRedirect: React.FC = () => {
+  const { isAuthenticated } = useAuth();
+  if (isAuthenticated) {
+    return <RoleDashboardRedirect />;
+  }
+  return <LandingPage />;
 };
 
 const MainLayout: React.FC = () => {
@@ -141,6 +150,8 @@ export const App: React.FC = () => {
         <CacheClearer />
         <Router>
           <Routes>
+            <Route path="/" element={<RootRedirect />} />
+            <Route path="/landing" element={<LandingPage />} />
             <Route path="/login" element={<AuthPage />} />
             <Route path="/login/:role" element={<AuthPage />} />
             <Route path="/student-login" element={<AuthPage />} />

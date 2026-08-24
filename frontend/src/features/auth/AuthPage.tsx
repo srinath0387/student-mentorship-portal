@@ -132,11 +132,7 @@ export const AuthPage: React.FC = () => {
   });
 
   const handleGoBack = () => {
-    if (window.history.length > 1) {
-      navigate(-1);
-    } else {
-      window.location.href = '/';
-    }
+    navigate('/');
   };
 
   const handleToggleSignUp = (signUp: boolean) => {
