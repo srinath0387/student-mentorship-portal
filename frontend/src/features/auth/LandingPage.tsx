@@ -200,11 +200,11 @@ export const LandingPage: React.FC = () => {
 
       {/* ── Top Header Brand ── */}
       <div className="z-10 relative pt-6 sm:pt-10 pb-3 px-4 sm:px-6 lg:px-8 text-center max-w-5xl mx-auto shrink-0">
-        <div className="inline-flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-[#031B33] p-1.5 shadow-xl shadow-brand-primary/20 mb-2.5 ring-1 ring-white/15 overflow-hidden">
+        <div className="inline-flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-white/95 p-1.5 shadow-2xl shadow-cyan-500/20 mb-3 ring-2 ring-white/20 backdrop-blur-md overflow-hidden hover:scale-105 transition-transform duration-300">
           <img
-            src="/ds-logo.jpeg"
-            alt="Data Science Logo"
-            className="w-full h-full object-contain"
+            src="/rgmcet-crest.png"
+            alt="RGM Official Institutional Crest"
+            className="w-full h-full object-contain filter drop-shadow-md"
           />
         </div>
 
@@ -214,12 +214,8 @@ export const LandingPage: React.FC = () => {
           <span className="text-white font-medium drop-shadow-sm tracking-widest inline-block font-sans">FLOW</span>
         </h1>
 
-        <p className="mt-1.5 text-xs sm:text-sm text-slate-300 font-medium max-w-2xl mx-auto">
-          Department of Computer Science & Engineering (Data Science) • RGMCET
-        </p>
-
-        <p className="mt-3 text-xs sm:text-sm text-slate-300/90 font-medium max-w-3xl mx-auto leading-relaxed px-4">
-          A digital initiative by the institute facilitating Faculty, Staff, Students, Parents and Alumni to access and process Academics, Research, Supporting services at one common platform.
+        <p className="mt-3 text-xs sm:text-sm text-slate-200/90 font-medium max-w-3xl mx-auto leading-relaxed px-4">
+          A digital initiative by the institute facilitating Faculty, Staff, Students and Parents to access and process Academics, Research, Supporting services at one common platform.
         </p>
       </div>
 

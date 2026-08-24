@@ -682,6 +682,13 @@ export const AuthPage: React.FC = () => {
 
       <div className="flex-1 flex flex-col justify-center py-2 sm:py-3 px-4 sm:px-6 lg:px-8 z-10 min-h-0 overflow-y-auto relative">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center shrink-0 mb-1 sm:mb-2">
+        <div className="inline-flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-white/95 p-1 shadow-lg shadow-cyan-500/20 mb-2 ring-1 ring-white/20 overflow-hidden">
+          <img
+            src="/rgmcet-crest.png"
+            alt="RGM Official Institutional Crest"
+            className="w-full h-full object-contain filter drop-shadow-sm"
+          />
+        </div>
         <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white drop-shadow-sm">
           {activeTab === 'hod'
             ? 'HOD Login'
