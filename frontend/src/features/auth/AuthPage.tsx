@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useNavigate, useSearchParams, useLocation, useParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation, useParams, Navigate } from 'react-router-dom';
 import { ShieldCheck, UserCheck, Lock, CheckCircle2, XCircle, Loader2, Sparkles, Eye, EyeOff, ArrowLeft } from 'lucide-react';
 import { studentSignUpSchema, facultySignUpSchema, loginSchema, adminLoginSchema, TIER1_SUPER_ADMIN_EMAILS, StudentSignUpInput, FacultySignUpInput, LoginInput, DEPARTMENT_CODE_MAP, VALID_DEPARTMENT_NAMES, getDeptCodeFromRollNumber, getDeptFromRollNumber } from '../../lib/validation/auth';
 import { api } from '../../lib/api';
@@ -22,7 +22,7 @@ export const AuthPage: React.FC = () => {
   const navigate = useNavigate();
 
   // Determine active role strictly from search query (?role=faculty), route param (/login/:role), path, or window.location
-  const getInitialRole = (): UserRole => {
+  const getInitialRole = (): UserRole | null => {
     // 1. React Router searchParams (?role=...)
     const queryRole = searchParams.get('role')?.toLowerCase().trim();
     if (queryRole && ['student', 'parent', 'faculty', 'hod', 'admin'].includes(queryRole)) {
@@ -37,11 +37,11 @@ export const AuthPage: React.FC = () => {
 
     // 3. Pathname checks (/faculty-login, /admin-login, /student-login, /hod-login, /parent-login)
     const path = location.pathname.toLowerCase();
-    if (path.includes('faculty')) return 'faculty';
-    if (path.includes('hod')) return 'hod';
-    if (path.includes('admin')) return 'admin';
-    if (path.includes('parent')) return 'parent';
-    if (path.includes('student')) return 'student';
+    if (path.includes('faculty-login')) return 'faculty';
+    if (path.includes('hod-login')) return 'hod';
+    if (path.includes('admin-login')) return 'admin';
+    if (path.includes('parent-login')) return 'parent';
+    if (path.includes('student-login')) return 'student';
 
     // 4. Fallback from window.location (handles both query strings and hash query strings)
     try {
@@ -60,10 +60,15 @@ export const AuthPage: React.FC = () => {
       }
     } catch (_) {}
 
-    return 'student';
+    return null;
   };
 
-  const activeTab: UserRole = getInitialRole();
+  const activeTab = getInitialRole();
+
+  // If accessed directly without an explicit role parameter, redirect back to the Landing Page
+  if (!activeTab) {
+    return <Navigate to="/" replace />;
+  }
   const [isSignUp, setIsSignUp] = useState(false);
   const [loginDept, setLoginDept] = useState<string>('CSE (Data Science)');
   const [regNoStatus, setRegNoStatus] = useState<{ loading: boolean; available?: boolean; message?: string }>({ loading: false });

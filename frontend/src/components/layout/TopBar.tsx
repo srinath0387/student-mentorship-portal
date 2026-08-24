@@ -124,7 +124,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
   const handleLogout = () => {
     logout();
     setIsProfileOpen(false);
-    navigate('/auth');
+    navigate('/');
   };
 
   const searchInputRef = useRef<HTMLInputElement>(null);
