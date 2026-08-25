@@ -934,15 +934,6 @@ export const AuthPage: React.FC = () => {
           {activeTab === 'parent' ? (
             /* PARENT LOGIN FORM (VIEW ONLY) */
             <div className="space-y-4">
-              <div className="bg-brand-soft border border-brand-primary/20 rounded-xl p-3.5 flex items-start gap-2.5 text-xs text-brand-primary">
-                <ShieldCheck className="w-5 h-5 shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-semibold">PARENT PORTAL (VIEW ONLY)</p>
-                  <p className="mt-0.5 text-[11px] text-textSecondary">
-                    Access your ward's 360° academic performance, cumulative attendance, and mentor counseling records.
-                  </p>
-                </div>
-              </div>
 
               <form onSubmit={handleLoginSubmit(onLogin)} className="space-y-4">
                 <div>
@@ -1644,30 +1635,11 @@ export const AuthPage: React.FC = () => {
           ) : (
             /* FACULTY, HOD & ADMIN LOGIN FORMS */
             <div className="space-y-4">
-              <div className="bg-brand-soft border border-brand-primary/20 rounded-xl p-3.5 flex items-start gap-2.5 text-xs text-brand-primary">
-                <ShieldCheck className="w-5 h-5 shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-semibold">{activeTab.toUpperCase()} Portal Login</p>
-                  <p className="mt-0.5 text-[11px] text-textSecondary">
-                    {activeTab === 'faculty'
-                      ? 'Access assigned mentees, view student 360° analytics, and update mentor remarks.'
-                      : activeTab === 'hod'
-                      ? 'Official HOD Portal for Department Head.'
-                      : 'Full administrative authority to manage student directory CRUD, placement analytics & CSV export.'}
-                  </p>
-                </div>
-              </div>
 
 
               {activeTab === 'coordinator' ? (
                 /* ── COORDINATOR LOGIN ── */
                 <form onSubmit={handleAdminLoginSubmit(onLogin)} className="space-y-4">
-                  <div className="bg-pink-950/40 border border-pink-500/30 rounded-xl p-3 text-xs text-pink-300">
-                    <p className="font-bold">1st Year System Oversight</p>
-                    <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
-                      Scoped day-to-day oversight for all 1st-year (1-1 & 1-2) fresher admissions, email migrations, attendance tracking, and class incharges across all departments.
-                    </p>
-                  </div>
 
                   <div>
                     <div className="flex justify-between items-center mb-1">
