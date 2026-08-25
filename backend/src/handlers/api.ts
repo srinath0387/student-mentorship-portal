@@ -5231,9 +5231,9 @@ app.get('/attendance/timetable', requireAuth, async (req: Request, res: Response
       params.push(section.toUpperCase());
       query += ` AND section = $${params.length}`;
     }
-    if (department && department !== 'All') {
+    if (department && department !== 'All' && department !== '*') {
       params.push(`%${department}%`);
-      query += ` AND department ILIKE $${params.length}`;
+      query += ` AND (department ILIKE $${params.length} OR department = '' OR department = '*')`;
     }
     if (dayOfWeek && dayOfWeek !== 'All') {
       params.push(dayOfWeek);
@@ -5278,7 +5278,10 @@ app.post('/attendance/timetable/document/upload', requireRole('admin', 'hod'), a
     }
 
     const callerDept = req.auth?.department;
-    const targetDept = (department || callerDept || 'CSE').trim();
+    let targetDept = (department || callerDept || 'CSE').trim();
+    if (targetDept === '*' || targetDept === 'All') {
+      targetDept = 'CSE';
+    }
     const targetSec = (section || 'A').trim().toUpperCase();
     const uploadedBy = req.auth?.email || 'Admin';
 
@@ -5320,9 +5323,9 @@ app.get('/attendance/timetable/document', requireAuth, async (req: Request, res:
       params.push(section);
       query += ` AND section = $${params.length}`;
     }
-    if (department && department !== 'All') {
-      params.push(department);
-      query += ` AND (department ILIKE $${params.length} OR department = '')`;
+    if (department && department !== 'All' && department !== '*') {
+      params.push(`%${department}%`);
+      query += ` AND (department ILIKE $${params.length} OR department = '' OR department = '*')`;
     }
 
     const result = await db.query(query, params);

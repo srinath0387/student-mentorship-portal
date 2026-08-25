@@ -35,17 +35,31 @@ export const AttendanceManagementTab: React.FC = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
-  const userDept = user?.department && user.department !== 'All' ? user.department : 'CSE';
+  const validUserDept =
+    user?.department &&
+    user.department !== 'All' &&
+    user.department !== '*' &&
+    VALID_DEPARTMENT_NAMES.includes(user.department)
+      ? user.department
+      : 'CSE';
+
+  const defaultFilterDept =
+    user?.department &&
+    user.department !== 'All' &&
+    user.department !== '*' &&
+    VALID_DEPARTMENT_NAMES.includes(user.department)
+      ? user.department
+      : 'All';
 
   const [activeSubTab, setActiveSubTab] = useState<'timetable' | 'allotments' | 'rosters'>('timetable');
   const [selectedSemester, setSelectedSemester] = useState<SemesterLabel>('2-1');
-  const [selectedDepartment, setSelectedDepartment] = useState<string>(user?.department && user.department !== 'All' ? user.department : 'All');
+  const [selectedDepartment, setSelectedDepartment] = useState<string>(defaultFilterDept);
   const [selectedSection, setSelectedSection] = useState<string>('A');
   const [searchQuery, setSearchQuery] = useState('');
   const [showPdfModal, setShowPdfModal] = useState(false);
 
   // ── Timetable Upload State ──
-  const [timetableDepartment, setTimetableDepartment] = useState<string>(userDept);
+  const [timetableDepartment, setTimetableDepartment] = useState<string>(validUserDept);
   const [timetableSemester, setTimetableSemester] = useState<SemesterLabel>('2-1');
   const [timetableSection, setTimetableSection] = useState<string>('A');
   const [timetableFile, setTimetableFile] = useState<File | null>(null);
@@ -59,7 +73,7 @@ export const AttendanceManagementTab: React.FC = () => {
   const [viewingPdfDoc, setViewingPdfDoc] = useState<{ name: string; data: string } | null>(null);
 
   // ── Allotment Upload State ──
-  const [allotmentDepartment, setAllotmentDepartment] = useState<string>(user?.department && user.department !== 'All' ? user.department : 'All');
+  const [allotmentDepartment, setAllotmentDepartment] = useState<string>(defaultFilterDept);
   const [allotmentFile, setAllotmentFile] = useState<File | null>(null);
   const [parsedAllotments, setParsedAllotments] = useState<any[]>([]);
   const [allotmentUploadStatus, setAllotmentUploadStatus] = useState<{
@@ -764,10 +778,21 @@ export const AttendanceManagementTab: React.FC = () => {
                 Loading {timetableDepartment} section timetable...
               </div>
             ) : timetableEntries.length === 0 ? (
-              <div className="py-12 text-center text-textMuted bg-surface-2 rounded-xl border border-dashed border-borderLine">
-                <Calendar className="w-8 h-8 mx-auto mb-2 text-textMuted/60" />
-                <p className="text-sm font-semibold">No timetable entries saved for {timetableDepartment} — Sem {timetableSemester} (Section {timetableSection}).</p>
-                <p className="text-xs text-textSecondary mt-1">Upload an Excel timetable sheet or PDF using the form above.</p>
+              <div className="py-10 px-6 text-center text-textMuted bg-surface-2/60 rounded-xl border border-dashed border-borderLine space-y-2">
+                <Calendar className="w-8 h-8 mx-auto text-textMuted/60" />
+                <p className="text-sm font-bold text-textPrimary">
+                  No period-by-period slot entries saved for {timetableDepartment} — Sem {timetableSemester} (Section {timetableSection}).
+                </p>
+                {attachedPdfDoc ? (
+                  <p className="text-xs text-emerald-400 font-semibold flex items-center justify-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Official PDF Timetable is uploaded and available above. To generate automated period slots for daily attendance marking, upload the matching Excel (.xlsx) schedule.
+                  </p>
+                ) : (
+                  <p className="text-xs text-textSecondary">
+                    Upload an Excel timetable schedule (.xlsx) or official PDF document using the form above.
+                  </p>
+                )}
               </div>
             ) : (
               <div className="overflow-x-auto rounded-xl border border-borderLine">
