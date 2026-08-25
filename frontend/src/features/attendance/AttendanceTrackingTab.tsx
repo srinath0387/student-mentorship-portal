@@ -35,7 +35,11 @@ import {
   SubjectAttendanceSummaryResponse,
 } from '../../types';
 import { useAuth } from '../../context/AuthContext';
-import { VALID_DEPARTMENT_NAMES } from '../../lib/validation/auth';
+import {
+  VALID_DEPARTMENT_NAMES,
+  DEPARTMENT_CODE_MAP,
+  normalizeDepartmentName,
+} from '../../lib/validation/auth';
 import { AttendancePdfModal } from './AttendancePdfModal';
 
 interface AttendanceTrackingTabProps {
@@ -56,7 +60,7 @@ export const AttendanceTrackingTab: React.FC<AttendanceTrackingTabProps> = ({ ro
   // Faculty / HOD / Admin filter state
   const [selectedSemester, setSelectedSemester] = useState<SemesterLabel>('2-1');
   const [selectedDepartment, setSelectedDepartment] = useState<string>(
-    role === 'hod' ? (user?.department || 'CSE (Data Science)') : 'All'
+    role === 'hod' ? normalizeDepartmentName(user?.department) : 'All'
   );
   const [selectedAllotmentId, setSelectedAllotmentId] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');

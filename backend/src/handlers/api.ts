@@ -4566,12 +4566,12 @@ app.get('/attendance/allotments', requireRole('admin', 'hod', 'coordinator', 'fa
     if (callerRole === 'faculty') {
       params.push(callerEmail);
       query += ` AND LOWER(a.faculty_email) = LOWER($${params.length})`;
-    } else if (callerRole === 'hod' && callerDept && callerDept !== '*') {
-      params.push(`%${callerDept}%`);
-      query += ` AND a.department ILIKE $${params.length}`;
-    } else if (department && department !== 'All') {
-      params.push(`%${department}%`);
-      query += ` AND a.department ILIKE $${params.length}`;
+    } else {
+      const targetDept = (callerRole === 'hod' && callerDept && callerDept !== '*') ? callerDept : (department && department !== 'All' ? department : '');
+      if (targetDept) {
+        params.push(targetDept);
+        query += ` AND (LOWER(REPLACE(a.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($${params.length}, ' ', '')) || '%' OR LOWER(REPLACE($${params.length}, ' ', '')) ILIKE '%' || LOWER(REPLACE(a.department, ' ', '')) || '%')`;
+      }
     }
 
     query += ` ORDER BY a.semester_label, a.subject_name, a.section`;
@@ -4859,8 +4859,8 @@ app.get('/attendance/sessions', requireRole('faculty', 'hod', 'admin'), async (r
       params.push(req.auth.email.toLowerCase());
       query += ` AND LOWER(a.faculty_email) = LOWER($${params.length})`;
     } else if (req.auth?.role === 'hod' && req.auth.department && req.auth.department !== '*') {
-      params.push(`%${req.auth.department}%`);
-      query += ` AND a.department ILIKE $${params.length}`;
+      params.push(req.auth.department);
+      query += ` AND (LOWER(REPLACE(a.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($${params.length}, ' ', '')) || '%' OR LOWER(REPLACE($${params.length}, ' ', '')) ILIKE '%' || LOWER(REPLACE(a.department, ' ', '')) || '%')`;
     }
 
     if (dateFrom) {
@@ -5499,8 +5499,8 @@ app.get('/attendance/reports/year-summary', requireRole('admin', 'hod', 'faculty
     const subjParams: any[] = [semesterLabels];
 
     if (targetDept && targetDept !== 'All') {
-      subjParams.push(`%${targetDept}%`);
-      subjQuery += ` AND a.department ILIKE $${subjParams.length}`;
+      subjParams.push(targetDept);
+      subjQuery += ` AND (LOWER(REPLACE(a.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($${subjParams.length}, ' ', '')) || '%' OR LOWER(REPLACE($${subjParams.length}, ' ', '')) ILIKE '%' || LOWER(REPLACE(a.department, ' ', '')) || '%')`;
     }
     if (sectionParam && sectionParam !== 'All') {
       subjParams.push(sectionParam.toUpperCase());

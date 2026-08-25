@@ -20,6 +20,23 @@ export const DEPARTMENT_CODE_MAP: Record<string, string> = {
 
 export const VALID_DEPARTMENT_NAMES = Object.values(DEPARTMENT_CODE_MAP);
 
+/** Normalize department string variations to canonical VALID_DEPARTMENT_NAMES string */
+export function normalizeDepartmentName(dept?: string): string {
+  if (!dept || dept === 'All' || dept === '*') return dept || 'CSE';
+  const clean = dept.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (clean.includes('datascience') || clean.includes('cseds') || clean === 'ds' || clean.includes('data')) return 'CSE (Data Science)';
+  if (clean.includes('aiml') || clean.includes('aiandml') || clean.includes('machinelearning')) return 'CSE (AI & ML)';
+  if (clean.includes('cyber')) return 'CSE (Cyber Security)';
+  if (clean.includes('business') || clean === 'csebs' || clean === 'bs') return 'CSE (BS)';
+  if (clean === 'cse' || clean.includes('computerscience')) return 'CSE';
+  if (clean === 'ece' || clean.includes('electronics')) return 'ECE';
+  if (clean === 'eee' || clean.includes('electrical')) return 'EEE';
+  if (clean.includes('civil')) return 'Civil';
+  if (clean.includes('mech')) return 'Mechanical';
+  const match = VALID_DEPARTMENT_NAMES.find((d) => d.toLowerCase() === dept.toLowerCase());
+  return match || dept;
+}
+
 /** Extract the 2-character department code from a roll number (positions 6-7, 0-indexed) */
 export function getDeptCodeFromRollNumber(rollNumber: string): string {
   return rollNumber.substring(6, 8);

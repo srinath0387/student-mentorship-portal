@@ -25,7 +25,7 @@ import * as XLSX from 'xlsx';
 import { api } from '../../../lib/api';
 import { SemesterLabel, SubjectAllotment, SubjectType, TimetableEntry } from '../../../types';
 import { useAuth } from '../../../context/AuthContext';
-import { VALID_DEPARTMENT_NAMES } from '../../../lib/validation/auth';
+import { VALID_DEPARTMENT_NAMES, normalizeDepartmentName } from '../../../lib/validation/auth';
 import { AttendancePdfModal } from '../../attendance/AttendancePdfModal';
 
 const ALL_SEMESTERS: SemesterLabel[] = ['1-1', '1-2', '2-1', '2-2', '3-1', '3-2', '4-1', '4-2'];
@@ -35,20 +35,11 @@ export const AttendanceManagementTab: React.FC = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
-  const validUserDept =
-    user?.department &&
-    user.department !== 'All' &&
-    user.department !== '*' &&
-    VALID_DEPARTMENT_NAMES.includes(user.department)
-      ? user.department
-      : 'CSE';
+  const validUserDept = normalizeDepartmentName(user?.department);
 
   const defaultFilterDept =
-    user?.department &&
-    user.department !== 'All' &&
-    user.department !== '*' &&
-    VALID_DEPARTMENT_NAMES.includes(user.department)
-      ? user.department
+    user?.department && user.department !== 'All' && user.department !== '*'
+      ? normalizeDepartmentName(user.department)
       : 'All';
 
   const [activeSubTab, setActiveSubTab] = useState<'timetable' | 'allotments' | 'rosters'>('timetable');
