@@ -14,6 +14,7 @@ import {
 import * as XLSX from 'xlsx';
 import { api } from '../../lib/api';
 import { YearAttendanceReportResponse } from '../../types';
+import { VALID_DEPARTMENT_NAMES } from '../../lib/validation/auth';
 
 interface AttendancePdfModalProps {
   isOpen: boolean;
@@ -195,6 +196,20 @@ export const AttendancePdfModal: React.FC<AttendancePdfModalProps> = ({
                 {y}
               </button>
             ))}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-400">Department:</span>
+            <select
+              value={selectedDept}
+              onChange={(e) => setSelectedDept(e.target.value)}
+              className="bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1 focus:ring-1 focus:ring-cyan-500"
+            >
+              <option value="All">All Departments</option>
+              {VALID_DEPARTMENT_NAMES.map(d => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
           </div>
 
           <div className="flex items-center gap-2">

@@ -68,8 +68,26 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
       headers,
     });
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ message: response.statusText }));
-      throw new Error(errorData.message || errorData.error || 'API Request failed');
+      let errMsg = `HTTP ${response.status}: ${response.statusText || 'Request failed'}`;
+      try {
+        const text = await response.text();
+        if (text) {
+          try {
+            const parsed = JSON.parse(text);
+            errMsg = parsed.message || parsed.error || errMsg;
+          } catch {
+            errMsg = text.length > 200 ? text.substring(0, 200) + '...' : text;
+          }
+        }
+      } catch {
+        /* ignore text parse error */
+      }
+      if (response.status === 413) {
+        errMsg = 'File size is too large (exceeds server limit). Please upload a file smaller than 4.5 MB.';
+      } else if (response.status === 403) {
+        errMsg = 'Permission denied. Please ensure you are logged in as Admin or HOD.';
+      }
+      throw new Error(errMsg);
     }
     return await response.json();
   } catch (err) {

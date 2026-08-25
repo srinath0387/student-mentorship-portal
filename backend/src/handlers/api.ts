@@ -29,6 +29,7 @@ const BCRYPT_ROUNDS = 10;
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Global auth extraction — runs on every request, NEVER blocks.
 // Sets req.auth = { email, role, regNo } or null.
@@ -5277,7 +5278,7 @@ app.post('/attendance/timetable/document/upload', requireRole('admin', 'hod'), a
     }
 
     const callerDept = req.auth?.department;
-    const targetDept = department || callerDept || 'General';
+    const targetDept = (department || callerDept || 'CSE').trim();
     const targetSec = (section || 'A').trim().toUpperCase();
     const uploadedBy = req.auth?.email || 'Admin';
 
@@ -5296,7 +5297,7 @@ app.post('/attendance/timetable/document/upload', requireRole('admin', 'hod'), a
 
     res.json({
       success: true,
-      message: `Official Timetable PDF "${file_name}" uploaded successfully for Semester ${semester} (Sec ${targetSec}).`,
+      message: `Official Timetable PDF "${file_name}" uploaded successfully for ${targetDept} - Semester ${semester} (Sec ${targetSec}).`,
       document: result.rows[0],
     });
   } catch (err: any) {
@@ -5309,7 +5310,7 @@ app.get('/attendance/timetable/document', requireAuth, async (req: Request, res:
   try {
     const semester = (req.query.semester as string) || '';
     const section = ((req.query.section as string) || 'A').toUpperCase();
-    const department = (req.query.department as string) || '';
+    const department = ((req.query.department as string) || '').trim();
 
     let query = `SELECT id, semester_label, department, section, file_name, file_data, file_size, uploaded_by, created_at 
                  FROM timetable_documents WHERE semester_label = $1`;
@@ -5320,8 +5321,8 @@ app.get('/attendance/timetable/document', requireAuth, async (req: Request, res:
       query += ` AND section = $${params.length}`;
     }
     if (department && department !== 'All') {
-      params.push(`%${department}%`);
-      query += ` AND department ILIKE $${params.length}`;
+      params.push(department);
+      query += ` AND (department ILIKE $${params.length} OR department = '')`;
     }
 
     const result = await db.query(query, params);

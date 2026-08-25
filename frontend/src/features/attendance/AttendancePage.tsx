@@ -96,10 +96,11 @@ export const AttendancePage: React.FC = () => {
 
   // ── Fetch Uploaded Official Timetable PDF Document ──
   const { data: timetableDocRes } = useQuery({
-    queryKey: ['attendancePageTimetableDoc', selectedSemester, selectedSubject?.section],
+    queryKey: ['attendancePageTimetableDoc', selectedSemester, selectedSubject?.section, selectedSubject?.department],
     queryFn: () => (selectedSemester && selectedSubject ? api.getTimetableDocument({
       semester: selectedSemester,
       section: selectedSubject.section,
+      department: selectedSubject.department,
     }) : Promise.resolve({ document: null })),
     enabled: Boolean(selectedSemester && selectedSubject),
   });

@@ -35,14 +35,17 @@ export const AttendanceManagementTab: React.FC = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
+  const userDept = user?.department && user.department !== 'All' ? user.department : 'CSE';
+
   const [activeSubTab, setActiveSubTab] = useState<'timetable' | 'allotments' | 'rosters'>('timetable');
   const [selectedSemester, setSelectedSemester] = useState<SemesterLabel>('2-1');
-  const [selectedDepartment, setSelectedDepartment] = useState<string>('All');
+  const [selectedDepartment, setSelectedDepartment] = useState<string>(user?.department && user.department !== 'All' ? user.department : 'All');
   const [selectedSection, setSelectedSection] = useState<string>('A');
   const [searchQuery, setSearchQuery] = useState('');
   const [showPdfModal, setShowPdfModal] = useState(false);
 
   // ── Timetable Upload State ──
+  const [timetableDepartment, setTimetableDepartment] = useState<string>(userDept);
   const [timetableSemester, setTimetableSemester] = useState<SemesterLabel>('2-1');
   const [timetableSection, setTimetableSection] = useState<string>('A');
   const [timetableFile, setTimetableFile] = useState<File | null>(null);
@@ -56,6 +59,7 @@ export const AttendanceManagementTab: React.FC = () => {
   const [viewingPdfDoc, setViewingPdfDoc] = useState<{ name: string; data: string } | null>(null);
 
   // ── Allotment Upload State ──
+  const [allotmentDepartment, setAllotmentDepartment] = useState<string>(user?.department && user.department !== 'All' ? user.department : 'All');
   const [allotmentFile, setAllotmentFile] = useState<File | null>(null);
   const [parsedAllotments, setParsedAllotments] = useState<any[]>([]);
   const [allotmentUploadStatus, setAllotmentUploadStatus] = useState<{
@@ -66,6 +70,7 @@ export const AttendanceManagementTab: React.FC = () => {
   const [isUploadingAllotments, setIsUploadingAllotments] = useState(false);
 
   // ── Roster Upload State ──
+  const [rosterDepartment, setRosterDepartment] = useState<string>(user?.department && user.department !== 'All' ? user.department : 'All');
   const [rosterSemester, setRosterSemester] = useState<SemesterLabel>('2-1');
   const [selectedAllotmentId, setSelectedAllotmentId] = useState<string>('');
   const [rosterFile, setRosterFile] = useState<File | null>(null);
@@ -84,35 +89,35 @@ export const AttendanceManagementTab: React.FC = () => {
 
   // ── Fetch Timetable ──
   const { data: timetableEntries = [], isLoading: isLoadingTimetable } = useQuery({
-    queryKey: ['attendanceTimetable', timetableSemester, timetableSection, selectedDepartment],
+    queryKey: ['attendanceTimetable', timetableSemester, timetableSection, timetableDepartment],
     queryFn: () => api.getTimetable({
       semester: timetableSemester,
       section: timetableSection,
-      department: selectedDepartment === 'All' ? '' : selectedDepartment,
+      department: timetableDepartment,
     }),
   });
 
   // ── Fetch Uploaded Official PDF Timetable Document ──
   const { data: timetableDocRes, isLoading: isLoadingTimetableDoc } = useQuery({
-    queryKey: ['timetableDocument', timetableSemester, timetableSection, selectedDepartment],
+    queryKey: ['timetableDocument', timetableSemester, timetableSection, timetableDepartment],
     queryFn: () => api.getTimetableDocument({
       semester: timetableSemester,
       section: timetableSection,
-      department: selectedDepartment === 'All' ? '' : selectedDepartment,
+      department: timetableDepartment,
     }),
   });
   const attachedPdfDoc = timetableDocRes?.document;
 
   // ── Fetch Allotments ──
   const { data: allotments = [], isLoading: isLoadingAllotments } = useQuery({
-    queryKey: ['attendanceAllotments', selectedSemester, selectedDepartment],
-    queryFn: () => api.getAllotments(selectedSemester, selectedDepartment === 'All' ? '' : selectedDepartment),
+    queryKey: ['attendanceAllotments', selectedSemester, allotmentDepartment],
+    queryFn: () => api.getAllotments(selectedSemester, allotmentDepartment === 'All' ? '' : allotmentDepartment),
   });
 
   // ── Fetch Allotments for Roster dropdown ──
   const { data: rosterAllotments = [] } = useQuery({
-    queryKey: ['attendanceAllotmentsForRoster', rosterSemester],
-    queryFn: () => api.getAllotments(rosterSemester),
+    queryKey: ['attendanceAllotmentsForRoster', rosterSemester, rosterDepartment],
+    queryFn: () => api.getAllotments(rosterSemester, rosterDepartment === 'All' ? '' : rosterDepartment),
   });
 
   // ── Fetch Roster for Inspect Modal ──
@@ -194,21 +199,22 @@ export const AttendanceManagementTab: React.FC = () => {
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Timetable');
-    XLSX.writeFile(wb, `Timetable_Template_${timetableSemester}_Sec_${timetableSection}.xlsx`);
+    XLSX.writeFile(wb, `Timetable_Template_${timetableDepartment}_${timetableSemester}_Sec_${timetableSection}.xlsx`);
   };
 
   // ── Download Allotment Template ──
   const handleDownloadAllotmentTemplate = () => {
+    const defaultDept = allotmentDepartment === 'All' ? 'CSE' : allotmentDepartment;
     const wsData = [
       ['Faculty Name', 'Faculty Email', 'Subject Allotted', 'Section', 'Subject Type', 'Department'],
-      ['Dr. K. V. Subbaiah', 'kvsubbaiah@rgmcet.edu.in', 'Database Management Systems', 'A', 'Theory', 'CSE'],
-      ['Dr. K. V. Subbaiah', 'kvsubbaiah@rgmcet.edu.in', 'DBMS Lab', 'A', 'Lab', 'CSE'],
+      ['Dr. K. V. Subbaiah', 'kvsubbaiah@rgmcet.edu.in', 'Database Management Systems', 'A', 'Theory', defaultDept],
+      ['Dr. K. V. Subbaiah', 'kvsubbaiah@rgmcet.edu.in', 'DBMS Lab', 'A', 'Lab', defaultDept],
       ['Prof. M. Ramesh', 'mramesh@rgmcet.edu.in', 'Microprocessors & Microcontrollers', 'B', 'Theory', 'ECE'],
     ];
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Allotments');
-    XLSX.writeFile(wb, `Faculty_Subject_Allotment_Template_${selectedSemester}.xlsx`);
+    XLSX.writeFile(wb, `Faculty_Subject_Allotment_Template_${selectedSemester}_${defaultDept}.xlsx`);
   };
 
   // ── Download Roster Template ──
@@ -234,6 +240,13 @@ export const AttendanceManagementTab: React.FC = () => {
 
     // Handle PDF Upload directly
     if (file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf') {
+      if (file.size > 5 * 1024 * 1024) {
+        setTimetableUploadStatus({
+          type: 'error',
+          message: `PDF file size (${(file.size / (1024 * 1024)).toFixed(2)} MB) exceeds the 5 MB limit. Please upload a compressed PDF under 5 MB.`,
+        });
+        return;
+      }
       const reader = new FileReader();
       reader.onload = async (evt) => {
         try {
@@ -242,14 +255,14 @@ export const AttendanceManagementTab: React.FC = () => {
           const res = await api.uploadTimetableDocument({
             semester: timetableSemester,
             section: timetableSection,
-            department: selectedDepartment === 'All' ? '' : selectedDepartment,
+            department: timetableDepartment,
             file_name: file.name,
             file_data: base64Data,
             file_size: file.size,
           });
           setTimetableUploadStatus({
             type: 'success',
-            message: res.message || `Official Timetable PDF "${file.name}" uploaded successfully!`,
+            message: res.message || `Official Timetable PDF "${file.name}" uploaded successfully for ${timetableDepartment} - Sem ${timetableSemester} (Sec ${timetableSection})!`,
           });
           queryClient.invalidateQueries({ queryKey: ['timetableDocument'] });
         } catch (err: any) {
@@ -296,7 +309,7 @@ export const AttendanceManagementTab: React.FC = () => {
       const res = await api.uploadTimetable(
         timetableSemester,
         timetableSection,
-        selectedDepartment === 'All' ? '' : selectedDepartment,
+        timetableDepartment,
         parsedTimetable
       );
       setTimetableUploadStatus({
@@ -549,8 +562,25 @@ export const AttendanceManagementTab: React.FC = () => {
               </div>
             </div>
 
-            {/* Semester & Section Selectors */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {/* Department, Semester & Section Selectors */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
+                  Department
+                </label>
+                <select
+                  value={timetableDepartment}
+                  onChange={(e) => setTimetableDepartment(e.target.value)}
+                  className="w-full bg-surface-2 border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary font-medium"
+                >
+                  {VALID_DEPARTMENT_NAMES.map((dept) => (
+                    <option key={dept} value={dept}>
+                      {dept}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
                   Select Semester
@@ -579,7 +609,7 @@ export const AttendanceManagementTab: React.FC = () => {
                 <select
                   value={timetableSection}
                   onChange={(e) => setTimetableSection(e.target.value)}
-                  className="w-full bg-surface-2 border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary"
+                  className="w-full bg-surface-2 border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary font-medium"
                 >
                   {['A', 'B', 'C', 'D', 'DS', 'AIML'].map((sec) => (
                     <option key={sec} value={sec}>
@@ -615,6 +645,9 @@ export const AttendanceManagementTab: React.FC = () => {
                       <span className="text-[10px] font-mono text-textMuted bg-surface px-2 py-0.5 rounded border border-borderLine">
                         {(attachedPdfDoc.file_size / 1024).toFixed(1)} KB
                       </span>
+                      <span className="text-[10px] font-semibold text-purple-300 bg-purple-500/20 px-2 py-0.5 rounded border border-purple-500/30">
+                        {attachedPdfDoc.department || timetableDepartment}
+                      </span>
                     </p>
                     <p className="text-[11px] text-textSecondary mt-0.5 font-mono">
                       {attachedPdfDoc.file_name} • Uploaded by {attachedPdfDoc.uploaded_by} on {new Date(attachedPdfDoc.created_at).toLocaleDateString('en-GB')}
@@ -638,7 +671,7 @@ export const AttendanceManagementTab: React.FC = () => {
                   </a>
                   <button
                     onClick={async () => {
-                      if (confirm(`Remove official PDF "${attachedPdfDoc.file_name}" for ${timetableSemester} Sec ${timetableSection}?`)) {
+                      if (confirm(`Remove official PDF "${attachedPdfDoc.file_name}" for ${timetableDepartment} Sem ${timetableSemester} Sec ${timetableSection}?`)) {
                         await api.deleteTimetableDocument(attachedPdfDoc.id);
                         queryClient.invalidateQueries({ queryKey: ['timetableDocument'] });
                       }
@@ -657,7 +690,7 @@ export const AttendanceManagementTab: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-bold text-textPrimary flex items-center gap-2">
                     <FileSpreadsheet className="w-4 h-4 text-brand-primary" />
-                    Parsed {parsedTimetable.length} Timetable Slot(s) for {timetableSemester} — Section {timetableSection}
+                    Parsed {parsedTimetable.length} Timetable Slot(s) for {timetableDepartment} — Sem {timetableSemester} (Sec {timetableSection})
                   </p>
                   <button
                     onClick={handleUploadTimetable}
@@ -717,7 +750,7 @@ export const AttendanceManagementTab: React.FC = () => {
               <div>
                 <h3 className="text-base font-bold text-textPrimary flex items-center gap-2">
                   <CalendarDays className="w-4 h-4 text-cyan-400" />
-                  Weekly Timetable Matrix — {timetableSemester} (Section {timetableSection})
+                  Weekly Timetable Matrix — {timetableDepartment} • Semester {timetableSemester} (Section {timetableSection})
                 </h3>
                 <p className="text-xs text-textSecondary mt-0.5">
                   7 Class periods per day. Multi-period sessions occupy continuous blocks.
@@ -728,13 +761,13 @@ export const AttendanceManagementTab: React.FC = () => {
             {isLoadingTimetable ? (
               <div className="py-12 text-center text-textMuted">
                 <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-brand-primary" />
-                Loading section timetable...
+                Loading {timetableDepartment} section timetable...
               </div>
             ) : timetableEntries.length === 0 ? (
               <div className="py-12 text-center text-textMuted bg-surface-2 rounded-xl border border-dashed border-borderLine">
                 <Calendar className="w-8 h-8 mx-auto mb-2 text-textMuted/60" />
-                <p className="text-sm font-semibold">No timetable entries saved for {timetableSemester} (Section {timetableSection}).</p>
-                <p className="text-xs text-textSecondary mt-1">Upload an Excel timetable sheet using the form above.</p>
+                <p className="text-sm font-semibold">No timetable entries saved for {timetableDepartment} — Sem {timetableSemester} (Section {timetableSection}).</p>
+                <p className="text-xs text-textSecondary mt-1">Upload an Excel timetable sheet or PDF using the form above.</p>
               </div>
             ) : (
               <div className="overflow-x-auto rounded-xl border border-borderLine">
@@ -853,8 +886,26 @@ export const AttendanceManagementTab: React.FC = () => {
               </div>
             </div>
 
-            {/* Semester Filter Selector */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Department & Semester Filter Selector */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
+                  Department
+                </label>
+                <select
+                  value={allotmentDepartment}
+                  onChange={(e) => setAllotmentDepartment(e.target.value)}
+                  className="w-full bg-surface-2 border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary font-medium"
+                >
+                  <option value="All">All Departments</option>
+                  {VALID_DEPARTMENT_NAMES.map((dept) => (
+                    <option key={dept} value={dept}>
+                      {dept}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
                   Select Semester
@@ -1080,11 +1131,32 @@ export const AttendanceManagementTab: React.FC = () => {
               </button>
             </div>
 
-            {/* Select Semester & Allotment */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {/* Department, Semester & Allotment Selectors */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div>
                 <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
-                  1. Filter Semester
+                  1. Filter Department
+                </label>
+                <select
+                  value={rosterDepartment}
+                  onChange={(e) => {
+                    setRosterDepartment(e.target.value);
+                    setSelectedAllotmentId('');
+                  }}
+                  className="w-full bg-surface-2 border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary font-medium"
+                >
+                  <option value="All">All Departments</option>
+                  {VALID_DEPARTMENT_NAMES.map((dept) => (
+                    <option key={dept} value={dept}>
+                      {dept}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
+                  2. Filter Semester
                 </label>
                 <select
                   value={rosterSemester}
@@ -1092,7 +1164,7 @@ export const AttendanceManagementTab: React.FC = () => {
                     setRosterSemester(e.target.value as SemesterLabel);
                     setSelectedAllotmentId('');
                   }}
-                  className="w-full bg-surface-2 border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary"
+                  className="w-full bg-surface-2 border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary font-medium"
                 >
                   {ALL_SEMESTERS.map((sem) => (
                     <option key={sem} value={sem}>
@@ -1104,17 +1176,17 @@ export const AttendanceManagementTab: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
-                  2. Select Subject & Faculty
+                  3. Select Subject & Faculty
                 </label>
                 <select
                   value={selectedAllotmentId}
                   onChange={(e) => setSelectedAllotmentId(e.target.value)}
-                  className="w-full bg-surface-2 border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary"
+                  className="w-full bg-surface-2 border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary font-medium"
                 >
                   <option value="">-- Choose Subject Allotment --</option>
                   {rosterAllotments.map((a: SubjectAllotment) => (
                     <option key={a.id} value={a.id}>
-                      {a.subject_name} (Sec {a.section}) — {a.faculty_name}
+                      {a.subject_name} ({a.department} Sec {a.section}) — {a.faculty_name}
                     </option>
                   ))}
                 </select>
@@ -1122,7 +1194,7 @@ export const AttendanceManagementTab: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
-                  3. Upload Student Roster (.xlsx)
+                  4. Upload Student Roster (.xlsx)
                 </label>
                 <input
                   type="file"
