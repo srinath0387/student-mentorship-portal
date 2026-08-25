@@ -185,7 +185,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
             ].join(' ')}
           >
             <p className="text-sm font-extrabold tracking-tight text-textPrimary whitespace-nowrap">
-              RGM <span className="text-brand-primary font-black">EDU</span><span className="text-textPrimary font-semibold tracking-wide">FLOW</span>
+              RGM <span className="text-brand-primary font-black">EDU</span><span className="text-textPrimary font-semibold tracking-wide" style={{ fontFamily: "'Kalam', cursive" }}>FLOW</span>
             </p>
             <p className="text-[9px] font-semibold text-textMuted uppercase tracking-widest whitespace-nowrap -mt-0.5">
               Institutional Platform
