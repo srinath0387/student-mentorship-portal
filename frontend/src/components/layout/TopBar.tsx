@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { PanelLeft, Bell, Search, User, LogOut, ChevronDown, X, Code2, Sun, Moon } from 'lucide-react';
+import { PanelLeft, Bell, Search, User, LogOut, ChevronDown, X, Code2, Sun, Moon, CalendarCheck, Users, UserCheck } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
@@ -301,20 +301,75 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
               </div>
 
               <div className="p-2 space-y-0.5">
-                <button
-                  onClick={() => { setIsProfileOpen(false); navigate('/profile'); }}
-                  className="w-full px-3 py-2.5 rounded-xl text-xs font-semibold text-textPrimary hover:bg-surface-2 flex items-center gap-2.5 transition-colors"
-                >
-                  <User className="w-3.5 h-3.5 text-brand-primary" />
-                  <span>My Profile & Demographics</span>
-                </button>
-                <button
-                  onClick={() => { setIsProfileOpen(false); navigate('/coding'); }}
-                  className="w-full px-3 py-2.5 rounded-xl text-xs font-semibold text-textPrimary hover:bg-surface-2 flex items-center gap-2.5 transition-colors"
-                >
-                  <Code2 className="w-3.5 h-3.5 text-brand-primary" />
-                  <span>Coding Profiles & Stats</span>
-                </button>
+                {user?.role === 'hod' ? (
+                  <>
+                    <button
+                      onClick={() => { setIsProfileOpen(false); navigate('/hod/dashboard'); }}
+                      className="w-full px-3 py-2.5 rounded-xl text-xs font-semibold text-textPrimary hover:bg-surface-2 flex items-center gap-2.5 transition-colors"
+                    >
+                      <User className="w-3.5 h-3.5 text-brand-primary" />
+                      <span>HOD Executive Dashboard</span>
+                    </button>
+                    <button
+                      onClick={() => { setIsProfileOpen(false); navigate('/hod/dashboard?tab=attendance'); }}
+                      className="w-full px-3 py-2.5 rounded-xl text-xs font-semibold text-textPrimary hover:bg-surface-2 flex items-center gap-2.5 transition-colors"
+                    >
+                      <CalendarCheck className="w-3.5 h-3.5 text-brand-primary" />
+                      <span>Attendance Tracker</span>
+                    </button>
+                  </>
+                ) : user?.role === 'admin' ? (
+                  <>
+                    <button
+                      onClick={() => { setIsProfileOpen(false); navigate('/admin/dashboard'); }}
+                      className="w-full px-3 py-2.5 rounded-xl text-xs font-semibold text-textPrimary hover:bg-surface-2 flex items-center gap-2.5 transition-colors"
+                    >
+                      <User className="w-3.5 h-3.5 text-brand-primary" />
+                      <span>Admin Dashboard</span>
+                    </button>
+                    <button
+                      onClick={() => { setIsProfileOpen(false); navigate('/admin/faculty'); }}
+                      className="w-full px-3 py-2.5 rounded-xl text-xs font-semibold text-textPrimary hover:bg-surface-2 flex items-center gap-2.5 transition-colors"
+                    >
+                      <Users className="w-3.5 h-3.5 text-brand-primary" />
+                      <span>Faculty Management</span>
+                    </button>
+                  </>
+                ) : user?.role === 'faculty' ? (
+                  <>
+                    <button
+                      onClick={() => { setIsProfileOpen(false); navigate('/faculty/dashboard'); }}
+                      className="w-full px-3 py-2.5 rounded-xl text-xs font-semibold text-textPrimary hover:bg-surface-2 flex items-center gap-2.5 transition-colors"
+                    >
+                      <User className="w-3.5 h-3.5 text-brand-primary" />
+                      <span>Faculty Dashboard</span>
+                    </button>
+                    <button
+                      onClick={() => { setIsProfileOpen(false); navigate('/faculty/dashboard?tab=profile'); }}
+                      className="w-full px-3 py-2.5 rounded-xl text-xs font-semibold text-textPrimary hover:bg-surface-2 flex items-center gap-2.5 transition-colors"
+                    >
+                      <UserCheck className="w-3.5 h-3.5 text-brand-primary" />
+                      <span>My Faculty Profile</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => { setIsProfileOpen(false); navigate('/profile'); }}
+                      className="w-full px-3 py-2.5 rounded-xl text-xs font-semibold text-textPrimary hover:bg-surface-2 flex items-center gap-2.5 transition-colors"
+                    >
+                      <User className="w-3.5 h-3.5 text-brand-primary" />
+                      <span>My Profile & Demographics</span>
+                    </button>
+                    <button
+                      onClick={() => { setIsProfileOpen(false); navigate('/profile?tab=coding-profiles'); }}
+                      className="w-full px-3 py-2.5 rounded-xl text-xs font-semibold text-textPrimary hover:bg-surface-2 flex items-center gap-2.5 transition-colors"
+                    >
+                      <Code2 className="w-3.5 h-3.5 text-brand-primary" />
+                      <span>Coding Profiles & Stats</span>
+                    </button>
+                  </>
+                )}
               </div>
 
               <div className="p-2 border-t border-borderLine">

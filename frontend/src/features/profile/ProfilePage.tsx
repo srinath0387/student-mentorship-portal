@@ -1,5 +1,5 @@
 import React from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Navigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   User,
@@ -31,8 +31,20 @@ export const ProfilePage: React.FC = () => {
   const { user } = useAuth();
 
   // ?id=ROLLNO means admin/HOD is viewing a specific student's profile from search.
-  // Fall back to the logged-in user's own roll number for students on their own profile.
   const viewId = searchParams.get('id') || '';
+
+  // Guard: If logged-in user is HOD, Admin, or Faculty and is NOT inspecting a student via ?id=,
+  // redirect them to their respective executive dashboard instead of showing a blank/student profile.
+  if (!viewId && user && (user.role === 'hod' || user.role === 'admin' || user.role === 'faculty')) {
+    const redirectTarget = user.role === 'hod'
+      ? '/hod/dashboard'
+      : user.role === 'admin'
+      ? '/admin/dashboard'
+      : '/faculty/dashboard';
+    return <Navigate to={redirectTarget} replace />;
+  }
+
+  // Fall back to the logged-in user's own roll number for students on their own profile.
   const activeRollNo = viewId || user?.rollNumber || '';
   const isViewingOther = Boolean(viewId && viewId !== user?.rollNumber);
   const isReadOnly = isViewingOther || user?.role === 'parent';
