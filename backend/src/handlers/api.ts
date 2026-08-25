@@ -28,7 +28,7 @@ const BCRYPT_ROUNDS = 10;
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
 // Global auth extraction — runs on every request, NEVER blocks.
 // Sets req.auth = { email, role, regNo } or null.
