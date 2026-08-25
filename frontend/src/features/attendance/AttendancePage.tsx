@@ -17,12 +17,17 @@ import {
   LayoutDashboard,
   AlertCircle,
   Sparkles,
+  Zap,
+  FileText,
+  Download
 } from 'lucide-react';
 import { api } from '../../lib/api';
-import { SemesterLabel, SubjectAllotment, SubjectRosterEntry } from '../../types';
+import { SemesterLabel, SubjectAllotment, SubjectRosterEntry, TimetableEntry } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 
-const SEMESTERS: { label: SemesterLabel; desc: string }[] = [
+const ALL_SEMESTERS: { label: SemesterLabel; desc: string }[] = [
+  { label: '1-1', desc: '1st Year — Sem 1' },
+  { label: '1-2', desc: '1st Year — Sem 2' },
   { label: '2-1', desc: '2nd Year — Sem 1' },
   { label: '2-2', desc: '2nd Year — Sem 2' },
   { label: '3-1', desc: '3rd Year — Sem 1' },
@@ -50,7 +55,13 @@ export const AttendancePage: React.FC = () => {
   const [numPeriods, setNumPeriods] = useState<number>(1);
 
   // Step 4: Roster & Marking
-  const [studentRecords, setStudentRecords] = useState<{ roll_number: string; student_name?: string; is_present: boolean }[]>([]);
+  const [studentRecords, setStudentRecords] = useState<{
+    roll_number: string;
+    student_name?: string;
+    joining_date?: string;
+    is_present: boolean;
+    is_exempt?: boolean;
+  }[]>([]);
   const [searchFilter, setSearchFilter] = useState('');
 
   // Step 5: Save confirmation result
@@ -62,12 +73,37 @@ export const AttendancePage: React.FC = () => {
     numPeriods: number;
   } | null>(null);
 
+  const [viewingPdfDoc, setViewingPdfDoc] = useState<{ name: string; data: string } | null>(null);
+
   // ── Fetch Faculty Allotted Subjects for selected semester ──
   const { data: mySubjects = [], isLoading: isLoadingSubjects } = useQuery({
     queryKey: ['myAttendanceSubjects', selectedSemester],
     queryFn: () => (selectedSemester ? api.getMyAttendanceSubjects(selectedSemester) : Promise.resolve([])),
     enabled: Boolean(selectedSemester),
   });
+
+  // ── Fetch Today's Timetable Slots for auto-detection ──
+  const { data: todaySlotsData } = useQuery({
+    queryKey: ['todayTimetableSlots', selectedSemester, selectedSubject?.section, sessionDate, user?.email],
+    queryFn: () => (selectedSemester && selectedSubject ? api.getTodayTimetableSlots({
+      semester: selectedSemester,
+      section: selectedSubject.section,
+      date: sessionDate,
+      faculty_email: user?.email,
+    }) : Promise.resolve({ slots: [] })),
+    enabled: Boolean(selectedSemester && selectedSubject),
+  });
+
+  // ── Fetch Uploaded Official Timetable PDF Document ──
+  const { data: timetableDocRes } = useQuery({
+    queryKey: ['attendancePageTimetableDoc', selectedSemester, selectedSubject?.section],
+    queryFn: () => (selectedSemester && selectedSubject ? api.getTimetableDocument({
+      semester: selectedSemester,
+      section: selectedSubject.section,
+    }) : Promise.resolve({ document: null })),
+    enabled: Boolean(selectedSemester && selectedSubject),
+  });
+  const attachedPdfDoc = timetableDocRes?.document;
 
   // ── Fetch Roster for selected subject ──
   const { data: roster = [], isLoading: isLoadingRoster } = useQuery({
@@ -76,39 +112,71 @@ export const AttendancePage: React.FC = () => {
     enabled: Boolean(selectedSubject?.id),
   });
 
-  // Initialize student records when roster loads
+  // Initialize student records when roster loads or sessionDate changes
   useEffect(() => {
     if (roster && roster.length > 0) {
       setStudentRecords(
-        roster.map((r: SubjectRosterEntry) => ({
-          roll_number: r.roll_number,
-          student_name: r.student_name,
-          is_present: true, // Default all present as requested
-        }))
+        roster.map((r: SubjectRosterEntry) => {
+          const joinDate = r.joining_date ? new Date(r.joining_date).toISOString().split('T')[0] : '';
+          const isExempt = Boolean(joinDate && sessionDate < joinDate);
+
+          return {
+            roll_number: r.roll_number,
+            student_name: r.student_name,
+            joining_date: joinDate,
+            is_present: true, // Default present
+            is_exempt: isExempt,
+          };
+        })
       );
     }
-  }, [roster]);
+  }, [roster, sessionDate]);
 
-  // Adjust session length options based on Theory vs Lab
+  // Adjust session length defaults based on Theory vs Lab
   useEffect(() => {
     if (selectedSubject) {
       if (selectedSubject.subject_type === 'Lab') {
-        setNumPeriods(2); // Default 2 for lab
+        setNumPeriods(2);
       } else {
-        setNumPeriods(1); // Default 1 for theory
+        setNumPeriods(1);
       }
     }
   }, [selectedSubject]);
 
+  // Auto-apply timetable match if available
+  const matchedTimetableSlot = todaySlotsData?.slots?.find((s: TimetableEntry) => 
+    s.subject_name.toLowerCase().includes(selectedSubject?.subject_name.toLowerCase() || '') ||
+    (selectedSubject?.subject_name.toLowerCase().includes(s.subject_name.toLowerCase()) || '')
+  );
+
+  const applyTimetableSlot = (slot: TimetableEntry) => {
+    setPeriodStart(slot.period_start);
+    setNumPeriods(slot.num_periods);
+  };
+
+  const isFirstOrFourthYear = selectedSemester ? ['1-1', '1-2', '4-1', '4-2'].includes(selectedSemester) : false;
+
+  const getPeriodTimingLabel = (period: number) => {
+    if (isFirstOrFourthYear) {
+      const startTimes = ['', '09:00 AM', '09:50 AM', '11:00 AM', '01:00 PM', '01:50 PM', '03:00 PM', '03:50 PM'];
+      const endTimes = ['', '09:50 AM', '10:40 AM', '11:50 AM', '01:50 PM', '02:40 PM', '03:50 PM', '04:40 PM'];
+      return `${startTimes[period]} – ${endTimes[Math.min(7, period + numPeriods - 1)]}`;
+    } else {
+      const startTimes = ['', '09:00 AM', '09:50 AM', '11:00 AM', '11:50 AM', '01:50 PM', '02:40 PM', '03:30 PM'];
+      const endTimes = ['', '09:50 AM', '10:40 AM', '11:50 AM', '12:40 PM', '02:40 PM', '03:30 PM', '04:20 PM'];
+      return `${startTimes[period]} – ${endTimes[Math.min(7, period + numPeriods - 1)]}`;
+    }
+  };
+
   // ── Toggle All Present / Absent ──
   const handleToggleAll = (present: boolean) => {
-    setStudentRecords((prev) => prev.map((s) => ({ ...s, is_present: present })));
+    setStudentRecords((prev) => prev.map((s) => (s.is_exempt ? s : { ...s, is_present: present })));
   };
 
   // ── Toggle Individual Student ──
   const handleToggleStudent = (rollNumber: string) => {
     setStudentRecords((prev) =>
-      prev.map((s) => (s.roll_number === rollNumber ? { ...s, is_present: !s.is_present } : s))
+      prev.map((s) => (s.roll_number === rollNumber && !s.is_exempt ? { ...s, is_present: !s.is_present } : s))
     );
   };
 
@@ -123,7 +191,7 @@ export const AttendancePage: React.FC = () => {
         period_start: periodStart,
         records: studentRecords.map((r) => ({
           roll_number: r.roll_number,
-          is_present: r.is_present,
+          is_present: r.is_exempt ? false : r.is_present,
         })),
       });
     },
@@ -139,8 +207,8 @@ export const AttendancePage: React.FC = () => {
     },
   });
 
-  const presentCount = studentRecords.filter((s) => s.is_present).length;
-  const absentCount = studentRecords.length - presentCount;
+  const presentCount = studentRecords.filter((s) => s.is_present && !s.is_exempt).length;
+  const absentCount = studentRecords.filter((s) => !s.is_present && !s.is_exempt).length;
 
   const filteredStudents = studentRecords.filter((s) => {
     if (!searchFilter) return true;
@@ -158,68 +226,54 @@ export const AttendancePage: React.FC = () => {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-12">
-      {/* Header Banner */}
-      <div className="p-6 rounded-2xl bg-surface border border-borderLine shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-soft text-brand-primary text-xs font-semibold mb-2">
-            <ClipboardCheck className="w-3.5 h-3.5" />
-            <span>Faculty Portal</span>
+      {/* Wizard Progress Header */}
+      <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-bold text-textPrimary flex items-center gap-2.5">
+              <ClipboardCheck className="w-6 h-6 text-brand-primary" />
+              Take Attendance Wizard
+            </h1>
+            <p className="text-xs text-textSecondary mt-0.5">
+              5-Step Attendance recording for assigned faculty subjects with auto timetable matching.
+            </p>
           </div>
-          <h1 className="text-2xl font-black text-textPrimary">Take Attendance</h1>
-          <p className="text-xs text-textSecondary mt-0.5">
-            Mark hour-by-hour period attendance for your allotted subjects and sections.
-          </p>
+
+          <div className="flex items-center gap-2">
+            {currentStep > 1 && currentStep < 5 && (
+              <button
+                onClick={handleReset}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-textSecondary bg-surface-2 hover:bg-surface-3 border border-borderLine transition-all"
+              >
+                <RotateCcw className="w-3.5 h-3.5" /> Start Over
+              </button>
+            )}
+          </div>
         </div>
 
-        {currentStep > 1 && currentStep < 5 && (
-          <button
-            onClick={handleReset}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-textSecondary bg-surface-2 hover:bg-surface-3 border border-borderLine transition-all self-start sm:self-auto"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            Restart Wizard
-          </button>
-        )}
-      </div>
-
-      {/* Wizard Progress Bar */}
-      <div className="p-4 rounded-2xl bg-surface border border-borderLine shadow-xs">
-        <div className="grid grid-cols-5 gap-2">
+        {/* Step Indicators */}
+        <div className="grid grid-cols-5 gap-2 pt-2">
           {[
-            { step: 1, title: 'Semester' },
-            { step: 2, title: 'Subject' },
-            { step: 3, title: 'Session Details' },
-            { step: 4, title: 'Mark Roster' },
-            { step: 5, title: 'Complete' },
-          ].map((item) => {
-            const isCompleted = currentStep > item.step;
-            const isCurrent = currentStep === item.step;
-            return (
-              <div
-                key={item.step}
-                className={`flex flex-col items-center text-center p-2 rounded-xl transition-all ${
-                  isCurrent
-                    ? 'bg-brand-soft border border-brand-primary/40 text-brand-primary font-bold'
-                    : isCompleted
-                    ? 'text-emerald-400 font-semibold'
-                    : 'text-textMuted'
-                }`}
-              >
-                <div
-                  className={`w-6 h-6 rounded-full flex items-center justify-center text-xs mb-1 font-black ${
-                    isCurrent
-                      ? 'bg-brand-primary text-white shadow-brand'
-                      : isCompleted
-                      ? 'bg-emerald-500 text-white'
-                      : 'bg-surface-2 text-textMuted border border-borderLine'
-                  }`}
-                >
-                  {isCompleted ? '✓' : item.step}
-                </div>
-                <span className="text-[10px] sm:text-xs truncate">{item.title}</span>
-              </div>
-            );
-          })}
+            { num: 1, label: 'Semester' },
+            { num: 2, label: 'Subject' },
+            { num: 3, label: 'Session' },
+            { num: 4, label: 'Mark Roster' },
+            { num: 5, label: 'Done' },
+          ].map((s) => (
+            <div
+              key={s.num}
+              className={`p-2 rounded-xl text-center border transition-all ${
+                currentStep === s.num
+                  ? 'bg-brand-primary/10 border-brand-primary text-brand-primary font-bold shadow-xs'
+                  : currentStep > s.num
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 font-semibold'
+                  : 'bg-surface-2/40 border-borderLine text-textMuted'
+              }`}
+            >
+              <div className="text-[10px] uppercase tracking-wider font-semibold">Step {s.num}</div>
+              <div className="text-xs font-bold truncate mt-0.5">{s.label}</div>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -227,38 +281,35 @@ export const AttendancePage: React.FC = () => {
           STEP 1: SELECT SEMESTER
          ──────────────────────────────────────────────────────────────────────── */}
       {currentStep === 1 && (
-        <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-6">
+        <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-5">
           <div>
             <h2 className="text-base font-bold text-textPrimary flex items-center gap-2">
               <span className="w-6 h-6 rounded-full bg-brand-primary text-white text-xs flex items-center justify-center font-black">
                 1
               </span>
-              Select Target Semester
+              Select Semester
             </h2>
             <p className="text-xs text-textSecondary mt-1">
-              Choose the semester you wish to record class attendance for.
+              Choose the semester of the class you are currently holding.
             </p>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-            {SEMESTERS.map((s) => (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+            {ALL_SEMESTERS.map((sem) => (
               <button
-                key={s.label}
+                key={sem.label}
                 onClick={() => {
-                  setSelectedSemester(s.label);
+                  setSelectedSemester(sem.label);
                   setCurrentStep(2);
                 }}
-                className="group p-5 rounded-2xl bg-surface-2 hover:bg-surface-3 border border-borderLine hover:border-brand-primary/60 transition-all text-left flex flex-col justify-between hover:shadow-brand hover:-translate-y-0.5"
+                className="group p-4 rounded-2xl bg-surface-2 hover:bg-surface-3 border border-borderLine hover:border-brand-primary/60 transition-all text-left flex flex-col justify-between hover:shadow-brand hover:-translate-y-0.5"
               >
-                <div>
-                  <span className="text-2xl font-black text-brand-primary font-mono group-hover:scale-105 transition-transform inline-block">
-                    {s.label}
-                  </span>
-                  <p className="text-xs font-semibold text-textPrimary mt-1">{s.desc}</p>
-                </div>
-                <div className="flex items-center justify-between text-[11px] text-textMuted group-hover:text-brand-primary font-bold mt-4 pt-3 border-t border-borderLine">
-                  <span>View Subjects</span>
-                  <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                <span className="text-2xl font-black text-brand-primary group-hover:scale-105 transition-transform">
+                  {sem.label}
+                </span>
+                <div className="mt-3">
+                  <p className="text-xs font-bold text-textPrimary">{sem.desc}</p>
+                  <p className="text-[11px] text-textMuted mt-0.5">Click to view subjects →</p>
                 </div>
               </button>
             ))}
@@ -267,10 +318,10 @@ export const AttendancePage: React.FC = () => {
       )}
 
       {/* ────────────────────────────────────────────────────────────────────────
-          STEP 2: SELECT SUBJECT
+          STEP 2: SELECT ALLOTTED SUBJECT
          ──────────────────────────────────────────────────────────────────────── */}
-      {currentStep === 2 && (
-        <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-6">
+      {currentStep === 2 && selectedSemester && (
+        <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-5">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-base font-bold text-textPrimary flex items-center gap-2">
@@ -280,7 +331,7 @@ export const AttendancePage: React.FC = () => {
                 Select Your Allotted Subject — Semester {selectedSemester}
               </h2>
               <p className="text-xs text-textSecondary mt-1">
-                Only subjects officially assigned to you for Semester {selectedSemester} are shown.
+                Showing only the subjects allotted to your login ({user?.email}) for this semester.
               </p>
             </div>
             <button
@@ -294,7 +345,7 @@ export const AttendancePage: React.FC = () => {
           {isLoadingSubjects ? (
             <div className="py-12 text-center text-textMuted">
               <div className="w-8 h-8 border-3 border-brand-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-              Loading your allotted subjects...
+              Loading allotted subjects...
             </div>
           ) : mySubjects.length === 0 ? (
             <div className="p-8 rounded-xl bg-surface-2 border border-borderLine text-center space-y-3">
@@ -357,7 +408,7 @@ export const AttendancePage: React.FC = () => {
       )}
 
       {/* ────────────────────────────────────────────────────────────────────────
-          STEP 3: SESSION SETUP
+          STEP 3: SESSION SETUP WITH TIMETABLE AUTO-DETECTION
          ──────────────────────────────────────────────────────────────────────── */}
       {currentStep === 3 && selectedSubject && (
         <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-6">
@@ -367,19 +418,56 @@ export const AttendancePage: React.FC = () => {
                 <span className="w-6 h-6 rounded-full bg-brand-primary text-white text-xs flex items-center justify-center font-black">
                   3
                 </span>
-                Session Configuration — {selectedSubject.subject_name}
+                Session Configuration — {selectedSubject.subject_name} (Sec {selectedSubject.section})
               </h2>
               <p className="text-xs text-textSecondary mt-1">
-                Configure date, starting class period, and duration/session length.
+                Configure session date, starting class period, and duration/session length.
               </p>
             </div>
-            <button
-              onClick={() => setCurrentStep(2)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-textSecondary bg-surface-2 hover:bg-surface-3 border border-borderLine transition-all"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" /> Back
-            </button>
+            <div className="flex items-center gap-2">
+              {attachedPdfDoc && (
+                <button
+                  type="button"
+                  onClick={() => setViewingPdfDoc({ name: attachedPdfDoc.file_name, data: attachedPdfDoc.file_data })}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-purple-300 bg-purple-500/10 border border-purple-500/30 hover:bg-purple-500/20 transition-all"
+                >
+                  <FileText className="w-3.5 h-3.5 text-purple-400" /> View Timetable PDF
+                </button>
+              )}
+              <button
+                onClick={() => setCurrentStep(2)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-textSecondary bg-surface-2 hover:bg-surface-3 border border-borderLine transition-all"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" /> Back
+              </button>
+            </div>
           </div>
+
+          {/* Timetable Auto-Match Card */}
+          {matchedTimetableSlot && (
+            <div className="p-4 rounded-xl bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border border-cyan-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-cyan-500/20 text-cyan-400 rounded-lg">
+                  <Zap className="w-4 h-4" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-textPrimary">
+                    ⚡ Auto-Detected Timetable Schedule ({todaySlotsData?.dayOfWeek})
+                  </p>
+                  <p className="text-[11px] text-textSecondary mt-0.5">
+                    Period {matchedTimetableSlot.period_start} ({matchedTimetableSlot.timing_display}) • {matchedTimetableSlot.num_periods} Period(s) • {matchedTimetableSlot.subject_type}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => applyTimetableSlot(matchedTimetableSlot)}
+                className="px-3.5 py-1.5 rounded-lg bg-cyan-500 text-slate-950 text-xs font-bold shadow hover:bg-cyan-400 transition-all self-start sm:self-auto shrink-0"
+              >
+                Use Scheduled Slot
+              </button>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
             {/* Date Picker */}
@@ -476,13 +564,13 @@ export const AttendancePage: React.FC = () => {
 
           <div className="p-4 rounded-xl bg-surface-2 border border-borderLine flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div className="text-xs">
-              <span className="font-bold text-textPrimary">Coverage: </span>
+              <span className="font-bold text-textPrimary">Timing Window: </span>
               <span className="text-textSecondary">
-                Date: <strong className="text-brand-primary">{sessionDate}</strong> | Periods:{' '}
-                <strong className="text-brand-primary">
+                Date: <strong className="text-brand-primary font-mono">{sessionDate}</strong> | Periods:{' '}
+                <strong className="text-brand-primary font-mono">
                   {periodStart} to {Math.min(7, periodStart + numPeriods - 1)}
                 </strong>{' '}
-                ({numPeriods} Hour{numPeriods > 1 ? 's' : ''})
+                ({getPeriodTimingLabel(periodStart)})
               </span>
             </div>
             <button
@@ -509,7 +597,7 @@ export const AttendancePage: React.FC = () => {
                 Mark Roster — {selectedSubject.subject_name} (Sec {selectedSubject.section})
               </h2>
               <p className="text-xs text-textSecondary mt-0.5">
-                All students are marked Present by default. Uncheck absentees.
+                All students are marked Present by default. Uncheck absentees. Late joined students prior to their join date are exempt.
               </p>
             </div>
 
@@ -549,7 +637,7 @@ export const AttendancePage: React.FC = () => {
                 <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
                 Absent: {absentCount}
               </span>
-              <span className="text-textSecondary">Total: {studentRecords.length}</span>
+              <span className="text-textSecondary">Total Active: {studentRecords.filter(s => !s.is_exempt).length}</span>
             </div>
           </div>
 
@@ -579,6 +667,29 @@ export const AttendancePage: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 max-h-[50vh] overflow-y-auto pr-1">
               {filteredStudents.map((student) => {
                 const isPresent = student.is_present;
+                const isExempt = student.is_exempt;
+
+                if (isExempt) {
+                  return (
+                    <div
+                      key={student.roll_number}
+                      className="p-3 rounded-xl border border-borderLine bg-surface-2/40 opacity-60 flex items-center justify-between"
+                      title={`Student joined this subject on ${student.joining_date}, after the session date.`}
+                    >
+                      <div className="min-w-0 pr-2">
+                        <p className="font-mono font-bold text-xs text-textPrimary truncate">{student.roll_number}</p>
+                        {student.student_name && (
+                          <p className="text-[11px] text-textSecondary truncate">{student.student_name}</p>
+                        )}
+                        <span className="text-[9px] text-purple-400 font-semibold">Exempt (Joined {student.joining_date})</span>
+                      </div>
+                      <div className="px-2 py-1 bg-surface-3 text-[10px] text-textMuted font-bold rounded">
+                        EXEMPT
+                      </div>
+                    </div>
+                  );
+                }
+
                 return (
                   <div
                     key={student.roll_number}
@@ -593,6 +704,9 @@ export const AttendancePage: React.FC = () => {
                       <p className="font-mono font-bold text-xs text-textPrimary truncate">{student.roll_number}</p>
                       {student.student_name && (
                         <p className="text-[11px] text-textSecondary truncate">{student.student_name}</p>
+                      )}
+                      {student.joining_date && (
+                        <span className="text-[9px] text-purple-400">Joined: {student.joining_date}</span>
                       )}
                     </div>
 
@@ -680,6 +794,41 @@ export const AttendancePage: React.FC = () => {
             >
               <LayoutDashboard className="w-3.5 h-3.5" /> View Attendance Records
             </button>
+          </div>
+        </div>
+      )}
+      {/* Official Timetable Document PDF Viewer Modal */}
+      {viewingPdfDoc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
+          <div className="bg-surface border border-borderLine rounded-2xl max-w-5xl w-full h-[88vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in-50">
+            <div className="p-4 border-b border-borderLine flex items-center justify-between bg-surface-2">
+              <div className="flex items-center gap-2.5 min-w-0 pr-4">
+                <FileText className="w-4 h-4 text-purple-400 shrink-0" />
+                <h3 className="text-sm font-bold text-textPrimary font-mono truncate">{viewingPdfDoc.name}</h3>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href={viewingPdfDoc.data}
+                  download={viewingPdfDoc.name}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-3 hover:bg-surface text-textPrimary text-xs rounded-xl border border-borderLine transition-all font-semibold"
+                >
+                  <Download className="w-3.5 h-3.5" /> Download PDF
+                </a>
+                <button
+                  onClick={() => setViewingPdfDoc(null)}
+                  className="p-1.5 text-textMuted hover:text-textPrimary rounded-xl hover:bg-surface-3 transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 bg-slate-950 overflow-hidden relative">
+              <iframe
+                src={viewingPdfDoc.data}
+                title={viewingPdfDoc.name}
+                className="w-full h-full border-0"
+              />
+            </div>
           </div>
         </div>
       )}

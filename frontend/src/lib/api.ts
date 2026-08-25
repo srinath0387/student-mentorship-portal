@@ -687,5 +687,90 @@ export const api = {
   getSubjectAttendanceSummary: async (allotmentId: string) => {
     return fetchWithAuth(`/attendance/subject/${encodeURIComponent(allotmentId)}/summary`);
   },
+
+  updateStudentJoiningDate: async (rosterId: string, joiningDate: string) => {
+    return fetchWithAuth(`/attendance/rosters/${encodeURIComponent(rosterId)}/joining-date`, {
+      method: 'PUT',
+      body: JSON.stringify({ joining_date: joiningDate }),
+    });
+  },
+
+  uploadTimetable: async (semester: string, section: string, department: string, entries: any[]) => {
+    return fetchWithAuth('/attendance/timetable/upload', {
+      method: 'POST',
+      body: JSON.stringify({ semester, section, department, entries }),
+    });
+  },
+
+  getTimetable: async (params: { semester?: string; section?: string; department?: string; day?: string }) => {
+    const query = new URLSearchParams();
+    if (params.semester) query.append('semester', params.semester);
+    if (params.section) query.append('section', params.section);
+    if (params.department) query.append('department', params.department);
+    if (params.day) query.append('day', params.day);
+    const queryString = query.toString() ? `?${query.toString()}` : '';
+    return fetchWithAuth(`/attendance/timetable${queryString}`);
+  },
+
+  deleteTimetableEntry: async (id: string) => {
+    return fetchWithAuth(`/attendance/timetable/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  clearSectionTimetable: async (semester: string, section?: string, department?: string) => {
+    const query = new URLSearchParams({ semester });
+    if (section) query.append('section', section);
+    if (department) query.append('department', department);
+    return fetchWithAuth(`/attendance/timetable/clear/section?${query.toString()}`, {
+      method: 'DELETE',
+    });
+  },
+
+  getTodayTimetableSlots: async (params: { semester?: string; section?: string; date?: string; faculty_email?: string }) => {
+    const query = new URLSearchParams();
+    if (params.semester) query.append('semester', params.semester);
+    if (params.section) query.append('section', params.section);
+    if (params.date) query.append('date', params.date);
+    if (params.faculty_email) query.append('faculty_email', params.faculty_email);
+    const queryString = query.toString() ? `?${query.toString()}` : '';
+    return fetchWithAuth(`/attendance/timetable/today-slots${queryString}`);
+  },
+
+  getYearAttendanceReport: async (params: { year?: string; department?: string; section?: string }) => {
+    const query = new URLSearchParams();
+    if (params.year) query.append('year', params.year);
+    if (params.department) query.append('department', params.department);
+    if (params.section) query.append('section', params.section);
+    const queryString = query.toString() ? `?${query.toString()}` : '';
+    return fetchWithAuth(`/attendance/reports/year-summary${queryString}`);
+  },
+
+  uploadTimetableDocument: async (data: {
+    semester: string;
+    section: string;
+    department?: string;
+    file_name: string;
+    file_data: string;
+    file_size?: number;
+  }) => {
+    return fetchWithAuth('/attendance/timetable/document/upload', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  getTimetableDocument: async (params: { semester: string; section?: string; department?: string }) => {
+    const query = new URLSearchParams({ semester: params.semester });
+    if (params.section) query.append('section', params.section);
+    if (params.department) query.append('department', params.department);
+    return fetchWithAuth(`/attendance/timetable/document?${query.toString()}`);
+  },
+
+  deleteTimetableDocument: async (id: string) => {
+    return fetchWithAuth(`/attendance/timetable/document/${id}`, {
+      method: 'DELETE',
+    });
+  },
 };
 

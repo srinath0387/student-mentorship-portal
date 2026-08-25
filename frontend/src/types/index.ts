@@ -207,8 +207,25 @@ export interface FacultyFullProfile {
 }
 
 // ── Attendance Management Types ─────────────────────────────────────────────
-export type SemesterLabel = '2-1' | '2-2' | '3-1' | '3-2' | '4-1' | '4-2';
+export type SemesterLabel = '1-1' | '1-2' | '2-1' | '2-2' | '3-1' | '3-2' | '4-1' | '4-2';
 export type SubjectType = 'Theory' | 'Lab';
+
+export interface TimetableEntry {
+  id?: string;
+  semester_label: SemesterLabel;
+  department: string;
+  section: string;
+  day_of_week: string;
+  period_start: number;
+  num_periods: number;
+  subject_name: string;
+  subject_type: SubjectType;
+  faculty_email?: string;
+  faculty_name?: string;
+  room_no?: string;
+  timing_display?: string;
+  created_at?: string;
+}
 
 export interface SubjectAllotment {
   id: string;
@@ -229,6 +246,7 @@ export interface SubjectRosterEntry {
   allotment_id: string;
   roll_number: string;
   student_email: string;
+  joining_date?: string;
   student_name?: string;
   student_department?: string;
   student_section?: string;
@@ -263,6 +281,7 @@ export interface StudentSubjectAttendance {
   subject_type: SubjectType;
   semester_label: SemesterLabel;
   faculty_name: string;
+  joining_date?: string;
   periods_held: number;
   periods_attended: number;
   percentage: number;
@@ -275,6 +294,7 @@ export interface StudentAttendanceSummary {
     department?: string;
     batch?: string;
     section?: string;
+    year?: string;
   };
   overall_percentage: number;
   total_periods_held: number;
@@ -302,9 +322,11 @@ export interface StudentDaywiseAttendanceResponse {
 }
 
 export interface SubjectAttendanceStudentSummary {
+  roster_id?: string;
   roll_number: string;
   student_name: string;
   section: string;
+  joining_date?: string;
   periods_attended: number;
   periods_held: number;
   percentage: number;
@@ -316,6 +338,35 @@ export interface SubjectAttendanceSummaryResponse {
   sessions_count: number;
   total_students: number;
   students: SubjectAttendanceStudentSummary[];
+}
+
+export interface StudentYearAttendanceRecord {
+  roll_number: string;
+  name: string;
+  section: string;
+  department: string;
+  subjects: Record<string, {
+    allotment_id: string;
+    subject_name: string;
+    semester_label: string;
+    joining_date?: string;
+    periods_held: number;
+    periods_attended: number;
+    percentage: number;
+  }>;
+  total_periods_held: number;
+  total_periods_attended: number;
+  overall_percentage: number;
+}
+
+export interface YearAttendanceReportResponse {
+  year: string;
+  semesters: string[];
+  department: string;
+  section: string;
+  subjects: SubjectAllotment[];
+  students: StudentYearAttendanceRecord[];
+  generatedAt: string;
 }
 
 

@@ -20,6 +20,9 @@ import {
   ArrowUpRight,
   Eye,
   Info,
+  Printer,
+  FileText,
+  Download
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import {
@@ -33,13 +36,14 @@ import {
 } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { VALID_DEPARTMENT_NAMES } from '../../lib/validation/auth';
+import { AttendancePdfModal } from './AttendancePdfModal';
 
 interface AttendanceTrackingTabProps {
   role: UserRole;
   targetRollNumber?: string;
 }
 
-const SEMESTERS: SemesterLabel[] = ['2-1', '2-2', '3-1', '3-2', '4-1', '4-2'];
+const ALL_SEMESTERS: SemesterLabel[] = ['1-1', '1-2', '2-1', '2-2', '3-1', '3-2', '4-1', '4-2'];
 
 export const AttendanceTrackingTab: React.FC<AttendanceTrackingTabProps> = ({ role, targetRollNumber }) => {
   const { user } = useAuth();
@@ -50,12 +54,14 @@ export const AttendanceTrackingTab: React.FC<AttendanceTrackingTabProps> = ({ ro
   const studentRollNo = targetRollNumber || user?.rollNumber || '';
 
   // Faculty / HOD / Admin filter state
-  const [selectedSemester, setSelectedSemester] = useState<SemesterLabel>('3-1');
+  const [selectedSemester, setSelectedSemester] = useState<SemesterLabel>('2-1');
   const [selectedDepartment, setSelectedDepartment] = useState<string>(
     role === 'hod' ? (user?.department || 'CSE (Data Science)') : 'All'
   );
   const [selectedAllotmentId, setSelectedAllotmentId] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [showPdfModal, setShowPdfModal] = useState(false);
+  const [viewingPdfDoc, setViewingPdfDoc] = useState<{ name: string; data: string } | null>(null);
 
   // Date Range filter for Day-wise Dot Grid
   const [dateRangeOption, setDateRangeOption] = useState<'7' | '14' | '30'>('14');
@@ -109,6 +115,19 @@ export const AttendanceTrackingTab: React.FC<AttendanceTrackingTabProps> = ({ ro
     }
   }, [allotments, selectedAllotmentId]);
 
+  const selectedAllotment = allotments.find((a) => a.id === selectedAllotmentId);
+
+  // Fetch Timetable PDF Document for current semester/section
+  const { data: sectionTimetableDoc } = useQuery({
+    queryKey: ['sectionTimetableDoc', selectedSemester, selectedAllotment?.section, selectedDepartment],
+    queryFn: () => (selectedSemester ? api.getTimetableDocument({
+      semester: selectedSemester,
+      section: selectedAllotment?.section || 'A',
+      department: selectedDepartment === 'All' ? '' : selectedDepartment,
+    }) : Promise.resolve({ document: null })),
+    enabled: !isStudentOrParent,
+  });
+
   // Fetch Subject Attendance Summary (Per-Student Table)
   const { data: subjectSummary, isLoading: isLoadingSubjectSummary } = useQuery<SubjectAttendanceSummaryResponse>({
     queryKey: ['subjectAttendanceSummary', selectedAllotmentId],
@@ -149,57 +168,66 @@ export const AttendanceTrackingTab: React.FC<AttendanceTrackingTabProps> = ({ ro
   if (isStudentOrParent) {
     const overallPct = studentSummary?.overall_percentage ?? 100;
     const isGood = overallPct >= 75;
-    const isWarning = overallPct >= 65 && overallPct < 75;
+    const isWarn = overallPct >= 65 && overallPct < 75;
+    const isCritical = overallPct < 65;
 
     return (
       <div className="space-y-6">
-        {/* Header & Overall Summary Card */}
-        <div className="p-6 md:p-8 rounded-2xl bg-surface border border-borderLine shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-soft text-brand-primary text-xs font-semibold">
-              <CalendarCheck className="w-3.5 h-3.5" />
-              <span>{role === 'parent' ? "Ward's Attendance Tracker" : 'My Attendance & Period Analytics'}</span>
+        {/* Header KPI Card */}
+        <div className="p-6 rounded-2xl bg-surface border border-borderLine relative overflow-hidden shadow-sm">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
+            <div className="space-y-1.5">
+              <span className="px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider bg-brand-primary/10 text-brand-primary border border-brand-primary/20">
+                Official Attendance Record
+              </span>
+              <h2 className="text-xl font-bold text-textPrimary flex items-center gap-2 mt-2">
+                <CalendarCheck className="w-5 h-5 text-brand-primary" />
+                Student Attendance Dashboard
+              </h2>
+              <p className="text-xs text-textSecondary">
+                Roll Number: <strong className="text-textPrimary font-mono">{studentRollNo}</strong>
+                {studentSummary?.student?.name ? ` • ${studentSummary.student.name}` : ''}
+                {studentSummary?.student?.section ? ` • Section ${studentSummary.student.section}` : ''}
+              </p>
             </div>
-            <h2 className="text-2xl font-black text-textPrimary">
-              {studentSummary?.student?.name ? `${studentSummary.student.name} (${studentSummary.student.roll_number})` : studentRollNo}
-            </h2>
-            <p className="text-xs text-textSecondary">
-              Real-time proportional attendance tracking weighted by session length.
-            </p>
-          </div>
 
-          {/* Overall Percentage Badge */}
-          <div className="flex items-center gap-4 p-4 rounded-2xl bg-surface-2 border border-borderLine shrink-0">
-            <div
-              className={`w-16 h-16 rounded-2xl flex flex-col items-center justify-center font-mono font-black shadow-lg ${
-                isGood
-                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                  : isWarning
-                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                  : 'bg-red-500/20 text-red-400 border border-red-500/40'
-              }`}
-            >
-              <span className="text-xl leading-none">{overallPct}%</span>
-              <span className="text-[9px] uppercase tracking-wider font-bold mt-1">Total</span>
-            </div>
-            <div className="text-xs space-y-1">
-              <p className="font-bold text-textPrimary">
-                {isGood ? '✅ Eligible (≥75%)' : isWarning ? '⚠️ Low Attendance (<75%)' : '🚨 Critical Shortage (<65%)'}
-              </p>
-              <p className="text-textSecondary">
-                Attended: <strong className="text-textPrimary">{studentSummary?.total_periods_attended || 0}</strong> /{' '}
-                {studentSummary?.total_periods_held || 0} Periods Held
-              </p>
+            {/* Circular Percentage Badge */}
+            <div className="flex items-center gap-4 bg-surface-2 p-4 rounded-2xl border border-borderLine">
+              <div className="text-right">
+                <p className="text-[10px] uppercase tracking-wider text-textMuted font-bold">Overall Percentage</p>
+                <p className="text-xs text-textSecondary">
+                  {studentSummary?.total_periods_attended ?? 0} / {studentSummary?.total_periods_held ?? 0} Periods
+                </p>
+              </div>
+              <div
+                className={`w-16 h-16 rounded-2xl flex flex-col items-center justify-center font-mono font-black text-xl shadow-lg border ${
+                  isGood
+                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                    : isWarn
+                    ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                    : 'bg-red-500/10 text-red-400 border-red-500/30 animate-pulse'
+                }`}
+              >
+                <span>{overallPct}%</span>
+                <span className="text-[8px] font-sans uppercase font-bold tracking-tight opacity-80">
+                  {isGood ? 'Eligible' : isWarn ? 'Condonation' : 'Shortage'}
+                </span>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Per-Subject Attendance Cards */}
-        <div className="space-y-3">
-          <h3 className="text-base font-bold text-textPrimary flex items-center gap-2">
-            <BookOpen className="w-4 h-4 text-brand-primary" />
-            Subject-wise Attendance Breakdown
-          </h3>
+        {/* Per-Subject Breakdown Cards */}
+        <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-bold text-textPrimary flex items-center gap-2">
+              <BookOpen className="w-4 h-4 text-brand-primary" />
+              Subject-wise Attendance Progress
+            </h3>
+            <span className="text-xs text-textMuted font-semibold">
+              {studentSummary?.subjects?.length || 0} Registered Subjects
+            </span>
+          </div>
 
           {isLoadingStudentSummary ? (
             <div className="py-8 text-center text-textMuted">
@@ -207,57 +235,71 @@ export const AttendanceTrackingTab: React.FC<AttendanceTrackingTabProps> = ({ ro
               Loading subject attendance...
             </div>
           ) : !studentSummary?.subjects || studentSummary.subjects.length === 0 ? (
-            <div className="p-8 rounded-2xl bg-surface border border-borderLine text-center text-textMuted text-xs">
-              No enrolled subjects found for your roll number. Contact administration to assign subject rosters.
+            <div className="py-8 text-center text-textMuted text-xs">
+              No subject attendance records found for this student.
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {studentSummary.subjects.map((sub) => {
-                const subPct = sub.percentage;
-                const subGood = subPct >= 75;
-                const subWarn = subPct >= 65 && subPct < 75;
+                const pct = sub.percentage;
+                const subGood = pct >= 75;
+                const subWarn = pct >= 65 && pct < 75;
+
                 return (
-                  <div key={sub.allotment_id} className="p-5 rounded-2xl bg-surface border border-borderLine space-y-4 shadow-xs">
+                  <div
+                    key={sub.allotment_id}
+                    className="p-4 rounded-xl bg-surface-2 border border-borderLine space-y-3 hover:border-brand-primary/40 transition-colors"
+                  >
                     <div className="flex items-start justify-between gap-2">
-                      <div className="space-y-1 min-w-0">
-                        <span
-                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                            sub.subject_type === 'Lab'
-                              ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
-                              : 'bg-brand-soft text-brand-primary border border-brand-primary/30'
-                          }`}
-                        >
-                          {sub.subject_type}
-                        </span>
-                        <h4 className="text-sm font-bold text-textPrimary truncate">{sub.subject_name}</h4>
-                        <p className="text-[11px] text-textMuted">{sub.faculty_name}</p>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                              sub.subject_type === 'Lab'
+                                ? 'bg-purple-500/10 text-purple-400'
+                                : 'bg-cyan-500/10 text-cyan-400'
+                            }`}
+                          >
+                            {sub.subject_type}
+                          </span>
+                          <span className="text-[10px] text-textMuted font-mono">Sem {sub.semester_label}</span>
+                          {sub.joining_date && (
+                            <span className="text-[9px] text-purple-400 font-semibold" title={`Joined subject on ${sub.joining_date}`}>
+                              *Joined: {new Date(sub.joining_date).toLocaleDateString('en-GB')}
+                            </span>
+                          )}
+                        </div>
+                        <h4 className="text-xs font-bold text-textPrimary mt-1 line-clamp-1" title={sub.subject_name}>
+                          {sub.subject_name}
+                        </h4>
+                        <p className="text-[11px] text-textSecondary mt-0.5">{sub.faculty_name}</p>
                       </div>
 
                       <span
-                        className={`text-base font-mono font-black px-2.5 py-1 rounded-xl shrink-0 ${
+                        className={`text-sm font-mono font-bold px-2 py-0.5 rounded-lg ${
                           subGood
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                            ? 'bg-emerald-500/10 text-emerald-400'
                             : subWarn
-                            ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
-                            : 'bg-red-500/10 text-red-400 border border-red-500/30'
+                            ? 'bg-amber-500/10 text-amber-400'
+                            : 'bg-red-500/10 text-red-400'
                         }`}
                       >
-                        {subPct}%
+                        {pct}%
                       </span>
                     </div>
 
                     {/* Progress Bar */}
-                    <div className="space-y-1.5">
-                      <div className="w-full bg-surface-2 rounded-full h-2 overflow-hidden border border-borderLine">
+                    <div className="space-y-1">
+                      <div className="w-full h-2 rounded-full bg-surface-3 overflow-hidden">
                         <div
-                          className={`h-full rounded-full transition-all ${
+                          className={`h-full rounded-full transition-all duration-500 ${
                             subGood ? 'bg-emerald-500' : subWarn ? 'bg-amber-500' : 'bg-red-500'
                           }`}
-                          style={{ width: `${Math.min(100, subPct)}%` }}
+                          style={{ width: `${Math.min(100, pct)}%` }}
                         />
                       </div>
-                      <div className="flex justify-between text-[11px] text-textSecondary font-semibold">
-                        <span>Attended: {sub.periods_attended} Periods</span>
+                      <div className="flex justify-between text-[10px] text-textMuted font-mono">
+                        <span>Attended: {sub.periods_attended}</span>
                         <span>Held: {sub.periods_held} Periods</span>
                       </div>
                     </div>
@@ -266,72 +308,75 @@ export const AttendanceTrackingTab: React.FC<AttendanceTrackingTabProps> = ({ ro
               })}
             </div>
           )}
+
+          <p className="text-[10px] text-textMuted pt-2">
+            * Note: For students who joined a subject mid-way, attendance percentage is calculated strictly from classes held on or after their verified join date.
+          </p>
         </div>
 
-        {/* ──────────────────────────────────────────────────────────────────
-            DAY-WISE 7-PERIOD DOT GRID TRACKING VIEW
-           ────────────────────────────────────────────────────────────────── */}
-        <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-5 shadow-xs">
+        {/* Day-Wise 7-Period Attendance Dot Grid Matrix */}
+        <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-5 shadow-sm">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h3 className="text-base font-bold text-textPrimary flex items-center gap-2">
                 <Clock className="w-4 h-4 text-brand-primary" />
-                Day-wise Hour-by-Hour Period Tracking (7 Periods / Day)
+                Day-Wise 7-Period Attendance Matrix
               </h3>
               <p className="text-xs text-textSecondary mt-0.5">
-                🟢 Green = Present | 🔴 Red = Absent | ⚪ Grey = No class scheduled
+                Horizontal dot row of each day's 7 class periods (🟢 Present, 🔴 Absent, ⚪ No Class).
               </p>
             </div>
 
-            {/* Date range picker */}
-            <div className="flex items-center gap-2 bg-surface-2 p-1 rounded-xl border border-borderLine">
-              {(['7', '14', '30'] as const).map((opt) => (
+            {/* Date Range Selector */}
+            <div className="flex items-center gap-1.5 bg-surface-2 p-1 rounded-xl border border-borderLine">
+              {(['7', '14', '30'] as const).map((days) => (
                 <button
-                  key={opt}
+                  key={days}
                   onClick={() => {
-                    setDateRangeOption(opt);
-                    const daysAgo = parseInt(opt);
-                    setCustomFromDate(new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
-                    setCustomToDate(new Date().toISOString().split('T')[0]);
+                    setDateRangeOption(days);
+                    setCustomFromDate(
+                      new Date(Date.now() - parseInt(days) * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+                    );
                   }}
-                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-                    dateRangeOption === opt
-                      ? 'bg-brand-primary text-white shadow-brand'
+                  className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
+                    dateRangeOption === days
+                      ? 'bg-brand-primary text-white shadow-xs'
                       : 'text-textSecondary hover:text-textPrimary'
                   }`}
                 >
-                  Last {opt} Days
+                  Last {days} Days
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Dot Grid */}
           {isLoadingStudentDaywise ? (
             <div className="py-8 text-center text-textMuted">
               <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-brand-primary" />
-              Loading day-wise attendance...
+              Loading day-wise matrix...
             </div>
           ) : !studentDaywise?.days || studentDaywise.days.length === 0 ? (
-            <div className="p-8 rounded-xl bg-surface-2 border border-borderLine text-center text-textMuted text-xs">
-              No attendance records logged in the selected date window ({customFromDate} to {customToDate}).
+            <div className="py-8 text-center text-textMuted text-xs">
+              No sessions recorded in this date range.
             </div>
           ) : (
-            <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
-              {/* Header Periods */}
-              <div className="grid grid-cols-8 gap-2 px-3 py-1.5 text-[11px] font-bold text-textMuted uppercase tracking-wider border-b border-borderLine bg-surface-2/40 rounded-lg">
+            <div className="space-y-2">
+              {/* Header Columns */}
+              <div className="grid grid-cols-8 gap-2 px-3 py-2 text-[10px] font-bold text-textMuted uppercase tracking-wider">
                 <div>Date</div>
-                {[1, 2, 3, 4, 5, 6, 7].map((p) => (
-                  <div key={p} className="text-center">
-                    P{p}
-                  </div>
-                ))}
+                <div className="text-center">Period 1</div>
+                <div className="text-center">Period 2</div>
+                <div className="text-center">Period 3</div>
+                <div className="text-center">Period 4</div>
+                <div className="text-center">Period 5</div>
+                <div className="text-center">Period 6</div>
+                <div className="text-center">Period 7</div>
               </div>
 
               {studentDaywise.days.map((day) => (
                 <div
                   key={day.date}
-                  className="grid grid-cols-8 gap-2 items-center p-3 rounded-xl bg-surface-2/60 hover:bg-surface-2 border border-borderLine transition-all text-xs"
+                  className="grid grid-cols-8 gap-2 items-center p-3 rounded-xl bg-surface-2/60 border border-borderLine text-xs hover:bg-surface-2 transition-colors"
                 >
                   <div className="font-mono font-bold text-textPrimary text-[11px] truncate">{day.date}</div>
 
@@ -387,14 +432,35 @@ export const AttendanceTrackingTab: React.FC<AttendanceTrackingTabProps> = ({ ro
           </p>
         </div>
 
-        {role === 'faculty' && (
+        <div className="flex items-center gap-3 self-start md:self-auto">
+          {sectionTimetableDoc?.document && (
+            <button
+              onClick={() => setViewingPdfDoc({
+                name: sectionTimetableDoc.document.file_name,
+                data: sectionTimetableDoc.document.file_data,
+              })}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold text-purple-300 bg-purple-500/10 border border-purple-500/30 hover:bg-purple-500/20 transition-all"
+            >
+              <FileText className="w-4 h-4 text-purple-400" /> View Timetable PDF
+            </button>
+          )}
+
           <button
-            onClick={() => navigate('/attendance')}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-brand-primary text-white text-xs font-bold hover:bg-brand-primary/90 shadow-brand transition-all self-start md:self-auto"
+            onClick={() => setShowPdfModal(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 shadow-md transition-all"
           >
-            <Plus className="w-4 h-4" /> Take Attendance Now
+            <Printer className="w-4 h-4" /> Download PDF Report
           </button>
-        )}
+
+          {role === 'faculty' && (
+            <button
+              onClick={() => navigate('/attendance')}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-brand-primary text-white text-xs font-bold hover:bg-brand-primary/90 shadow-brand transition-all"
+            >
+              <Plus className="w-4 h-4" /> Take Attendance Now
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Selectors Bar */}
@@ -412,7 +478,7 @@ export const AttendanceTrackingTab: React.FC<AttendanceTrackingTabProps> = ({ ro
             }}
             className="w-full bg-surface-2 border border-borderLine rounded-xl px-3 py-2 text-xs text-textPrimary font-semibold focus:outline-none focus:border-brand-primary"
           >
-            {SEMESTERS.map((sem) => (
+            {ALL_SEMESTERS.map((sem) => (
               <option key={sem} value={sem}>
                 Semester {sem}
               </option>
@@ -492,7 +558,7 @@ export const AttendanceTrackingTab: React.FC<AttendanceTrackingTabProps> = ({ ro
               Student Attendance Register
             </h3>
             <p className="text-xs text-textSecondary mt-0.5">
-              Click on any student to view their 7-period day-wise dot grid.
+              Click on any student to inspect their 7-period day-wise dot grid.
             </p>
           </div>
 
@@ -550,34 +616,43 @@ export const AttendanceTrackingTab: React.FC<AttendanceTrackingTabProps> = ({ ro
                     return (
                       <tr
                         key={student.roll_number}
+                        className="hover:bg-surface-2/40 transition-colors cursor-pointer"
                         onClick={() => setInspectingStudentRoll(student.roll_number)}
-                        className="hover:bg-surface-2/60 transition-colors cursor-pointer"
                       >
                         <td className="py-3 px-4 text-textMuted font-mono">{idx + 1}</td>
                         <td className="py-3 px-4 font-mono font-bold text-brand-primary">{student.roll_number}</td>
-                        <td className="py-3 px-4 font-semibold text-textPrimary">{student.student_name}</td>
-                        <td className="py-3 px-4 font-mono text-textSecondary">{student.section}</td>
+                        <td className="py-3 px-4 font-medium text-textPrimary">
+                          {student.student_name}
+                          {student.joining_date && (
+                            <span className="ml-2 px-1.5 py-0.5 rounded text-[9px] bg-purple-500/10 text-purple-400 font-semibold" title={`Joined on ${student.joining_date}`}>
+                              *Joined: {new Date(student.joining_date).toLocaleDateString('en-GB')}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 font-bold text-textSecondary">{student.section}</td>
                         <td className="py-3 px-4 text-center font-mono font-bold text-textPrimary">
                           {student.periods_attended}
                         </td>
-                        <td className="py-3 px-4 text-center font-mono text-textSecondary">{student.periods_held}</td>
-                        <td className="py-3 px-4 text-center">
+                        <td className="py-3 px-4 text-center font-mono text-textSecondary">
+                          {student.periods_held}
+                        </td>
+                        <td className="py-3 px-4 text-center font-mono font-black">
                           <span
-                            className={`px-2.5 py-1 rounded-lg text-xs font-mono font-black inline-block ${
+                            className={`px-2 py-0.5 rounded-md ${
                               isGood
-                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                                ? 'bg-emerald-500/10 text-emerald-400'
                                 : isWarn
-                                ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
-                                : 'bg-red-500/10 text-red-400 border border-red-500/30'
+                                ? 'bg-amber-500/10 text-amber-400'
+                                : 'bg-red-500/10 text-red-400'
                             }`}
                           >
                             {pct}%
                           </span>
                         </td>
                         <td className="py-3 px-4 text-right">
-                          <span className="text-brand-primary hover:underline inline-flex items-center gap-1 font-semibold text-[11px]">
-                            Inspect <ArrowUpRight className="w-3 h-3" />
-                          </span>
+                          <button className="p-1.5 rounded-lg bg-surface-2 hover:bg-surface-3 text-textSecondary hover:text-textPrimary transition-colors inline-flex items-center gap-1 text-[11px] font-semibold">
+                            <Eye className="w-3 h-3" /> View Dots
+                          </button>
                         </td>
                       </tr>
                     );
@@ -588,85 +663,90 @@ export const AttendanceTrackingTab: React.FC<AttendanceTrackingTabProps> = ({ ro
         </div>
       </div>
 
-      {/* Sessions History Table (With Delete Option) */}
+      {/* Session History & Deletion Card */}
       <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-4 shadow-xs">
-        <h3 className="text-base font-bold text-textPrimary flex items-center gap-2">
-          <Clock className="w-4 h-4 text-brand-primary" />
-          Recorded Attendance Sessions ({sessionsHistory.length})
-        </h3>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-base font-bold text-textPrimary flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-brand-primary" />
+              Recorded Sessions History
+            </h3>
+            <p className="text-xs text-textSecondary mt-0.5">
+              Review and manage past attendance sessions recorded for this subject.
+            </p>
+          </div>
+        </div>
 
-        <div className="overflow-x-auto rounded-xl border border-borderLine">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-surface-2 text-textMuted font-bold uppercase tracking-wider border-b border-borderLine">
-              <tr>
-                <th className="py-3 px-4">Date</th>
-                <th className="py-3 px-4">Starting Period</th>
-                <th className="py-3 px-4">Sessions Held</th>
-                <th className="py-3 px-4">Present / Total</th>
-                <th className="py-3 px-4">Recorded By</th>
-                <th className="py-3 px-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-borderLine">
-              {isLoadingSessions ? (
+        {isLoadingSessions ? (
+          <div className="py-8 text-center text-textMuted">
+            <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-brand-primary" />
+            Loading session logs...
+          </div>
+        ) : sessionsHistory.length === 0 ? (
+          <div className="py-8 text-center text-textMuted text-xs bg-surface-2/30 rounded-xl border border-dashed border-borderLine">
+            No attendance sessions taken yet for this subject.
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-borderLine">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-surface-2 text-textMuted font-bold uppercase tracking-wider border-b border-borderLine">
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-textMuted">
-                    <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-brand-primary" />
-                    Loading sessions...
-                  </td>
+                  <th className="py-3 px-4">Date</th>
+                  <th className="py-3 px-4">Period Start</th>
+                  <th className="py-3 px-4">Session Length</th>
+                  <th className="py-3 px-4 text-center">Present / Total</th>
+                  <th className="py-3 px-4">Recorded By</th>
+                  <th className="py-3 px-4 text-right">Action</th>
                 </tr>
-              ) : sessionsHistory.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-8 text-center text-textMuted">
-                    No attendance sessions logged for this subject yet.
-                  </td>
-                </tr>
-              ) : (
-                sessionsHistory.map((sess) => (
-                  <tr key={sess.id} className="hover:bg-surface-2/60 transition-colors">
+              </thead>
+              <tbody className="divide-y divide-borderLine">
+                {sessionsHistory.map((sess) => (
+                  <tr key={sess.id} className="hover:bg-surface-2/40 transition-colors">
                     <td className="py-3 px-4 font-mono font-bold text-textPrimary">{sess.session_date}</td>
-                    <td className="py-3 px-4 font-semibold text-brand-primary">Period {sess.period_start}</td>
-                    <td className="py-3 px-4 font-semibold text-textPrimary">{sess.num_periods} Hour(s)</td>
-                    <td className="py-3 px-4">
-                      <span className="text-emerald-400 font-bold">{sess.present_count || 0}</span> /{' '}
-                      {sess.total_marked || 0}
+                    <td className="py-3 px-4 font-semibold text-textSecondary">Period {sess.period_start}</td>
+                    <td className="py-3 px-4 font-semibold text-brand-primary">
+                      {sess.num_periods} Period{sess.num_periods > 1 ? 's' : ''}
                     </td>
-                    <td className="py-3 px-4 text-textSecondary font-mono text-[11px]">{sess.recorded_by}</td>
+                    <td className="py-3 px-4 text-center font-mono font-bold">
+                      <span className="text-emerald-400">{sess.present_count || 0}</span> /{' '}
+                      <span className="text-textSecondary">{sess.total_marked || 0}</span>
+                    </td>
+                    <td className="py-3 px-4 text-textMuted font-mono text-[11px]">{sess.recorded_by}</td>
                     <td className="py-3 px-4 text-right">
                       <button
                         onClick={() => {
-                          if (confirm(`Delete attendance session on ${sess.session_date} (Period ${sess.period_start})?`)) {
+                          if (confirm(`Are you sure you want to delete session from ${sess.session_date}?`)) {
                             deleteSessionMutation.mutate(sess.id);
                           }
                         }}
-                        className="p-1.5 rounded-lg text-textMuted hover:text-alert hover:bg-alert-soft transition-colors"
+                        className="p-1.5 text-textMuted hover:text-alert rounded-lg hover:bg-surface-3 transition-colors"
                         title="Delete Session"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
-      {/* ──────────────────────────────────────────────────────────────────────
-          INSPECT STUDENT DAY-WISE MODAL
-         ────────────────────────────────────────────────────────────────────── */}
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {/* INSPECTED STUDENT DAY-WISE MODAL */}
+      {/* ────────────────────────────────────────────────────────────────────────── */}
       {inspectingStudentRoll && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-surface border border-borderLine rounded-2xl max-w-3xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+          <div className="bg-surface border border-borderLine rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
             <div className="p-5 border-b border-borderLine flex items-center justify-between bg-surface-2">
               <div>
                 <h3 className="text-base font-bold text-textPrimary flex items-center gap-2">
                   <Clock className="w-4 h-4 text-brand-primary" />
-                  Day-wise 7-Period Attendance Matrix
+                  Day-Wise Attendance Matrix
                 </h3>
-                <p className="text-xs text-textSecondary mt-0.5 font-mono font-bold text-brand-primary">
-                  {inspectingStudentRoll}
+                <p className="text-xs text-textSecondary mt-0.5">
+                  Roll Number: <strong className="text-brand-primary font-mono">{inspectingStudentRoll}</strong>
                 </p>
               </div>
               <button
@@ -679,23 +759,25 @@ export const AttendanceTrackingTab: React.FC<AttendanceTrackingTabProps> = ({ ro
 
             <div className="p-5 overflow-y-auto flex-1 space-y-4">
               {isLoadingInspectedDaywise ? (
-                <div className="py-12 text-center text-textMuted">
-                  <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-brand-primary" />
-                  Loading student dot grid...
+                <div className="py-8 text-center text-textMuted">
+                  <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-brand-primary" />
+                  Loading day-wise slots...
                 </div>
               ) : !inspectedStudentDaywise?.days || inspectedStudentDaywise.days.length === 0 ? (
                 <div className="py-8 text-center text-textMuted text-xs">
-                  No attendance records logged for this student in the last 14 days.
+                  No attendance session records found for this student in the last 14 days.
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <div className="grid grid-cols-8 gap-2 px-3 py-1.5 text-[11px] font-bold text-textMuted uppercase tracking-wider border-b border-borderLine bg-surface-2/40 rounded-lg">
+                  <div className="grid grid-cols-8 gap-2 px-3 py-1.5 text-[10px] font-bold text-textMuted uppercase">
                     <div>Date</div>
-                    {[1, 2, 3, 4, 5, 6, 7].map((p) => (
-                      <div key={p} className="text-center">
-                        P{p}
-                      </div>
-                    ))}
+                    <div className="text-center">P1</div>
+                    <div className="text-center">P2</div>
+                    <div className="text-center">P3</div>
+                    <div className="text-center">P4</div>
+                    <div className="text-center">P5</div>
+                    <div className="text-center">P6</div>
+                    <div className="text-center">P7</div>
                   </div>
 
                   {inspectedStudentDaywise.days.map((day) => (
@@ -748,6 +830,50 @@ export const AttendanceTrackingTab: React.FC<AttendanceTrackingTabProps> = ({ ro
           </div>
         </div>
       )}
+
+      {/* Official Timetable Document PDF Viewer Modal */}
+      {viewingPdfDoc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
+          <div className="bg-surface border border-borderLine rounded-2xl max-w-5xl w-full h-[88vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in-50">
+            <div className="p-4 border-b border-borderLine flex items-center justify-between bg-surface-2">
+              <div className="flex items-center gap-2.5 min-w-0 pr-4">
+                <FileText className="w-4 h-4 text-purple-400 shrink-0" />
+                <h3 className="text-sm font-bold text-textPrimary font-mono truncate">{viewingPdfDoc.name}</h3>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href={viewingPdfDoc.data}
+                  download={viewingPdfDoc.name}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-3 hover:bg-surface text-textPrimary text-xs rounded-xl border border-borderLine transition-all font-semibold"
+                >
+                  <Download className="w-3.5 h-3.5" /> Download PDF
+                </a>
+                <button
+                  onClick={() => setViewingPdfDoc(null)}
+                  className="p-1.5 text-textMuted hover:text-textPrimary rounded-xl hover:bg-surface-3 transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 bg-slate-950 overflow-hidden relative">
+              <iframe
+                src={viewingPdfDoc.data}
+                title={viewingPdfDoc.name}
+                className="w-full h-full border-0"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Attendance PDF & Excel Report Modal */}
+      <AttendancePdfModal
+        isOpen={showPdfModal}
+        onClose={() => setShowPdfModal(false)}
+        defaultYear="2nd Year"
+        defaultDepartment={selectedDepartment === 'All' ? '' : selectedDepartment}
+      />
     </div>
   );
 };

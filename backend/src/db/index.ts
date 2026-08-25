@@ -435,9 +435,11 @@ async function ensureSchema(p: Pool) {
       allotment_id UUID NOT NULL REFERENCES subject_allotments(id) ON DELETE CASCADE,
       roll_number VARCHAR(10) NOT NULL,
       student_email VARCHAR(100) NOT NULL DEFAULT '',
+      joining_date DATE DEFAULT CURRENT_DATE,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(allotment_id, roll_number)
     );`,
+    `ALTER TABLE subject_rosters ADD COLUMN IF NOT EXISTS joining_date DATE DEFAULT CURRENT_DATE;`,
     `CREATE TABLE IF NOT EXISTS attendance_sessions (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       allotment_id UUID NOT NULL REFERENCES subject_allotments(id) ON DELETE CASCADE,
@@ -455,14 +457,46 @@ async function ensureSchema(p: Pool) {
       is_present BOOLEAN NOT NULL DEFAULT TRUE,
       UNIQUE(session_id, roll_number)
     );`,
+    `CREATE TABLE IF NOT EXISTS timetable_entries (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      semester_label VARCHAR(5) NOT NULL,
+      department VARCHAR(50) NOT NULL DEFAULT '',
+      section VARCHAR(10) NOT NULL DEFAULT '',
+      day_of_week VARCHAR(15) NOT NULL,
+      period_start INT NOT NULL CHECK (period_start BETWEEN 1 AND 7),
+      num_periods INT NOT NULL CHECK (num_periods BETWEEN 1 AND 3),
+      subject_name VARCHAR(200) NOT NULL,
+      subject_type VARCHAR(10) NOT NULL CHECK (subject_type IN ('Theory', 'Lab')),
+      faculty_email VARCHAR(100) NOT NULL DEFAULT '',
+      faculty_name VARCHAR(100) NOT NULL DEFAULT '',
+      room_no VARCHAR(50) NOT NULL DEFAULT '',
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(semester_label, department, section, day_of_week, period_start)
+    );`,
+    `CREATE TABLE IF NOT EXISTS timetable_documents (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      semester_label VARCHAR(5) NOT NULL,
+      department VARCHAR(50) NOT NULL DEFAULT '',
+      section VARCHAR(10) NOT NULL DEFAULT '',
+      file_name VARCHAR(255) NOT NULL,
+      file_data TEXT NOT NULL,
+      file_size INT NOT NULL DEFAULT 0,
+      uploaded_by VARCHAR(100) NOT NULL DEFAULT '',
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(semester_label, department, section)
+    );`,
     `CREATE INDEX IF NOT EXISTS idx_allotments_faculty ON subject_allotments(faculty_email);`,
     `CREATE INDEX IF NOT EXISTS idx_allotments_semester ON subject_allotments(semester_label);`,
     `CREATE INDEX IF NOT EXISTS idx_allotments_dept ON subject_allotments(department);`,
     `CREATE INDEX IF NOT EXISTS idx_rosters_allotment ON subject_rosters(allotment_id);`,
+    `CREATE INDEX IF NOT EXISTS idx_rosters_roll ON subject_rosters(roll_number);`,
     `CREATE INDEX IF NOT EXISTS idx_sessions_allotment ON attendance_sessions(allotment_id);`,
     `CREATE INDEX IF NOT EXISTS idx_sessions_date ON attendance_sessions(session_date);`,
     `CREATE INDEX IF NOT EXISTS idx_records_session ON attendance_records(session_id);`,
-    `CREATE INDEX IF NOT EXISTS idx_records_roll ON attendance_records(roll_number);`
+    `CREATE INDEX IF NOT EXISTS idx_records_roll ON attendance_records(roll_number);`,
+    `CREATE INDEX IF NOT EXISTS idx_timetable_lookup ON timetable_entries(semester_label, department, section, day_of_week);`,
+    `CREATE INDEX IF NOT EXISTS idx_timetable_faculty ON timetable_entries(faculty_email);`,
+    `CREATE INDEX IF NOT EXISTS idx_timetable_docs ON timetable_documents(semester_label, department, section);`
   ];
 
   try {

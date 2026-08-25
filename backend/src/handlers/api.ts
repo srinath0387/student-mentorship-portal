@@ -4608,6 +4608,20 @@ app.post('/attendance/rosters/upload', requireRole('admin', 'hod'), async (req: 
       const row = roster[i];
       const rollNumber = (row.roll_number || row.rollNumber || row['Roll Number'] || '').trim().toUpperCase();
       const studentEmail = (row.student_email || row.studentEmail || row['Student Email'] || (rollNumber ? `${rollNumber.toLowerCase()}@rgmcet.edu.in` : '')).trim().toLowerCase();
+      
+      // Optional Date of Joining (defaults to today if not provided)
+      let joiningDate: string | null = null;
+      const rawDate = row.joining_date || row.joiningDate || row['Joining Date'] || row['Date of Joining'] || row['Date of Joining This Subject'];
+      if (rawDate) {
+        try {
+          const parsed = new Date(rawDate);
+          if (!isNaN(parsed.getTime())) {
+            joiningDate = parsed.toISOString().split('T')[0];
+          }
+        } catch {
+          joiningDate = null;
+        }
+      }
 
       if (!rollNumber) {
         errors.push({ row: i + 1, reason: 'Roll Number is required', item: row });
@@ -4622,11 +4636,12 @@ app.post('/attendance/rosters/upload', requireRole('admin', 'hod'), async (req: 
 
       try {
         await db.query(
-          `INSERT INTO subject_rosters (allotment_id, roll_number, student_email)
-           VALUES ($1, $2, $3)
+          `INSERT INTO subject_rosters (allotment_id, roll_number, student_email, joining_date)
+           VALUES ($1, $2, $3, COALESCE($4::date, CURRENT_DATE))
            ON CONFLICT (allotment_id, roll_number) DO UPDATE
-           SET student_email = EXCLUDED.student_email`,
-          [allotment_id, rollNumber, studentEmail]
+           SET student_email = EXCLUDED.student_email,
+               joining_date = COALESCE($4::date, subject_rosters.joining_date, CURRENT_DATE)`,
+          [allotment_id, rollNumber, studentEmail, joiningDate]
         );
         addedCount++;
       } catch (err: any) {
@@ -4640,6 +4655,33 @@ app.post('/attendance/rosters/upload', requireRole('admin', 'hod'), async (req: 
       errorsCount: errors.length,
       errors,
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4b. Update Student Joining Date for a Subject (Admin, HOD, Faculty)
+app.put('/attendance/rosters/:rosterId/joining-date', requireRole('admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
+  try {
+    const { rosterId } = req.params;
+    const { joining_date } = req.body;
+    if (!joining_date) {
+      return res.status(400).json({ error: 'joining_date is required' });
+    }
+
+    const result = await db.query(
+      `UPDATE subject_rosters
+       SET joining_date = $1::date
+       WHERE id = $2
+       RETURNING *`,
+      [joining_date, rosterId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Roster entry not found' });
+    }
+
+    res.json({ success: true, roster: result.rows[0], message: 'Joining date updated successfully.' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -4878,6 +4920,7 @@ app.delete('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin'), a
 });
 
 // 11. Student / Parent / General: Get Student Attendance Summary (Per-Subject % & Overall %)
+// Correctly accounts for student's joining_date for each subject!
 app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res: Response) => {
   try {
     const rollNumber = req.params.rollNumber.toUpperCase();
@@ -4888,10 +4931,10 @@ app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res
     }
 
     // Get student details
-    const studentRes = await db.query('SELECT roll_number, name, department, batch, section FROM students WHERE roll_number = $1', [rollNumber]);
+    const studentRes = await db.query('SELECT roll_number, name, department, batch, section, year FROM students WHERE roll_number = $1', [rollNumber]);
     const student = studentRes.rows[0] || { roll_number: rollNumber };
 
-    // Query all subjects this student is enrolled in
+    // Query all subjects this student is enrolled in with joining_date filter
     const subjectsQuery = `
       SELECT 
         a.id AS allotment_id,
@@ -4899,14 +4942,15 @@ app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res
         a.subject_type,
         a.semester_label,
         a.faculty_name,
-        COALESCE(SUM(s.num_periods), 0) AS total_periods_held,
-        COALESCE(SUM(CASE WHEN r.is_present = true THEN s.num_periods ELSE 0 END), 0) AS periods_attended
+        sr.joining_date,
+        COALESCE(SUM(CASE WHEN s.session_date >= COALESCE(sr.joining_date, '1970-01-01'::date) THEN s.num_periods ELSE 0 END), 0) AS total_periods_held,
+        COALESCE(SUM(CASE WHEN s.session_date >= COALESCE(sr.joining_date, '1970-01-01'::date) AND r.is_present = true THEN s.num_periods ELSE 0 END), 0) AS periods_attended
       FROM subject_rosters sr
       JOIN subject_allotments a ON a.id = sr.allotment_id
       LEFT JOIN attendance_sessions s ON s.allotment_id = a.id
       LEFT JOIN attendance_records r ON r.session_id = s.id AND r.roll_number = sr.roll_number
       WHERE sr.roll_number = $1
-      GROUP BY a.id, a.subject_name, a.subject_type, a.semester_label, a.faculty_name
+      GROUP BY a.id, a.subject_name, a.subject_type, a.semester_label, a.faculty_name, sr.joining_date
       ORDER BY a.semester_label, a.subject_name
     `;
 
@@ -4927,6 +4971,7 @@ app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res
         subject_type: row.subject_type,
         semester_label: row.semester_label,
         faculty_name: row.faculty_name,
+        joining_date: row.joining_date,
         periods_held: held,
         periods_attended: attended,
         percentage: pct,
@@ -4950,6 +4995,7 @@ app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res
 });
 
 // 12. Student / Parent / Faculty / HOD / Admin: Day-wise 7-Period Attendance Dot Grid
+// Excludes sessions held prior to student's joining date
 app.get('/attendance/student/:rollNumber/daywise', requireAuth, async (req: Request, res: Response) => {
   try {
     const rollNumber = req.params.rollNumber.toUpperCase();
@@ -4968,13 +5014,16 @@ app.get('/attendance/student/:rollNumber/daywise', requireAuth, async (req: Requ
         s.num_periods,
         r.is_present,
         a.subject_name,
-        a.subject_type
+        a.subject_type,
+        sr.joining_date
       FROM attendance_records r
       JOIN attendance_sessions s ON s.id = r.session_id
       JOIN subject_allotments a ON a.id = s.allotment_id
+      JOIN subject_rosters sr ON sr.allotment_id = a.id AND sr.roll_number = r.roll_number
       WHERE r.roll_number = $1
         AND s.session_date >= $2
         AND s.session_date <= $3
+        AND s.session_date >= COALESCE(sr.joining_date, '1970-01-01'::date)
       ORDER BY s.session_date DESC, s.period_start ASC
     `;
 
@@ -5025,6 +5074,7 @@ app.get('/attendance/student/:rollNumber/daywise', requireAuth, async (req: Requ
 });
 
 // 13. Subject Attendance Summary (Per-Student Attendance Table for Faculty/HOD/Admin)
+// Respects each individual student's joining_date
 app.get('/attendance/subject/:allotmentId/summary', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
   try {
     const { allotmentId } = req.params;
@@ -5035,51 +5085,520 @@ app.get('/attendance/subject/:allotmentId/summary', requireRole('faculty', 'hod'
     }
     const allotment = allotRes.rows[0];
 
-    // Total periods held for this subject
+    // Total periods held overall for this subject
     const heldRes = await db.query(
       'SELECT COALESCE(SUM(num_periods), 0) as total_held, COUNT(*) as sessions_count FROM attendance_sessions WHERE allotment_id = $1',
       [allotmentId]
     );
-    const totalHeld = parseInt(heldRes.rows[0]?.total_held || '0');
+    const totalHeldOverall = parseInt(heldRes.rows[0]?.total_held || '0');
     const sessionsCount = parseInt(heldRes.rows[0]?.sessions_count || '0');
 
-    // Per-student attendance
+    // Per-student attendance with joining_date consideration
     const studentsRes = await db.query(
       `SELECT 
+        r.id AS roster_id,
         r.roll_number,
+        r.joining_date,
         COALESCE(st.name, r.roll_number) AS student_name,
         COALESCE(st.section, allotment.section) AS section,
-        COALESCE(SUM(CASE WHEN ar.is_present = true THEN s.num_periods ELSE 0 END), 0) AS periods_attended
+        COALESCE(SUM(CASE WHEN s.session_date >= COALESCE(r.joining_date, '1970-01-01'::date) THEN s.num_periods ELSE 0 END), 0) AS student_periods_held,
+        COALESCE(SUM(CASE WHEN s.session_date >= COALESCE(r.joining_date, '1970-01-01'::date) AND ar.is_present = true THEN s.num_periods ELSE 0 END), 0) AS periods_attended
        FROM subject_rosters r
        CROSS JOIN (SELECT $1::uuid AS id, $2::text AS section) allotment
        LEFT JOIN students st ON st.roll_number = r.roll_number
        LEFT JOIN attendance_sessions s ON s.allotment_id = $1
        LEFT JOIN attendance_records ar ON ar.session_id = s.id AND ar.roll_number = r.roll_number
        WHERE r.allotment_id = $1
-       GROUP BY r.roll_number, st.name, st.section, allotment.section
+       GROUP BY r.id, r.roll_number, r.joining_date, st.name, st.section, allotment.section
        ORDER BY r.roll_number`,
       [allotmentId, allotment.section]
     );
 
     const students = studentsRes.rows.map((row: any) => {
+      const held = parseInt(row.student_periods_held || '0');
       const attended = parseInt(row.periods_attended || '0');
-      const pct = totalHeld > 0 ? Math.round((attended / totalHeld) * 1000) / 10 : 100;
+      const pct = held > 0 ? Math.round((attended / held) * 1000) / 10 : 100;
       return {
+        roster_id: row.roster_id,
         roll_number: row.roll_number,
         student_name: row.student_name,
         section: row.section,
+        joining_date: row.joining_date,
+        periods_held: held,
         periods_attended: attended,
-        periods_held: totalHeld,
         percentage: pct,
       };
     });
 
     res.json({
       allotment,
-      total_periods_held: totalHeld,
+      total_periods_held: totalHeldOverall,
       sessions_count: sessionsCount,
       total_students: students.length,
       students,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 14. Timetable: Upload Timetable Schedule (Admin / HOD)
+app.post('/attendance/timetable/upload', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+  try {
+    const { semester, department, section, entries } = req.body;
+    if (!semester || !Array.isArray(entries) || entries.length === 0) {
+      return res.status(400).json({ error: 'Semester and non-empty entries array are required' });
+    }
+
+    const callerDept = req.auth?.department;
+    const targetDept = department || callerDept || 'General';
+    const targetSec = (section || 'A').trim().toUpperCase();
+
+    let addedCount = 0;
+    let updatedCount = 0;
+    const errors: { row: number; reason: string; item: any }[] = [];
+
+    const validDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    for (let i = 0; i < entries.length; i++) {
+      const row = entries[i];
+      const dayRaw = (row.day_of_week || row.day || row['Day'] || row['Day of Week'] || '').trim();
+      const dayOfWeek = validDays.find(d => d.toLowerCase() === dayRaw.toLowerCase()) || dayRaw;
+      const periodStart = parseInt(row.period_start || row.periodStart || row['Period Start'] || row['Period'] || '1');
+      const numPeriods = parseInt(row.num_periods || row.numPeriods || row['Num Periods'] || row['Duration'] || '1');
+      const subjectName = (row.subject_name || row.subjectName || row['Subject Name'] || row['Subject'] || '').trim();
+      const subjectTypeRaw = (row.subject_type || row.subjectType || row['Subject Type'] || 'Theory').trim();
+      const subjectType = subjectTypeRaw.toLowerCase().includes('lab') ? 'Lab' : 'Theory';
+      const facultyEmail = (row.faculty_email || row.facultyEmail || row['Faculty Email'] || '').trim().toLowerCase();
+      const facultyName = (row.faculty_name || row.facultyName || row['Faculty Name'] || '').trim();
+      const roomNo = (row.room_no || row.roomNo || row['Room No'] || row['Room'] || '').trim();
+      const rowSec = (row.section || row['Section'] || targetSec).trim().toUpperCase();
+
+      if (!dayOfWeek || !subjectName || isNaN(periodStart) || periodStart < 1 || periodStart > 7) {
+        errors.push({ row: i + 1, reason: 'Valid Day (Mon-Sat), Subject Name, and Period Start (1-7) are required', item: row });
+        continue;
+      }
+
+      const validNumPeriods = Math.max(1, Math.min(3, isNaN(numPeriods) ? 1 : numPeriods));
+
+      try {
+        await db.query(
+          `INSERT INTO timetable_entries (semester_label, department, section, day_of_week, period_start, num_periods, subject_name, subject_type, faculty_email, faculty_name, room_no)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           ON CONFLICT (semester_label, department, section, day_of_week, period_start) DO UPDATE
+           SET num_periods = EXCLUDED.num_periods,
+               subject_name = EXCLUDED.subject_name,
+               subject_type = EXCLUDED.subject_type,
+               faculty_email = EXCLUDED.faculty_email,
+               faculty_name = EXCLUDED.faculty_name,
+               room_no = EXCLUDED.room_no`,
+          [semester, targetDept, rowSec, dayOfWeek, periodStart, validNumPeriods, subjectName, subjectType, facultyEmail, facultyName, roomNo]
+        );
+        addedCount++;
+      } catch (err: any) {
+        errors.push({ row: i + 1, reason: err.message, item: row });
+      }
+    }
+
+    res.json({
+      message: `Timetable processed: ${addedCount} slots saved.`,
+      addedCount,
+      errorsCount: errors.length,
+      errors,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 15. Timetable: Get Timetable Entries (Filterable)
+app.get('/attendance/timetable', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const semester = (req.query.semester as string) || '';
+    const section = (req.query.section as string) || '';
+    const department = (req.query.department as string) || '';
+    const dayOfWeek = (req.query.day as string) || '';
+
+    let query = `SELECT * FROM timetable_entries WHERE 1=1`;
+    const params: any[] = [];
+
+    if (semester) {
+      params.push(semester);
+      query += ` AND semester_label = $${params.length}`;
+    }
+    if (section && section !== 'All') {
+      params.push(section.toUpperCase());
+      query += ` AND section = $${params.length}`;
+    }
+    if (department && department !== 'All') {
+      params.push(`%${department}%`);
+      query += ` AND department ILIKE $${params.length}`;
+    }
+    if (dayOfWeek && dayOfWeek !== 'All') {
+      params.push(dayOfWeek);
+      query += ` AND day_of_week = $${params.length}`;
+    }
+
+    query += ` ORDER BY 
+      CASE day_of_week
+        WHEN 'Monday' THEN 1
+        WHEN 'Tuesday' THEN 2
+        WHEN 'Wednesday' THEN 3
+        WHEN 'Thursday' THEN 4
+        WHEN 'Friday' THEN 5
+        WHEN 'Saturday' THEN 6
+        ELSE 7
+      END, period_start ASC`;
+
+    const result = await db.query(query, params);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 16. Timetable: Delete Timetable Entry
+app.delete('/attendance/timetable/:id', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    await db.query('DELETE FROM timetable_entries WHERE id = $1', [id]);
+    res.json({ success: true, message: 'Timetable slot deleted.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 16b. Timetable: Upload Official Timetable PDF Document (Admin / HOD)
+app.post('/attendance/timetable/document/upload', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+  try {
+    const { semester, department, section, file_name, file_data, file_size } = req.body;
+    if (!semester || !file_name || !file_data) {
+      return res.status(400).json({ error: 'Semester, file_name, and file_data are required' });
+    }
+
+    const callerDept = req.auth?.department;
+    const targetDept = department || callerDept || 'General';
+    const targetSec = (section || 'A').trim().toUpperCase();
+    const uploadedBy = req.auth?.email || 'Admin';
+
+    const result = await db.query(
+      `INSERT INTO timetable_documents (semester_label, department, section, file_name, file_data, file_size, uploaded_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (semester_label, department, section) DO UPDATE
+       SET file_name = EXCLUDED.file_name,
+           file_data = EXCLUDED.file_data,
+           file_size = EXCLUDED.file_size,
+           uploaded_by = EXCLUDED.uploaded_by,
+           created_at = NOW()
+       RETURNING id, semester_label, department, section, file_name, file_size, uploaded_by, created_at`,
+      [semester, targetDept, targetSec, file_name, file_data, file_size || 0, uploadedBy]
+    );
+
+    res.json({
+      success: true,
+      message: `Official Timetable PDF "${file_name}" uploaded successfully for Semester ${semester} (Sec ${targetSec}).`,
+      document: result.rows[0],
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 16c. Timetable: Get Official Timetable PDF Document
+app.get('/attendance/timetable/document', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const semester = (req.query.semester as string) || '';
+    const section = ((req.query.section as string) || 'A').toUpperCase();
+    const department = (req.query.department as string) || '';
+
+    let query = `SELECT id, semester_label, department, section, file_name, file_data, file_size, uploaded_by, created_at 
+                 FROM timetable_documents WHERE semester_label = $1`;
+    const params: any[] = [semester];
+
+    if (section && section !== 'All') {
+      params.push(section);
+      query += ` AND section = $${params.length}`;
+    }
+    if (department && department !== 'All') {
+      params.push(`%${department}%`);
+      query += ` AND department ILIKE $${params.length}`;
+    }
+
+    const result = await db.query(query, params);
+    if (result.rows.length === 0) {
+      return res.json({ document: null });
+    }
+
+    res.json({ document: result.rows[0] });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 16d. Timetable: Delete Official Timetable PDF Document
+app.delete('/attendance/timetable/document/:id', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    await db.query('DELETE FROM timetable_documents WHERE id = $1', [id]);
+    res.json({ success: true, message: 'Timetable document deleted.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 17. Timetable: Clear Section Timetable
+app.delete('/attendance/timetable/clear/section', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+  try {
+    const { semester, section, department } = req.query;
+    if (!semester) {
+      return res.status(400).json({ error: 'Semester is required' });
+    }
+    let query = `DELETE FROM timetable_entries WHERE semester_label = $1`;
+    const params: any[] = [semester];
+
+    if (section && section !== 'All') {
+      params.push(section);
+      query += ` AND section = $${params.length}`;
+    }
+    if (department && department !== 'All') {
+      params.push(`%${department}%`);
+      query += ` AND department ILIKE $${params.length}`;
+    }
+
+    const result = await db.query(query, params);
+    res.json({ success: true, message: `Cleared ${result.rowCount || 0} timetable slots.` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 18. Timetable: Get Today's Scheduled Session Slots (Auto-Generator for Faculty & Students)
+app.get('/attendance/timetable/today-slots', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const dateStr = (req.query.date as string) || new Date().toISOString().split('T')[0];
+    const semester = (req.query.semester as string) || '';
+    const section = (req.query.section as string) || '';
+    const facultyEmail = (req.query.faculty_email as string) || (req.auth?.role === 'faculty' ? req.auth.email : '');
+
+    const dateObj = new Date(dateStr);
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dayOfWeek = dayNames[dateObj.getDay()];
+
+    if (dayOfWeek === 'Sunday') {
+      return res.json({ dayOfWeek, date: dateStr, slots: [], message: 'Sunday is a holiday' });
+    }
+
+    let query = `SELECT * FROM timetable_entries WHERE day_of_week = $1`;
+    const params: any[] = [dayOfWeek];
+
+    if (semester) {
+      params.push(semester);
+      query += ` AND semester_label = $${params.length}`;
+    }
+    if (section && section !== 'All') {
+      params.push(section.toUpperCase());
+      query += ` AND section = $${params.length}`;
+    }
+    if (facultyEmail) {
+      params.push(facultyEmail.toLowerCase());
+      query += ` AND LOWER(faculty_email) = LOWER($${params.length})`;
+    }
+
+    query += ` ORDER BY period_start ASC`;
+
+    const result = await db.query(query, params);
+
+    // Attach period timing metadata based on year
+    const slots = result.rows.map((row: any) => {
+      const isFirstOrFourthYear = ['1-1', '1-2', '4-1', '4-2'].includes(row.semester_label);
+      let timingStr = '';
+      const p = parseInt(row.period_start);
+      const span = parseInt(row.num_periods);
+
+      if (isFirstOrFourthYear) {
+        // 1st & 4th year period structure:
+        // P1: 09:00-09:50, P2: 09:50-10:40 [Break 10:40-11:00]
+        // P3: 11:00-11:50 [Lunch 11:50-01:00]
+        // P4: 01:00-01:50, P5: 01:50-02:40 [Break 02:40-03:00]
+        // P6: 03:00-03:50, P7: 03:50-04:40
+        const startTimes = ['', '09:00 AM', '09:50 AM', '11:00 AM', '01:00 PM', '01:50 PM', '03:00 PM', '03:50 PM'];
+        const endTimes = ['', '09:50 AM', '10:40 AM', '11:50 AM', '01:50 PM', '02:40 PM', '03:50 PM', '04:40 PM'];
+        const start = startTimes[p] || '09:00 AM';
+        const end = endTimes[Math.min(7, p + span - 1)] || '04:40 PM';
+        timingStr = `${start} – ${end}`;
+      } else {
+        // 2nd & 3rd year period structure:
+        // P1: 09:00-09:50, P2: 09:50-10:40 [Break 10:40-11:00]
+        // P3: 11:00-11:50, P4: 11:50-12:40 [Lunch 12:40-01:50]
+        // P5: 01:50-02:40, P6: 02:40-03:30, P7: 03:30-04:20
+        const startTimes = ['', '09:00 AM', '09:50 AM', '11:00 AM', '11:50 AM', '01:50 PM', '02:40 PM', '03:30 PM'];
+        const endTimes = ['', '09:50 AM', '10:40 AM', '11:50 AM', '12:40 PM', '02:40 PM', '03:30 PM', '04:20 PM'];
+        const start = startTimes[p] || '09:00 AM';
+        const end = endTimes[Math.min(7, p + span - 1)] || '04:20 PM';
+        timingStr = `${start} – ${end}`;
+      }
+
+      return {
+        ...row,
+        timing_display: timingStr,
+      };
+    });
+
+    res.json({
+      date: dateStr,
+      dayOfWeek,
+      slots,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 19. Year-Wise Attendance Summary Report (for PDF & Excel Export)
+// Accessible by Admin, HOD, and Faculty (for their allotted subjects)
+app.get('/attendance/reports/year-summary', requireRole('admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
+  try {
+    const yearParam = (req.query.year as string) || '2nd Year';
+    const departmentParam = (req.query.department as string) || '';
+    const sectionParam = (req.query.section as string) || '';
+    const callerRole = req.auth?.role;
+    const callerEmail = req.auth?.email?.toLowerCase();
+    const callerDept = req.auth?.department;
+
+    // Resolve semester labels for the selected year
+    let semesterLabels: string[] = ['2-1', '2-2'];
+    if (yearParam.includes('1') || yearParam === '1st Year') semesterLabels = ['1-1', '1-2'];
+    else if (yearParam.includes('2') || yearParam === '2nd Year') semesterLabels = ['2-1', '2-2'];
+    else if (yearParam.includes('3') || yearParam === '3rd Year') semesterLabels = ['3-1', '3-2'];
+    else if (yearParam.includes('4') || yearParam === '4th Year') semesterLabels = ['4-1', '4-2'];
+    else semesterLabels = [yearParam];
+
+    // Filter department
+    let targetDept = departmentParam;
+    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+      targetDept = callerDept;
+    }
+
+    // Step 1: Get all subjects in these semesters for the department
+    let subjQuery = `
+      SELECT a.id, a.subject_name, a.subject_type, a.semester_label, a.section, a.faculty_name, a.faculty_email, a.department
+      FROM subject_allotments a
+      WHERE a.semester_label = ANY($1)
+    `;
+    const subjParams: any[] = [semesterLabels];
+
+    if (targetDept && targetDept !== 'All') {
+      subjParams.push(`%${targetDept}%`);
+      subjQuery += ` AND a.department ILIKE $${subjParams.length}`;
+    }
+    if (sectionParam && sectionParam !== 'All') {
+      subjParams.push(sectionParam.toUpperCase());
+      subjQuery += ` AND a.section = $${subjParams.length}`;
+    }
+    if (callerRole === 'faculty') {
+      subjParams.push(callerEmail);
+      subjQuery += ` AND LOWER(a.faculty_email) = LOWER($${subjParams.length})`;
+    }
+
+    subjQuery += ` ORDER BY a.semester_label, a.subject_name, a.section`;
+    const subjectsRes = await db.query(subjQuery, subjParams);
+    const subjects = subjectsRes.rows;
+
+    if (subjects.length === 0) {
+      return res.json({
+        year: yearParam,
+        semesters: semesterLabels,
+        department: targetDept || 'All',
+        section: sectionParam || 'All',
+        subjects: [],
+        students: [],
+        generatedAt: new Date().toISOString(),
+      });
+    }
+
+    const allotmentIds = subjects.map(s => s.id);
+
+    // Step 2: Get all students enrolled in any of these allotments with per-subject attendance
+    const studentDataQuery = `
+      SELECT 
+        st.roll_number,
+        st.name AS student_name,
+        st.section AS student_section,
+        st.department AS student_department,
+        r.allotment_id,
+        r.joining_date,
+        a.subject_name,
+        a.semester_label,
+        COALESCE(SUM(CASE WHEN s.session_date >= COALESCE(r.joining_date, '1970-01-01'::date) THEN s.num_periods ELSE 0 END), 0) AS periods_held,
+        COALESCE(SUM(CASE WHEN s.session_date >= COALESCE(r.joining_date, '1970-01-01'::date) AND ar.is_present = true THEN s.num_periods ELSE 0 END), 0) AS periods_attended
+      FROM subject_rosters r
+      JOIN subject_allotments a ON a.id = r.allotment_id
+      LEFT JOIN students st ON st.roll_number = r.roll_number
+      LEFT JOIN attendance_sessions s ON s.allotment_id = a.id
+      LEFT JOIN attendance_records ar ON ar.session_id = s.id AND ar.roll_number = r.roll_number
+      WHERE r.allotment_id = ANY($1)
+      GROUP BY st.roll_number, st.name, st.section, st.department, r.allotment_id, r.joining_date, a.subject_name, a.semester_label
+      ORDER BY st.roll_number, a.subject_name
+    `;
+
+    const studentDataRes = await db.query(studentDataQuery, [allotmentIds]);
+
+    // Aggregate by student
+    const studentMap: Record<string, any> = {};
+
+    studentDataRes.rows.forEach((row: any) => {
+      const roll = row.roll_number || 'UNKNOWN';
+      if (!studentMap[roll]) {
+        studentMap[roll] = {
+          roll_number: roll,
+          name: row.student_name || roll,
+          section: row.student_section || sectionParam || 'A',
+          department: row.student_department || targetDept || 'General',
+          subjects: {},
+          total_periods_held: 0,
+          total_periods_attended: 0,
+        };
+      }
+
+      const held = parseInt(row.periods_held || '0');
+      const attended = parseInt(row.periods_attended || '0');
+      const pct = held > 0 ? Math.round((attended / held) * 1000) / 10 : 100;
+
+      studentMap[roll].subjects[row.allotment_id] = {
+        allotment_id: row.allotment_id,
+        subject_name: row.subject_name,
+        semester_label: row.semester_label,
+        joining_date: row.joining_date,
+        periods_held: held,
+        periods_attended: attended,
+        percentage: pct,
+      };
+
+      studentMap[roll].total_periods_held += held;
+      studentMap[roll].total_periods_attended += attended;
+    });
+
+    const students = Object.values(studentMap).map((s: any) => {
+      const overallPct = s.total_periods_held > 0
+        ? Math.round((s.total_periods_attended / s.total_periods_held) * 1000) / 10
+        : 100;
+      return {
+        ...s,
+        overall_percentage: overallPct,
+      };
+    });
+
+    // Sort students by roll number
+    students.sort((a, b) => a.roll_number.localeCompare(b.roll_number));
+
+    res.json({
+      year: yearParam,
+      semesters: semesterLabels,
+      department: targetDept || 'All Departments',
+      section: sectionParam || 'All Sections',
+      subjects,
+      students,
+      generatedAt: new Date().toISOString(),
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
