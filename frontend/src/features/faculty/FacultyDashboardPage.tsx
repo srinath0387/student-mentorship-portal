@@ -97,6 +97,29 @@ export const FacultyDashboardPage: React.FC = () => {
     queryFn: () => api.getDepartmentReport(user?.department),
   });
 
+  // ── Class Incharge (1st-Year Sections) Query ──
+  const { data: inchargeSections = [] } = useQuery({
+    queryKey: ['facultyInchargeSections', user?.email],
+    queryFn: () => api.getFacultyInchargeSections(),
+    enabled: Boolean(user?.email),
+  });
+
+  const [selectedInchargeIdx, setSelectedInchargeIdx] = useState<number>(0);
+  const activeIncharge = inchargeSections[selectedInchargeIdx] || inchargeSections[0] || null;
+
+  const { data: inchargeAnalytics, isLoading: inchargeAnalyticsLoading } = useQuery({
+    queryKey: ['inchargeSectionAnalytics', activeIncharge?.semester_label, activeIncharge?.department, activeIncharge?.section],
+    queryFn: () =>
+      activeIncharge
+        ? api.getInchargeSectionAnalytics({
+            semester: activeIncharge.semester_label,
+            department: activeIncharge.department,
+            section: activeIncharge.section,
+          })
+        : Promise.resolve(null),
+    enabled: Boolean(activeIncharge),
+  });
+
   // Compute real stat card values
   const topStandingCount = useMemo(
     () => mentees.filter((m: any) => Number(m.cgpa) >= 8.0).length,
@@ -313,9 +336,185 @@ export const FacultyDashboardPage: React.FC = () => {
             >
               <span>🎯 Placement Eligibility (T&P Drive)</span>
             </button>
+            {inchargeSections.length > 0 && (
+              <button
+                onClick={() => setSearchParams({ tab: 'incharge' })}
+                className={`flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold border-b-2 whitespace-nowrap transition-all rounded-t-lg ${
+                  activeTab === 'incharge'
+                    ? 'border-pink-500 text-pink-500 bg-pink-500/10'
+                    : 'border-transparent text-textSecondary hover:text-textPrimary hover:bg-surface-2'
+                }`}
+              >
+                <Award className="w-3.5 h-3.5 text-pink-500" />
+                <span>Class Incharge ({inchargeSections.length} Sections)</span>
+              </button>
+            )}
           </nav>
         </div>
       </div>
+
+      {/* Tab: Class Incharge Section Intelligence (1st-Year Only) */}
+      {activeTab === 'incharge' && activeIncharge && (
+        <div className="space-y-6">
+          {/* Section Picker if assigned to multiple */}
+          {inchargeSections.length > 1 && (
+            <div className="flex gap-2 bg-surface-2 p-1.5 rounded-xl border border-borderLine max-w-md">
+              {inchargeSections.map((sec: any, idx: number) => (
+                <button
+                  key={sec.id}
+                  onClick={() => setSelectedInchargeIdx(idx)}
+                  className={`flex-1 py-1.5 px-3 text-xs font-bold rounded-lg transition-all ${
+                    selectedInchargeIdx === idx
+                      ? 'bg-pink-600 text-white shadow-sm'
+                      : 'text-textSecondary hover:text-textPrimary'
+                  }`}
+                >
+                  {sec.department} Sem {sec.semester_label} (Sec {sec.section})
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Section Hero Banner */}
+          <div className="bg-gradient-to-r from-pink-950/30 via-surface to-surface border border-pink-500/30 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-pink-500/10 text-pink-400 text-xs font-bold uppercase tracking-wider mb-2">
+                <Award className="w-3.5 h-3.5" />
+                Official 1st-Year Class Incharge Intelligence
+              </div>
+              <h2 className="text-xl md:text-2xl font-black text-textPrimary">
+                {activeIncharge.department} — Semester {activeIncharge.semester_label} (Section {activeIncharge.section})
+              </h2>
+              <p className="text-xs text-textSecondary mt-1">
+                Full view-only oversight across all theory and lab subjects, aggregate student attendance, and risk alerts for this section.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="bg-surface-2 px-4 py-2.5 rounded-xl border border-borderLine text-center">
+                <span className="text-[10px] uppercase font-bold text-textSecondary block">Section Attendance Avg</span>
+                <span className="text-xl font-black text-pink-400">
+                  {inchargeAnalytics?.sectionAverage || 0}%
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Low Attendance Warning Alert */}
+          {inchargeAnalytics?.lowAttendanceCount > 0 && (
+            <div className="bg-red-950/30 border border-red-500/30 rounded-2xl p-4 flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+              <div>
+                <h4 className="text-xs font-bold text-red-300">
+                  Attendance Deficit Warning: {inchargeAnalytics.lowAttendanceCount} Student(s) Below 75%
+                </h4>
+                <p className="text-[11px] text-textSecondary mt-0.5">
+                  These 1st-year students require academic mentoring or parent notification to avoid condonation shortages.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Section Subjects Matrix */}
+          <div className="bg-surface border border-borderLine rounded-2xl p-5 shadow-sm space-y-3">
+            <h3 className="text-xs font-bold text-textSecondary uppercase tracking-wider">
+              Enrolled Subjects in Section ({inchargeAnalytics?.subjects?.length || 0})
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {inchargeAnalytics?.subjects?.map((sub: any) => (
+                <div key={sub.id} className="bg-surface-2 p-3 rounded-xl border border-borderLine text-xs">
+                  <div className="font-bold text-textPrimary">{sub.subject_name}</div>
+                  <div className="text-[11px] text-textSecondary mt-0.5">
+                    Faculty: <span className="font-semibold text-brand-primary">{sub.faculty_name || sub.faculty_email}</span>
+                  </div>
+                  <span className="inline-block mt-2 px-2 py-0.5 rounded-md bg-background border border-borderLine text-[10px] font-bold text-textSecondary">
+                    {sub.subject_type}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Section Students Table */}
+          <div className="bg-surface border border-borderLine rounded-2xl shadow-sm overflow-hidden">
+            <div className="p-4 border-b border-borderLine flex items-center justify-between">
+              <h3 className="text-xs font-bold text-textSecondary uppercase tracking-wider">
+                Section Roster & Attendance Tracking ({inchargeAnalytics?.students?.length || 0} Students)
+              </h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left border-collapse">
+                <thead className="bg-surface-2 text-textMuted font-bold uppercase tracking-wider border-b border-borderLine">
+                  <tr>
+                    <th className="py-3 px-4">Roll / Adm No</th>
+                    <th className="py-3 px-4">Student Name</th>
+                    <th className="py-3 px-4">Email</th>
+                    <th className="py-3 px-4 text-center">Classes Held</th>
+                    <th className="py-3 px-4 text-center">Attended</th>
+                    <th className="py-3 px-4 text-center">Overall %</th>
+                    <th className="py-3 px-4">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-borderLine">
+                  {inchargeAnalyticsLoading ? (
+                    <tr>
+                      <td colSpan={7} className="py-10 text-center text-textMuted">
+                        Loading section analytics...
+                      </td>
+                    </tr>
+                  ) : !inchargeAnalytics?.students || inchargeAnalytics.students.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-10 text-center text-textMuted">
+                        No students enrolled in this section yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    inchargeAnalytics.students.map((st: any) => (
+                      <tr key={st.roll_number} className="hover:bg-surface-2/40 transition-colors">
+                        <td className="py-3 px-4 font-mono font-bold text-pink-400">
+                          {st.roll_number}
+                        </td>
+                        <td className="py-3 px-4 font-bold text-textPrimary">
+                          {st.name}
+                        </td>
+                        <td className="py-3 px-4 font-mono text-textSecondary">
+                          {st.email}
+                        </td>
+                        <td className="py-3 px-4 text-center font-bold text-textPrimary">
+                          {st.total_held}
+                        </td>
+                        <td className="py-3 px-4 text-center font-bold text-emerald-400">
+                          {st.total_attended}
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <span
+                            className={`font-black ${
+                              st.overall_percentage < 75 ? 'text-red-400' : 'text-emerald-400'
+                            }`}
+                          >
+                            {st.overall_percentage}%
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          {st.overall_percentage < 75 ? (
+                            <span className="px-2 py-0.5 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 font-bold text-[10px]">
+                              Deficit (&lt;75%)
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-bold text-[10px]">
+                              Normal
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tab: Attendance Records & Tracking */}
       {activeTab === 'attendance' && (

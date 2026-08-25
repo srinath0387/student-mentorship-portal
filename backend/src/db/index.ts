@@ -399,8 +399,23 @@ async function ensureSchema(p: Pool) {
       ('adminds@rgmcet.edu.in', 'Data Science Admin', 'admin@2026', 'CSE (Data Science)', 'System'),
       ('adminaiml@rgmcet.edu.in', 'AI & ML Admin', 'admin@2026', 'CSE (AI & ML)', 'System'),
       ('adminbs@rgmcet.edu.in', 'BS Admin', 'admin@2026', 'CSE (BS)', 'System'),
-      ('admincys@rgmcet.edu.in', 'Cyber Security Admin', 'admin@2026', 'CSE (Cyber Security)', 'System')
+      ('admincys@rgmcet.edu.in', 'Cyber Security Admin', 'admin@2026', 'CSE (Cyber Security)', 'System'),
+      ('coordinator@rgmcet.edu.in', '1st Year Coordinator', 'coordinator@2026', 'All', 'System')
      ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, password = EXCLUDED.password;`,
+
+    // Migration: add 1st year fresher admission and migration columns to students table
+    `ALTER TABLE students DROP CONSTRAINT IF EXISTS check_roll_number_format;`,
+    `ALTER TABLE students DROP CONSTRAINT IF EXISTS check_rgmcet_email;`,
+    `ALTER TABLE students ADD COLUMN IF NOT EXISTS admission_id VARCHAR(50);`,
+    `ALTER TABLE students ADD COLUMN IF NOT EXISTS dob DATE;`,
+    `ALTER TABLE students ADD COLUMN IF NOT EXISTS personal_mobile VARCHAR(20);`,
+    `ALTER TABLE students ADD COLUMN IF NOT EXISTS personal_email VARCHAR(100);`,
+    `ALTER TABLE students ADD COLUMN IF NOT EXISTS username VARCHAR(50);`,
+    `ALTER TABLE students ADD COLUMN IF NOT EXISTS password_hash TEXT;`,
+    `ALTER TABLE students ADD COLUMN IF NOT EXISTS migration_stage INT DEFAULT 0;`,
+    `ALTER TABLE students ADD COLUMN IF NOT EXISTS is_first_year_setup_complete BOOLEAN DEFAULT FALSE;`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_students_admission_id ON students(admission_id) WHERE admission_id IS NOT NULL AND admission_id != '';`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_students_username ON students(LOWER(username)) WHERE username IS NOT NULL AND username != '';`,
 
     // Index for department-based lookups
     `CREATE INDEX IF NOT EXISTS idx_students_department ON students(department);`,
@@ -493,10 +508,22 @@ async function ensureSchema(p: Pool) {
     `CREATE INDEX IF NOT EXISTS idx_sessions_allotment ON attendance_sessions(allotment_id);`,
     `CREATE INDEX IF NOT EXISTS idx_sessions_date ON attendance_sessions(session_date);`,
     `CREATE INDEX IF NOT EXISTS idx_records_session ON attendance_records(session_id);`,
-    `CREATE INDEX IF NOT EXISTS idx_records_roll ON attendance_records(roll_number);`,
     `CREATE INDEX IF NOT EXISTS idx_timetable_lookup ON timetable_entries(semester_label, department, section, day_of_week);`,
     `CREATE INDEX IF NOT EXISTS idx_timetable_faculty ON timetable_entries(faculty_email);`,
-    `CREATE INDEX IF NOT EXISTS idx_timetable_docs ON timetable_documents(semester_label, department, section);`
+    `CREATE INDEX IF NOT EXISTS idx_timetable_docs ON timetable_documents(semester_label, department, section);`,
+    `CREATE TABLE IF NOT EXISTS class_incharges (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      semester_label VARCHAR(5) NOT NULL CHECK (semester_label IN ('1-1', '1-2')),
+      department VARCHAR(50) NOT NULL,
+      section VARCHAR(10) NOT NULL,
+      faculty_email VARCHAR(100) NOT NULL,
+      faculty_name VARCHAR(100) NOT NULL DEFAULT '',
+      assigned_by VARCHAR(100) NOT NULL DEFAULT '',
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(semester_label, department, section)
+    );`,
+    `CREATE INDEX IF NOT EXISTS idx_class_incharges_faculty ON class_incharges(faculty_email);`
   ];
 
   try {

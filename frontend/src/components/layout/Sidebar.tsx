@@ -123,6 +123,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
     },
   ];
 
+  const coordinatorNavGroups: NavGroup[] = [
+    {
+      title: '1ST YEAR COORDINATOR',
+      items: [
+        { label: 'Coordinator Hub', path: '/coordinator/dashboard', icon: LayoutDashboard },
+        { label: 'Fresher Directory', path: '/coordinator/dashboard', icon: Users },
+        { label: 'Class Incharges', path: '/coordinator/dashboard', icon: Award },
+        { label: 'Attendance Mgmt', path: '/admin/dashboard?tab=attendance', icon: CalendarCheck },
+        { label: 'Faculty Directory', path: '/admin/faculty', icon: ShieldCheck },
+      ],
+    },
+  ];
+
   const parentNavGroups: NavGroup[] = [
     {
       title: 'WARD OVERVIEW',
@@ -138,7 +151,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
   ];
 
   const activeNavGroups =
-    role === 'admin' ? adminNavGroups
+    role === 'coordinator' ? coordinatorNavGroups
+    : role === 'admin' ? adminNavGroups
     : role === 'faculty' ? facultyNavGroups
     : role === 'hod' ? hodNavGroups
     : role === 'parent' ? parentNavGroups

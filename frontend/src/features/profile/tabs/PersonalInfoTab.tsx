@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { Edit2, Save, X, ExternalLink, GraduationCap, Lock } from 'lucide-react';
+import { Edit2, Save, X, ExternalLink, GraduationCap, Lock, Mail, Sparkles, CheckCircle2, KeyRound, Clock } from 'lucide-react';
 import { StudentProfile, AcademicRecord } from '../../../types';
 import { api } from '../../../lib/api';
 import { useAuth } from '../../../context/AuthContext';
@@ -35,6 +35,107 @@ export const PersonalInfoTab: React.FC<PersonalInfoTabProps> = ({ student, acade
   const activeRoll = student?.roll_number || user?.rollNumber || '';
   const activeName = student?.name || user?.name || 'Student';
   const activeEmail = student?.email || user?.email || 'student@rgmcet.edu.in';
+
+  // ── Self-Service Email Migration Modal State ──
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [newCollegeEmail, setNewCollegeEmail] = useState('');
+  const [emailAuthPassword, setEmailAuthPassword] = useState('');
+  const [isLinkingEmail, setIsLinkingEmail] = useState(false);
+  const [emailLinkError, setEmailLinkError] = useState<string | null>(null);
+  const [emailLinkSuccess, setEmailLinkSuccess] = useState<string | null>(null);
+
+  // ── Self-Service Username Modal State ──
+  const [showUsernameModal, setShowUsernameModal] = useState(false);
+  const [newUsername, setNewUsername] = useState(student?.username || '');
+  const [userAuthPassword, setUserAuthPassword] = useState('');
+  const [isUpdatingUsername, setIsUpdatingUsername] = useState(false);
+  const [usernameStatus, setUsernameStatus] = useState<{ loading: boolean; available?: boolean; message?: string }>({ loading: false });
+  const [usernameError, setUsernameError] = useState<string | null>(null);
+  const [usernameSuccess, setUsernameSuccess] = useState<string | null>(null);
+
+  // Live availability check for new username
+  React.useEffect(() => {
+    if (!newUsername || newUsername.length < 4) {
+      setUsernameStatus({ loading: false });
+      return;
+    }
+    if (!/^[a-zA-Z0-9_.]+$/.test(newUsername)) {
+      setUsernameStatus({ loading: false, available: false, message: '✕ Only letters, numbers, _, and . allowed' });
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setUsernameStatus({ loading: true });
+      try {
+        const res = await api.checkUsernameAvailability(newUsername);
+        setUsernameStatus({ loading: false, available: res.available, message: res.message });
+      } catch {
+        setUsernameStatus({ loading: false, available: true, message: '✓ Format valid' });
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [newUsername]);
+
+  const handleLinkEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEmailLinkError(null);
+    setEmailLinkSuccess(null);
+    if (!newCollegeEmail || !newCollegeEmail.toLowerCase().endsWith('@rgmcet.edu.in')) {
+      setEmailLinkError('Please enter a valid @rgmcet.edu.in college email address.');
+      return;
+    }
+    if (!emailAuthPassword) {
+      setEmailLinkError('Please enter your current account password to authorize.');
+      return;
+    }
+
+    setIsLinkingEmail(true);
+    try {
+      const res = await api.linkCollegeEmail({
+        collegeEmail: newCollegeEmail.trim().toLowerCase(),
+        currentPassword: emailAuthPassword,
+      });
+      setEmailLinkSuccess(res.message || 'College email linked successfully!');
+      setTimeout(() => {
+        setShowEmailModal(false);
+        onRefresh();
+      }, 1500);
+    } catch (err: any) {
+      setEmailLinkError(err.message || 'Failed to link college email.');
+    } finally {
+      setIsLinkingEmail(false);
+    }
+  };
+
+  const handleUpdateUsername = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setUsernameError(null);
+    setUsernameSuccess(null);
+    if (!newUsername || newUsername.length < 4) {
+      setUsernameError('Username must be at least 4 characters.');
+      return;
+    }
+    if (!userAuthPassword) {
+      setUsernameError('Please enter your current password to authorize.');
+      return;
+    }
+
+    setIsUpdatingUsername(true);
+    try {
+      const res = await api.updateUsername({
+        newUsername: newUsername.trim(),
+        currentPassword: userAuthPassword,
+      });
+      setUsernameSuccess(res.message || 'Username updated successfully!');
+      setTimeout(() => {
+        setShowUsernameModal(false);
+        onRefresh();
+      }, 1500);
+    } catch (err: any) {
+      setUsernameError(err.message || 'Failed to update username.');
+    } finally {
+      setIsUpdatingUsername(false);
+    }
+  };
 
   const { register, handleSubmit, reset } = useForm<StudentProfile>();
 
@@ -347,6 +448,271 @@ export const PersonalInfoTab: React.FC<PersonalInfoTabProps> = ({ student, acade
           </div>
         )}
       </form>
+
+      {/* ── 1st Year Self-Service Migration & Account Credentials Section ── */}
+      {!readOnly && (
+        <div className="mt-8 pt-6 border-t border-borderLine space-y-4">
+          <div>
+            <h4 className="text-sm font-bold text-textPrimary flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-pink-500" />
+              Account Credentials & Self-Service Migration
+            </h4>
+            <p className="text-xs text-textSecondary">
+              Manage your personal username and link your official institutional email ID.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Box 1: College Email Status */}
+            <div className="bg-surface-2 p-4 rounded-xl border border-borderLine flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-textSecondary uppercase tracking-wider">Official College Email</span>
+                  {s?.migration_stage === 1 ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-bold text-[10px]">
+                      <CheckCircle2 className="w-3 h-3" />
+                      Stage 1 Linked
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 font-bold text-[10px]">
+                      <Clock className="w-3 h-3" />
+                      Stage 0 Admission
+                    </span>
+                  )}
+                </div>
+
+                <div className="mt-2 text-sm font-mono font-bold text-textPrimary">
+                  {s?.migration_stage === 1 ? s.email : 'No official email linked yet'}
+                </div>
+                <p className="text-[11px] text-textSecondary mt-1">
+                  {s?.migration_stage === 1
+                    ? 'Your account is permanently linked to your institutional email.'
+                    : 'Once you receive your @rgmcet.edu.in email ID, link it here to upgrade to Stage 1.'}
+                </p>
+              </div>
+
+              {s?.migration_stage !== 1 && (
+                <div className="mt-4">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmailLinkError(null);
+                      setEmailLinkSuccess(null);
+                      setShowEmailModal(true);
+                    }}
+                    className="w-full py-2 px-3 bg-brand-primary hover:bg-brand-primary/90 text-white text-xs font-bold rounded-lg shadow-sm transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>Link Official College Email</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Box 2: Username Management */}
+            <div className="bg-surface-2 p-4 rounded-xl border border-borderLine flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-textSecondary uppercase tracking-wider">Student Username</span>
+                  <span className="text-[10px] text-brand-primary font-bold">Platform-wide Login</span>
+                </div>
+
+                <div className="mt-2 text-sm font-mono font-bold text-brand-primary">
+                  {s?.username ? `@${s.username}` : 'Not set'}
+                </div>
+                <p className="text-[11px] text-textSecondary mt-1">
+                  You can use your unique username along with your password to log in from any browser.
+                </p>
+              </div>
+
+              <div className="mt-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewUsername(s?.username || '');
+                    setUsernameError(null);
+                    setUsernameSuccess(null);
+                    setShowUsernameModal(true);
+                  }}
+                  className="w-full py-2 px-3 border border-borderLine hover:bg-surface-3 text-textPrimary text-xs font-bold rounded-lg transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>{s?.username ? 'Change Username' : 'Set Username'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Link Official College Email ── */}
+      {showEmailModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
+          <div className="bg-surface border border-borderLine rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-borderLine">
+              <h2 className="text-base font-bold text-textPrimary flex items-center gap-2">
+                <Mail className="w-5 h-5 text-brand-primary" />
+                Link Official College Email
+              </h2>
+              <button
+                onClick={() => setShowEmailModal(false)}
+                className="text-textSecondary hover:text-textPrimary text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-textSecondary leading-relaxed">
+              Enter your official <strong>@rgmcet.edu.in</strong> email ID and confirm your account password. All historical attendance, grades, and profile data remain permanently linked.
+            </p>
+
+            {emailLinkError && (
+              <div className="p-2.5 rounded-xl border border-red-500/50 bg-red-950/60 text-xs text-red-300">
+                {emailLinkError}
+              </div>
+            )}
+            {emailLinkSuccess && (
+              <div className="p-2.5 rounded-xl border border-emerald-500/50 bg-emerald-950/60 text-xs text-emerald-300">
+                {emailLinkSuccess}
+              </div>
+            )}
+
+            <form onSubmit={handleLinkEmail} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-textPrimary mb-1">Official RGMCET Email ID *</label>
+                <input
+                  type="email"
+                  value={newCollegeEmail}
+                  onChange={(e) => setNewCollegeEmail(e.target.value)}
+                  placeholder="e.g. 25091a3201@rgmcet.edu.in"
+                  className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-textPrimary mb-1">Current Account Password *</label>
+                <input
+                  type="password"
+                  value={emailAuthPassword}
+                  onChange={(e) => setEmailAuthPassword(e.target.value)}
+                  placeholder="Enter current password to authorize"
+                  className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                />
+              </div>
+
+              <div className="pt-2 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowEmailModal(false)}
+                  className="flex-1 py-2 text-xs font-semibold rounded-xl border border-borderLine text-textSecondary hover:bg-surface-2 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isLinkingEmail}
+                  className="flex-1 py-2 text-xs font-bold rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                >
+                  {isLinkingEmail ? 'Linking...' : 'Link College Email'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Update Username ── */}
+      {showUsernameModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
+          <div className="bg-surface border border-borderLine rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-borderLine">
+              <h2 className="text-base font-bold text-textPrimary flex items-center gap-2">
+                <KeyRound className="w-5 h-5 text-brand-primary" />
+                Update Student Username
+              </h2>
+              <button
+                onClick={() => setShowUsernameModal(false)}
+                className="text-textSecondary hover:text-textPrimary text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-textSecondary leading-relaxed">
+              Choose a unique platform-wide username (4-30 characters, letters, numbers, _, .) and confirm your password.
+            </p>
+
+            {usernameError && (
+              <div className="p-2.5 rounded-xl border border-red-500/50 bg-red-950/60 text-xs text-red-300">
+                {usernameError}
+              </div>
+            )}
+            {usernameSuccess && (
+              <div className="p-2.5 rounded-xl border border-emerald-500/50 bg-emerald-950/60 text-xs text-emerald-300">
+                {usernameSuccess}
+              </div>
+            )}
+
+            <form onSubmit={handleUpdateUsername} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-textPrimary mb-1">New Username *</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={newUsername}
+                    onChange={(e) => setNewUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_.]/g, ''))}
+                    placeholder="e.g. rahul_rgm25"
+                    className={`w-full px-3.5 py-2 pr-24 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 font-medium ${
+                      usernameStatus.available === true
+                        ? 'border-emerald-500 focus:ring-emerald-500'
+                        : usernameStatus.available === false
+                        ? 'border-red-500 focus:ring-red-500'
+                        : 'border-borderLine focus:ring-brand-primary'
+                    }`}
+                  />
+                  <div className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-bold">
+                    {usernameStatus.loading ? (
+                      <span className="text-textSecondary">Checking...</span>
+                    ) : usernameStatus.available === true ? (
+                      <span className="text-emerald-400">✓ Available</span>
+                    ) : usernameStatus.available === false ? (
+                      <span className="text-red-400">✕ Taken</span>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-textPrimary mb-1">Current Password *</label>
+                <input
+                  type="password"
+                  value={userAuthPassword}
+                  onChange={(e) => setUserAuthPassword(e.target.value)}
+                  placeholder="Enter current password to authorize"
+                  className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                />
+              </div>
+
+              <div className="pt-2 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowUsernameModal(false)}
+                  className="flex-1 py-2 text-xs font-semibold rounded-xl border border-borderLine text-textSecondary hover:bg-surface-2 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdatingUsername || usernameStatus.available === false}
+                  className="flex-1 py-2 text-xs font-bold rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                >
+                  {isUpdatingUsername ? 'Updating...' : 'Save Username'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

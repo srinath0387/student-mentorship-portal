@@ -171,6 +171,16 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
         return next();
       }
 
+      if (demoRole === 'coordinator') {
+        req.auth = {
+          email: email || 'coordinator@rgmcet.edu.in',
+          role: 'coordinator',
+          regNo: 'COORDINATOR_1ST_YEAR',
+          department: 'All',
+        };
+        return next();
+      }
+
       if (demoRole === 'faculty') {
         // Look up faculty department from DB
         let facDept: string | undefined;

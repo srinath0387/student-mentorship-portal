@@ -277,10 +277,20 @@ CREATE INDEX IF NOT EXISTS idx_rosters_allotment ON subject_rosters(allotment_id
 CREATE INDEX IF NOT EXISTS idx_rosters_roll ON subject_rosters(roll_number);
 CREATE INDEX IF NOT EXISTS idx_sessions_allotment ON attendance_sessions(allotment_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_date ON attendance_sessions(session_date);
-CREATE INDEX IF NOT EXISTS idx_records_session ON attendance_records(session_id);
-CREATE INDEX IF NOT EXISTS idx_records_roll ON attendance_records(roll_number);
-CREATE INDEX IF NOT EXISTS idx_timetable_lookup ON timetable_entries(semester_label, department, section, day_of_week);
-CREATE INDEX IF NOT EXISTS idx_timetable_faculty ON timetable_entries(faculty_email);
-CREATE INDEX IF NOT EXISTS idx_timetable_docs ON timetable_documents(semester_label, department, section);
+-- 19. Class Incharges (1st Year Only: 1-1 and 1-2)
+CREATE TABLE IF NOT EXISTS class_incharges (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    semester_label VARCHAR(5) NOT NULL CHECK (semester_label IN ('1-1', '1-2')),
+    department VARCHAR(50) NOT NULL,
+    section VARCHAR(10) NOT NULL,
+    faculty_email VARCHAR(100) NOT NULL,
+    faculty_name VARCHAR(100) NOT NULL DEFAULT '',
+    assigned_by VARCHAR(100) NOT NULL DEFAULT '',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(semester_label, department, section)
+);
+
+CREATE INDEX IF NOT EXISTS idx_class_incharges_faculty ON class_incharges(faculty_email);
 
 -- End of schema.sql

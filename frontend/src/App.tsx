@@ -15,6 +15,7 @@ const ProfilePage = lazy(() => import('./features/profile/ProfilePage').then(m =
 const FacultyDashboardPage = lazy(() => import('./features/faculty/FacultyDashboardPage').then(m => ({ default: m.FacultyDashboardPage })));
 const AdminDashboardPage = lazy(() => import('./features/admin/AdminDashboardPage').then(m => ({ default: m.AdminDashboardPage })));
 const HodDashboardPage = lazy(() => import('./features/hod/HodDashboardPage').then(m => ({ default: m.HodDashboardPage })));
+const CoordinatorDashboardPage = lazy(() => import('./features/coordinator/CoordinatorDashboardPage'));
 const CodingAnalyticsPage = lazy(() => import('./features/coding/CodingAnalyticsPage').then(m => ({ default: m.CodingAnalyticsPage })));
 const PlatformStatsRedirect = lazy(() => import('./features/coding/PlatformStatsRedirect').then(m => ({ default: m.PlatformStatsRedirect })));
 const FacultyManagementPage = lazy(() => import('./features/admin/FacultyManagementPage'));
@@ -57,6 +58,9 @@ const CacheClearer: React.FC = () => {
 
 const RoleDashboardRedirect: React.FC = () => {
   const { role } = useAuth();
+  if (role === 'coordinator') {
+    return <Navigate to="/coordinator/dashboard" replace />;
+  }
   if (role === 'admin') {
     return <Navigate to="/admin/dashboard" replace />;
   }
@@ -101,32 +105,21 @@ const MainLayout: React.FC = () => {
     }
   }, [location.pathname, location.search]);
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-10 h-10 border-4 border-brand-primary border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-          <p className="text-sm text-textSecondary font-medium">Restoring session...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
+  // Auth guard: redirect to root if not authenticated
+  if (!isLoading && !isAuthenticated) {
     return <Navigate to="/" replace />;
   }
 
   return (
-    <div className="h-dvh bg-background flex overflow-hidden">
+    <div className="min-h-screen bg-background flex flex-col">
       <Sidebar
         isOpen={isSidebarOpen}
-        collapsed={collapsed}
         onClose={() => setIsSidebarOpen(false)}
+        collapsed={collapsed}
       />
-      {/* Content area shifts right based on sidebar width */}
       <div
         className={[
-          'flex-1 flex flex-col min-w-0 transition-all duration-300',
+          'flex-1 flex flex-col min-w-0 transition-all duration-200',
           collapsed ? 'lg:pl-14' : 'lg:pl-[220px]',
         ].join(' ')}
       >
@@ -167,6 +160,7 @@ export const App: React.FC = () => {
             <Route path="/login/:role" element={<AuthPage />} />
             <Route path="/student-login" element={<AuthPage />} />
             <Route path="/faculty-login" element={<AuthPage />} />
+            <Route path="/coordinator-login" element={<AuthPage />} />
             <Route path="/hod-login" element={<AuthPage />} />
             <Route path="/admin-login" element={<AuthPage />} />
             <Route path="/parent-login" element={<AuthPage />} />
@@ -175,6 +169,7 @@ export const App: React.FC = () => {
               <Route path="/profile" element={<ProfilePage />} />
               <Route path="/profile/coding-profiles/:platform" element={<PlatformStatsRedirect />} />
               <Route path="/program-stats/:platform" element={<PlatformStatsRedirect />} />
+              <Route path="/coordinator/dashboard" element={<CoordinatorDashboardPage />} />
               <Route path="/faculty/dashboard" element={<FacultyDashboardPage />} />
               <Route path="/attendance" element={<AttendancePage />} />
               <Route path="/admin/dashboard" element={<AdminDashboardPage />} />

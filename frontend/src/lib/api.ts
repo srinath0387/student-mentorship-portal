@@ -790,5 +790,131 @@ export const api = {
       method: 'DELETE',
     });
   },
+
+  // ── 19. 1st Year System: Fresher, Coordinator, & Class Incharge ─────────────
+  uploadFresherRoster: async (students: any[]) => {
+    return fetchWithAuth('/admin/freshers/upload-roster', {
+      method: 'POST',
+      body: JSON.stringify({ students }),
+    });
+  },
+
+  checkUsernameAvailability: async (username: string) => {
+    return fetchWithAuth(`/auth/check-username-availability?username=${encodeURIComponent(username)}`);
+  },
+
+  fresherLogin: async (credentials: {
+    admissionId?: string;
+    dob?: string;
+    username?: string;
+    password?: string;
+  }) => {
+    return fetchWithAuth('/auth/fresher-login', {
+      method: 'POST',
+      body: JSON.stringify(credentials),
+    });
+  },
+
+  fresherSetupPassword: async (data: {
+    admissionId: string;
+    dob: string;
+    username: string;
+    password: string;
+  }) => {
+    return fetchWithAuth('/auth/fresher-setup-password', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  linkCollegeEmail: async (data: {
+    collegeEmail: string;
+    currentPassword: string;
+  }) => {
+    return fetchWithAuth('/student/link-college-email', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  updateUsername: async (data: {
+    newUsername: string;
+    currentPassword: string;
+  }) => {
+    return fetchWithAuth('/student/username', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  getCoordinatorFreshers: async (params: {
+    department?: string;
+    section?: string;
+    stage?: string;
+    search?: string;
+  }) => {
+    const query = new URLSearchParams();
+    if (params.department) query.append('department', params.department);
+    if (params.section) query.append('section', params.section);
+    if (params.stage !== undefined) query.append('stage', params.stage);
+    if (params.search) query.append('search', params.search);
+    const queryString = query.toString() ? `?${query.toString()}` : '';
+    return fetchWithAuth(`/coordinator/freshers${queryString}`);
+  },
+
+  getCoordinatorFresherStats: async () => {
+    return fetchWithAuth('/coordinator/freshers/stats');
+  },
+
+  assignClassIncharge: async (data: {
+    semester_label: '1-1' | '1-2';
+    department: string;
+    section: string;
+    faculty_email: string;
+    faculty_name?: string;
+  }) => {
+    return fetchWithAuth('/coordinator/class-incharge', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  getClassIncharges: async (params?: { semester?: string; department?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.semester) query.append('semester', params.semester);
+    if (params?.department) query.append('department', params.department);
+    const queryString = query.toString() ? `?${query.toString()}` : '';
+    return fetchWithAuth(`/coordinator/class-incharge${queryString}`);
+  },
+
+  deleteClassIncharge: async (id: string) => {
+    return fetchWithAuth(`/coordinator/class-incharge/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  getFacultyInchargeSections: async () => {
+    return fetchWithAuth('/faculty/incharge-sections');
+  },
+
+  getInchargeSectionAnalytics: async (params: {
+    semester: string;
+    department: string;
+    section: string;
+  }) => {
+    const query = new URLSearchParams({
+      semester: params.semester,
+      department: params.department,
+      section: params.section,
+    });
+    return fetchWithAuth(`/faculty/incharge-section-analytics?${query.toString()}`);
+  },
+
+  promoteSection: async (department: string, section?: string) => {
+    return fetchWithAuth('/coordinator/promote-section', {
+      method: 'POST',
+      body: JSON.stringify({ department, section }),
+    });
+  },
 };
 

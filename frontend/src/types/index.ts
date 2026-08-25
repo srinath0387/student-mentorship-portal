@@ -1,4 +1,4 @@
-export type UserRole = 'student' | 'faculty' | 'admin' | 'hod' | 'parent';
+export type UserRole = 'student' | 'faculty' | 'admin' | 'hod' | 'parent' | 'coordinator';
 
 export interface User {
   id: string;
@@ -33,6 +33,81 @@ export interface StudentProfile {
   resume_url?: string;
   linkedin_url?: string;
   linkedin_updated?: string;
+  admission_id?: string;
+  dob?: string;
+  personal_mobile?: string;
+  personal_email?: string;
+  username?: string;
+  migration_stage?: number;
+  is_first_year_setup_complete?: boolean;
+}
+
+export interface FresherStudent {
+  roll_number: string;
+  admission_id?: string;
+  name: string;
+  email: string;
+  dob?: string;
+  personal_mobile?: string;
+  personal_email?: string;
+  department: string;
+  section: string;
+  batch: string;
+  username?: string;
+  migration_stage: number;
+  is_first_year_setup_complete: boolean;
+  attendance_pct: number;
+  total_subjects_enrolled: number;
+  created_at: string;
+}
+
+export interface FresherStats {
+  totalFreshers: number;
+  stage0AdmissionCount: number;
+  stage1EmailLinkedCount: number;
+  activeClassInchargesCount: number;
+  totalFirstYearSections: number;
+}
+
+export interface ClassIncharge {
+  id: string;
+  semester_label: '1-1' | '1-2';
+  department: string;
+  section: string;
+  faculty_email: string;
+  faculty_name: string;
+  assigned_by: string;
+  created_at: string;
+}
+
+export interface ClassInchargeAnalytics {
+  semester: string;
+  department: string;
+  section: string;
+  totalStudents: number;
+  totalSubjects: number;
+  sectionAverage: number;
+  subjects: {
+    id: string;
+    subject_name: string;
+    subject_type: 'Theory' | 'Lab';
+    faculty_name: string;
+    faculty_email: string;
+    department: string;
+    section: string;
+  }[];
+  students: {
+    roll_number: string;
+    name: string;
+    email: string;
+    admission_id: string;
+    total_held: number;
+    total_attended: number;
+    overall_percentage: number;
+    subjects: Record<string, { held: number; attended: number; percentage: number }>;
+  }[];
+  lowAttendanceCount: number;
+  lowAttendanceStudents: any[];
 }
 
 export interface AcademicRecord {

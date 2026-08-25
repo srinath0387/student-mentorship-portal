@@ -141,6 +141,26 @@ const AdminIllustration: React.FC = () => (
   </div>
 );
 
+const CoordinatorIllustration: React.FC = () => (
+  <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 relative flex items-center justify-center">
+    <svg viewBox="0 0 80 80" fill="none" className="w-full h-full drop-shadow-sm">
+      {/* Background Soft Glow Disc */}
+      <circle cx="40" cy="40" r="36" fill="#FDF2F8" />
+      <circle cx="40" cy="40" r="30" fill="#FCE7F3" />
+      {/* Body */}
+      <path d="M22 64C22 52.9543 30.0589 44 40 44C49.9411 44 58 52.9543 58 64H22Z" fill="#BE185D" />
+      <polygon points="40,44 46,44 40,54 34,44" fill="#FFFFFF" />
+      <polygon points="38.5,47 41.5,47 42.5,58 40,62 37.5,58" fill="#DB2777" />
+      {/* Face */}
+      <circle cx="40" cy="33" r="10" fill="#FDE68A" />
+      <path d="M30 30C30 24 34 20 40 20C46 20 50 24 50 30C47 28 44 27 40 27C36 27 33 28 30 30Z" fill="#831843" />
+      {/* 1st Year Star Badge */}
+      <circle cx="40" cy="14" r="6" fill="#F59E0B" />
+      <path d="M40 10.5L41.2 13.5L44.5 13.5L41.8 15.5L42.8 18.5L40 16.5L37.2 18.5L38.2 15.5L35.5 13.5L38.8 13.5Z" fill="#FFFFFF" />
+    </svg>
+  </div>
+);
+
 // ── Role Cards Configuration ──────────────────────────────────────────────────
 
 const ROLE_CARDS: RoleCardConfig[] = [
@@ -175,6 +195,14 @@ const ROLE_CARDS: RoleCardConfig[] = [
     textColor: 'text-orange-500',
     buttonBg: 'bg-orange-500 hover:bg-orange-600 shadow-orange-500/30',
     renderIllustration: () => <HodIllustration />,
+  },
+  {
+    role: 'coordinator',
+    title: 'Coordinator',
+    topBorderColor: 'border-pink-600',
+    textColor: 'text-pink-600',
+    buttonBg: 'bg-pink-600 hover:bg-pink-700 shadow-pink-600/30',
+    renderIllustration: () => <CoordinatorIllustration />,
   },
   {
     role: 'admin',

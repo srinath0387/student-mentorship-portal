@@ -25,20 +25,21 @@ export const AuthPage: React.FC = () => {
   const getInitialRole = (): UserRole | null => {
     // 1. React Router searchParams (?role=...)
     const queryRole = searchParams.get('role')?.toLowerCase().trim();
-    if (queryRole && ['student', 'parent', 'faculty', 'hod', 'admin'].includes(queryRole)) {
+    if (queryRole && ['student', 'parent', 'faculty', 'hod', 'coordinator', 'admin'].includes(queryRole)) {
       return queryRole as UserRole;
     }
 
     // 2. Route param (/login/:role)
     const paramRole = params.role?.toLowerCase().trim();
-    if (paramRole && ['student', 'parent', 'faculty', 'hod', 'admin'].includes(paramRole)) {
+    if (paramRole && ['student', 'parent', 'faculty', 'hod', 'coordinator', 'admin'].includes(paramRole)) {
       return paramRole as UserRole;
     }
 
-    // 3. Pathname checks (/faculty-login, /admin-login, /student-login, /hod-login, /parent-login)
+    // 3. Pathname checks (/faculty-login, /admin-login, /student-login, /hod-login, /parent-login, /coordinator-login)
     const path = location.pathname.toLowerCase();
     if (path.includes('faculty-login')) return 'faculty';
     if (path.includes('hod-login')) return 'hod';
+    if (path.includes('coordinator-login')) return 'coordinator';
     if (path.includes('admin-login')) return 'admin';
     if (path.includes('parent-login')) return 'parent';
     if (path.includes('student-login')) return 'student';
@@ -47,14 +48,14 @@ export const AuthPage: React.FC = () => {
     try {
       const urlObj = new URL(window.location.href);
       const winRole = urlObj.searchParams.get('role')?.toLowerCase().trim();
-      if (winRole && ['student', 'parent', 'faculty', 'hod', 'admin'].includes(winRole)) {
+      if (winRole && ['student', 'parent', 'faculty', 'hod', 'coordinator', 'admin'].includes(winRole)) {
         return winRole as UserRole;
       }
       if (window.location.hash.includes('?')) {
         const hashQuery = window.location.hash.split('?')[1];
         const hashParams = new URLSearchParams(hashQuery);
         const hashRole = hashParams.get('role')?.toLowerCase().trim();
-        if (hashRole && ['student', 'parent', 'faculty', 'hod', 'admin'].includes(hashRole)) {
+        if (hashRole && ['student', 'parent', 'faculty', 'hod', 'coordinator', 'admin'].includes(hashRole)) {
           return hashRole as UserRole;
         }
       }
@@ -77,6 +78,25 @@ export const AuthPage: React.FC = () => {
 
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  // ── Fresher (1st Year No College Email) Login & Setup State ──
+  const [studentLoginMode, setStudentLoginMode] = useState<'standard' | 'fresher'>('standard');
+  const [fresherLoginType, setFresherLoginType] = useState<'dob' | 'username'>('dob');
+  const [fresherAdmissionId, setFresherAdmissionId] = useState('');
+  const [fresherDob, setFresherDob] = useState('');
+  const [fresherUsername, setFresherUsername] = useState('');
+  const [fresherPassword, setFresherPassword] = useState('');
+  const [isFresherSubmitting, setIsFresherSubmitting] = useState(false);
+
+  // First-time setup modal for fresher
+  const [showSetupModal, setShowSetupModal] = useState(false);
+  const [setupStudentInfo, setSetupStudentInfo] = useState<any>(null);
+  const [setupUsername, setSetupUsername] = useState('');
+  const [setupPassword, setSetupPassword] = useState('');
+  const [setupConfirmPassword, setSetupConfirmPassword] = useState('');
+  const [usernameStatus, setUsernameStatus] = useState<{ loading: boolean; available?: boolean; message?: string }>({ loading: false });
+  const [isSettingUp, setIsSettingUp] = useState(false);
+  const [setupError, setSetupError] = useState<string | null>(null);
 
   const { login, registerSession, sessionKickedOut } = useAuth();
 
@@ -225,6 +245,118 @@ export const AuthPage: React.FC = () => {
     }, 400);
     return () => clearTimeout(timer);
   }, [watchedEmail, watchedRegNo]);
+
+  // Live username availability check for first-time fresher setup
+  useEffect(() => {
+    if (!setupUsername || setupUsername.length < 4) {
+      setUsernameStatus({ loading: false });
+      return;
+    }
+    if (!/^[a-zA-Z0-9_.]+$/.test(setupUsername)) {
+      setUsernameStatus({ loading: false, available: false, message: '✕ Only letters, numbers, _, and . allowed' });
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setUsernameStatus({ loading: true });
+      try {
+        const res = await api.checkUsernameAvailability(setupUsername);
+        setUsernameStatus({ loading: false, available: res.available, message: res.message });
+      } catch {
+        setUsernameStatus({ loading: false, available: true, message: '✓ Format valid' });
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [setupUsername]);
+
+  const onFresherLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage(null);
+    setIsFresherSubmitting(true);
+    try {
+      let res: any;
+      if (fresherLoginType === 'dob') {
+        if (!fresherAdmissionId || !fresherDob) {
+          throw new Error('Please enter both Admission ID and Date of Birth.');
+        }
+        res = await api.fresherLogin({
+          admissionId: fresherAdmissionId.trim(),
+          dob: fresherDob,
+        });
+      } else {
+        if (!fresherUsername || !fresherPassword) {
+          throw new Error('Please enter both Username and Password.');
+        }
+        res = await api.fresherLogin({
+          username: fresherUsername.trim(),
+          password: fresherPassword,
+        });
+      }
+
+      if (res.requiresPasswordSetup) {
+        setSetupStudentInfo(res.student);
+        setSetupUsername(res.student?.username || '');
+        setShowSetupModal(true);
+        setIsFresherSubmitting(false);
+        return;
+      }
+
+      if (res.valid && res.student) {
+        const stu = res.student;
+        const studentDept = stu.department || 'CSE';
+        login(stu.email || stu.admission_id, 'student', stu.roll_number || stu.admission_id, stu.name, res.token, studentDept);
+        registerSession(stu.email || stu.admission_id, 'student');
+        navigate('/dashboard');
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Fresher login failed. Please verify your credentials.');
+    } finally {
+      setIsFresherSubmitting(false);
+    }
+  };
+
+  const onCompleteSetup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSetupError(null);
+    if (!setupUsername || setupUsername.length < 4) {
+      setSetupError('Username must be at least 4 characters long.');
+      return;
+    }
+    if (!setupPassword || setupPassword.length < 6) {
+      setSetupError('Password must be at least 6 characters long.');
+      return;
+    }
+    if (setupPassword !== setupConfirmPassword) {
+      setSetupError('Passwords do not match.');
+      return;
+    }
+    if (usernameStatus.available === false) {
+      setSetupError('Please choose an available username.');
+      return;
+    }
+
+    setIsSettingUp(true);
+    try {
+      const res = await api.fresherSetupPassword({
+        admissionId: setupStudentInfo?.admission_id || fresherAdmissionId,
+        dob: setupStudentInfo?.dob || fresherDob,
+        username: setupUsername.trim(),
+        password: setupPassword,
+      });
+
+      if (res.success && res.student) {
+        const stu = res.student;
+        const studentDept = stu.department || 'CSE';
+        login(stu.email || stu.admission_id, 'student', stu.roll_number || stu.admission_id, stu.name, res.token, studentDept);
+        registerSession(stu.email || stu.admission_id, 'student');
+        setShowSetupModal(false);
+        navigate('/dashboard');
+      }
+    } catch (err: any) {
+      setSetupError(err.message || 'Setup failed. Please try again.');
+    } finally {
+      setIsSettingUp(false);
+    }
+  };
 
   const onSignUp = async (data: StudentSignUpInput) => {
     setErrorMessage(null);
@@ -434,6 +566,20 @@ export const AuthPage: React.FC = () => {
         login(cleanEmail, 'parent', roll, `Parent of ${wardName}`, undefined, wardDept);
         registerSession(cleanEmail, 'parent');
         navigate('/dashboard');
+        return;
+      }
+
+      // ── MASTER COORDINATOR LOGIN HANDLER ──
+      if (activeTab === 'coordinator') {
+        const coordAuthResult = await api.adminLogin(data.email, data.password, 'All');
+        if (!coordAuthResult.valid) {
+          throw new Error(coordAuthResult.error || 'Incorrect password. Please enter valid Coordinator credentials.');
+        }
+
+        cognitoSignOut();
+        login(data.email, 'coordinator', 'COORDINATOR_1ST_YEAR', '1st Year Coordinator', undefined, 'All');
+        registerSession(data.email, 'coordinator');
+        navigate('/coordinator/dashboard');
         return;
       }
 
@@ -692,6 +838,8 @@ export const AuthPage: React.FC = () => {
         <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white drop-shadow-sm">
           {activeTab === 'hod'
             ? 'HOD Login'
+            : activeTab === 'coordinator'
+            ? '1st Year Coordinator Login'
             : activeTab === 'admin'
             ? 'Admin Login'
             : activeTab === 'faculty'
@@ -748,6 +896,8 @@ export const AuthPage: React.FC = () => {
               <span className="text-xs font-extrabold uppercase tracking-wider text-brand-primary">
                 {activeTab === 'hod'
                   ? 'HOD Portal Login'
+                  : activeTab === 'coordinator'
+                  ? '1st Year Coordinator Portal'
                   : activeTab === 'parent'
                   ? 'Parent Portal Login'
                   : activeTab === 'faculty'
@@ -767,6 +917,8 @@ export const AuthPage: React.FC = () => {
               <span>
                 {activeTab === 'hod'
                   ? 'Not HOD? Go back'
+                  : activeTab === 'coordinator'
+                  ? 'Not Coordinator? Go back'
                   : activeTab === 'admin'
                   ? 'Not an Admin? Go back'
                   : activeTab === 'faculty'
@@ -1092,93 +1244,239 @@ export const AuthPage: React.FC = () => {
               </form>
             ) : (
               /* STUDENT LOGIN FORM */
-              <form onSubmit={handleLoginSubmit(onLogin)} className="space-y-4">
-
-
-                <div>
-                  <div className="flex justify-between items-center mb-1">
-                    <label className="block text-xs font-semibold text-textPrimary">Student Email *</label>
-                    <span className="text-[10px] text-textSecondary">@rgmcet.edu.in only</span>
-                  </div>
-                  <div className="relative">
-                    <input
-                      {...registerLogin('email')}
-                      type="email"
-                      placeholder="username@rgmcet.edu.in"
-                      className={`w-full px-3.5 py-2 pr-10 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 ${
-                        watchedLoginEmail && watchedLoginEmail.includes('@')
-                          ? watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in')
-                            ? 'border-emerald-500 focus:ring-emerald-500'
-                            : 'border-red-500 focus:ring-red-500'
-                          : 'border-borderLine focus:ring-brand-primary'
-                      }`}
-                    />
-                    {watchedLoginEmail && watchedLoginEmail.includes('@') && (
-                      <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                        {watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in') ? (
-                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                        ) : (
-                          <XCircle className="w-4 h-4 text-red-500" />
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  {watchedLoginEmail && watchedLoginEmail.includes('@') && !watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in') && (
-                    <p className="text-xs text-alert mt-1 flex items-center gap-1">
-                      <XCircle className="w-3.5 h-3.5 shrink-0" />
-                      <span>Only @rgmcet.edu.in domain is allowed (e.g. username@rgmcet.edu.in)</span>
-                    </p>
-                  )}
-                  {loginErrors.email && (!watchedLoginEmail || !watchedLoginEmail.includes('@') || watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in')) && (
-                    <p className="text-xs text-alert mt-1">{loginErrors.email.message}</p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-textPrimary mb-1">Password *</label>
-                  <div className="relative">
-                    <input
-                      {...registerLogin('password')}
-                      type={showPassword ? 'text' : 'password'}
-                      placeholder="Enter password"
-                      className="w-full px-3.5 py-2 pr-10 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-textSecondary hover:text-textPrimary p-1 rounded-md transition-colors"
-                      title={showPassword ? 'Hide password' : 'Show password'}
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4 text-brand-primary" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  {loginErrors.password && (
-                    <p className="text-xs text-alert mt-1">{loginErrors.password.message}</p>
-                  )}
-                </div>
-
-                <div className="pt-2">
-                  <PillButton
-                    variant="primary"
-                    size="lg"
-                    type="submit"
-                    disabled={isLoginSubmitting}
-                    className="w-full"
-                  >
-                    Log In as Student
-                  </PillButton>
-                </div>
-
-                <div className="text-center pt-2">
+              <div className="space-y-4">
+                {/* Switcher between Standard Student and New 1st Year Fresher */}
+                <div className="flex bg-surface-2 p-1 rounded-xl border border-borderLine">
                   <button
                     type="button"
-                    onClick={() => handleToggleSignUp(true)}
-                    className="text-xs font-semibold text-brand-primary hover:underline"
+                    onClick={() => {
+                      setStudentLoginMode('standard');
+                      setErrorMessage(null);
+                    }}
+                    className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-all ${
+                      studentLoginMode === 'standard'
+                        ? 'bg-brand-primary text-white shadow-sm'
+                        : 'text-textSecondary hover:text-textPrimary'
+                    }`}
                   >
-                    New here? Create a Student Account
+                    Standard Student (Email)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStudentLoginMode('fresher');
+                      setErrorMessage(null);
+                    }}
+                    className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-all ${
+                      studentLoginMode === 'fresher'
+                        ? 'bg-brand-primary text-white shadow-sm'
+                        : 'text-textSecondary hover:text-textPrimary'
+                    }`}
+                  >
+                    New Student (1st Year – No Email Yet)
                   </button>
                 </div>
-              </form>
+
+                {studentLoginMode === 'standard' ? (
+                  <form onSubmit={handleLoginSubmit(onLogin)} className="space-y-4">
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="block text-xs font-semibold text-textPrimary">Student Email *</label>
+                        <span className="text-[10px] text-textSecondary">@rgmcet.edu.in only</span>
+                      </div>
+                      <div className="relative">
+                        <input
+                          {...registerLogin('email')}
+                          type="email"
+                          placeholder="username@rgmcet.edu.in"
+                          className={`w-full px-3.5 py-2 pr-10 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 ${
+                            watchedLoginEmail && watchedLoginEmail.includes('@')
+                              ? watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in')
+                                ? 'border-emerald-500 focus:ring-emerald-500'
+                                : 'border-red-500 focus:ring-red-500'
+                              : 'border-borderLine focus:ring-brand-primary'
+                          }`}
+                        />
+                        {watchedLoginEmail && watchedLoginEmail.includes('@') && (
+                          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                            {watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in') ? (
+                              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                            ) : (
+                              <XCircle className="w-4 h-4 text-red-500" />
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      {watchedLoginEmail && watchedLoginEmail.includes('@') && !watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in') && (
+                        <p className="text-xs text-alert mt-1 flex items-center gap-1">
+                          <XCircle className="w-3.5 h-3.5 shrink-0" />
+                          <span>Only @rgmcet.edu.in domain is allowed (e.g. username@rgmcet.edu.in)</span>
+                        </p>
+                      )}
+                      {loginErrors.email && (!watchedLoginEmail || !watchedLoginEmail.includes('@') || watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in')) && (
+                        <p className="text-xs text-alert mt-1">{loginErrors.email.message}</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-textPrimary mb-1">Password *</label>
+                      <div className="relative">
+                        <input
+                          {...registerLogin('password')}
+                          type={showPassword ? 'text' : 'password'}
+                          placeholder="Enter password"
+                          className="w-full px-3.5 py-2 pr-10 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-textSecondary hover:text-textPrimary p-1 rounded-md transition-colors"
+                          title={showPassword ? 'Hide password' : 'Show password'}
+                        >
+                          {showPassword ? <EyeOff className="w-4 h-4 text-brand-primary" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                      {loginErrors.password && (
+                        <p className="text-xs text-alert mt-1">{loginErrors.password.message}</p>
+                      )}
+                    </div>
+
+                    <div className="pt-2">
+                      <PillButton
+                        variant="primary"
+                        size="lg"
+                        type="submit"
+                        disabled={isLoginSubmitting}
+                        className="w-full"
+                      >
+                        Log In as Student
+                      </PillButton>
+                    </div>
+
+                    <div className="text-center pt-2">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleSignUp(true)}
+                        className="text-xs font-semibold text-brand-primary hover:underline"
+                      >
+                        New here? Create a Student Account
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  /* FRESHER (STAGE 0) LOGIN FORM */
+                  <form onSubmit={onFresherLogin} className="space-y-4">
+                    <div className="bg-brand-soft border border-brand-primary/20 rounded-xl p-3 text-xs text-brand-primary">
+                      <div className="flex items-center gap-1.5 font-bold mb-0.5">
+                        <Sparkles className="w-4 h-4 text-brand-primary" />
+                        <span>1st Year Fresher Admission Access</span>
+                      </div>
+                      <p className="text-[11px] text-textSecondary leading-relaxed">
+                        Log in using your <strong>Admission ID & Date of Birth</strong> provided at admission, or your chosen username once initialized.
+                      </p>
+                    </div>
+
+                    {/* Method Toggle: DOB vs Username */}
+                    <div className="flex justify-end gap-3 text-xs font-semibold">
+                      <button
+                        type="button"
+                        onClick={() => setFresherLoginType('dob')}
+                        className={`hover:underline ${fresherLoginType === 'dob' ? 'text-brand-primary underline font-bold' : 'text-textSecondary'}`}
+                      >
+                        Login with Admission ID + DOB
+                      </button>
+                      <span className="text-textMuted">•</span>
+                      <button
+                        type="button"
+                        onClick={() => setFresherLoginType('username')}
+                        className={`hover:underline ${fresherLoginType === 'username' ? 'text-brand-primary underline font-bold' : 'text-textSecondary'}`}
+                      >
+                        Login with Username
+                      </button>
+                    </div>
+
+                    {fresherLoginType === 'dob' ? (
+                      <>
+                        <div>
+                          <label className="block text-xs font-semibold text-textPrimary mb-1">Admission ID / Application No *</label>
+                          <input
+                            type="text"
+                            value={fresherAdmissionId}
+                            onChange={(e) => setFresherAdmissionId(e.target.value.toUpperCase())}
+                            placeholder="e.g. ADM2025001"
+                            className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary uppercase font-mono"
+                          />
+                        </div>
+
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <label className="block text-xs font-semibold text-textPrimary">Date of Birth *</label>
+                            <span className="text-[10px] text-textSecondary">YYYY-MM-DD</span>
+                          </div>
+                          <input
+                            type="date"
+                            value={fresherDob}
+                            onChange={(e) => setFresherDob(e.target.value)}
+                            className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div>
+                          <label className="block text-xs font-semibold text-textPrimary mb-1">Student Username *</label>
+                          <input
+                            type="text"
+                            value={fresherUsername}
+                            onChange={(e) => setFresherUsername(e.target.value)}
+                            placeholder="e.g. rahul_rgm25"
+                            className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary font-medium"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-textPrimary mb-1">Password *</label>
+                          <div className="relative">
+                            <input
+                              type={showPassword ? 'text' : 'password'}
+                              value={fresherPassword}
+                              onChange={(e) => setFresherPassword(e.target.value)}
+                              placeholder="Enter your password"
+                              className="w-full px-3.5 py-2 pr-10 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowPassword(!showPassword)}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-textSecondary hover:text-textPrimary p-1 rounded-md transition-colors"
+                              title={showPassword ? 'Hide password' : 'Show password'}
+                            >
+                              {showPassword ? <EyeOff className="w-4 h-4 text-brand-primary" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    <div className="pt-2">
+                      <PillButton
+                        variant="primary"
+                        size="lg"
+                        type="submit"
+                        disabled={isFresherSubmitting}
+                        className="w-full"
+                      >
+                        {isFresherSubmitting ? 'Verifying...' : 'Log In as Fresher Student'}
+                      </PillButton>
+                    </div>
+
+                    <div className="text-center pt-1">
+                      <p className="text-[11px] text-textSecondary">
+                        Need assistance? Contact 1st Year Coordinator (<code className="text-textPrimary">coordinator@rgmcet.edu.in</code>)
+                      </p>
+                    </div>
+                  </form>
+                )}
+              </div>
             )
           ) : (activeTab === 'faculty' || activeTab === 'hod') && isSignUp ? (
             /* FACULTY & HOD SIGN UP FORM */
@@ -1361,7 +1659,72 @@ export const AuthPage: React.FC = () => {
               </div>
 
 
-              {activeTab === 'admin' ? (
+              {activeTab === 'coordinator' ? (
+                /* ── COORDINATOR LOGIN ── */
+                <form onSubmit={handleAdminLoginSubmit(onLogin)} className="space-y-4">
+                  <div className="bg-pink-950/40 border border-pink-500/30 rounded-xl p-3 text-xs text-pink-300">
+                    <p className="font-bold">1st Year System Oversight</p>
+                    <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
+                      Scoped day-to-day oversight for all 1st-year (1-1 & 1-2) fresher admissions, email migrations, attendance tracking, and class incharges across all departments.
+                    </p>
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block text-xs font-semibold text-textPrimary">Coordinator Official Email</label>
+                      <span className="text-[10px] text-textSecondary">@rgmcet.edu.in only</span>
+                    </div>
+                    <div className="relative">
+                      <input
+                        {...registerAdminLogin('email')}
+                        type="email"
+                        defaultValue="coordinator@rgmcet.edu.in"
+                        placeholder="coordinator@rgmcet.edu.in"
+                        className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-pink-500 font-medium"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-textPrimary mb-1">Password</label>
+                    <div className="relative">
+                      <input
+                        {...registerAdminLogin('password')}
+                        type={showPassword ? 'text' : 'password'}
+                        placeholder="Enter coordinator password"
+                        className="w-full px-3.5 py-2 pr-10 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-pink-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-textSecondary hover:text-textPrimary p-1 rounded-md transition-colors"
+                        title={showPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4 text-pink-500" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    {adminLoginErrors.password && (
+                      <p className="text-xs text-alert mt-1">{adminLoginErrors.password.message}</p>
+                    )}
+                  </div>
+
+                  <div className="pt-2">
+                    <button
+                      type="submit"
+                      disabled={isAdminLoginSubmitting}
+                      className="w-full py-2.5 px-4 bg-pink-600 hover:bg-pink-700 text-white font-bold rounded-xl shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                    >
+                      {isAdminLoginSubmitting ? 'Authenticating...' : 'Log In as 1st Year Coordinator'}
+                    </button>
+                  </div>
+
+                  <div className="text-center pt-2">
+                    <p className="text-xs text-textSecondary">
+                      Need access? Contact Admin Office
+                    </p>
+                  </div>
+                </form>
+              ) : activeTab === 'admin' ? (
                 /* ── ADMIN LOGIN — accepts @rgmcet.edu.in OR the 3 tier-1 Gmail super-admin addresses (no department) ── */
                 <form onSubmit={handleAdminLoginSubmit(onLogin)} className="space-y-4">
                   <div>
@@ -1578,6 +1941,118 @@ export const AuthPage: React.FC = () => {
           </div>
         </div>
       </div>
+      {/* ── Fresher First-Time Setup Modal (Set Username & Password) ── */}
+      {showSetupModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
+          <div className="bg-surface border border-borderLine rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="text-center space-y-1">
+              <div className="w-12 h-12 rounded-full bg-brand-primary/10 text-brand-primary flex items-center justify-center mx-auto mb-2">
+                <Sparkles className="w-6 h-6" />
+              </div>
+              <h2 className="text-lg font-black text-textPrimary">Welcome Fresher!</h2>
+              <p className="text-xs text-textSecondary">
+                Set up your personal <strong>Username</strong> and permanent <strong>Password</strong> to access your 1st-year dashboard.
+              </p>
+            </div>
+
+            {setupStudentInfo && (
+              <div className="bg-surface-2 p-3 rounded-xl border border-borderLine text-xs space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-textSecondary">Name:</span>
+                  <span className="font-bold text-textPrimary">{setupStudentInfo.name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-textSecondary">Admission ID:</span>
+                  <span className="font-mono font-bold text-brand-primary">{setupStudentInfo.admission_id}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-textSecondary">Branch / Section:</span>
+                  <span className="font-bold text-textPrimary">{setupStudentInfo.department} (Sec {setupStudentInfo.section})</span>
+                </div>
+              </div>
+            )}
+
+            {setupError && (
+              <div className="bg-red-950/60 border border-red-500/50 rounded-xl p-2.5 text-xs text-red-300">
+                {setupError}
+              </div>
+            )}
+
+            <form onSubmit={onCompleteSetup} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-textPrimary mb-1">Choose Username *</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={setupUsername}
+                    onChange={(e) => setSetupUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_.]/g, ''))}
+                    placeholder="e.g. rahul_rgm25"
+                    className={`w-full px-3.5 py-2 pr-24 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 font-medium ${
+                      usernameStatus.available === true
+                        ? 'border-emerald-500 focus:ring-emerald-500'
+                        : usernameStatus.available === false
+                        ? 'border-red-500 focus:ring-red-500'
+                        : 'border-borderLine focus:ring-brand-primary'
+                    }`}
+                  />
+                  <div className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-bold">
+                    {usernameStatus.loading ? (
+                      <span className="text-textSecondary">Checking...</span>
+                    ) : usernameStatus.available === true ? (
+                      <span className="text-emerald-400">✓ Available</span>
+                    ) : usernameStatus.available === false ? (
+                      <span className="text-red-400">✕ Taken</span>
+                    ) : null}
+                  </div>
+                </div>
+                <p className="text-[10px] text-textSecondary mt-0.5">
+                  4-30 characters (letters, numbers, _, .)
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-textPrimary mb-1">Create Password *</label>
+                <input
+                  type="password"
+                  value={setupPassword}
+                  onChange={(e) => setSetupPassword(e.target.value)}
+                  placeholder="Min 6 characters"
+                  className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-textPrimary mb-1">Confirm Password *</label>
+                <input
+                  type="password"
+                  value={setupConfirmPassword}
+                  onChange={(e) => setSetupConfirmPassword(e.target.value)}
+                  placeholder="Re-enter password"
+                  className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                />
+              </div>
+
+              <div className="pt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSetupModal(false)}
+                  className="flex-1 py-2 text-xs font-semibold rounded-xl border border-borderLine text-textSecondary hover:bg-surface-2 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSettingUp}
+                  className="flex-1 py-2 text-xs font-bold rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                >
+                  {isSettingUp ? 'Saving...' : 'Save & Enter Dashboard'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <div className="z-10 relative">
         <Footer />
       </div>

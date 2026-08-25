@@ -367,8 +367,15 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
         if (adminResult.rows.length > 0) {
           const adminRow = adminResult.rows[0];
           if (adminRow.password === password) {
-            const assignedDept = adminRow.department || department || 'CSE (Data Science)';
-            return res.json({ valid: true, role: 'admin', isSuperAdmin: false, department: assignedDept, email: adminRow.email });
+            const isCoordinator = emailLower === 'coordinator@rgmcet.edu.in' || adminRow.department === 'Coordinator';
+            const assignedDept = adminRow.department || department || (isCoordinator ? 'All' : 'CSE (Data Science)');
+            return res.json({
+              valid: true,
+              role: isCoordinator ? 'coordinator' : 'admin',
+              isSuperAdmin: false,
+              department: assignedDept,
+              email: adminRow.email,
+            });
           }
           await new Promise(resolve => setTimeout(resolve, 600));
           return res.status(401).json({ valid: false, error: 'Invalid email or password.' });
@@ -4442,8 +4449,8 @@ app.get('/reports/placement-summary', async (_req: Request, res: Response) => {
 // Attendance Management System Endpoints
 // ============================================================================
 
-// 1. Upload/Sync Faculty-Subject Allotments (Admin / HOD)
-app.post('/attendance/allotments/upload', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+// 1. Upload/Sync Faculty-Subject Allotments (Admin / HOD / Coordinator)
+app.post('/attendance/allotments/upload', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { semester, allotments } = req.body;
     if (!semester || !Array.isArray(allotments) || allotments.length === 0) {
@@ -4451,7 +4458,7 @@ app.post('/attendance/allotments/upload', requireRole('admin', 'hod'), async (re
     }
 
     const callerDept = req.auth?.department;
-    const isSuper = req.auth?.isSuperAdmin || callerDept === '*' || req.auth?.role === 'admin';
+    const isSuper = req.auth?.isSuperAdmin || callerDept === '*' || req.auth?.role === 'admin' || req.auth?.role === 'coordinator';
 
     let addedCount = 0;
     let updatedCount = 0;
@@ -4533,8 +4540,8 @@ app.post('/attendance/allotments/upload', requireRole('admin', 'hod'), async (re
   }
 });
 
-// 2. Get Allotments (Admin, HOD, Faculty)
-app.get('/attendance/allotments', requireRole('admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
+// 2. Get Allotments (Admin, HOD, Coordinator, Faculty)
+app.get('/attendance/allotments', requireRole('admin', 'hod', 'coordinator', 'faculty'), async (req: Request, res: Response) => {
   try {
     const semester = (req.query.semester as string) || '';
     const department = (req.query.department as string) || '';
@@ -4576,8 +4583,8 @@ app.get('/attendance/allotments', requireRole('admin', 'hod', 'faculty'), async 
   }
 });
 
-// 3. Delete an Allotment (Admin / HOD)
-app.delete('/attendance/allotments/:id', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+// 3. Delete an Allotment (Admin / HOD / Coordinator)
+app.delete('/attendance/allotments/:id', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     await db.query('DELETE FROM subject_allotments WHERE id = $1', [id]);
@@ -4587,8 +4594,8 @@ app.delete('/attendance/allotments/:id', requireRole('admin', 'hod'), async (req
   }
 });
 
-// 4. Upload Student Roster for a Subject Allotment (Admin / HOD)
-app.post('/attendance/rosters/upload', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+// 4. Upload Student Roster for a Subject Allotment (Admin / HOD / Coordinator)
+app.post('/attendance/rosters/upload', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { allotment_id, roster } = req.body;
     if (!allotment_id || !Array.isArray(roster) || roster.length === 0) {
@@ -5143,8 +5150,8 @@ app.get('/attendance/subject/:allotmentId/summary', requireRole('faculty', 'hod'
   }
 });
 
-// 14. Timetable: Upload Timetable Schedule (Admin / HOD)
-app.post('/attendance/timetable/upload', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+// 14. Timetable: Upload Timetable Schedule (Admin / HOD / Coordinator)
+app.post('/attendance/timetable/upload', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { semester, department, section, entries } = req.body;
     if (!semester || !Array.isArray(entries) || entries.length === 0) {
@@ -5259,7 +5266,7 @@ app.get('/attendance/timetable', requireAuth, async (req: Request, res: Response
 });
 
 // 16. Timetable: Delete Timetable Entry
-app.delete('/attendance/timetable/:id', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+app.delete('/attendance/timetable/:id', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     await db.query('DELETE FROM timetable_entries WHERE id = $1', [id]);
@@ -5269,8 +5276,8 @@ app.delete('/attendance/timetable/:id', requireRole('admin', 'hod'), async (req:
   }
 });
 
-// 16b. Timetable: Upload Official Timetable PDF Document (Admin / HOD)
-app.post('/attendance/timetable/document/upload', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+// 16b. Timetable: Upload Official Timetable PDF Document (Admin / HOD / Coordinator)
+app.post('/attendance/timetable/document/upload', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { semester, department, section, file_name, file_data, file_size } = req.body;
     if (!semester || !file_name || !file_data) {
@@ -5340,7 +5347,7 @@ app.get('/attendance/timetable/document', requireAuth, async (req: Request, res:
 });
 
 // 16d. Timetable: Delete Official Timetable PDF Document
-app.delete('/attendance/timetable/document/:id', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+app.delete('/attendance/timetable/document/:id', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     await db.query('DELETE FROM timetable_documents WHERE id = $1', [id]);
@@ -5351,7 +5358,7 @@ app.delete('/attendance/timetable/document/:id', requireRole('admin', 'hod'), as
 });
 
 // 17. Timetable: Clear Section Timetable
-app.delete('/attendance/timetable/clear/section', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+app.delete('/attendance/timetable/clear/section', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { semester, section, department } = req.query;
     if (!semester) {
@@ -5603,6 +5610,816 @@ app.get('/attendance/reports/year-summary', requireRole('admin', 'hod', 'faculty
       subjects,
       students,
       generatedAt: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// 19. 1ST YEAR SYSTEM: FRESHER ADMISSION, SELF-SERVICE MIGRATION,
+//     COORDINATOR OVERSIGHT & CLASS INCHARGE
+// ============================================================================
+
+// 19a. Admin / Coordinator: Upload Fresher Admission Roster (Excel)
+app.post('/admin/freshers/upload-roster', requireRole('admin', 'coordinator'), async (req: Request, res: Response) => {
+  try {
+    const { students: rosterData } = req.body;
+    if (!Array.isArray(rosterData) || rosterData.length === 0) {
+      return res.status(400).json({ error: 'Roster data must be a non-empty array of students.' });
+    }
+
+    let inserted = 0;
+    let updated = 0;
+    const errors: Array<{ row: number; admission_id?: string; reason: string }> = [];
+
+    for (let i = 0; i < rosterData.length; i++) {
+      const row = rosterData[i];
+      const admissionId = String(row.admission_id || row['Admission ID'] || row['Admission No'] || '').trim().toUpperCase();
+      const fullName = String(row.name || row['Full Name'] || row['Student Name'] || '').trim();
+      const rawDob = String(row.dob || row['Date of Birth'] || row['DOB'] || '').trim();
+      const mobile = String(row.phone || row['Mobile'] || row['Personal Mobile'] || row['Phone'] || '').trim();
+      const personalEmail = String(row.personal_email || row['Personal Email'] || row['Email'] || '').trim().toLowerCase();
+      const dept = String(row.department || row['Department'] || row['Branch'] || 'CSE').trim();
+      const section = String(row.section || row['Section'] || 'A').trim().toUpperCase();
+
+      if (!admissionId) {
+        errors.push({ row: i + 1, reason: 'Admission ID is required' });
+        continue;
+      }
+      if (!fullName) {
+        errors.push({ row: i + 1, admission_id: admissionId, reason: 'Full Name is required' });
+        continue;
+      }
+
+      let parsedDob: string | null = null;
+      if (rawDob) {
+        const d = new Date(rawDob);
+        if (!isNaN(d.getTime())) {
+          parsedDob = d.toISOString().split('T')[0];
+        } else if (rawDob.match(/^\d{4}-\d{2}-\d{2}$/)) {
+          parsedDob = rawDob;
+        } else if (rawDob.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/)) {
+          const parts = rawDob.split(/[-/]/);
+          parsedDob = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        }
+      }
+
+      const rollNumber = admissionId;
+      const placeholderEmail = `adm_${admissionId.toLowerCase()}@fresher.rgmcet.edu.in`;
+
+      try {
+        const existing = await db.query(
+          'SELECT roll_number, admission_id, migration_stage, email FROM students WHERE LOWER(admission_id) = LOWER($1) OR roll_number = $2',
+          [admissionId, rollNumber]
+        );
+
+        if (existing.rows.length > 0) {
+          await db.query(
+            `UPDATE students
+             SET name = $1,
+                 dob = COALESCE($2, dob),
+                 phone = COALESCE(NULLIF($3, ''), phone),
+                 personal_mobile = COALESCE(NULLIF($3, ''), personal_mobile),
+                 personal_email = COALESCE(NULLIF($4, ''), personal_email),
+                 department = $5,
+                 section = $6,
+                 admission_id = $7,
+                 year = '1st Year',
+                 updated_at = NOW()
+             WHERE roll_number = $8 OR LOWER(admission_id) = LOWER($7)`,
+            [fullName, parsedDob, mobile, personalEmail, dept, section, admissionId, rollNumber]
+          );
+          updated++;
+        } else {
+          await db.query(
+            `INSERT INTO students (
+              roll_number, name, email, year, department, section, batch,
+              admission_id, dob, personal_mobile, personal_email, migration_stage, is_first_year_setup_complete
+             )
+             VALUES ($1, $2, $3, '1st Year', $4, $5, '2025-2029', $6, $7, $8, $9, 0, FALSE)`,
+            [rollNumber, fullName, placeholderEmail, dept, section, admissionId, parsedDob, mobile, personalEmail]
+          );
+          inserted++;
+        }
+      } catch (err: any) {
+        errors.push({ row: i + 1, admission_id: admissionId, reason: err.message });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Processed ${rosterData.length} students (${inserted} newly inserted, ${updated} updated).`,
+      inserted,
+      updated,
+      errorsCount: errors.length,
+      errors,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 19b. Check Username Availability
+app.get('/auth/check-username-availability', async (req: Request, res: Response) => {
+  try {
+    const rawUsername = String(req.query.username || '').trim();
+    if (!rawUsername) {
+      return res.status(400).json({ available: false, message: 'Username cannot be empty.' });
+    }
+
+    if (rawUsername.length < 4 || rawUsername.length > 30) {
+      return res.json({ available: false, message: 'Username must be between 4 and 30 characters.' });
+    }
+
+    if (!/^[a-zA-Z0-9_.]+$/.test(rawUsername)) {
+      return res.json({ available: false, message: 'Username can only contain letters, numbers, underscores (_), and periods (.).' });
+    }
+
+    const check = await db.query(
+      'SELECT roll_number FROM students WHERE LOWER(username) = LOWER($1)',
+      [rawUsername]
+    );
+
+    if (check.rows.length > 0) {
+      return res.json({ available: false, message: `Username "${rawUsername}" is already taken.` });
+    }
+
+    return res.json({ available: true, message: '✓ Username is available.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 19c. Fresher Login (Admission ID + DOB OR Username + Password)
+app.post('/auth/fresher-login', async (req: Request, res: Response) => {
+  try {
+    const { admissionId, dob, username, password } = req.body;
+
+    if (username && password) {
+      const uRes = await db.query(
+        `SELECT roll_number, name, email, year, department, section, admission_id, dob, username, password_hash, migration_stage, is_first_year_setup_complete
+         FROM students WHERE LOWER(username) = LOWER($1)`,
+        [username.trim()]
+      );
+
+      if (uRes.rows.length === 0) {
+        return res.status(401).json({ valid: false, error: 'Invalid username or password.' });
+      }
+
+      const stu = uRes.rows[0];
+      if (stu.migration_stage === 1) {
+        return res.status(400).json({
+          valid: false,
+          error: `Your account has been linked to your College Email (${stu.email}). Please log in using your @rgmcet.edu.in email address on the standard Student tab.`,
+        });
+      }
+
+      if (!stu.password_hash) {
+        return res.status(400).json({
+          valid: false,
+          error: 'Password setup not completed. Please log in using your Admission ID and Date of Birth first.',
+        });
+      }
+
+      const match = await bcrypt.compare(password, stu.password_hash);
+      if (!match) {
+        return res.status(401).json({ valid: false, error: 'Invalid username or password.' });
+      }
+
+      const token = `demo_token_student_${encodeURIComponent(stu.email || stu.admission_id)}_${Date.now()}`;
+      return res.json({
+        valid: true,
+        token,
+        requiresPasswordSetup: false,
+        student: {
+          roll_number: stu.roll_number,
+          admission_id: stu.admission_id,
+          name: stu.name,
+          email: stu.email,
+          year: stu.year,
+          department: stu.department,
+          section: stu.section,
+          username: stu.username,
+          migration_stage: stu.migration_stage,
+        },
+      });
+    }
+
+    if (!admissionId || !dob) {
+      return res.status(400).json({ error: 'Admission ID and Date of Birth are required.' });
+    }
+
+    const admRes = await db.query(
+      `SELECT roll_number, name, email, year, department, section, admission_id, dob, username, password_hash, migration_stage, is_first_year_setup_complete
+       FROM students WHERE LOWER(admission_id) = LOWER($1) OR roll_number = $1`,
+      [admissionId.trim()]
+    );
+
+    if (admRes.rows.length === 0) {
+      return res.status(404).json({
+        valid: false,
+        error: `No fresher record found for Admission ID "${admissionId}". Please verify your admission details with the 1st Year Coordinator or Admin.`,
+      });
+    }
+
+    const stu = admRes.rows[0];
+    if (stu.migration_stage === 1) {
+      return res.status(400).json({
+        valid: false,
+        error: `Your account has already been linked to your College Email (${stu.email}). Please log in using your official @rgmcet.edu.in email address on the standard Student tab.`,
+      });
+    }
+
+    const normalizedInputDob = new Date(dob).toISOString().split('T')[0];
+    const studentDob = stu.dob ? new Date(stu.dob).toISOString().split('T')[0] : '';
+
+    if (studentDob && studentDob !== normalizedInputDob) {
+      return res.status(401).json({ valid: false, error: 'Invalid Date of Birth for this Admission ID.' });
+    }
+
+    if (!stu.is_first_year_setup_complete || !stu.password_hash) {
+      return res.json({
+        valid: true,
+        requiresPasswordSetup: true,
+        student: {
+          admission_id: stu.admission_id,
+          roll_number: stu.roll_number,
+          name: stu.name,
+          department: stu.department,
+          section: stu.section,
+          dob: studentDob,
+          username: stu.username || '',
+        },
+      });
+    }
+
+    if (password) {
+      const match = await bcrypt.compare(password, stu.password_hash);
+      if (!match) {
+        return res.status(401).json({ valid: false, error: 'Incorrect password.' });
+      }
+    }
+
+    const token = `demo_token_student_${encodeURIComponent(stu.email || stu.admission_id)}_${Date.now()}`;
+    return res.json({
+      valid: true,
+      token,
+      requiresPasswordSetup: false,
+      student: {
+        roll_number: stu.roll_number,
+        admission_id: stu.admission_id,
+        name: stu.name,
+        email: stu.email,
+        year: stu.year,
+        department: stu.department,
+        section: stu.section,
+        username: stu.username,
+        migration_stage: stu.migration_stage,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 19d. First-Time Setup: Set Username & Password for Fresher
+app.post('/auth/fresher-setup-password', async (req: Request, res: Response) => {
+  try {
+    const { admissionId, dob, username, password } = req.body;
+    if (!admissionId || !dob || !username || !password) {
+      return res.status(400).json({ error: 'Admission ID, DOB, username, and password are required.' });
+    }
+
+    const cleanUsername = String(username).trim();
+    if (cleanUsername.length < 4 || cleanUsername.length > 30) {
+      return res.status(400).json({ error: 'Username must be between 4 and 30 characters.' });
+    }
+    if (!/^[a-zA-Z0-9_.]+$/.test(cleanUsername)) {
+      return res.status(400).json({ error: 'Username can only contain letters, numbers, underscores (_), and periods (.).' });
+    }
+
+    const admRes = await db.query(
+      `SELECT roll_number, name, email, year, department, section, admission_id, dob, migration_stage
+       FROM students WHERE LOWER(admission_id) = LOWER($1) OR roll_number = $1`,
+      [admissionId.trim()]
+    );
+
+    if (admRes.rows.length === 0) {
+      return res.status(404).json({ error: 'No student found for this Admission ID.' });
+    }
+
+    const stu = admRes.rows[0];
+    const normalizedInputDob = new Date(dob).toISOString().split('T')[0];
+    const studentDob = stu.dob ? new Date(stu.dob).toISOString().split('T')[0] : '';
+    if (studentDob && studentDob !== normalizedInputDob) {
+      return res.status(401).json({ error: 'Invalid Date of Birth.' });
+    }
+
+    const userCheck = await db.query(
+      `SELECT roll_number FROM students WHERE LOWER(username) = LOWER($1) AND roll_number != $2`,
+      [cleanUsername, stu.roll_number]
+    );
+    if (userCheck.rows.length > 0) {
+      return res.status(400).json({ error: `Username "${cleanUsername}" is already taken.` });
+    }
+
+    const hashed = await bcrypt.hash(password, BCRYPT_ROUNDS);
+
+    await db.query(
+      `UPDATE students
+       SET username = $1,
+           password_hash = $2,
+           is_first_year_setup_complete = TRUE,
+           updated_at = NOW()
+       WHERE roll_number = $3`,
+      [cleanUsername, hashed, stu.roll_number]
+    );
+
+    const token = `demo_token_student_${encodeURIComponent(stu.email || stu.admission_id)}_${Date.now()}`;
+
+    res.json({
+      success: true,
+      message: 'Username and password configured successfully!',
+      token,
+      student: {
+        roll_number: stu.roll_number,
+        admission_id: stu.admission_id,
+        name: stu.name,
+        email: stu.email,
+        year: stu.year,
+        department: stu.department,
+        section: stu.section,
+        username: cleanUsername,
+        migration_stage: 0,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 19e. Student Self-Links College Email (Stage 1 Migration — Direct with Password Verification)
+app.post('/student/link-college-email', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { collegeEmail, currentPassword } = req.body;
+    if (!collegeEmail || !currentPassword) {
+      return res.status(400).json({ error: 'College Email and Current Password are required.' });
+    }
+
+    const cleanEmail = collegeEmail.trim().toLowerCase();
+    if (!cleanEmail.endsWith('@rgmcet.edu.in')) {
+      return res.status(400).json({ error: 'College Email must be an official @rgmcet.edu.in address.' });
+    }
+
+    const studentRollOrEmail = req.auth?.regNo || req.auth?.email;
+
+    const stuRes = await db.query(
+      `SELECT roll_number, name, email, year, department, section, admission_id, password_hash, migration_stage
+       FROM students
+       WHERE roll_number = $1 OR LOWER(email) = LOWER($1) OR LOWER(admission_id) = LOWER($1)`,
+      [studentRollOrEmail]
+    );
+
+    if (stuRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Student record not found.' });
+    }
+
+    const stu = stuRes.rows[0];
+
+    if (stu.password_hash) {
+      const match = await bcrypt.compare(currentPassword, stu.password_hash);
+      if (!match) {
+        return res.status(401).json({ error: 'Incorrect current password. Re-authentication failed.' });
+      }
+    }
+
+    const emailCheck = await db.query(
+      `SELECT roll_number FROM students WHERE LOWER(email) = LOWER($1) AND roll_number != $2`,
+      [cleanEmail, stu.roll_number]
+    );
+    if (emailCheck.rows.length > 0) {
+      return res.status(400).json({ error: `The email "${cleanEmail}" is already registered by another student.` });
+    }
+
+    const emailPrefix = cleanEmail.split('@')[0].toUpperCase();
+    let finalRollNumber = stu.roll_number;
+    if (emailPrefix.match(/^\d{4}[15]A[0-9A-Z]{4}$/i)) {
+      finalRollNumber = emailPrefix;
+    }
+
+    await db.query(
+      `UPDATE students
+       SET email = $1,
+           migration_stage = 1,
+           roll_number = $2,
+           updated_at = NOW()
+       WHERE roll_number = $3 OR LOWER(admission_id) = LOWER($4)`,
+      [cleanEmail, finalRollNumber, stu.roll_number, stu.admission_id]
+    );
+
+    if (finalRollNumber !== stu.roll_number) {
+      await db.query(
+        `UPDATE subject_rosters SET roll_number = $1, student_email = $2 WHERE roll_number = $3`,
+        [finalRollNumber, cleanEmail, stu.roll_number]
+      );
+      await db.query(
+        `UPDATE attendance_records SET roll_number = $1 WHERE roll_number = $2`,
+        [finalRollNumber, stu.roll_number]
+      );
+    }
+
+    res.json({
+      success: true,
+      message: `Official College Email (${cleanEmail}) linked successfully! From now on, please log in using your College Email and Password.`,
+      email: cleanEmail,
+      roll_number: finalRollNumber,
+      migration_stage: 1,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 19f. Student Updates Username (Profile / Account Settings)
+app.put('/student/username', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { newUsername, currentPassword } = req.body;
+    if (!newUsername || !currentPassword) {
+      return res.status(400).json({ error: 'New username and current password are required.' });
+    }
+
+    const cleanUsername = String(newUsername).trim();
+    if (cleanUsername.length < 4 || cleanUsername.length > 30) {
+      return res.status(400).json({ error: 'Username must be between 4 and 30 characters.' });
+    }
+    if (!/^[a-zA-Z0-9_.]+$/.test(cleanUsername)) {
+      return res.status(400).json({ error: 'Username can only contain letters, numbers, underscores (_), and periods (.).' });
+    }
+
+    const studentId = req.auth?.regNo || req.auth?.email;
+    const stuRes = await db.query(
+      `SELECT roll_number, username, password_hash, migration_stage FROM students WHERE roll_number = $1 OR LOWER(email) = LOWER($1) OR LOWER(admission_id) = LOWER($1)`,
+      [studentId]
+    );
+    if (stuRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Student record not found.' });
+    }
+
+    const stu = stuRes.rows[0];
+    if (stu.password_hash) {
+      const match = await bcrypt.compare(currentPassword, stu.password_hash);
+      if (!match) {
+        return res.status(401).json({ error: 'Incorrect current password.' });
+      }
+    }
+
+    const check = await db.query(
+      `SELECT roll_number FROM students WHERE LOWER(username) = LOWER($1) AND roll_number != $2`,
+      [cleanUsername, stu.roll_number]
+    );
+    if (check.rows.length > 0) {
+      return res.status(400).json({ error: `Username "${cleanUsername}" is already taken.` });
+    }
+
+    await db.query(
+      `UPDATE students SET username = $1, updated_at = NOW() WHERE roll_number = $2`,
+      [cleanUsername, stu.roll_number]
+    );
+
+    res.json({
+      success: true,
+      message: `Username updated to "${cleanUsername}" successfully.`,
+      username: cleanUsername,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 19g. Coordinator & Admin: Get 1st Year Freshers Directory & Migration Tracking
+app.get('/coordinator/freshers', requireRole('coordinator', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const department = (req.query.department as string) || '';
+    const section = (req.query.section as string) || '';
+    const stage = req.query.stage as string;
+    const search = (req.query.search as string) || '';
+
+    let query = `
+      SELECT 
+        s.roll_number,
+        s.admission_id,
+        s.name,
+        s.email,
+        s.dob,
+        s.personal_mobile,
+        s.personal_email,
+        s.department,
+        s.section,
+        s.batch,
+        s.username,
+        s.migration_stage,
+        s.is_first_year_setup_complete,
+        s.created_at,
+        COALESCE(
+          ROUND(
+            (SUM(CASE WHEN ar.is_present THEN 1 ELSE 0 END)::NUMERIC / NULLIF(COUNT(ar.id), 0)) * 100, 1
+          ), 100
+        ) AS attendance_pct,
+        COUNT(DISTINCT a.id) AS total_subjects_enrolled
+      FROM students s
+      LEFT JOIN subject_rosters sr ON sr.roll_number = s.roll_number
+      LEFT JOIN subject_allotments a ON a.id = sr.allotment_id
+      LEFT JOIN attendance_records ar ON ar.roll_number = s.roll_number
+      WHERE s.year = '1st Year'
+    `;
+    const params: any[] = [];
+
+    if (department && department !== 'All') {
+      params.push(`%${department}%`);
+      query += ` AND s.department ILIKE $${params.length}`;
+    }
+    if (section && section !== 'All') {
+      params.push(section.toUpperCase());
+      query += ` AND s.section = $${params.length}`;
+    }
+    if (stage !== undefined && stage !== '' && stage !== 'All') {
+      params.push(Number(stage));
+      query += ` AND s.migration_stage = $${params.length}`;
+    }
+    if (search) {
+      params.push(`%${search.toLowerCase()}%`);
+      query += ` AND (LOWER(s.name) LIKE $${params.length} OR LOWER(s.roll_number) LIKE $${params.length} OR LOWER(COALESCE(s.admission_id, '')) LIKE $${params.length} OR LOWER(COALESCE(s.username, '')) LIKE $${params.length})`;
+    }
+
+    query += ` GROUP BY s.roll_number, s.admission_id, s.name, s.email, s.dob, s.personal_mobile, s.personal_email, s.department, s.section, s.batch, s.username, s.migration_stage, s.is_first_year_setup_complete, s.created_at`;
+    query += ` ORDER BY s.department ASC, s.section ASC, s.name ASC`;
+
+    const result = await db.query(query, params);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 19h. Coordinator & Admin: 1st Year Freshers KPI Statistics
+app.get('/coordinator/freshers/stats', requireRole('coordinator', 'admin'), async (_req: Request, res: Response) => {
+  try {
+    const totalRes = await db.query(`SELECT COUNT(*) as count FROM students WHERE year = '1st Year'`);
+    const stage0Res = await db.query(`SELECT COUNT(*) as count FROM students WHERE year = '1st Year' AND migration_stage = 0`);
+    const stage1Res = await db.query(`SELECT COUNT(*) as count FROM students WHERE year = '1st Year' AND migration_stage = 1`);
+    const inchargeRes = await db.query(`SELECT COUNT(*) as count FROM class_incharges`);
+    const sectionsRes = await db.query(`SELECT COUNT(DISTINCT (department || '_' || section)) as count FROM students WHERE year = '1st Year'`);
+
+    res.json({
+      totalFreshers: Number(totalRes.rows[0]?.count || 0),
+      stage0AdmissionCount: Number(stage0Res.rows[0]?.count || 0),
+      stage1EmailLinkedCount: Number(stage1Res.rows[0]?.count || 0),
+      activeClassInchargesCount: Number(inchargeRes.rows[0]?.count || 0),
+      totalFirstYearSections: Number(sectionsRes.rows[0]?.count || 0),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 19i. Class Incharge: Assign / Replace Class Incharge for 1st Year Section (1-1 and 1-2 only)
+app.post('/coordinator/class-incharge', requireRole('coordinator', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const { semester_label, department, section, faculty_email, faculty_name } = req.body;
+    if (!semester_label || !department || !section || !faculty_email) {
+      return res.status(400).json({ error: 'Semester, Department, Section, and Faculty Email are required.' });
+    }
+
+    if (!['1-1', '1-2'].includes(semester_label)) {
+      return res.status(400).json({ error: 'Class Incharge designation is applicable only to 1st-year sections (1-1 and 1-2).' });
+    }
+
+    const assignedBy = req.auth?.email || 'Coordinator';
+
+    const result = await db.query(
+      `INSERT INTO class_incharges (semester_label, department, section, faculty_email, faculty_name, assigned_by)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (semester_label, department, section) DO UPDATE
+       SET faculty_email = EXCLUDED.faculty_email,
+           faculty_name = EXCLUDED.faculty_name,
+           assigned_by = EXCLUDED.assigned_by,
+           updated_at = NOW()
+       RETURNING *`,
+      [semester_label, department.trim(), section.trim().toUpperCase(), faculty_email.trim().toLowerCase(), faculty_name || '', assignedBy]
+    );
+
+    res.json({
+      success: true,
+      message: `Assigned ${faculty_name || faculty_email} as Class Incharge for ${department} Sem ${semester_label} (Sec ${section.toUpperCase()}).`,
+      incharge: result.rows[0],
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 19j. Class Incharge: List All 1st Year Class Incharges
+app.get('/coordinator/class-incharge', requireRole('coordinator', 'admin', 'faculty'), async (req: Request, res: Response) => {
+  try {
+    const semester = (req.query.semester as string) || '';
+    const department = (req.query.department as string) || '';
+
+    let query = `SELECT * FROM class_incharges WHERE 1=1`;
+    const params: any[] = [];
+
+    if (semester && semester !== 'All') {
+      params.push(semester);
+      query += ` AND semester_label = $${params.length}`;
+    }
+    if (department && department !== 'All') {
+      params.push(`%${department}%`);
+      query += ` AND department ILIKE $${params.length}`;
+    }
+
+    query += ` ORDER BY semester_label ASC, department ASC, section ASC`;
+
+    const result = await db.query(query, params);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 19k. Class Incharge: Delete Assignment
+app.delete('/coordinator/class-incharge/:id', requireRole('coordinator', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    await db.query('DELETE FROM class_incharges WHERE id = $1', [id]);
+    res.json({ success: true, message: 'Class Incharge assignment removed.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 19l. Faculty: Get Sections where Logged-in Faculty is Class Incharge (1st Year Only)
+app.get('/faculty/incharge-sections', requireRole('faculty', 'admin', 'coordinator'), async (req: Request, res: Response) => {
+  try {
+    const email = req.auth?.email;
+    if (!email) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const result = await db.query(
+      `SELECT id, semester_label, department, section, faculty_email, faculty_name, created_at
+       FROM class_incharges
+       WHERE LOWER(faculty_email) = LOWER($1)
+       ORDER BY semester_label ASC, department ASC, section ASC`,
+      [email]
+    );
+
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 19m. Class Incharge & Coordinator: Section Intelligence Analytics (View-Only)
+app.get('/faculty/incharge-section-analytics', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const semester = (req.query.semester as string) || '1-1';
+    const department = (req.query.department as string) || '';
+    const section = (req.query.section as string) || 'A';
+
+    if (!department) {
+      return res.status(400).json({ error: 'Department is required' });
+    }
+
+    const studentsRes = await db.query(
+      `SELECT roll_number, name, email, admission_id, personal_mobile, migration_stage
+       FROM students
+       WHERE year = '1st Year' AND department ILIKE $1 AND section = $2
+       ORDER BY roll_number ASC`,
+      [`%${department}%`, section.toUpperCase()]
+    );
+    const students = studentsRes.rows;
+
+    const subjectsRes = await db.query(
+      `SELECT id, subject_name, subject_type, faculty_name, faculty_email, department, section
+       FROM subject_allotments
+       WHERE semester_label = $1 AND department ILIKE $2 AND section = $3
+       ORDER BY subject_name ASC`,
+      [semester, `%${department}%`, section.toUpperCase()]
+    );
+    const subjects = subjectsRes.rows;
+
+    const studentStats: Array<{
+      roll_number: string;
+      name: string;
+      email: string;
+      admission_id: string;
+      total_held: number;
+      total_attended: number;
+      overall_percentage: number;
+      subjects: Record<string, { held: number; attended: number; percentage: number }>;
+    }> = [];
+
+    let sectionTotalHeld = 0;
+    let sectionTotalAttended = 0;
+
+    for (const st of students) {
+      let stHeld = 0;
+      let stAttended = 0;
+      const subMap: Record<string, { held: number; attended: number; percentage: number }> = {};
+
+      for (const sub of subjects) {
+        const sessRes = await db.query(
+          `SELECT s.id, s.num_periods, s.session_date, sr.joining_date
+           FROM attendance_sessions s
+           LEFT JOIN subject_rosters sr ON sr.allotment_id = s.allotment_id AND sr.roll_number = $1
+           WHERE s.allotment_id = $2`,
+          [st.roll_number, sub.id]
+        );
+
+        let subHeld = 0;
+        let subAttended = 0;
+
+        for (const s of sessRes.rows) {
+          const joinDate = s.joining_date ? new Date(s.joining_date).toISOString().split('T')[0] : '';
+          const sessDate = s.session_date ? new Date(s.session_date).toISOString().split('T')[0] : '';
+          if (joinDate && sessDate && sessDate < joinDate) continue;
+
+          subHeld += Number(s.num_periods || 1);
+
+          const recRes = await db.query(
+            `SELECT is_present FROM attendance_records WHERE session_id = $1 AND roll_number = $2`,
+            [s.id, st.roll_number]
+          );
+          if (recRes.rows.length > 0 && recRes.rows[0].is_present) {
+            subAttended += Number(s.num_periods || 1);
+          }
+        }
+
+        const pct = subHeld > 0 ? Math.round((subAttended / subHeld) * 1000) / 10 : 100;
+        subMap[sub.id] = { held: subHeld, attended: subAttended, percentage: pct };
+
+        stHeld += subHeld;
+        stAttended += subAttended;
+      }
+
+      const overallPct = stHeld > 0 ? Math.round((stAttended / stHeld) * 1000) / 10 : 100;
+      sectionTotalHeld += stHeld;
+      sectionTotalAttended += stAttended;
+
+      studentStats.push({
+        roll_number: st.roll_number,
+        name: st.name,
+        email: st.email,
+        admission_id: st.admission_id || '',
+        total_held: stHeld,
+        total_attended: stAttended,
+        overall_percentage: overallPct,
+        subjects: subMap,
+      });
+    }
+
+    const sectionAverage = sectionTotalHeld > 0 ? Math.round((sectionTotalAttended / sectionTotalHeld) * 1000) / 10 : 100;
+    const belowThreshold = studentStats.filter(s => s.overall_percentage < 75);
+
+    res.json({
+      semester,
+      department,
+      section,
+      totalStudents: students.length,
+      totalSubjects: subjects.length,
+      sectionAverage,
+      subjects,
+      students: studentStats,
+      lowAttendanceCount: belowThreshold.length,
+      lowAttendanceStudents: belowThreshold,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 19n. Coordinator & Admin: Promote 1st Year Section (1-2 → 2-1)
+app.post('/coordinator/promote-section', requireRole('coordinator', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const { department, section } = req.body;
+    if (!department) {
+      return res.status(400).json({ error: 'Department is required for promotion.' });
+    }
+
+    let query = `UPDATE students SET year = '2nd Year', updated_at = NOW() WHERE year = '1st Year' AND department ILIKE $1`;
+    const params: any[] = [`%${department}%`];
+
+    if (section && section !== 'All') {
+      params.push(section.toUpperCase());
+      query += ` AND section = $${params.length}`;
+    }
+
+    const result = await db.query(query, params);
+
+    res.json({
+      success: true,
+      message: `Successfully promoted ${result.rowCount || 0} student(s) of ${department} (Section ${section || 'All'}) from 1st Year to 2nd Year (2-1). Active dashboard visibility is now transferred to the ${department} HOD.`,
+      promotedCount: result.rowCount,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
