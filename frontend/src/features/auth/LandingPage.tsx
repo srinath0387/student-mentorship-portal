@@ -211,7 +211,7 @@ export const LandingPage: React.FC = () => {
         <h1 className="text-3xl sm:text-4xl md:text-5xl font-black tracking-wider">
           <span className="text-white font-black drop-shadow-sm">RGM </span>
           <span className="text-cyan-400 font-black drop-shadow-[0_0_16px_rgba(56,217,232,0.9)] inline-block tracking-tight font-sans">EDU</span>
-          <span className="text-white font-medium drop-shadow-sm tracking-widest inline-block" style={{ fontFamily: "'Kalam', cursive" }}>FLOW</span>
+          <span className="text-white font-medium drop-shadow-sm tracking-widest inline-block" style={{ fontFamily: "'Kalam', cursive" }}>flow</span>
         </h1>
 
         <p className="mt-3 text-xs sm:text-sm text-slate-200/90 font-medium max-w-3xl mx-auto leading-relaxed px-4">
