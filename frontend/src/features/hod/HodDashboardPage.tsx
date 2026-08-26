@@ -169,7 +169,7 @@ export const HodDashboardPage: React.FC = () => {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const tab = params.get('tab');
-    if (tab === 'overview' || tab === 'analytics' || tab === 'students' || tab === 'rankings' || tab === 'placement' || tab === 'mentees' || tab === 'settings') {
+    if (tab === 'overview' || tab === 'attendance' || tab === 'analytics' || tab === 'students' || tab === 'rankings' || tab === 'placement' || tab === 'mentees' || tab === 'settings') {
       setActiveTab(tab as any);
     }
   }, [location.search]);
