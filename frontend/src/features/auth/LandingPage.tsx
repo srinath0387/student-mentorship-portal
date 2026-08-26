@@ -249,44 +249,41 @@ export const LandingPage: React.FC = () => {
 
       {/* ── Role Selection Section ── */}
       <main className="z-10 relative flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col justify-center">
-        {/* ── 5 White Role Cards Grid (3 per row on desktop) ── */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6 justify-center">
-          {ROLE_CARDS.map((card, idx) => {
-            const isLastSingle = idx === 4;
-
+        {/* ── 6 White Role Cards Grid (3 per row on desktop) ── */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 lg:gap-6 justify-center">
+          {ROLE_CARDS.map((card) => {
             return (
               <div
                 key={card.role}
                 onClick={() => handleSelectRole(card.role)}
-                className={`group cursor-pointer bg-white rounded-2xl p-6 sm:p-7 border-t-[5px] ${card.topBorderColor} shadow-xl hover:shadow-2xl hover:shadow-black/30 transition-all duration-200 hover:-translate-y-1 hover:scale-[1.02] flex items-center justify-between gap-4 select-none relative overflow-hidden active:scale-[0.99] ${
-                  isLastSingle ? 'md:col-span-2 lg:col-span-1 md:max-w-md md:mx-auto lg:max-w-none w-full' : ''
-                }`}
+                className={`group cursor-pointer bg-white rounded-2xl p-4 sm:p-5 lg:p-6 border-t-[5px] ${card.topBorderColor} shadow-xl hover:shadow-2xl hover:shadow-black/30 transition-all duration-200 hover:-translate-y-1 hover:scale-[1.02] flex items-center justify-between gap-3 sm:gap-4 select-none relative overflow-hidden active:scale-[0.99] w-full`}
               >
-                {/* Left: Colorful Illustrated Graphic (~60-70px) */}
+                {/* Left: Colorful Illustrated Graphic (~56-64px) */}
                 <div className="shrink-0 transition-transform duration-200 group-hover:scale-105">
                   {card.renderIllustration()}
                 </div>
 
-                {/* Middle: Role Name as Bold Colored Text (~28-32px) */}
-                <div className="flex-1 text-center sm:text-left">
+                {/* Middle: Role Name as Bold Colored Text */}
+                <div className="flex-1 min-w-0 text-center sm:text-left">
                   <span
-                    className={`text-2xl sm:text-3xl font-extrabold tracking-tight ${card.textColor}`}
+                    className={`text-xl sm:text-2xl lg:text-[26px] font-extrabold tracking-tight truncate block ${card.textColor}`}
+                    title={card.title}
                   >
                     {card.title}
                   </span>
                 </div>
 
-                {/* Right: Small Square Action Button Matching Accent Color (~48-56px) */}
+                {/* Right: Small Square Action Button Matching Accent Color */}
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     handleSelectRole(card.role);
                   }}
-                  className={`w-12 h-12 sm:w-14 sm:h-14 rounded-xl flex items-center justify-center text-white shadow-md transition-all duration-200 group-hover:scale-105 active:scale-95 shrink-0 cursor-pointer ${card.buttonBg}`}
+                  className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center text-white shadow-md transition-all duration-200 group-hover:scale-105 active:scale-95 shrink-0 cursor-pointer ${card.buttonBg}`}
                   title={`Log in as ${card.title}`}
                 >
-                  <LogIn className="w-5 h-5 sm:w-6 sm:h-6 transition-transform group-hover:translate-x-0.5" />
+                  <LogIn className="w-4 h-4 sm:w-5 sm:h-5 transition-transform group-hover:translate-x-0.5" />
                 </button>
               </div>
             );
