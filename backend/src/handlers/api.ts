@@ -7424,14 +7424,12 @@ app.get('/faculty/leaves/my-summary', requireRole('faculty', 'hod', 'admin'), as
     const yearStart = `${currentYear}-01-01`;
     const yearEnd = `${currentYear}-12-31`;
 
-    // Fetch leaves taken in current year
+    // Fetch leaves for this faculty
     const leavesRes = await db.query(
       `SELECT * FROM faculty_leaves 
        WHERE LOWER(faculty_email) = $1 
-         AND from_date >= $2 
-         AND from_date <= $3
        ORDER BY created_at DESC`,
-      [email, yearStart, yearEnd]
+      [email]
     );
 
     const leaves = leavesRes.rows;

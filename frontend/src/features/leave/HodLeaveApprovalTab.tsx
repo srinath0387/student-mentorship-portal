@@ -24,6 +24,7 @@ import {
 } from '../../types';
 import { LeaveLetterModal } from './LeaveLetterModal';
 import { PermissionLetterModal } from './PermissionLetterModal';
+import { ProofViewerModal } from './ProofViewerModal';
 
 export const HodLeaveApprovalTab: React.FC = () => {
   const { user } = useAuth();
@@ -44,6 +45,7 @@ export const HodLeaveApprovalTab: React.FC = () => {
 
   const [viewingLeave, setViewingLeave] = useState<FacultyLeaveRecord | null>(null);
   const [viewingPermission, setViewingPermission] = useState<StudentPermissionRecord | null>(null);
+  const [inspectingProof, setInspectingProof] = useState<StudentPermissionRecord | null>(null);
 
   // Queries
   const { data: facultyLeaves = [], isLoading: isLoadingFaculty } = useQuery<FacultyLeaveRecord[]>({
@@ -445,15 +447,14 @@ export const HodLeaveApprovalTab: React.FC = () => {
                           <span>Uploaded Proof Document:</span>
                         </span>
                         {p.proof_url ? (
-                          <a
-                            href={p.proof_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-3 py-1 rounded-lg bg-brand-soft text-brand-primary font-bold text-xs hover:bg-brand-primary hover:text-white transition-all inline-flex items-center gap-1"
+                          <button
+                            type="button"
+                            onClick={() => setInspectingProof(p)}
+                            className="px-3 py-1.5 rounded-lg bg-brand-soft text-brand-primary font-bold text-xs hover:bg-brand-primary hover:text-white transition-all inline-flex items-center gap-1.5 shadow-xs cursor-pointer"
                           >
-                            <span>Inspect Proof File</span>
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
+                            <FileText className="w-3.5 h-3.5" />
+                            <span>View / Inspect Proof Document</span>
+                          </button>
                         ) : (
                           <span className="text-textMuted">No proof attached</span>
                         )}
@@ -562,6 +563,14 @@ export const HodLeaveApprovalTab: React.FC = () => {
         isOpen={Boolean(viewingPermission)}
         onClose={() => setViewingPermission(null)}
         permission={viewingPermission}
+      />
+      <ProofViewerModal
+        isOpen={Boolean(inspectingProof)}
+        onClose={() => setInspectingProof(null)}
+        proofUrl={inspectingProof?.proof_url || null}
+        studentName={inspectingProof?.student_name}
+        rollNumber={inspectingProof?.roll_number}
+        title={`Event Proof: ${inspectingProof?.permission_type || 'Document'}`}
       />
     </div>
   );

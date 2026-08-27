@@ -22,6 +22,7 @@ import {
   HolidayCalendarEntry
 } from '../../types';
 import { PermissionLetterModal } from './PermissionLetterModal';
+import { ProofViewerModal } from './ProofViewerModal';
 
 interface StudentPermissionTabProps {
   rollNumber?: string;
@@ -34,6 +35,7 @@ export const StudentPermissionTab: React.FC<StudentPermissionTabProps> = ({ roll
 
   const [showApplyModal, setShowApplyModal] = useState(false);
   const [viewingPermission, setViewingPermission] = useState<StudentPermissionRecord | null>(null);
+  const [inspectingProof, setInspectingProof] = useState<StudentPermissionRecord | null>(null);
 
   // Form State
   const [formType, setFormType] = useState<StudentPermissionType>('Attending Workshop');
@@ -217,14 +219,13 @@ export const StudentPermissionTab: React.FC<StudentPermissionTabProps> = ({ roll
                       <td className="py-2.5 px-3.5 text-textSecondary max-w-xs truncate">{p.reason}</td>
                       <td className="py-2.5 px-3.5 text-center">
                         {p.proof_url ? (
-                          <a
-                            href={p.proof_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-2 py-0.5 rounded-md bg-surface-2 border border-borderLine text-[10px] font-bold text-brand-primary inline-flex items-center gap-1"
+                          <button
+                            type="button"
+                            onClick={() => setInspectingProof(p)}
+                            className="px-2 py-0.5 rounded-md bg-brand-soft border border-brand-primary/20 text-[10px] font-bold text-brand-primary inline-flex items-center gap-1 hover:bg-brand-primary hover:text-white transition-all cursor-pointer"
                           >
                             <FileText className="w-2.5 h-2.5" /> View Proof
-                          </a>
+                          </button>
                         ) : (
                           <span className="text-[10px] text-textMuted">None</span>
                         )}
@@ -381,6 +382,16 @@ export const StudentPermissionTab: React.FC<StudentPermissionTabProps> = ({ roll
         isOpen={Boolean(viewingPermission)}
         onClose={() => setViewingPermission(null)}
         permission={viewingPermission}
+      />
+
+      {/* ── Proof Document Viewer Modal ── */}
+      <ProofViewerModal
+        isOpen={Boolean(inspectingProof)}
+        onClose={() => setInspectingProof(null)}
+        proofUrl={inspectingProof?.proof_url || null}
+        studentName={inspectingProof?.student_name}
+        rollNumber={inspectingProof?.roll_number}
+        title={`Event Proof: ${inspectingProof?.permission_type || 'Document'}`}
       />
     </div>
   );
