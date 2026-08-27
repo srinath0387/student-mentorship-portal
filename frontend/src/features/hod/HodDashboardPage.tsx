@@ -41,6 +41,7 @@ import { PlacementPreferencesTab } from '../profile/tabs/PlacementPreferencesTab
 import { AttendanceManagementTab } from '../admin/tabs/AttendanceManagementTab';
 import { AttendanceTrackingTab } from '../attendance/AttendanceTrackingTab';
 import { HodLeaveApprovalTab } from '../leave/HodLeaveApprovalTab';
+import { HolidayCalendarTab } from '../admin/tabs/HolidayCalendarTab';
 
 const YEARS = ['1st Year', '2nd Year', '3rd Year', '4th Year'] as const;
 const SECTIONS = ['Section A', 'Section B', 'Section C'] as const;
@@ -118,7 +119,7 @@ function mapStudentToHodEntry(student: any, index: number, liveSolved?: number):
 }
 
 export const HodDashboardPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'leaves' | 'attendance' | 'analytics' | 'students' | 'rankings' | 'placement' | 'mentees' | 'settings'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'leaves' | 'holidays' | 'attendance' | 'analytics' | 'students' | 'rankings' | 'placement' | 'mentees' | 'settings'>('overview');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Interactive Filter Slicers
@@ -138,7 +139,10 @@ export const HodDashboardPage: React.FC = () => {
   const [menteeSearch, setMenteeSearch] = useState('');
   const [collapsedYears, setCollapsedYears] = useState<Set<string>>(new Set());
   const toggleYear = (year: string) => setCollapsedYears(prev => {
-    const next = new Set(prev); if (next.has(year)) next.delete(year); else next.add(year); return next;
+    const next = new Set(prev);
+    if (next.has(year)) next.delete(year);
+    else next.add(year);
+    return next;
   });
 
   // Student → Mentor Lookup state
@@ -587,6 +591,7 @@ export const HodDashboardPage: React.FC = () => {
             {[
               { key: 'overview', label: '📊 Year-Wise Overview' },
               { key: 'leaves', label: '🌴 Leave & OD Approvals' },
+              { key: 'holidays', label: '📅 Academic & Holiday Calendar' },
               { key: 'attendance', label: '📋 Attendance Tracker' },
               { key: 'analytics', label: '📈 Academic Analytics' },
               { key: 'placement', label: '🎯 Placement Eligibility Engine (T&P)' },
@@ -613,6 +618,9 @@ export const HodDashboardPage: React.FC = () => {
 
       {/* ── TAB: Leave & OD Approvals ── */}
       {activeTab === 'leaves' && <HodLeaveApprovalTab />}
+
+      {/* ── TAB: Academic & Holiday Calendar ── */}
+      {activeTab === 'holidays' && <HolidayCalendarTab />}
 
       {/* ── TAB: Attendance Tracker & Management ── */}
       {activeTab === 'attendance' && (

@@ -997,8 +997,40 @@ export const api = {
     });
   },
 
+  updateHoliday: async (id: string, date: string, title: string, type?: string) => {
+    return fetchWithAuth(`/holidays/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ date, title, type }),
+    });
+  },
+
   deleteHoliday: async (id: string) => {
     return fetchWithAuth(`/holidays/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // ── MODULE 6: Academic Calendar (Semester Windows) ────────────────────────
+  getAcademicCalendars: async (academicYear?: string) => {
+    const query = academicYear ? `?academic_year=${encodeURIComponent(academicYear)}` : '';
+    return fetchWithAuth(`/academic-calendar${query}`);
+  },
+
+  saveAcademicCalendar: async (data: {
+    academic_year: string;
+    semester: string;
+    start_date: string;
+    end_date: string;
+    description?: string;
+  }) => {
+    return fetchWithAuth('/academic-calendar', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  deleteAcademicCalendar: async (id: string) => {
+    return fetchWithAuth(`/academic-calendar/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
   },

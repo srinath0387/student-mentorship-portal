@@ -5072,6 +5072,32 @@ app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin'), async (
     if (req.auth?.role === 'faculty' && allotment.faculty_email.toLowerCase() !== req.auth.email.toLowerCase()) {
       return res.status(403).json({ error: 'Access denied: You can only take attendance for your own allotted subjects' });
     }
+    // 1. Holiday Check — Attendance cannot be marked on declared public/institutional holidays
+    const holRes = await db.query('SELECT title, type FROM holiday_calendar WHERE date = $1', [session_date]);
+    if (holRes.rows.length > 0) {
+      const hol = holRes.rows[0];
+      return res.status(400).json({
+        error: `Cannot post attendance on ${session_date}: It is marked as an official ${hol.type || 'Holiday'} (${hol.title}).`,
+      });
+    }
+
+    // 2. Academic Calendar Check — Attendance can only be marked within the active semester date window
+    const semRes = await db.query(
+      `SELECT * FROM academic_calendar 
+       WHERE semester = $1 
+       ORDER BY academic_year DESC LIMIT 1`,
+      [allotment.semester]
+    );
+    if (semRes.rows.length > 0) {
+      const cal = semRes.rows[0];
+      const startIso = typeof cal.start_date === 'string' ? cal.start_date.split('T')[0] : new Date(cal.start_date).toISOString().split('T')[0];
+      const endIso = typeof cal.end_date === 'string' ? cal.end_date.split('T')[0] : new Date(cal.end_date).toISOString().split('T')[0];
+      if (session_date < startIso || session_date > endIso) {
+        return res.status(400).json({
+          error: `Cannot post attendance on ${session_date}: Outside active semester ${allotment.semester} academic calendar window (${startIso} to ${endIso} for ${cal.academic_year}).`,
+        });
+      }
+    }
 
     const recordedBy = req.auth?.email?.toLowerCase() || allotment.faculty_email;
 
@@ -7158,6 +7184,51 @@ const ensureLeaveAndSubjectsHandledTables = async () => {
       );
     `);
 
+    // 2B. Academic Calendar (Semester Start & End Dates)
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS academic_calendar (
+        id TEXT PRIMARY KEY,
+        academic_year TEXT NOT NULL,
+        semester TEXT NOT NULL,
+        start_date DATE NOT NULL,
+        end_date DATE NOT NULL,
+        description TEXT,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (academic_year, semester)
+      );
+    `);
+
+    // Seed default academic calendars if empty
+    const calCount = await db.query('SELECT COUNT(*) FROM academic_calendar');
+    if (parseInt(calCount.rows[0]?.count || '0') === 0) {
+      const defaultAcademicWindows = [
+        { id: 'AC_2024_25_1_1', academic_year: '2024-2025', semester: '1-1', start_date: '2024-07-15', end_date: '2024-11-30', description: 'Odd Semester 2024-25' },
+        { id: 'AC_2024_25_1_2', academic_year: '2024-2025', semester: '1-2', start_date: '2024-12-15', end_date: '2025-04-30', description: 'Even Semester 2024-25' },
+        { id: 'AC_2024_25_2_1', academic_year: '2024-2025', semester: '2-1', start_date: '2024-07-01', end_date: '2024-11-15', description: 'Odd Semester 2024-25' },
+        { id: 'AC_2024_25_2_2', academic_year: '2024-2025', semester: '2-2', start_date: '2024-12-01', end_date: '2025-04-15', description: 'Even Semester 2024-25' },
+        { id: 'AC_2024_25_3_1', academic_year: '2024-2025', semester: '3-1', start_date: '2024-06-24', end_date: '2024-11-10', description: 'Odd Semester 2024-25' },
+        { id: 'AC_2024_25_3_2', academic_year: '2024-2025', semester: '3-2', start_date: '2024-11-25', end_date: '2025-04-10', description: 'Even Semester 2024-25' },
+        { id: 'AC_2024_25_4_1', academic_year: '2024-2025', semester: '4-1', start_date: '2024-06-24', end_date: '2024-11-10', description: 'Odd Semester 2024-25' },
+        { id: 'AC_2024_25_4_2', academic_year: '2024-2025', semester: '4-2', start_date: '2024-11-25', end_date: '2025-03-31', description: 'Even Semester 2024-25' },
+        { id: 'AC_2025_26_1_1', academic_year: '2025-2026', semester: '1-1', start_date: '2025-07-15', end_date: '2025-11-30', description: 'Odd Semester 2025-26' },
+        { id: 'AC_2025_26_1_2', academic_year: '2025-2026', semester: '1-2', start_date: '2025-12-15', end_date: '2026-04-30', description: 'Even Semester 2025-26' },
+        { id: 'AC_2025_26_2_1', academic_year: '2025-2026', semester: '2-1', start_date: '2025-07-01', end_date: '2025-11-15', description: 'Odd Semester 2025-26' },
+        { id: 'AC_2025_26_2_2', academic_year: '2025-2026', semester: '2-2', start_date: '2025-12-01', end_date: '2026-04-15', description: 'Even Semester 2025-26' },
+        { id: 'AC_2025_26_3_1', academic_year: '2025-2026', semester: '3-1', start_date: '2025-06-23', end_date: '2025-11-08', description: 'Odd Semester 2025-26' },
+        { id: 'AC_2025_26_3_2', academic_year: '2025-2026', semester: '3-2', start_date: '2025-11-24', end_date: '2026-04-11', description: 'Even Semester 2025-26' },
+        { id: 'AC_2025_26_4_1', academic_year: '2025-2026', semester: '4-1', start_date: '2025-06-23', end_date: '2025-11-08', description: 'Odd Semester 2025-26' },
+        { id: 'AC_2025_26_4_2', academic_year: '2025-2026', semester: '4-2', start_date: '2025-11-24', end_date: '2026-03-31', description: 'Even Semester 2025-26' },
+      ];
+      for (const w of defaultAcademicWindows) {
+        await db.query(
+          `INSERT INTO academic_calendar (id, academic_year, semester, start_date, end_date, description)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (academic_year, semester) DO NOTHING`,
+          [w.id, w.academic_year, w.semester, w.start_date, w.end_date, w.description]
+        ).catch(() => {});
+      }
+    }
+
     // Seed default holidays if table is empty
     const holCount = await db.query('SELECT COUNT(*) FROM holiday_calendar');
     if (parseInt(holCount.rows[0]?.count || '0') === 0) {
@@ -7364,6 +7435,29 @@ app.post('/holidays', requireRole('admin'), async (req: Request, res: Response) 
   }
 });
 
+// PUT /holidays/:id — Update a holiday (Admin)
+app.put('/holidays/:id', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const { id } = req.params;
+    const { date, title, type } = req.body;
+    if (!date || !title) return res.status(400).json({ error: 'Date and Title are required' });
+
+    const result = await db.query(
+      `UPDATE holiday_calendar 
+       SET date = $1, title = $2, type = $3 
+       WHERE id = $4
+       RETURNING *`,
+      [date, title.trim(), type || 'Holiday', id]
+    );
+
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Holiday not found' });
+    res.json({ success: true, holiday: result.rows[0] });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // DELETE /holidays/:id — Delete a holiday (Admin)
 app.delete('/holidays/:id', requireRole('admin'), async (req: Request, res: Response) => {
   try {
@@ -7371,6 +7465,72 @@ app.delete('/holidays/:id', requireRole('admin'), async (req: Request, res: Resp
     const { id } = req.params;
     await db.query('DELETE FROM holiday_calendar WHERE id = $1', [id]);
     res.json({ success: true, message: 'Holiday deleted' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── ACADEMIC CALENDAR ENDPOINTS ─────────────────────────────────────────────
+
+// GET /academic-calendar — Get all academic calendar semester date windows
+app.get('/academic-calendar', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const academicYear = req.query.academic_year as string;
+    let query = 'SELECT * FROM academic_calendar';
+    const params: any[] = [];
+    if (academicYear) {
+      params.push(academicYear);
+      query += ' WHERE academic_year = $1';
+    }
+    query += ' ORDER BY academic_year DESC, semester ASC';
+    const result = await db.query(query, params);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /academic-calendar — Create or update academic semester date range (Admin)
+app.post('/academic-calendar', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const { academic_year, semester, start_date, end_date, description } = req.body;
+    if (!academic_year || !semester || !start_date || !end_date) {
+      return res.status(400).json({ error: 'Academic year, semester, start date, and end date are required' });
+    }
+
+    if (new Date(start_date) > new Date(end_date)) {
+      return res.status(400).json({ error: 'Semester start date cannot be after end date' });
+    }
+
+    const id = `AC_${academic_year.replace(/[^a-zA-Z0-9]/g, '_')}_${semester.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    const ins = await db.query(
+      `INSERT INTO academic_calendar (id, academic_year, semester, start_date, end_date, description)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (academic_year, semester) DO UPDATE 
+       SET start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date, description = EXCLUDED.description
+       RETURNING *`,
+      [id, academic_year.trim(), semester.trim(), start_date, end_date, description?.trim() || null]
+    );
+
+    res.json({
+      success: true,
+      message: `Academic calendar for ${academic_year} (Sem ${semester}) saved successfully.`,
+      calendar: ins.rows[0],
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /academic-calendar/:id — Delete academic calendar semester entry (Admin)
+app.delete('/academic-calendar/:id', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const { id } = req.params;
+    await db.query('DELETE FROM academic_calendar WHERE id = $1', [id]);
+    res.json({ success: true, message: 'Academic calendar entry deleted successfully.' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

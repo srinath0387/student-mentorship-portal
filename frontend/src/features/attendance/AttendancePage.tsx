@@ -19,10 +19,13 @@ import {
   Sparkles,
   Zap,
   FileText,
-  Download
+  Download,
+  Lock,
+  CalendarOff,
+  AlertTriangle
 } from 'lucide-react';
 import { api } from '../../lib/api';
-import { SemesterLabel, SubjectAllotment, SubjectRosterEntry, TimetableEntry } from '../../types';
+import { SemesterLabel, SubjectAllotment, SubjectRosterEntry, TimetableEntry, HolidayCalendarEntry, AcademicCalendarEntry } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 
 const ALL_SEMESTERS: { label: SemesterLabel; desc: string }[] = [
@@ -113,6 +116,44 @@ export const AttendancePage: React.FC = () => {
     queryFn: () => (selectedSubject?.id ? api.getRoster(selectedSubject.id) : Promise.resolve([])),
     enabled: Boolean(selectedSubject?.id),
   });
+
+  // ── Fetch Holidays and Academic Calendar for Date Validation ──
+  const { data: holidays = [] } = useQuery<HolidayCalendarEntry[]>({
+    queryKey: ['holidayCalendar'],
+    queryFn: () => api.getHolidays(),
+  });
+
+  const { data: academicCalendars = [] } = useQuery<AcademicCalendarEntry[]>({
+    queryKey: ['academicCalendars'],
+    queryFn: () => api.getAcademicCalendars(),
+  });
+
+  // Check if chosen date is a declared Holiday
+  const matchedHoliday = React.useMemo(() => {
+    return holidays.find((h) => {
+      const hDate = typeof h.date === 'string' ? h.date.split('T')[0] : new Date(h.date).toISOString().split('T')[0];
+      return hDate === sessionDate;
+    });
+  }, [holidays, sessionDate]);
+
+  // Check if chosen date falls within active semester academic calendar range
+  const semesterCalendarWindow = React.useMemo(() => {
+    if (!selectedSemester) return null;
+    return academicCalendars.find((c) => String(c.semester) === String(selectedSemester)) || null;
+  }, [academicCalendars, selectedSemester]);
+
+  const isOutsideSemesterRange = React.useMemo(() => {
+    if (!semesterCalendarWindow) return false;
+    const startStr = typeof semesterCalendarWindow.start_date === 'string'
+      ? semesterCalendarWindow.start_date.split('T')[0]
+      : new Date(semesterCalendarWindow.start_date).toISOString().split('T')[0];
+    const endStr = typeof semesterCalendarWindow.end_date === 'string'
+      ? semesterCalendarWindow.end_date.split('T')[0]
+      : new Date(semesterCalendarWindow.end_date).toISOString().split('T')[0];
+    return sessionDate < startStr || sessionDate > endStr;
+  }, [semesterCalendarWindow, sessionDate]);
+
+  const isDateLocked = Boolean(matchedHoliday || isOutsideSemesterRange);
 
   // Initialize student records when roster loads or sessionDate changes
   useEffect(() => {
@@ -574,6 +615,35 @@ export const AttendancePage: React.FC = () => {
             </div>
           </div>
 
+          {/* Holiday / Semester Lock Banner */}
+          {matchedHoliday && (
+            <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-start gap-3">
+              <CalendarOff className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-bold text-rose-300">
+                  Attendance Locked: Declared {matchedHoliday.type || 'Holiday'} ({matchedHoliday.title})
+                </p>
+                <p className="text-[11px] text-textSecondary mt-0.5">
+                  Institutional academic activities are suspended on this date. Attendance cannot be recorded for holidays.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {!matchedHoliday && isOutsideSemesterRange && semesterCalendarWindow && (
+            <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3">
+              <Lock className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-bold text-amber-300">
+                  Attendance Locked: Date Outside Active Semester Window
+                </p>
+                <p className="text-[11px] text-textSecondary mt-0.5">
+                  Selected date ({sessionDate}) is outside configured academic calendar dates for Sem {selectedSemester} ({typeof semesterCalendarWindow.start_date === 'string' ? semesterCalendarWindow.start_date.split('T')[0] : ''} to {typeof semesterCalendarWindow.end_date === 'string' ? semesterCalendarWindow.end_date.split('T')[0] : ''}).
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="p-4 rounded-xl bg-surface-2 border border-borderLine flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div className="text-xs">
               <span className="font-bold text-textPrimary">Timing Window: </span>
@@ -587,9 +657,18 @@ export const AttendancePage: React.FC = () => {
             </div>
             <button
               onClick={() => setCurrentStep(4)}
-              className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-brand-primary text-white text-xs font-bold hover:bg-brand-primary/90 shadow-brand transition-all"
+              disabled={isDateLocked}
+              className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-brand-primary text-white text-xs font-bold hover:bg-brand-primary/90 shadow-brand transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              Load Student Roster <ArrowRight className="w-3.5 h-3.5" />
+              {isDateLocked ? (
+                <>
+                  <Lock className="w-3.5 h-3.5" /> Date Locked for Attendance
+                </>
+              ) : (
+                <>
+                  Load Student Roster <ArrowRight className="w-3.5 h-3.5" />
+                </>
+              )}
             </button>
           </div>
         </div>

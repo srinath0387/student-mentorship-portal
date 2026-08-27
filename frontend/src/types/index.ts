@@ -526,6 +526,17 @@ export interface FacultyLeaveSummaryResponse {
   leaves: FacultyLeaveRecord[];
 }
 
+// ── MODULE 6: Academic Calendar (Semester Start & End Dates) ───────────────
+export interface AcademicCalendarEntry {
+  id: string;
+  academic_year: string;
+  semester: SemesterLabel | string;
+  start_date: string;
+  end_date: string;
+  description?: string;
+  created_at?: string;
+}
+
 // ── MODULE 5: Student Permissions (On-Duty / Leaves) ────────────────────────
 export type StudentPermissionType =
   | 'Attending Workshop'
