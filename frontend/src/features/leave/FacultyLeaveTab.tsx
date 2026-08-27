@@ -622,21 +622,52 @@ export const FacultyLeaveTab: React.FC = () => {
 
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                     <div className="flex-1">
-                      <label className="font-bold text-textMuted block mb-0.5 text-[10px]">Adjusted / Reassigned Faculty Email *</label>
-                      <input
-                        type="email"
-                        placeholder="colleague@rgmcet.edu.in"
-                        value={adjFacultyEmail}
-                        onChange={(e) => setAdjFacultyEmail(e.target.value)}
-                        className="w-full px-2.5 py-1.5 rounded-lg border border-borderLine bg-background text-textPrimary text-xs"
-                      />
+                      <label className="font-bold text-textMuted block mb-0.5 text-[10px]">
+                        Reassigned Colleague Faculty *
+                      </label>
+                      <div className="flex gap-2">
+                        {facultyDirectory.length > 0 ? (
+                          <select
+                            value={adjFacultyEmail}
+                            onChange={(e) => {
+                              const selectedEmail = e.target.value;
+                              setAdjFacultyEmail(selectedEmail);
+                              const found = facultyDirectory.find(
+                                (f: any) => f.email?.toLowerCase() === selectedEmail.toLowerCase()
+                              );
+                              if (found) {
+                                setAdjFacultyName(found.name || '');
+                              }
+                            }}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-borderLine bg-background text-textPrimary text-xs focus:outline-none focus:border-brand-primary"
+                          >
+                            <option value="">-- Select Colleague Faculty --</option>
+                            {facultyDirectory
+                              .filter((f: any) => f.email && f.email.toLowerCase() !== email.toLowerCase())
+                              .map((f: any) => (
+                                <option key={f.id || f.email} value={f.email}>
+                                  {f.name} ({f.department} - {f.email})
+                                </option>
+                              ))}
+                          </select>
+                        ) : (
+                          <input
+                            type="email"
+                            placeholder="colleague@rgmcet.edu.in"
+                            value={adjFacultyEmail}
+                            onChange={(e) => setAdjFacultyEmail(e.target.value)}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-borderLine bg-background text-textPrimary text-xs focus:outline-none focus:border-brand-primary"
+                          />
+                        )}
+                      </div>
                     </div>
                     <button
                       type="button"
                       onClick={handleAddAdjustment}
-                      className="mt-auto px-3.5 py-1.5 rounded-lg bg-surface border border-borderLine hover:bg-surface-2 text-brand-primary font-bold text-xs shadow-xs"
+                      className="mt-auto px-4 py-2 rounded-lg bg-brand-primary hover:bg-brand-primary/90 text-white font-bold text-xs shadow-sm transition-all flex items-center justify-center gap-1 shrink-0"
                     >
-                      + Add Entry
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add Duty</span>
                     </button>
                   </div>
                 </div>

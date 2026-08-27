@@ -316,37 +316,59 @@ export const HodLeaveApprovalTab: React.FC = () => {
                       </div>
 
                       {/* Classwork & Exam Duty Adjustments */}
-                      {l.adjustments && l.adjustments.length > 0 && (
-                        <div className="space-y-1.5">
-                          <p className="text-[11px] font-bold text-textSecondary uppercase tracking-wider">
-                            Reassignments / Covered Classes:
+                      <div className="space-y-1.5 pt-1">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[11px] font-bold text-textSecondary uppercase tracking-wider flex items-center gap-1.5">
+                            <Users className="w-3.5 h-3.5 text-purple-400" />
+                            <span>Classwork &amp; Exam Duty Adjustments ({l.adjustments?.length || 0})</span>
                           </p>
+                          {(!l.adjustments || l.adjustments.length === 0) && (
+                            <span className="text-[10px] text-textMuted italic">No covering duties added for this leave</span>
+                          )}
+                        </div>
+
+                        {l.adjustments && l.adjustments.length > 0 && (
                           <div className="rounded-xl border border-borderLine overflow-hidden">
                             <table className="w-full text-left text-[11px]">
                               <thead className="bg-surface font-bold text-textMuted border-b border-borderLine">
                                 <tr>
-                                  <th className="p-2">Type</th>
+                                  <th className="p-2">Adjustment Type</th>
                                   <th className="p-2">Date</th>
-                                  <th className="p-2">Subject / Duty</th>
-                                  <th className="p-2">Slot</th>
-                                  <th className="p-2">Reassigned Colleague</th>
+                                  <th className="p-2">Subject / Duty Description</th>
+                                  <th className="p-2">Period / Slot</th>
+                                  <th className="p-2">Covering Faculty Colleague</th>
                                 </tr>
                               </thead>
-                              <tbody className="divide-y divide-borderLine font-mono">
+                              <tbody className="divide-y divide-borderLine">
                                 {l.adjustments.map((adj, i) => (
-                                  <tr key={i}>
-                                    <td className="p-2 font-sans font-bold uppercase text-[10px]">{adj.adjustment_type}</td>
-                                    <td className="p-2">{adj.date}</td>
-                                    <td className="p-2 font-sans font-medium text-textPrimary">{adj.subject_or_duty}</td>
-                                    <td className="p-2">{adj.timing_slot}</td>
-                                    <td className="p-2 font-sans font-bold text-textPrimary">{adj.reassigned_faculty_name}</td>
+                                  <tr key={i} className="hover:bg-surface transition-colors">
+                                    <td className="p-2">
+                                      <span
+                                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${
+                                          adj.adjustment_type === 'exam_duty'
+                                            ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                            : 'bg-brand-soft text-brand-primary border border-brand-primary/20'
+                                        }`}
+                                      >
+                                        {adj.adjustment_type === 'exam_duty' ? 'Exam Duty' : 'Classwork'}
+                                      </span>
+                                    </td>
+                                    <td className="p-2 font-mono text-textPrimary font-bold">{adj.date}</td>
+                                    <td className="p-2 font-medium text-textPrimary">{adj.subject_or_duty}</td>
+                                    <td className="p-2 font-mono text-textSecondary">{adj.timing_slot}</td>
+                                    <td className="p-2">
+                                      <p className="font-bold text-textPrimary">{adj.reassigned_faculty_name || adj.reassigned_faculty_email}</p>
+                                      {adj.reassigned_faculty_name && adj.reassigned_faculty_name !== adj.reassigned_faculty_email && (
+                                        <p className="text-[10px] text-textMuted font-mono">{adj.reassigned_faculty_email}</p>
+                                      )}
+                                    </td>
                                   </tr>
                                 ))}
                               </tbody>
                             </table>
                           </div>
-                        </div>
-                      )}
+                        )}
+                      </div>
 
                       {/* Action Buttons for Pending */}
                       {isPending && (

@@ -7752,6 +7752,13 @@ app.post('/faculty/leaves/apply', requireRole('faculty', 'hod', 'admin'), async 
       for (const adj of adjustments) {
         if (!adj.date || !adj.reassigned_faculty_email) continue;
         const adjId = `ADJ_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        const reassignedEmail = adj.reassigned_faculty_email.toLowerCase().trim();
+        let reassignedName = adj.reassigned_faculty_name?.trim();
+        if (!reassignedName || reassignedName === reassignedEmail) {
+          const rfRes = await db.query('SELECT name FROM faculty WHERE LOWER(email) = $1 LIMIT 1', [reassignedEmail]);
+          reassignedName = rfRes.rows[0]?.name || reassignedEmail.split('@')[0];
+        }
+
         const insAdj = await db.query(
           `INSERT INTO faculty_leave_adjustments 
            (id, leave_id, adjustment_type, date, subject_or_duty, timing_slot, reassigned_faculty_email, reassigned_faculty_name)
@@ -7764,8 +7771,8 @@ app.post('/faculty/leaves/apply', requireRole('faculty', 'hod', 'admin'), async 
             adj.date,
             adj.subject_or_duty || 'Classwork',
             adj.timing_slot || 'Regular Slot',
-            adj.reassigned_faculty_email.toLowerCase().trim(),
-            adj.reassigned_faculty_name || adj.reassigned_faculty_email,
+            reassignedEmail,
+            reassignedName,
           ]
         );
         savedAdj.push(insAdj.rows[0]);
