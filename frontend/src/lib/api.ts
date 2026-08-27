@@ -967,6 +967,34 @@ export const api = {
     });
   },
 
+  fresherSectionSync: async (data: {
+    semester: string;
+    department: string;
+    section: string;
+  }) => {
+    return fetchWithAuth('/attendance/allotments/fresher-section-sync', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  getCoordinatorFresherAttendance: async (params?: {
+    semester?: string;
+    department?: string;
+    section?: string;
+  }) => {
+    const query = new URLSearchParams();
+    if (params?.semester) query.append('semester', params.semester);
+    if (params?.department) query.append('department', params.department);
+    if (params?.section) query.append('section', params.section);
+    const queryString = query.toString() ? `?${query.toString()}` : '';
+    return fetchWithAuth(`/coordinator/fresher-attendance${queryString}`);
+  },
+
+  getFresherMyAttendance: async () => {
+    return fetchWithAuth('/freshers/my-attendance');
+  },
+
   // ── MODULE 4: Subjects Handled (Results) ──────────────────────────────────
   getFacultySubjectsHandled: async (email: string) => {
     return fetchWithAuth(`/faculty/subjects-handled/${encodeURIComponent(email)}`);

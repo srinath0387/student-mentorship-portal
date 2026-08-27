@@ -427,15 +427,23 @@ export const AttendancePage: React.FC = () => {
                 >
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-2">
-                      <span
-                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                          sub.subject_type === 'Lab'
-                            ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
-                            : 'bg-brand-soft text-brand-primary border border-brand-primary/30'
-                        }`}
-                      >
-                        {sub.subject_type}
-                      </span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                            sub.subject_type === 'Lab'
+                              ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                              : 'bg-brand-soft text-brand-primary border border-brand-primary/30'
+                          }`}
+                        >
+                          {sub.subject_type}
+                        </span>
+                        {['1-1', '1-2'].includes(selectedSemester || '') && (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-pink-500/10 text-pink-400 border border-pink-500/30 flex items-center gap-1">
+                            <Sparkles className="w-2.5 h-2.5" />
+                            1st Year Fresher
+                          </span>
+                        )}
+                      </div>
                       <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-surface border border-borderLine text-textPrimary">
                         Section {sub.section}
                       </span>
@@ -445,7 +453,7 @@ export const AttendancePage: React.FC = () => {
                     </h4>
                     <p className="text-xs text-textSecondary flex items-center gap-1.5">
                       <Users className="w-3.5 h-3.5 text-textMuted" />
-                      {sub.roster_count || 0} Enrolled Students
+                      <span>{sub.roster_count || (['1-1', '1-2'].includes(selectedSemester || '') ? 'Section Enrolled' : 0)} Students</span>
                     </p>
                   </div>
 

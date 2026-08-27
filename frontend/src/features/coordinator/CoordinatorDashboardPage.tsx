@@ -14,6 +14,8 @@ import {
   GraduationCap,
   Trash2,
   Plus,
+  BookOpen,
+  BarChart3,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { api } from '../../lib/api';
@@ -24,7 +26,7 @@ import { FresherStudent, ClassIncharge } from '../../types';
 export const CoordinatorDashboardPage: React.FC = () => {
   const queryClient = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<'freshers' | 'incharge' | 'promotion'>('freshers');
+  const [activeTab, setActiveTab] = useState<'freshers' | 'subjects' | 'attendance' | 'incharge' | 'promotion'>('freshers');
 
   // Directory Filters
   const [selectedDept, setSelectedDept] = useState<string>('All');
@@ -57,6 +59,22 @@ export const CoordinatorDashboardPage: React.FC = () => {
     message: '',
   });
 
+  // Subject Assignment State
+  const [subjSem, setSubjSem] = useState<'1-1' | '1-2'>('1-1');
+  const [subjDept, setSubjDept] = useState<string>('CSE');
+  const [subjSection, setSubjSection] = useState<string>('A');
+  const [showAddSubjectModal, setShowAddSubjectModal] = useState(false);
+  const [newSubjName, setNewSubjName] = useState('');
+  const [newSubjType, setNewSubjType] = useState<'Theory' | 'Lab'>('Theory');
+  const [newSubjFacultyEmail, setNewSubjFacultyEmail] = useState('');
+  const [newSubjFacultyName, setNewSubjFacultyName] = useState('');
+  const [syncStatus, setSyncStatus] = useState<{ type: 'idle' | 'success' | 'error'; message: string }>({ type: 'idle', message: '' });
+
+  // Attendance Overview State
+  const [attSem, setAttSem] = useState<'1-1' | '1-2'>('1-1');
+  const [attDept, setAttDept] = useState<string>('All');
+  const [attSection, setAttSection] = useState<string>('All');
+
   // ── Queries ──
   const { data: stats, refetch: refetchStats } = useQuery({
     queryKey: ['coordinator-stats'],
@@ -82,6 +100,18 @@ export const CoordinatorDashboardPage: React.FC = () => {
   const { data: facultyList = [] } = useQuery({
     queryKey: ['all-faculty-for-incharge'],
     queryFn: () => api.getAllFaculty('All'),
+  });
+
+  // Query 1st-Year Subjects
+  const { data: sectionSubjects = [], isLoading: subjectsLoading, refetch: refetchSubjects } = useQuery({
+    queryKey: ['coordinator-subjects', subjSem, subjDept, subjSection],
+    queryFn: () => api.getAllotments(subjSem, subjDept),
+  });
+
+  // Query 1st-Year Attendance Summaries
+  const { data: fresherAttendanceData, isLoading: attLoading, refetch: refetchFresherAtt } = useQuery({
+    queryKey: ['coordinator-fresher-attendance', attSem, attDept, attSection],
+    queryFn: () => api.getCoordinatorFresherAttendance({ semester: attSem, department: attDept, section: attSection }),
   });
 
   // ── Excel Parser for Admission Roster ──
@@ -174,6 +204,54 @@ export const CoordinatorDashboardPage: React.FC = () => {
     },
     onError: (err: any) => {
       setPromoStatus({ type: 'error', message: err.message || 'Promotion failed.' });
+    },
+  });
+
+  const addSubjectMutation = useMutation({
+    mutationFn: (data: {
+      semester: string;
+      department: string;
+      section: string;
+      subject_name: string;
+      subject_type: 'Theory' | 'Lab';
+      faculty_email: string;
+      faculty_name?: string;
+    }) =>
+      api.createSingleAllotment({
+        semester: data.semester,
+        department: data.department,
+        section: data.section,
+        subject_name: data.subject_name,
+        subject_type: data.subject_type,
+        faculty_email: data.faculty_email,
+        faculty_name: data.faculty_name || '',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['coordinator-subjects'] });
+      setShowAddSubjectModal(false);
+      setNewSubjName('');
+      setNewSubjFacultyEmail('');
+      setNewSubjFacultyName('');
+    },
+  });
+
+  const deleteSubjectMutation = useMutation({
+    mutationFn: (id: string) => api.deleteAllotment(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['coordinator-subjects'] });
+    },
+  });
+
+  const syncRosterMutation = useMutation({
+    mutationFn: (data: { semester: string; department: string; section: string }) =>
+      api.fresherSectionSync(data),
+    onSuccess: (res: any) => {
+      setSyncStatus({ type: 'success', message: res.message || 'Roster synchronized.' });
+      queryClient.invalidateQueries({ queryKey: ['coordinator-subjects'] });
+      queryClient.invalidateQueries({ queryKey: ['coordinator-fresher-attendance'] });
+    },
+    onError: (err: any) => {
+      setSyncStatus({ type: 'error', message: err.message || 'Sync failed.' });
     },
   });
 
@@ -299,41 +377,65 @@ export const CoordinatorDashboardPage: React.FC = () => {
       </div>
 
       {/* ── Main Tab Navigation ── */}
-      <div className="flex bg-surface-2 p-1 rounded-2xl border border-borderLine max-w-xl">
+      <div className="flex flex-wrap bg-surface-2 p-1 rounded-2xl border border-borderLine max-w-3xl gap-1">
         <button
           onClick={() => setActiveTab('freshers')}
-          className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer ${
+          className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'freshers'
               ? 'bg-pink-600 text-white shadow-md'
               : 'text-textSecondary hover:text-textPrimary'
           }`}
         >
           <Users className="w-3.5 h-3.5" />
-          <span>Fresher Admissions & Migration</span>
+          <span>Freshers</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('subjects')}
+          className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+            activeTab === 'subjects'
+              ? 'bg-pink-600 text-white shadow-md'
+              : 'text-textSecondary hover:text-textPrimary'
+          }`}
+        >
+          <BookOpen className="w-3.5 h-3.5" />
+          <span>Section Subjects</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('attendance')}
+          className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+            activeTab === 'attendance'
+              ? 'bg-pink-600 text-white shadow-md'
+              : 'text-textSecondary hover:text-textPrimary'
+          }`}
+        >
+          <BarChart3 className="w-3.5 h-3.5" />
+          <span>Attendance Overview</span>
         </button>
 
         <button
           onClick={() => setActiveTab('incharge')}
-          className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer ${
+          className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'incharge'
               ? 'bg-pink-600 text-white shadow-md'
               : 'text-textSecondary hover:text-textPrimary'
           }`}
         >
           <Award className="w-3.5 h-3.5" />
-          <span>Class Incharges (1st Year)</span>
+          <span>Class Incharges</span>
         </button>
 
         <button
           onClick={() => setActiveTab('promotion')}
-          className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer ${
+          className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'promotion'
               ? 'bg-pink-600 text-white shadow-md'
               : 'text-textSecondary hover:text-textPrimary'
           }`}
         >
           <GraduationCap className="w-3.5 h-3.5" />
-          <span>Semester Promotion (1-2 → 2-1)</span>
+          <span>Promotion</span>
         </button>
       </div>
 
@@ -587,7 +689,350 @@ export const CoordinatorDashboardPage: React.FC = () => {
       )}
 
       {/* ════════════════════════════════════════════════════════════════════════ */}
-      {/* TAB 3: SEMESTER PROMOTION (1-2 → 2-1) */}
+      {/* TAB: SECTION SUBJECT ASSIGNMENTS (1ST YEAR) */}
+      {/* ════════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'subjects' && (
+        <div className="space-y-4">
+          {/* Controls Bar */}
+          <div className="bg-surface border border-borderLine rounded-2xl p-4 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+              {/* Semester Toggle */}
+              <div className="flex bg-surface-2 p-1 rounded-xl border border-borderLine">
+                <button
+                  type="button"
+                  onClick={() => setSubjSem('1-1')}
+                  className={`py-1.5 px-3 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                    subjSem === '1-1' ? 'bg-pink-600 text-white shadow' : 'text-textSecondary hover:text-textPrimary'
+                  }`}
+                >
+                  Sem 1-1
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSubjSem('1-2')}
+                  className={`py-1.5 px-3 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                    subjSem === '1-2' ? 'bg-pink-600 text-white shadow' : 'text-textSecondary hover:text-textPrimary'
+                  }`}
+                >
+                  Sem 1-2
+                </button>
+              </div>
+
+              {/* Department Dropdown */}
+              <select
+                value={subjDept}
+                onChange={(e) => setSubjDept(e.target.value)}
+                className="px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-background text-textPrimary focus:outline-none focus:ring-2 focus:ring-pink-500 font-semibold"
+              >
+                {VALID_DEPARTMENT_NAMES.map((d) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+
+              {/* Section Dropdown */}
+              <select
+                value={subjSection}
+                onChange={(e) => setSubjSection(e.target.value)}
+                className="px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-background text-textPrimary focus:outline-none focus:ring-2 focus:ring-pink-500 font-semibold"
+              >
+                {['A', 'B', 'C', 'D', 'E', 'F'].map((s) => (
+                  <option key={s} value={s}>Section {s}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2 w-full md:w-auto">
+              <PillButton
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  setSyncStatus({ type: 'idle', message: '' });
+                  syncRosterMutation.mutate({
+                    semester: subjSem,
+                    department: subjDept,
+                    section: subjSection,
+                  });
+                }}
+                disabled={syncRosterMutation.isPending}
+                className="bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/30 cursor-pointer flex items-center gap-1.5"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${syncRosterMutation.isPending ? 'animate-spin' : ''}`} />
+                <span>{syncRosterMutation.isPending ? 'Syncing...' : 'Sync Section Roster'}</span>
+              </PillButton>
+
+              <PillButton
+                variant="primary"
+                size="sm"
+                onClick={() => setShowAddSubjectModal(true)}
+                className="bg-pink-600 hover:bg-pink-700 shadow-pink-600/30 cursor-pointer flex items-center gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>+ Add Subject</span>
+              </PillButton>
+            </div>
+          </div>
+
+          {syncStatus.message && (
+            <div
+              className={`p-3 rounded-xl border text-xs font-semibold ${
+                syncStatus.type === 'success'
+                  ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300'
+                  : 'bg-red-950/60 border-red-500/50 text-red-300'
+              }`}
+            >
+              {syncStatus.message}
+            </div>
+          )}
+
+          {/* Subjects Table */}
+          <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden shadow-sm">
+            <div className="p-4 border-b border-borderLine flex items-center justify-between bg-surface-2">
+              <div>
+                <h3 className="text-sm font-bold text-textPrimary flex items-center gap-2">
+                  <BookOpen className="w-4 h-4 text-pink-400" />
+                  <span>Assigned Subjects — {subjDept} (Section {subjSection}) • Sem {subjSem}</span>
+                </h3>
+                <p className="text-[11px] text-textSecondary mt-0.5">
+                  Subjects allotted to this 1st-year section. Faculty can mark attendance directly. Click "Sync Section Roster" to auto-enroll newly admitted freshers.
+                </p>
+              </div>
+              <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-pink-500/10 text-pink-400 border border-pink-500/20">
+                {(sectionSubjects.filter((s: any) => s.section === subjSection || s.section === 'All') || []).length} Subject(s)
+              </span>
+            </div>
+
+            {subjectsLoading ? (
+              <div className="py-12 text-center text-xs text-textSecondary flex items-center justify-center gap-2">
+                <RefreshCw className="w-4 h-4 animate-spin text-pink-400" />
+                <span>Loading assigned subjects...</span>
+              </div>
+            ) : sectionSubjects.filter((s: any) => s.section === subjSection || s.section === 'All').length === 0 ? (
+              <div className="py-12 text-center text-textSecondary text-xs space-y-2">
+                <p>No subjects assigned for {subjDept} Section {subjSection} in Semester {subjSem}.</p>
+                <button
+                  type="button"
+                  onClick={() => setShowAddSubjectModal(true)}
+                  className="text-xs font-bold text-pink-400 hover:underline"
+                >
+                  + Add First Subject
+                </button>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-surface-2 text-textSecondary uppercase font-bold border-b border-borderLine text-[10px]">
+                    <tr>
+                      <th className="py-3 px-4">Subject Name</th>
+                      <th className="py-3 px-4">Type</th>
+                      <th className="py-3 px-4">Section</th>
+                      <th className="py-3 px-4">Assigned Faculty</th>
+                      <th className="py-3 px-4">Faculty Email</th>
+                      <th className="py-3 px-4 text-center">Enrolled</th>
+                      <th className="py-3 px-4 text-center">Sessions</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-borderLine font-medium text-textPrimary">
+                    {sectionSubjects
+                      .filter((s: any) => s.section === subjSection || s.section === 'All')
+                      .map((subj: any) => (
+                        <tr key={subj.id} className="hover:bg-surface-2/60 transition-colors">
+                          <td className="py-3 px-4 font-bold text-textPrimary flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-pink-500"></span>
+                            {subj.subject_name}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              subj.subject_type === 'Lab'
+                                ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+                                : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                            }`}>
+                              {subj.subject_type || 'Theory'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 font-bold text-textSecondary">Section {subj.section}</td>
+                          <td className="py-3 px-4 font-semibold text-textPrimary">{subj.faculty_name || '—'}</td>
+                          <td className="py-3 px-4 text-textSecondary font-mono text-[11px]">{subj.faculty_email}</td>
+                          <td className="py-3 px-4 text-center">
+                            <span className="px-2 py-0.5 rounded-full bg-surface-2 text-textSecondary font-bold text-[10px] border border-borderLine">
+                              {subj.roster_count || 0} students
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-center font-bold text-pink-400">
+                            {subj.sessions_count || 0}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (window.confirm(`Delete subject "${subj.subject_name}" from Section ${subj.section}?`)) {
+                                  deleteSubjectMutation.mutate(subj.id);
+                                }
+                              }}
+                              className="p-1 text-textSecondary hover:text-red-400 transition-colors cursor-pointer"
+                              title="Delete Subject Allotment"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════════════════════════ */}
+      {/* TAB: ATTENDANCE OVERVIEW (1ST YEAR) */}
+      {/* ════════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'attendance' && (
+        <div className="space-y-4">
+          {/* Controls */}
+          <div className="bg-surface border border-borderLine rounded-2xl p-4 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+              <div className="flex bg-surface-2 p-1 rounded-xl border border-borderLine">
+                <button
+                  type="button"
+                  onClick={() => setAttSem('1-1')}
+                  className={`py-1.5 px-3 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                    attSem === '1-1' ? 'bg-pink-600 text-white shadow' : 'text-textSecondary hover:text-textPrimary'
+                  }`}
+                >
+                  Sem 1-1
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAttSem('1-2')}
+                  className={`py-1.5 px-3 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                    attSem === '1-2' ? 'bg-pink-600 text-white shadow' : 'text-textSecondary hover:text-textPrimary'
+                  }`}
+                >
+                  Sem 1-2
+                </button>
+              </div>
+
+              <select
+                value={attDept}
+                onChange={(e) => setAttDept(e.target.value)}
+                className="px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-background text-textPrimary focus:outline-none focus:ring-2 focus:ring-pink-500 font-semibold"
+              >
+                <option value="All">All Departments</option>
+                {VALID_DEPARTMENT_NAMES.map((d) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+
+              <select
+                value={attSection}
+                onChange={(e) => setAttSection(e.target.value)}
+                className="px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-background text-textPrimary focus:outline-none focus:ring-2 focus:ring-pink-500 font-semibold"
+              >
+                <option value="All">All Sections</option>
+                {['A', 'B', 'C', 'D', 'E', 'F'].map((s) => (
+                  <option key={s} value={s}>Section {s}</option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              onClick={() => refetchFresherAtt()}
+              className="p-2 rounded-xl border border-borderLine bg-surface-2 hover:bg-surface-3 text-textSecondary hover:text-textPrimary transition-all cursor-pointer"
+              title="Refresh Attendance Data"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Summary Table */}
+          <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden shadow-sm">
+            <div className="p-4 border-b border-borderLine flex items-center justify-between bg-surface-2">
+              <div>
+                <h3 className="text-sm font-bold text-textPrimary flex items-center gap-2">
+                  <BarChart3 className="w-4 h-4 text-pink-400" />
+                  <span>1st-Year Section Attendance Intelligence — Sem {attSem}</span>
+                </h3>
+                <p className="text-[11px] text-textSecondary mt-0.5">
+                  Real-time attendance summaries posted by subject faculty across all 1st-year sections.
+                </p>
+              </div>
+              <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-pink-500/10 text-pink-400 border border-pink-500/20">
+                {fresherAttendanceData?.summaries?.length || 0} Subject Allotment(s)
+              </span>
+            </div>
+
+            {attLoading ? (
+              <div className="py-12 text-center text-xs text-textSecondary flex items-center justify-center gap-2">
+                <RefreshCw className="w-4 h-4 animate-spin text-pink-400" />
+                <span>Aggregating section attendance records...</span>
+              </div>
+            ) : !fresherAttendanceData?.summaries || fresherAttendanceData.summaries.length === 0 ? (
+              <div className="py-12 text-center text-textSecondary text-xs">
+                No attendance sessions recorded yet for {attDept === 'All' ? 'any department' : attDept} in Semester {attSem}.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-surface-2 text-textSecondary uppercase font-bold border-b border-borderLine text-[10px]">
+                    <tr>
+                      <th className="py-3 px-4">Department</th>
+                      <th className="py-3 px-4">Section</th>
+                      <th className="py-3 px-4">Subject</th>
+                      <th className="py-3 px-4">Faculty</th>
+                      <th className="py-3 px-4 text-center">Sessions Held</th>
+                      <th className="py-3 px-4 text-center">Enrolled</th>
+                      <th className="py-3 px-4 text-center">Avg Attendance</th>
+                      <th className="py-3 px-4 text-center">At Risk (&lt;75%)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-borderLine font-medium text-textPrimary">
+                    {fresherAttendanceData.summaries.map((s: any) => (
+                      <tr key={s.id} className="hover:bg-surface-2/60 transition-colors">
+                        <td className="py-3 px-4 font-bold text-textPrimary">{s.department}</td>
+                        <td className="py-3 px-4 font-bold text-textSecondary">Section {s.section}</td>
+                        <td className="py-3 px-4 font-bold text-textPrimary">
+                          <div className="flex items-center gap-2">
+                            <span>{s.subject_name}</span>
+                            <span className="text-[10px] font-normal px-1.5 py-0.2 rounded bg-surface-2 text-textSecondary border border-borderLine">
+                              {s.subject_type}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-textSecondary">{s.faculty_name || s.faculty_email}</td>
+                        <td className="py-3 px-4 text-center font-bold text-pink-400">{s.total_sessions} ({s.total_periods_held} hrs)</td>
+                        <td className="py-3 px-4 text-center text-textSecondary">{s.enrolled_students}</td>
+                        <td className="py-3 px-4 text-center">
+                          <span className={`px-2.5 py-0.5 rounded-full font-bold text-xs ${
+                            s.avg_percentage >= 75
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                              : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                          }`}>
+                            {s.avg_percentage}%
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          {s.at_risk_count > 0 ? (
+                            <span className="px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 font-bold text-[11px] border border-red-500/20">
+                              {s.at_risk_count} student(s)
+                            </span>
+                          ) : (
+                            <span className="text-emerald-400 text-xs font-semibold">✓ None</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════════════════════════ */}
+      {/* TAB 4: SEMESTER PROMOTION (1-2 → 2-1) */}
       {/* ════════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'promotion' && (
         <div className="bg-surface border border-borderLine rounded-2xl p-6 shadow-sm max-w-2xl mx-auto space-y-6">
@@ -869,6 +1314,118 @@ export const CoordinatorDashboardPage: React.FC = () => {
                   className="flex-1 py-2 text-xs font-bold rounded-xl bg-pink-600 hover:bg-pink-700 text-white shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
                 >
                   {assignInchargeMutation.isPending ? 'Assigning...' : 'Assign Class Incharge'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Add 1st-Year Subject Allotment ── */}
+      {showAddSubjectModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
+          <div className="bg-surface border border-borderLine rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-borderLine">
+              <h2 className="text-base font-bold text-textPrimary flex items-center gap-2">
+                <BookOpen className="w-5 h-5 text-pink-400" />
+                Add Subject — {subjDept} (Section {subjSection})
+              </h2>
+              <button
+                onClick={() => setShowAddSubjectModal(false)}
+                className="text-textSecondary hover:text-textPrimary text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!newSubjName.trim() || !newSubjFacultyEmail.trim()) return;
+                addSubjectMutation.mutate({
+                  semester: subjSem,
+                  department: subjDept,
+                  section: subjSection,
+                  subject_name: newSubjName.trim(),
+                  subject_type: newSubjType,
+                  faculty_email: newSubjFacultyEmail.trim(),
+                  faculty_name: newSubjFacultyName.trim() || undefined,
+                });
+              }}
+              className="space-y-3"
+            >
+              <div>
+                <label className="block text-xs font-semibold text-textPrimary mb-1">Subject Name *</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Mathematics - I / C Programming"
+                  value={newSubjName}
+                  onChange={(e) => setNewSubjName(e.target.value)}
+                  required
+                  className="w-full px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-background text-textPrimary font-semibold focus:outline-none focus:ring-2 focus:ring-pink-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-textPrimary mb-1">Subject Type</label>
+                  <select
+                    value={newSubjType}
+                    onChange={(e) => setNewSubjType(e.target.value as any)}
+                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-background text-textPrimary font-semibold"
+                  >
+                    <option value="Theory">Theory (1 Period)</option>
+                    <option value="Lab">Lab (2 Periods)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-textPrimary mb-1">Section</label>
+                  <input
+                    type="text"
+                    value={`Section ${subjSection}`}
+                    disabled
+                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-surface-2 text-textSecondary font-semibold"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-textPrimary mb-1">Assigned Faculty Member *</label>
+                <select
+                  value={newSubjFacultyEmail}
+                  onChange={(e) => {
+                    const email = e.target.value;
+                    setNewSubjFacultyEmail(email);
+                    const matched = facultyList.find((f: any) => f.email?.toLowerCase() === email.toLowerCase());
+                    if (matched) setNewSubjFacultyName(matched.name);
+                  }}
+                  required
+                  className="w-full px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-background text-textPrimary font-semibold"
+                >
+                  <option value="">-- Choose Faculty --</option>
+                  {facultyList.map((f: any) => (
+                    <option key={f.faculty_id || f.email} value={f.email}>
+                      {f.name} ({f.department || 'Faculty'}) • {f.email}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="pt-2 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowAddSubjectModal(false)}
+                  className="flex-1 py-2 text-xs font-semibold rounded-xl border border-borderLine text-textSecondary hover:bg-surface-2 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!newSubjName.trim() || !newSubjFacultyEmail || addSubjectMutation.isPending}
+                  className="flex-1 py-2 text-xs font-bold rounded-xl bg-pink-600 hover:bg-pink-700 text-white shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                >
+                  {addSubjectMutation.isPending ? 'Saving...' : 'Add Subject'}
                 </button>
               </div>
             </form>

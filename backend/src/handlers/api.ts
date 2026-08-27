@@ -4997,10 +4997,16 @@ app.get('/attendance/rosters/:allotmentId', requireRole('admin', 'hod', 'faculty
   try {
     const { allotmentId } = req.params;
 
+    // Fetch allotment details
+    const allot = await db.query('SELECT * FROM subject_allotments WHERE id = $1', [allotmentId]);
+    if (allot.rows.length === 0) {
+      return res.status(404).json({ error: 'Subject allotment not found.' });
+    }
+    const allotmentRow = allot.rows[0];
+
     // Check authorization for faculty
     if (req.auth?.role === 'faculty') {
-      const allot = await db.query('SELECT faculty_email FROM subject_allotments WHERE id = $1', [allotmentId]);
-      if (allot.rows.length === 0 || allot.rows[0].faculty_email.toLowerCase() !== req.auth.email.toLowerCase()) {
+      if (allotmentRow.faculty_email.toLowerCase() !== req.auth.email.toLowerCase()) {
         return res.status(403).json({ error: 'Access denied. You can only view rosters for your allotted subjects.' });
       }
     }
@@ -5013,6 +5019,32 @@ app.get('/attendance/rosters/:allotmentId', requireRole('admin', 'hod', 'faculty
        ORDER BY r.roll_number`,
       [allotmentId]
     );
+
+    // If this is a 1st year semester (1-1 or 1-2) and subject_rosters has no rows for this allotment,
+    // automatically retrieve active 1st Year freshers from the students table by department and section!
+    if (result.rows.length === 0 && ['1-1', '1-2'].includes(allotmentRow.semester_label)) {
+      const dept = allotmentRow.department || '';
+      const sec = allotmentRow.section || 'A';
+      const fresherRes = await db.query(
+        `SELECT roll_number, name as student_name, email as student_email, department as student_department, section as student_section, created_at as joining_date
+         FROM students
+         WHERE year = '1st Year'
+           AND (LOWER(department) = LOWER($1) OR LOWER(REPLACE(department, ' ', '')) = LOWER(REPLACE($1, ' ', '')) OR $1 = '' OR $1 = 'General')
+           AND section = $2
+         ORDER BY name ASC, roll_number ASC`,
+        [dept, sec]
+      );
+      return res.json(fresherRes.rows.map(f => ({
+        id: `fresher_${f.roll_number}`,
+        allotment_id: allotmentId,
+        roll_number: f.roll_number,
+        student_name: f.student_name,
+        student_email: f.student_email,
+        student_department: f.student_department,
+        student_section: f.student_section,
+        joining_date: f.joining_date,
+      })));
+    }
 
     res.json(result.rows);
   } catch (err: any) {
@@ -7181,6 +7213,307 @@ app.post('/coordinator/promote-section', requireRole('coordinator', 'admin'), as
       success: true,
       message: `Successfully promoted ${result.rowCount || 0} student(s) of ${department} (Section ${section || 'All'}) from 1st Year to 2nd Year (2-1). Active dashboard visibility is now transferred to the ${department} HOD.`,
       promotedCount: result.rowCount,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 19o. Coordinator / Admin: Sync Section Roster to Allotments (Auto-enroll freshers)
+app.post('/attendance/allotments/fresher-section-sync', requireRole('coordinator', 'admin', 'hod'), async (req: Request, res: Response) => {
+  try {
+    const { semester, department, section } = req.body;
+    if (!semester || !department || !section) {
+      return res.status(400).json({ error: 'Semester, Department, and Section are required.' });
+    }
+
+    // 1. Get all 1st year students matching this department & section
+    const studentsRes = await db.query(
+      `SELECT roll_number, name, email
+       FROM students
+       WHERE year = '1st Year'
+         AND (LOWER(department) = LOWER($1) OR LOWER(REPLACE(department, ' ', '')) = LOWER(REPLACE($1, ' ', '')) OR $1 = 'All' OR $1 = 'General')
+         AND (section = $2 OR $2 = 'All')
+       ORDER BY roll_number ASC`,
+      [department, section.toUpperCase()]
+    );
+
+    if (studentsRes.rows.length === 0) {
+      return res.json({
+        success: true,
+        message: `No active 1st Year freshers found for ${department} Section ${section}. Upload the student roster first.`,
+        enrolledCount: 0,
+        allotmentsCount: 0,
+      });
+    }
+
+    // 2. Get all subject allotments for this department, section, and semester
+    const allotmentsRes = await db.query(
+      `SELECT id, subject_name, section
+       FROM subject_allotments
+       WHERE semester_label = $1
+         AND (LOWER(department) = LOWER($2) OR LOWER(REPLACE(department, ' ', '')) = LOWER(REPLACE($2, ' ', '')) OR $2 = 'All' OR $2 = 'General')
+         AND (section = $3 OR $3 = 'All')`,
+      [semester, department, section.toUpperCase()]
+    );
+
+    if (allotmentsRes.rows.length === 0) {
+      return res.json({
+        success: true,
+        message: `No subject allotments configured for ${department} Section ${section} in Semester ${semester}. Add subjects first.`,
+        enrolledCount: 0,
+        allotmentsCount: 0,
+      });
+    }
+
+    let totalEnrolled = 0;
+    for (const allot of allotmentsRes.rows) {
+      for (const st of studentsRes.rows) {
+        await db.query(
+          `INSERT INTO subject_rosters (allotment_id, roll_number, student_email, joining_date)
+           VALUES ($1, $2, $3, CURRENT_DATE)
+           ON CONFLICT (allotment_id, roll_number) DO UPDATE
+           SET student_email = EXCLUDED.student_email`,
+          [allot.id, st.roll_number, st.email || `${st.roll_number.toLowerCase()}@rgmcet.edu.in`]
+        );
+        totalEnrolled++;
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Enrolled ${studentsRes.rows.length} student(s) into ${allotmentsRes.rows.length} subject(s) for ${department} Section ${section} (${totalEnrolled} roster records synchronized).`,
+      studentsCount: studentsRes.rows.length,
+      allotmentsCount: allotmentsRes.rows.length,
+      enrolledCount: totalEnrolled,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 19p. Coordinator / Admin: Get Section-wise Fresher Attendance Overview
+app.get('/coordinator/fresher-attendance', requireRole('coordinator', 'admin', 'hod'), async (req: Request, res: Response) => {
+  try {
+    const semester = (req.query.semester as string) || '1-1';
+    const department = (req.query.department as string) || 'All';
+    const section = (req.query.section as string) || 'All';
+
+    let allotQuery = `
+      SELECT a.id, a.semester_label, a.department, a.section, a.subject_name, a.subject_type, a.faculty_name, a.faculty_email,
+        (SELECT COUNT(*) FROM attendance_sessions s WHERE s.allotment_id = a.id) as total_sessions,
+        (SELECT COALESCE(SUM(s.num_periods), 0) FROM attendance_sessions s WHERE s.allotment_id = a.id) as total_periods_held
+      FROM subject_allotments a
+      WHERE a.semester_label = $1
+    `;
+    const params: any[] = [semester];
+
+    if (department && department !== 'All') {
+      params.push(department);
+      allotQuery += ` AND (LOWER(a.department) = LOWER($${params.length}) OR LOWER(REPLACE(a.department, ' ', '')) = LOWER(REPLACE($${params.length}, ' ', '')))`;
+    }
+    if (section && section !== 'All') {
+      params.push(section.toUpperCase());
+      allotQuery += ` AND a.section = $${params.length}`;
+    }
+
+    allotQuery += ` ORDER BY a.department ASC, a.section ASC, a.subject_name ASC`;
+
+    const allotRes = await db.query(allotQuery, params);
+    const summaryList: any[] = [];
+
+    for (const allot of allotRes.rows) {
+      // Calculate attendance stats for this allotment
+      const sessionsRes = await db.query(
+        `SELECT s.id, s.num_periods FROM attendance_sessions s WHERE s.allotment_id = $1`,
+        [allot.id]
+      );
+      const sessionIds = sessionsRes.rows.map(r => r.id);
+
+      let totalStudentPeriodsHeld = 0;
+      let totalStudentPeriodsAttended = 0;
+      let atRiskCount = 0;
+
+      // Get enrolled students for this allotment
+      const rosterRes = await db.query(
+        `SELECT DISTINCT r.roll_number, s.name as student_name, s.personal_mobile
+         FROM subject_rosters r
+         LEFT JOIN students s ON s.roll_number = r.roll_number
+         WHERE r.allotment_id = $1
+         UNION
+         SELECT s.roll_number, s.name as student_name, s.personal_mobile
+         FROM students s
+         WHERE s.year = '1st Year'
+           AND (LOWER(s.department) = LOWER($2) OR LOWER(REPLACE(s.department, ' ', '')) = LOWER(REPLACE($2, ' ', '')))
+           AND s.section = $3`,
+        [allot.id, allot.department, allot.section]
+      );
+
+      const enrolledStudents = rosterRes.rows;
+
+      if (sessionIds.length > 0 && enrolledStudents.length > 0) {
+        for (const st of enrolledStudents) {
+          let stHeld = 0;
+          let stAttended = 0;
+          for (const s of sessionsRes.rows) {
+            stHeld += Number(s.num_periods || 1);
+            const rec = await db.query(
+              `SELECT is_present FROM attendance_records WHERE session_id = $1 AND roll_number = $2`,
+              [s.id, st.roll_number]
+            );
+            if (rec.rows.length > 0 && rec.rows[0].is_present) {
+              stAttended += Number(s.num_periods || 1);
+            }
+          }
+          totalStudentPeriodsHeld += stHeld;
+          totalStudentPeriodsAttended += stAttended;
+          const pct = stHeld > 0 ? (stAttended / stHeld) * 100 : 100;
+          if (pct < 75) atRiskCount++;
+        }
+      }
+
+      const avgPercentage = totalStudentPeriodsHeld > 0
+        ? Math.round((totalStudentPeriodsAttended / totalStudentPeriodsHeld) * 1000) / 10
+        : 100;
+
+      summaryList.push({
+        id: allot.id,
+        semester_label: allot.semester_label,
+        department: allot.department,
+        section: allot.section,
+        subject_name: allot.subject_name,
+        subject_type: allot.subject_type,
+        faculty_name: allot.faculty_name,
+        faculty_email: allot.faculty_email,
+        total_sessions: Number(allot.total_sessions || 0),
+        total_periods_held: Number(allot.total_periods_held || 0),
+        enrolled_students: enrolledStudents.length,
+        avg_percentage: avgPercentage,
+        at_risk_count: atRiskCount,
+      });
+    }
+
+    res.json({
+      semester,
+      department,
+      section,
+      total_allotments: summaryList.length,
+      summaries: summaryList,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 19q. Student / Fresher: Get My Subject-wise Attendance (Fresher Dashboard)
+app.get('/freshers/my-attendance', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const studentUser = req.auth;
+    if (!studentUser) return res.status(401).json({ error: 'Unauthorized' });
+
+    // Look up student by email, roll_number, or admission_id
+    const stuRes = await db.query(
+      `SELECT roll_number, admission_id, name, department, section, year
+       FROM students
+       WHERE LOWER(email) = LOWER($1)
+          OR roll_number = $1
+          OR LOWER(admission_id) = LOWER($1)
+          OR personal_mobile = $1
+       LIMIT 1`,
+      [(studentUser as any).email || (studentUser as any).regNo || (studentUser as any).id || '']
+    );
+
+    if (stuRes.rows.length === 0) {
+      return res.json({ subjects: [], overall_percentage: 100, total_held: 0, total_attended: 0 });
+    }
+
+    const stu = stuRes.rows[0];
+    const rollNumber = stu.roll_number;
+
+    // Get all subject allotments for this student's department & section in 1st year (1-1 / 1-2)
+    const allotRes = await db.query(
+      `SELECT a.id, a.semester_label, a.department, a.section, a.subject_name, a.subject_type, a.faculty_name
+       FROM subject_allotments a
+       WHERE a.semester_label IN ('1-1', '1-2')
+         AND (LOWER(a.department) = LOWER($1) OR LOWER(REPLACE(a.department, ' ', '')) = LOWER(REPLACE($1, ' ', '')))
+         AND a.section = $2
+       ORDER BY a.semester_label ASC, a.subject_name ASC`,
+      [stu.department, stu.section]
+    );
+
+    const subjectsAttendance: any[] = [];
+    let grandHeld = 0;
+    let grandAttended = 0;
+
+    for (const allot of allotRes.rows) {
+      const sessionsRes = await db.query(
+        `SELECT s.id, s.num_periods, s.session_date, s.period_start
+         FROM attendance_sessions s
+         WHERE s.allotment_id = $1
+         ORDER BY s.session_date ASC`,
+        [allot.id]
+      );
+
+      let subHeld = 0;
+      let subAttended = 0;
+      const sessionHistory: any[] = [];
+
+      for (const s of sessionsRes.rows) {
+        const pCount = Number(s.num_periods || 1);
+        subHeld += pCount;
+
+        const rec = await db.query(
+          `SELECT is_present FROM attendance_records WHERE session_id = $1 AND roll_number = $2`,
+          [s.id, rollNumber]
+        );
+        const isPresent = rec.rows.length > 0 ? rec.rows[0].is_present : true;
+        if (isPresent) {
+          subAttended += pCount;
+        }
+
+        sessionHistory.push({
+          session_id: s.id,
+          date: s.session_date,
+          period_start: s.period_start,
+          num_periods: pCount,
+          is_present: isPresent,
+        });
+      }
+
+      const pct = subHeld > 0 ? Math.round((subAttended / subHeld) * 1000) / 10 : 100;
+      grandHeld += subHeld;
+      grandAttended += subAttended;
+
+      subjectsAttendance.push({
+        allotment_id: allot.id,
+        semester_label: allot.semester_label,
+        subject_name: allot.subject_name,
+        subject_type: allot.subject_type,
+        faculty_name: allot.faculty_name,
+        sessions_held: subHeld,
+        sessions_attended: subAttended,
+        percentage: pct,
+        is_low: pct < 75 && subHeld > 0,
+        history: sessionHistory,
+      });
+    }
+
+    const overallPct = grandHeld > 0 ? Math.round((grandAttended / grandHeld) * 1000) / 10 : 100;
+
+    res.json({
+      student: {
+        roll_number: stu.roll_number,
+        admission_id: stu.admission_id,
+        name: stu.name,
+        department: stu.department,
+        section: stu.section,
+        year: stu.year,
+      },
+      overall_percentage: overallPct,
+      total_held: grandHeld,
+      total_attended: grandAttended,
+      is_overall_low: overallPct < 75 && grandHeld > 0,
+      subjects: subjectsAttendance,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
