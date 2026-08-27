@@ -100,6 +100,9 @@ export const AttendanceTrackingTab: React.FC<AttendanceTrackingTabProps> = ({ ro
     queryKey: ['studentAttendanceSummary', studentRollNo],
     queryFn: () => (studentRollNo ? api.getStudentAttendance(studentRollNo) : Promise.resolve(null as any)),
     enabled: isStudentOrParent && Boolean(studentRollNo),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchOnMount: true,
   });
 
   // Day-wise Dot Grid Attendance for Student
@@ -110,6 +113,9 @@ export const AttendanceTrackingTab: React.FC<AttendanceTrackingTabProps> = ({ ro
         ? api.getStudentDaywiseAttendance(studentRollNo, customFromDate, customToDate)
         : Promise.resolve(null as any),
     enabled: isStudentOrParent && Boolean(studentRollNo),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchOnMount: true,
   });
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -126,6 +132,9 @@ export const AttendanceTrackingTab: React.FC<AttendanceTrackingTabProps> = ({ ro
         view_mode: dashboardTab === 'mentees' ? 'mentor' : 'all',
       }),
     enabled: !isStudentOrParent,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchOnMount: true,
   });
 
   // Fetch Allotments
@@ -136,6 +145,9 @@ export const AttendanceTrackingTab: React.FC<AttendanceTrackingTabProps> = ({ ro
         ? api.getMyAttendanceSubjects(selectedSemester)
         : api.getAllotments(selectedSemester, selectedDepartment === 'All' ? '' : selectedDepartment),
     enabled: !isStudentOrParent,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchOnMount: true,
   });
 
   // Automatically select first allotment if none selected
@@ -163,6 +175,9 @@ export const AttendanceTrackingTab: React.FC<AttendanceTrackingTabProps> = ({ ro
     queryKey: ['subjectAttendanceSummary', selectedAllotmentId],
     queryFn: () => (selectedAllotmentId ? api.getSubjectAttendanceSummary(selectedAllotmentId) : Promise.resolve(null as any)),
     enabled: !isStudentOrParent && Boolean(selectedAllotmentId),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchOnMount: true,
   });
 
   // Fetch Sessions History for Selected Allotment
@@ -170,6 +185,9 @@ export const AttendanceTrackingTab: React.FC<AttendanceTrackingTabProps> = ({ ro
     queryKey: ['attendanceSessionsHistory', selectedAllotmentId],
     queryFn: () => (selectedAllotmentId ? api.getAttendanceSessions(selectedAllotmentId) : Promise.resolve([])),
     enabled: !isStudentOrParent && Boolean(selectedAllotmentId),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchOnMount: true,
   });
 
   // Day-wise for Inspected Student Modal
@@ -180,6 +198,8 @@ export const AttendanceTrackingTab: React.FC<AttendanceTrackingTabProps> = ({ ro
         ? api.getStudentDaywiseAttendance(inspectingStudentRoll, customFromDate, customToDate)
         : Promise.resolve(null as any),
     enabled: Boolean(inspectingStudentRoll),
+    staleTime: 0,
+    refetchOnMount: true,
   });
 
   // Delete Session Mutation

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ClipboardCheck,
   CheckCircle2,
@@ -39,6 +39,7 @@ const ALL_SEMESTERS: { label: SemesterLabel; desc: string }[] = [
 export const AttendancePage: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   // Wizard Step: 1 = Sem, 2 = Subject, 3 = Session setup, 4 = Roster mark, 5 = Confirmation
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 5>(1);
@@ -197,6 +198,16 @@ export const AttendancePage: React.FC = () => {
       });
     },
     onSuccess: (res) => {
+      // ── Invalidate ALL attendance-related queries so every view (student,
+      //    parent, HOD, admin, faculty tracking, dashboard) updates immediately ──
+      queryClient.invalidateQueries({ queryKey: ['studentAttendanceSummary'] });
+      queryClient.invalidateQueries({ queryKey: ['studentDaywiseAttendance'] });
+      queryClient.invalidateQueries({ queryKey: ['subjectAttendanceSummary'] });
+      queryClient.invalidateQueries({ queryKey: ['attendanceSessionsHistory'] });
+      queryClient.invalidateQueries({ queryKey: ['semesterAttendanceSummary'] });
+      queryClient.invalidateQueries({ queryKey: ['attendanceTrackingAllotments'] });
+      queryClient.invalidateQueries({ queryKey: ['myAttendanceSubjects'] });
+
       setSaveResult({
         message: res.message,
         presentCount: res.presentCount,
