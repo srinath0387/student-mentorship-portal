@@ -27,11 +27,11 @@ import { LeaveLetterModal } from './LeaveLetterModal';
 import { PermissionLetterModal } from './PermissionLetterModal';
 import { ProofViewerModal } from './ProofViewerModal';
 
-export const HodLeaveApprovalTab: React.FC = () => {
+export const HodLeaveApprovalTab: React.FC<{ studentsOnly?: boolean }> = ({ studentsOnly = false }) => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
-  const [activeSubTab, setActiveSubTab] = useState<'faculty' | 'students'>('faculty');
+  const [activeSubTab, setActiveSubTab] = useState<'faculty' | 'students'>(studentsOnly ? 'students' : 'faculty');
   const [filterStatus, setFilterStatus] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -152,22 +152,24 @@ export const HodLeaveApprovalTab: React.FC = () => {
         {/* Navigation Tabs & Counts */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-borderLine pb-4">
           <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={() => setActiveSubTab('faculty')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-                activeSubTab === 'faculty'
-                  ? 'bg-brand-primary text-white shadow-sm'
-                  : 'bg-surface-2 text-textSecondary hover:text-textPrimary'
-              }`}
-            >
-              <Users className="w-4 h-4" />
-              <span>Faculty Leaves</span>
-              {pendingFacultyCount > 0 && (
-                <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black">
-                  {pendingFacultyCount}
-                </span>
-              )}
-            </button>
+            {!studentsOnly && (
+              <button
+                onClick={() => setActiveSubTab('faculty')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+                  activeSubTab === 'faculty'
+                    ? 'bg-brand-primary text-white shadow-sm'
+                    : 'bg-surface-2 text-textSecondary hover:text-textPrimary'
+                }`}
+              >
+                <Users className="w-4 h-4" />
+                <span>Faculty Leaves</span>
+                {pendingFacultyCount > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black">
+                    {pendingFacultyCount}
+                  </span>
+                )}
+              </button>
+            )}
 
             <button
               onClick={() => setActiveSubTab('students')}

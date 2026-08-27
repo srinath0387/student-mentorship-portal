@@ -8391,8 +8391,8 @@ app.get('/student/permissions/my-history', requireAuth, async (req: Request, res
   }
 });
 
-// GET /hod/permissions/students — HOD/Mentor view pending student permissions
-app.get('/hod/permissions/students', requireRole('hod', 'admin', 'faculty'), async (req: Request, res: Response) => {
+// GET /hod/permissions/students — HOD/Coordinator/Mentor view student permissions
+app.get('/hod/permissions/students', requireRole('hod', 'admin', 'faculty', 'coordinator'), async (req: Request, res: Response) => {
   try {
     await ensureLeaveAndSubjectsHandledTables();
     const callerRole = req.auth?.role;
@@ -8401,7 +8401,10 @@ app.get('/hod/permissions/students', requireRole('hod', 'admin', 'faculty'), asy
     let query = `SELECT * FROM student_permissions WHERE 1=1`;
     const params: any[] = [];
 
-    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+    // Coordinator exclusively supervises 1st Year (1-1 / 1-2) student permissions across all departments
+    if (callerRole === 'coordinator') {
+      query += ` AND (year = '1st Year' OR year ILIKE '1%')`;
+    } else if (callerRole === 'hod' && callerDept && callerDept !== '*') {
       params.push(callerDept);
       query += ` AND (LOWER(REPLACE(department, ' ', '')) ILIKE '%' || LOWER(REPLACE($1, ' ', '')) || '%' OR LOWER(REPLACE($1, ' ', '')) ILIKE '%' || LOWER(REPLACE(department, ' ', '')) || '%')`;
     }
@@ -8414,33 +8417,41 @@ app.get('/hod/permissions/students', requireRole('hod', 'admin', 'faculty'), asy
   }
 });
 
-// PUT /hod/permissions/students/:id/status — HOD Approve or Reject student permission
-app.put('/hod/permissions/students/:id/status', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
+// PUT /hod/permissions/students/:id/status — HOD/Coordinator Approve or Reject student permission
+app.put('/hod/permissions/students/:id/status', requireRole('hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
   try {
     await ensureLeaveAndSubjectsHandledTables();
     const { id } = req.params;
-    const { status, hod_remarks } = req.body;
-    const approvedBy = req.auth?.email || 'HOD';
-
+    const { status, remarks } = req.body;
     if (!['Approved', 'Rejected'].includes(status)) {
-      return res.status(400).json({ error: "Status must be 'Approved' or 'Rejected'" });
+      return res.status(400).json({ error: 'Status must be Approved or Rejected' });
     }
 
     const result = await db.query(
       `UPDATE student_permissions 
-       SET status = $1, hod_remarks = $2, approved_by = $3, approved_at = CURRENT_TIMESTAMP
+       SET status = $1, remarks = $2, approved_by = $3, updated_at = NOW()
        WHERE id = $4
        RETURNING *`,
-      [status, hod_remarks || null, approvedBy, id]
+      [status, remarks || '', req.auth?.email || 'HOD/Coordinator', id]
     );
 
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Permission record not found' });
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Permission request not found' });
+    }
 
-    res.json({
-      success: true,
-      message: `Student permission ${status.toLowerCase()} successfully. Approved dates will lock attendance as Present / On-Duty.`,
-      permission: result.rows[0],
-    });
+    res.json({ success: true, message: `Student permission ${status.toLowerCase()} successfully.`, permission: result.rows[0] });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /hod/permissions/students/:id — HOD, Coordinator, or Admin delete/cancel a student permission
+app.delete('/hod/permissions/students/:id', requireRole('hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const { id } = req.params;
+    await db.query('DELETE FROM student_permissions WHERE id = $1', [id]);
+    res.json({ success: true, message: 'Student permission deleted successfully.' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

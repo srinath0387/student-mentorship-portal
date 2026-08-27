@@ -506,7 +506,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
           }`}
         >
           <Palmtree className="w-3.5 h-3.5" />
-          <span>Leave & OD Approvals</span>
+          <span>Student OD Approvals</span>
         </button>
 
         <button
@@ -1165,9 +1165,9 @@ export const CoordinatorDashboardPage: React.FC = () => {
       )}
 
       {/* ════════════════════════════════════════════════════════════════════════ */}
-      {/* TAB: LEAVE & OD APPROVALS (HOD/COORDINATOR) */}
+      {/* TAB: STUDENT OD PERMISSIONS (1-1 & 1-2 FRESHERS ONLY) */}
       {/* ════════════════════════════════════════════════════════════════════════ */}
-      {activeTab === 'leaves' && <HodLeaveApprovalTab />}
+      {activeTab === 'leaves' && <HodLeaveApprovalTab studentsOnly={true} />}
 
       {/* ════════════════════════════════════════════════════════════════════════ */}
       {/* TAB: ACADEMIC & HOLIDAY CALENDAR */}
