@@ -15,7 +15,9 @@ export const DEPARTMENT_CODE_MAP: Record<string, string> = {
   '32': 'CSE (Data Science)',
   '33': 'CSE (AI & ML)',
   '34': 'CSE (BS)',
-  '37': 'CSE (Cyber Security)',
+  '37': 'CSE (CS)',
+  'MCA': 'MCA',
+  'MBA': 'MBA',
 };
 
 export const VALID_DEPARTMENT_CODES = Object.keys(DEPARTMENT_CODE_MAP);

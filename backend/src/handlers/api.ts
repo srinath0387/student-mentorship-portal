@@ -388,19 +388,17 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
     // ── Priority 3: HOD credentials (DB) ───────────────────────────────────
     if (!db.isMock) {
       try {
+        // Match strictly by email first (the official h<dept>@rgmcet.edu.in emails)
         let hodDbResult = await db.query('SELECT email, password, department FROM hod_credentials WHERE LOWER(email) = $1', [emailLower]);
-        if (hodDbResult.rows.length === 0 && department) {
-          hodDbResult = await db.query('SELECT email, password, department FROM hod_credentials WHERE LOWER(department) = LOWER($1)', [department]);
-        }
-        if (hodDbResult.rows.length === 0) {
-          hodDbResult = await db.query('SELECT email, password, department FROM hod_credentials LIMIT 1');
-        }
         if (hodDbResult.rows.length > 0) {
           const hodRow = hodDbResult.rows[0];
-          if ((emailLower === hodRow.email.toLowerCase() || (department && hodRow.department && department.toLowerCase() === hodRow.department.toLowerCase())) && password === hodRow.password) {
+          if (password === hodRow.password) {
             const assignedDept = hodRow.department || department || 'CSE (Data Science)';
             return res.json({ valid: true, role: 'hod', department: assignedDept, email: hodRow.email });
           }
+          // Email matched but password wrong — reject
+          await new Promise(resolve => setTimeout(resolve, 500));
+          return res.status(401).json({ valid: false, error: 'Invalid email or password.' });
         }
       } catch {
         // Fall through
@@ -434,6 +432,7 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
 
     if (db.isMock) {
       const matchAdmin = emailLower.match(/^admin([a-z]+)@rgmcet\.edu\.in$/);
+      // Legacy admin<dept>@rgmcet.edu.in pattern — kept for backward compat
       if (matchAdmin) {
         const deptPrefix = matchAdmin[1];
         const deptMap: Record<string, string> = {
@@ -445,7 +444,10 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
           ds: 'CSE (Data Science)',
           aiml: 'CSE (AI & ML)',
           bs: 'CSE (BS)',
-          cys: 'CSE (Cyber Security)',
+          cs: 'CSE (CS)',
+          cys: 'CSE (CS)',
+          mca: 'MCA',
+          mba: 'MBA',
         };
         const resolvedDept = deptMap[deptPrefix];
         if (resolvedDept && password === 'admin@2026') {
@@ -453,9 +455,33 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
         }
       }
 
-      const matchHod = emailLower.match(/^hod([a-z]+)@rgmcet\.edu\.in$/);
-      if (matchHod) {
-        const deptPrefix = matchHod[1];
+      // New official HOD email pattern: h<dept>@rgmcet.edu.in (e.g. hece, hcse, heee, hme, hce, hmca, hmba, hcseaiml, hcsebs, hcsecs, hcseds)
+      const matchHodNew = emailLower.match(/^h([a-z]+)@rgmcet\.edu\.in$/);
+      if (matchHodNew) {
+        const deptPrefix = matchHodNew[1];
+        const hodDeptMap: Record<string, string> = {
+          ce:      'Civil',
+          eee:     'EEE',
+          me:      'Mechanical',
+          ece:     'ECE',
+          cse:     'CSE',
+          cseds:   'CSE (Data Science)',
+          cseaiml: 'CSE (AI & ML)',
+          csebs:   'CSE (BS)',
+          csecs:   'CSE (CS)',
+          mca:     'MCA',
+          mba:     'MBA',
+        };
+        const resolvedDept = hodDeptMap[deptPrefix];
+        if (resolvedDept && password === 'hod@2026') {
+          return res.json({ valid: true, role: 'hod', department: resolvedDept, email: emailLower });
+        }
+      }
+
+      // Legacy hod<dept>@rgmcet.edu.in pattern — kept for backward compat only
+      const matchHodLegacy = emailLower.match(/^hod([a-z]+)@rgmcet\.edu\.in$/);
+      if (matchHodLegacy) {
+        const deptPrefix = matchHodLegacy[1];
         const deptMap: Record<string, string> = {
           civil: 'Civil',
           eee: 'EEE',
@@ -466,7 +492,8 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
           cseds: 'CSE (Data Science)',
           aiml: 'CSE (AI & ML)',
           bs: 'CSE (BS)',
-          cys: 'CSE (Cyber Security)',
+          cs: 'CSE (CS)',
+          cys: 'CSE (CS)',
         };
         const resolvedDept = deptMap[deptPrefix];
         const expectedPass = deptPrefix === 'cseds' ? 'cseds@2026' : 'hod@2026';
@@ -725,7 +752,7 @@ app.get('/auth/hod-credentials', requireRole('hod', 'admin'), async (req: Reques
     const hodEmailEnv = process.env.HOD_MASTER_EMAIL || null;
 
     if (db.isMock) {
-      return res.json({ email: hodEmailEnv || 'hodcseds@rgmcet.edu.in', password: '••••••', department: targetDept, source: 'env', updated_at: null });
+      return res.json({ email: hodEmailEnv || 'hcse@rgmcet.edu.in', password: '••••••', department: targetDept, source: 'env', updated_at: null });
     }
 
     const result = await db.query(

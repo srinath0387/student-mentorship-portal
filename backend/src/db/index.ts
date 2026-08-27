@@ -129,7 +129,7 @@ async function ensureSchema(p: Pool) {
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );`,
 
-    // Seed the 9 departments — safe to re-run
+    // Seed the departments — safe to re-run
     `INSERT INTO departments (code, name, short_name) VALUES
       ('01', 'Civil', 'CIVIL'),
       ('02', 'EEE', 'EEE'),
@@ -139,8 +139,15 @@ async function ensureSchema(p: Pool) {
       ('32', 'CSE (Data Science)', 'DS'),
       ('33', 'CSE (AI & ML)', 'AIML'),
       ('34', 'CSE (BS)', 'BS'),
-      ('37', 'CSE (Cyber Security)', 'CYS')
-     ON CONFLICT (code) DO NOTHING;`,
+      ('37', 'CSE (CS)', 'CS'),
+      ('MCA', 'MCA', 'MCA'),
+      ('MBA', 'MBA', 'MBA')
+     ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, short_name = EXCLUDED.short_name;`,
+
+    // Migrate old 'CSE (Cyber Security)' rows to 'CSE (CS)' for consistency
+    `UPDATE departments SET name = 'CSE (CS)', short_name = 'CS' WHERE name = 'CSE (Cyber Security)';`,
+    `UPDATE students SET department = 'CSE (CS)' WHERE department = 'CSE (Cyber Security)';`,
+    `UPDATE faculty SET department = 'CSE (CS)' WHERE department = 'CSE (Cyber Security)';`,
 
     `CREATE TABLE IF NOT EXISTS faculty (
       faculty_id VARCHAR(50) PRIMARY KEY,
@@ -288,10 +295,10 @@ async function ensureSchema(p: Pool) {
     // Migrations: add columns that may be missing from earlier schema versions
     `ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_updated TIMESTAMP WITH TIME ZONE;`,
 
-    // Pre-seed fixed HOD account
+    // Pre-seed fixed HOD account (legacy fallback — now managed via hod_credentials table)
     `INSERT INTO faculty (faculty_id, name, email, department, role)
-     VALUES ('HOD_CSEDS', 'Dr. HOD (CSE & Data Science)', 'hodcseds@rgmcet.edu.in', 'Data Science', 'hod')
-     ON CONFLICT (email) DO UPDATE SET role = 'hod', department = 'Data Science';`,
+     VALUES ('HOD_CSEDS', 'Dr. HOD (CSE & Data Science)', 'hcseds@rgmcet.edu.in', 'CSE (Data Science)', 'hod')
+     ON CONFLICT (email) DO UPDATE SET role = 'hod', department = 'CSE (Data Science)';`,
 
     // HOD credentials table — per-department HOD login credentials
     `CREATE TABLE IF NOT EXISTS hod_credentials (
@@ -305,28 +312,30 @@ async function ensureSchema(p: Pool) {
     // Migration: add department column to existing hod_credentials
     `ALTER TABLE hod_credentials ADD COLUMN IF NOT EXISTS department VARCHAR(100);`,
 
-    // Set existing DS HOD row's department if not set
+    // Set existing legacy DS HOD row's department if not set
     `UPDATE hod_credentials SET department = 'CSE (Data Science)' WHERE department IS NULL OR department = '';`,
 
     // Create unique index on department for hod_credentials
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_hod_dept ON hod_credentials(LOWER(department)) WHERE department IS NOT NULL;`,
 
-    // Seed HOD credentials with env defaults if no row exists yet
-    `INSERT INTO hod_credentials (id, email, password, department)
-     VALUES (1, 'hodcseds@rgmcet.edu.in', 'cseds@2026', 'CSE (Data Science)')
-     ON CONFLICT (id) DO UPDATE SET department = COALESCE(hod_credentials.department, 'CSE (Data Science)');`,
-
-    // Seed HOD credentials for all 9 departments
+    // Seed official HOD credentials — all departments with new official email IDs
+    // Email format: h<short_dept>@rgmcet.edu.in, Password: hod@2026
+    // hece  → ECE,  hcse  → CSE,  heee  → EEE,  hcsecs → CSE (CS)
+    // hmca  → MCA,  hmba  → MBA,  hcsebs → CSE (BS),  hcseaiml → CSE (AI & ML)
+    // hme   → Mechanical Engineering,  hce → Civil Engineering, hcse (data science) → CSE (Data Science)
     `INSERT INTO hod_credentials (id, email, password, department) VALUES
-      (101, 'hodcivil@rgmcet.edu.in', 'hod@2026', 'Civil'),
-      (102, 'hodeee@rgmcet.edu.in', 'hod@2026', 'EEE'),
-      (103, 'hodmech@rgmcet.edu.in', 'hod@2026', 'Mechanical'),
-      (104, 'hodece@rgmcet.edu.in', 'hod@2026', 'ECE'),
-      (105, 'hodcse@rgmcet.edu.in', 'hod@2026', 'CSE'),
-      (106, 'hodds@rgmcet.edu.in', 'hod@2026', 'CSE (Data Science)'),
-      (107, 'hodaiml@rgmcet.edu.in', 'hod@2026', 'CSE (AI & ML)'),
-      (108, 'hodbs@rgmcet.edu.in', 'hod@2026', 'CSE (BS)'),
-      (109, 'hodcys@rgmcet.edu.in', 'hod@2026', 'CSE (Cyber Security)')
+      (1,   'hcseds@rgmcet.edu.in',  'hod@2026', 'CSE (Data Science)'),
+      (101, 'hce@rgmcet.edu.in',     'hod@2026', 'Civil'),
+      (102, 'heee@rgmcet.edu.in',    'hod@2026', 'EEE'),
+      (103, 'hme@rgmcet.edu.in',     'hod@2026', 'Mechanical'),
+      (104, 'hece@rgmcet.edu.in',    'hod@2026', 'ECE'),
+      (105, 'hcse@rgmcet.edu.in',    'hod@2026', 'CSE'),
+      (106, 'hcseds@rgmcet.edu.in',  'hod@2026', 'CSE (Data Science)'),
+      (107, 'hcseaiml@rgmcet.edu.in','hod@2026', 'CSE (AI & ML)'),
+      (108, 'hcsebs@rgmcet.edu.in',  'hod@2026', 'CSE (BS)'),
+      (109, 'hcsecs@rgmcet.edu.in',  'hod@2026', 'CSE (CS)'),
+      (110, 'hmca@rgmcet.edu.in',    'hod@2026', 'MCA'),
+      (111, 'hmba@rgmcet.edu.in',    'hod@2026', 'MBA')
      ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, password = EXCLUDED.password, department = EXCLUDED.department, updated_at = NOW();`,
 
     // Semester unlock settings — HOD/Admin controls which semesters students can fill
@@ -399,7 +408,9 @@ async function ensureSchema(p: Pool) {
       ('adminds@rgmcet.edu.in', 'Data Science Admin', 'admin@2026', 'CSE (Data Science)', 'System'),
       ('adminaiml@rgmcet.edu.in', 'AI & ML Admin', 'admin@2026', 'CSE (AI & ML)', 'System'),
       ('adminbs@rgmcet.edu.in', 'BS Admin', 'admin@2026', 'CSE (BS)', 'System'),
-      ('admincys@rgmcet.edu.in', 'Cyber Security Admin', 'admin@2026', 'CSE (Cyber Security)', 'System'),
+      ('admincs@rgmcet.edu.in', 'CS Admin', 'admin@2026', 'CSE (CS)', 'System'),
+      ('adminmca@rgmcet.edu.in', 'MCA Admin', 'admin@2026', 'MCA', 'System'),
+      ('adminmba@rgmcet.edu.in', 'MBA Admin', 'admin@2026', 'MBA', 'System'),
       ('coordinator@rgmcet.edu.in', '1st Year Coordinator', 'coordinator@2026', 'All', 'System')
      ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, password = EXCLUDED.password;`,
 

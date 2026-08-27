@@ -15,7 +15,9 @@ export const DEPARTMENT_CODE_MAP: Record<string, string> = {
   '32': 'CSE (Data Science)',
   '33': 'CSE (AI & ML)',
   '34': 'CSE (BS)',
-  '37': 'CSE (Cyber Security)',
+  '37': 'CSE (CS)',
+  'MCA': 'MCA',
+  'MBA': 'MBA',
 };
 
 export const VALID_DEPARTMENT_NAMES = Object.values(DEPARTMENT_CODE_MAP);
@@ -26,13 +28,15 @@ export function normalizeDepartmentName(dept?: string): string {
   const clean = dept.toLowerCase().replace(/[^a-z0-9]/g, '');
   if (clean.includes('datascience') || clean.includes('cseds') || clean === 'ds' || clean.includes('data')) return 'CSE (Data Science)';
   if (clean.includes('aiml') || clean.includes('aiandml') || clean.includes('machinelearning')) return 'CSE (AI & ML)';
-  if (clean.includes('cyber')) return 'CSE (Cyber Security)';
+  if (clean.includes('cyber') || clean === 'csecs' || clean.includes('cybersec')) return 'CSE (CS)';
   if (clean.includes('business') || clean === 'csebs' || clean === 'bs') return 'CSE (BS)';
   if (clean === 'cse' || clean.includes('computerscience')) return 'CSE';
   if (clean === 'ece' || clean.includes('electronics')) return 'ECE';
   if (clean === 'eee' || clean.includes('electrical')) return 'EEE';
   if (clean.includes('civil')) return 'Civil';
   if (clean.includes('mech')) return 'Mechanical';
+  if (clean === 'mca' || clean.includes('masterofcomputer')) return 'MCA';
+  if (clean === 'mba' || clean.includes('businessadmin')) return 'MBA';
   const match = VALID_DEPARTMENT_NAMES.find((d) => d.toLowerCase() === dept.toLowerCase());
   return match || dept;
 }

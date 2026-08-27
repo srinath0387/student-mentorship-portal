@@ -44,7 +44,7 @@ async function syncOrphanedCognitoUsers() {
     if (u.role === 'admin' || u.role === 'hod' || u.role === 'faculty' || u.regNo.startsWith('FAC_')) {
       continue;
     }
-    if (u.email.includes('admin@rgmcet.edu.in') || u.email.includes('hodcseds@rgmcet.edu.in')) {
+    if (u.email.includes('admin@rgmcet.edu.in') || /^h[a-z]+@rgmcet\.edu\.in$/.test(u.email)) {
       continue;
     }
 
