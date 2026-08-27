@@ -118,11 +118,12 @@ export async function deleteAllCognitoUsers(): Promise<void> {
       for (const u of users) {
         const username = u.Username;
         if (!username) continue;
-        // Do not delete master admin or any official HOD accounts (h<dept>@rgmcet.edu.in)
+        // Do not delete master admin, official HOD accounts (h<dept>@rgmcet.edu.in), or coordinator accounts
         const emailAttr = u.Attributes?.find((a: any) => a.Name === 'email')?.Value?.toLowerCase() || username.toLowerCase();
         const isAdmin = emailAttr.includes('admin@rgmcet.edu.in');
         const isHodEmail = /^h[a-z]+@rgmcet\.edu\.in$/.test(emailAttr);
-        if (isAdmin || isHodEmail) {
+        const isCoordinator = emailAttr === 'coordinator@rgmcet.edu.in' || emailAttr === 'fycoordinator@rgmcet.edu.in';
+        if (isAdmin || isHodEmail || isCoordinator) {
           continue;
         }
 

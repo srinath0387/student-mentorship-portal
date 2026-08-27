@@ -455,27 +455,39 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
         }
       }
 
-      // New official HOD email pattern: h<dept>@rgmcet.edu.in (e.g. hece, hcse, heee, hme, hce, hmca, hmba, hcseaiml, hcsebs, hcsecs, hcseds)
+      // New official HOD email pattern: h<dept>@rgmcet.edu.in
+      // Includes branch HODs and S&H (Science & Humanities) 1st-year HODs
       const matchHodNew = emailLower.match(/^h([a-z]+)@rgmcet\.edu\.in$/);
       if (matchHodNew) {
         const deptPrefix = matchHodNew[1];
         const hodDeptMap: Record<string, string> = {
-          ce:      'Civil',
-          eee:     'EEE',
-          me:      'Mechanical',
-          ece:     'ECE',
-          cse:     'CSE',
-          cseds:   'CSE (Data Science)',
-          cseaiml: 'CSE (AI & ML)',
-          csebs:   'CSE (BS)',
-          csecs:   'CSE (CS)',
-          mca:     'MCA',
-          mba:     'MBA',
+          // Branch HODs
+          ce:          'Civil',
+          eee:         'EEE',
+          me:          'Mechanical',
+          ece:         'ECE',
+          cse:         'CSE',
+          cseds:       'CSE (Data Science)',
+          cseaiml:     'CSE (AI & ML)',
+          csebs:       'CSE (BS)',
+          csecs:       'CSE (CS)',
+          mca:         'MCA',
+          mba:         'MBA',
+          // S&H HODs — 1st year students only (all branches)
+          mathematics: 'Mathematics',
+          english:     'English',
+          physics:     'Physics',
+          chemistry:   'Chemistry',
         };
         const resolvedDept = hodDeptMap[deptPrefix];
         if (resolvedDept && password === 'hod@2026') {
           return res.json({ valid: true, role: 'hod', department: resolvedDept, email: emailLower });
         }
+      }
+
+      // fycoordinator — 1st Year coordinator (all branches, 1st year only)
+      if (emailLower === 'fycoordinator@rgmcet.edu.in' && password === 'hod@2026') {
+        return res.json({ valid: true, role: 'hod', department: '1st Year', email: emailLower });
       }
 
       // Legacy hod<dept>@rgmcet.edu.in pattern — kept for backward compat only
@@ -1338,10 +1350,17 @@ app.get('/students', async (req: Request, res: Response) => {
       // Deduplicate mock store entries by roll_number
       students = Array.from(new Map(students.map((s) => [s.roll_number.toUpperCase(), s])).values());
 
+      // S&H departments — these HODs see ALL 1st-year students across all branches
+      const FIRST_YEAR_SCOPE_DEPTS_MOCK = ['Mathematics', 'English', 'Physics', 'Chemistry', '1st Year'];
+
       const callerDept = req.auth?.department;
       const isSuper = req.auth?.isSuperAdmin || callerDept === '*';
       if (!isSuper && callerDept && (req.auth?.role === 'admin' || req.auth?.role === 'hod' || req.auth?.role === 'student')) {
-        students = students.filter((s) => s.department === callerDept);
+        if (FIRST_YEAR_SCOPE_DEPTS_MOCK.includes(callerDept)) {
+          students = students.filter((s) => s.year === '1st Year');
+        } else {
+          students = students.filter((s) => s.department === callerDept);
+        }
       } else if (department && String(department) !== 'All') {
         students = students.filter((s) => s.department === department);
       }
@@ -1398,12 +1417,21 @@ app.get('/students', async (req: Request, res: Response) => {
     const params: any[] = [];
     let paramIndex = 1;
 
+    // S&H departments — these HODs see ALL 1st-year students across all branches
+    const FIRST_YEAR_SCOPE_DEPTS = ['Mathematics', 'English', 'Physics', 'Chemistry', '1st Year'];
+
     // Auto-apply department scoping if caller is non-super admin, HOD, or Student
     const callerDept = req.auth?.department;
     const isSuper = req.auth?.isSuperAdmin || callerDept === '*';
     if (!isSuper && callerDept && (req.auth?.role === 'admin' || req.auth?.role === 'hod' || req.auth?.role === 'student')) {
-      conditions.push(`(LOWER(REPLACE(s.department, ' ', '')) = LOWER(REPLACE($${paramIndex++}, ' ', '')))`);
-      params.push(callerDept);
+      if (FIRST_YEAR_SCOPE_DEPTS.includes(callerDept)) {
+        // S&H / FY Coordinator — scope to 1st year only, no branch filter
+        conditions.push(`s.year = $${paramIndex++}`);
+        params.push('1st Year');
+      } else {
+        conditions.push(`(LOWER(REPLACE(s.department, ' ', '')) = LOWER(REPLACE($${paramIndex++}, ' ', '')))`);
+        params.push(callerDept);
+      }
     } else if (department && String(department) !== 'All' && String(department) !== 'undefined' && String(department) !== 'null') {
       conditions.push(`(LOWER(REPLACE(s.department, ' ', '')) = LOWER(REPLACE($${paramIndex++}, ' ', '')))`);
       params.push(String(department));

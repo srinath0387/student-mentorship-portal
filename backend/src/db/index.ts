@@ -320,23 +320,33 @@ async function ensureSchema(p: Pool) {
 
     // Seed official HOD credentials — all departments with new official email IDs
     // Email format: h<short_dept>@rgmcet.edu.in, Password: hod@2026
-    // hece  → ECE,  hcse  → CSE,  heee  → EEE,  hcsecs → CSE (CS)
-    // hmca  → MCA,  hmba  → MBA,  hcsebs → CSE (BS),  hcseaiml → CSE (AI & ML)
-    // hme   → Mechanical Engineering,  hce → Civil Engineering, hcse (data science) → CSE (Data Science)
+    // Branch HODs (2nd-4th year students of their dept):
+    //   hece→ECE, hcse→CSE, heee→EEE, hme→Mechanical, hce→Civil
+    //   hcseds→CSE(DS), hcseaiml→CSE(AI&ML), hcsebs→CSE(BS), hcsecs→CSE(CS), hmca→MCA, hmba→MBA
+    // S&H HODs (ALL 1st year students only — scoped by year, not department):
+    //   hmathematics→Mathematics, henglish→English, hphysics→Physics, hchemistry→Chemistry
+    //   fycoordinator→FY Coordinator (sees all 1st year students)
     `INSERT INTO hod_credentials (id, email, password, department) VALUES
-      (1,   'hcseds@rgmcet.edu.in',  'hod@2026', 'CSE (Data Science)'),
-      (101, 'hce@rgmcet.edu.in',     'hod@2026', 'Civil'),
-      (102, 'heee@rgmcet.edu.in',    'hod@2026', 'EEE'),
-      (103, 'hme@rgmcet.edu.in',     'hod@2026', 'Mechanical'),
-      (104, 'hece@rgmcet.edu.in',    'hod@2026', 'ECE'),
-      (105, 'hcse@rgmcet.edu.in',    'hod@2026', 'CSE'),
-      (106, 'hcseds@rgmcet.edu.in',  'hod@2026', 'CSE (Data Science)'),
-      (107, 'hcseaiml@rgmcet.edu.in','hod@2026', 'CSE (AI & ML)'),
-      (108, 'hcsebs@rgmcet.edu.in',  'hod@2026', 'CSE (BS)'),
-      (109, 'hcsecs@rgmcet.edu.in',  'hod@2026', 'CSE (CS)'),
-      (110, 'hmca@rgmcet.edu.in',    'hod@2026', 'MCA'),
-      (111, 'hmba@rgmcet.edu.in',    'hod@2026', 'MBA')
+      (101, 'hce@rgmcet.edu.in',          'hod@2026', 'Civil'),
+      (102, 'heee@rgmcet.edu.in',          'hod@2026', 'EEE'),
+      (103, 'hme@rgmcet.edu.in',           'hod@2026', 'Mechanical'),
+      (104, 'hece@rgmcet.edu.in',          'hod@2026', 'ECE'),
+      (105, 'hcse@rgmcet.edu.in',          'hod@2026', 'CSE'),
+      (106, 'hcseds@rgmcet.edu.in',        'hod@2026', 'CSE (Data Science)'),
+      (107, 'hcseaiml@rgmcet.edu.in',      'hod@2026', 'CSE (AI & ML)'),
+      (108, 'hcsebs@rgmcet.edu.in',        'hod@2026', 'CSE (BS)'),
+      (109, 'hcsecs@rgmcet.edu.in',        'hod@2026', 'CSE (CS)'),
+      (110, 'hmca@rgmcet.edu.in',          'hod@2026', 'MCA'),
+      (111, 'hmba@rgmcet.edu.in',          'hod@2026', 'MBA'),
+      (112, 'hmathematics@rgmcet.edu.in',  'hod@2026', 'Mathematics'),
+      (113, 'henglish@rgmcet.edu.in',      'hod@2026', 'English'),
+      (114, 'hphysics@rgmcet.edu.in',      'hod@2026', 'Physics'),
+      (115, 'hchemistry@rgmcet.edu.in',    'hod@2026', 'Chemistry'),
+      (116, 'fycoordinator@rgmcet.edu.in', 'hod@2026', '1st Year')
      ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, password = EXCLUDED.password, department = EXCLUDED.department, updated_at = NOW();`,
+
+    // Remove old row 1 that duplicated hcseds; row 106 now handles CSE (Data Science)
+    `DELETE FROM hod_credentials WHERE id = 1;`,
 
     // Semester unlock settings — HOD/Admin controls which semesters students can fill
     `CREATE TABLE IF NOT EXISTS semester_unlock_settings (
