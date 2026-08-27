@@ -636,6 +636,21 @@ export const api = {
     return fetchWithAuth(`/attendance/allotments${query}`);
   },
 
+  createSingleAllotment: async (data: {
+    semester: string;
+    department: string;
+    section: string;
+    subject_name: string;
+    subject_type: 'Theory' | 'Lab';
+    faculty_name: string;
+    faculty_email: string;
+  }) => {
+    return fetchWithAuth('/attendance/allotments/single', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
   deleteAllotment: async (id: string) => {
     return fetchWithAuth(`/attendance/allotments/${id}`, {
       method: 'DELETE',
@@ -646,6 +661,25 @@ export const api = {
     return fetchWithAuth('/attendance/rosters/upload', {
       method: 'POST',
       body: JSON.stringify({ allotment_id: allotmentId, roster }),
+    });
+  },
+
+  createSingleRosterStudent: async (data: {
+    allotment_id: string;
+    roll_number: string;
+    student_name?: string;
+    student_email?: string;
+    joining_date?: string;
+  }) => {
+    return fetchWithAuth('/attendance/rosters/single', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  deleteRosterStudent: async (rosterId: string) => {
+    return fetchWithAuth(`/attendance/rosters/${encodeURIComponent(rosterId)}`, {
+      method: 'DELETE',
     });
   },
 
@@ -762,6 +796,16 @@ export const api = {
     if (params.section) query.append('section', params.section);
     const queryString = query.toString() ? `?${query.toString()}` : '';
     return fetchWithAuth(`/attendance/reports/year-summary${queryString}`);
+  },
+
+  getSemesterAttendanceSummary: async (params: { semester?: string; department?: string; section?: string; view_mode?: string }) => {
+    const query = new URLSearchParams();
+    if (params.semester) query.append('semester', params.semester);
+    if (params.department && params.department !== 'All') query.append('department', params.department);
+    if (params.section && params.section !== 'All') query.append('section', params.section);
+    if (params.view_mode) query.append('view_mode', params.view_mode);
+    const queryString = query.toString() ? `?${query.toString()}` : '';
+    return fetchWithAuth(`/attendance/analytics/semester-summary${queryString}`);
   },
 
   uploadTimetableDocument: async (data: {

@@ -4540,6 +4540,77 @@ app.post('/attendance/allotments/upload', requireRole('admin', 'hod', 'coordinat
   }
 });
 
+// 1b. Add Single Allotment Entry (Admin / HOD / Coordinator)
+app.post('/attendance/allotments/single', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
+  try {
+    const { semester, department, section, subject_name, subject_type, faculty_name, faculty_email } = req.body;
+    if (!semester || !department || !section || !subject_name || !faculty_email) {
+      return res.status(400).json({ error: 'Semester, Department, Section, Subject Name, and Faculty Email are required' });
+    }
+
+    const cleanEmail = faculty_email.trim().toLowerCase();
+    const cleanSubj = subject_name.trim();
+    const cleanSection = section.trim().toUpperCase();
+    const cleanType = (subject_type || 'Theory').toLowerCase().includes('lab') ? 'Lab' : 'Theory';
+    const cleanFacName = (faculty_name || cleanEmail.split('@')[0]).trim();
+    const cleanDept = department.trim();
+
+    if (!RGMCET_EMAIL_REGEX.test(cleanEmail) && !cleanEmail.endsWith('@rgmcet.edu.in')) {
+      return res.status(400).json({ error: 'Invalid RGMCET faculty email domain (must be @rgmcet.edu.in)' });
+    }
+
+    // Upsert faculty record if not exists
+    try {
+      const facCheck = await db.query('SELECT faculty_id FROM faculty WHERE LOWER(email) = LOWER($1)', [cleanEmail]);
+      if (facCheck.rows.length === 0) {
+        const newFacId = `FAC_${Date.now().toString().slice(-6)}_${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+        await db.query(
+          `INSERT INTO faculty (faculty_id, name, email, department, role)
+           VALUES ($1, $2, $3, $4, 'mentor')
+           ON CONFLICT (email) DO NOTHING`,
+          [newFacId, cleanFacName, cleanEmail, cleanDept || 'General']
+        );
+      }
+    } catch {
+      // ignore conflict
+    }
+
+    const existing = await db.query(
+      `SELECT id FROM subject_allotments 
+       WHERE semester_label = $1 AND LOWER(subject_name) = LOWER($2) AND section = $3 AND LOWER(faculty_email) = LOWER($4)`,
+      [semester, cleanSubj, cleanSection, cleanEmail]
+    );
+
+    let allotmentId: string;
+    if (existing.rows.length > 0) {
+      allotmentId = existing.rows[0].id;
+      await db.query(
+        `UPDATE subject_allotments
+         SET subject_type = $1, faculty_name = $2, department = $3
+         WHERE id = $4`,
+        [cleanType, cleanFacName, cleanDept, allotmentId]
+      );
+    } else {
+      const insertRes = await db.query(
+        `INSERT INTO subject_allotments (semester_label, subject_name, subject_type, section, faculty_email, faculty_name, department)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id`,
+        [semester, cleanSubj, cleanType, cleanSection, cleanEmail, cleanFacName, cleanDept]
+      );
+      allotmentId = insertRes.rows[0].id;
+    }
+
+    const fullAllotment = await db.query('SELECT * FROM subject_allotments WHERE id = $1', [allotmentId]);
+    res.json({
+      success: true,
+      message: `Subject allocation for "${cleanSubj}" (Section ${cleanSection}) saved successfully.`,
+      allotment: fullAllotment.rows[0],
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 2. Get Allotments (Admin, HOD, Coordinator, Faculty)
 app.get('/attendance/allotments', requireRole('admin', 'hod', 'coordinator', 'faculty'), async (req: Request, res: Response) => {
   try {
@@ -4690,6 +4761,79 @@ app.put('/attendance/rosters/:rosterId/joining-date', requireRole('admin', 'hod'
     }
 
     res.json({ success: true, roster: result.rows[0], message: 'Joining date updated successfully.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4c. Add Single Student to Roster (Admin, HOD, Coordinator)
+app.post('/attendance/rosters/single', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
+  try {
+    const { allotment_id, roll_number, student_name, student_email, joining_date } = req.body;
+    if (!allotment_id || !roll_number) {
+      return res.status(400).json({ error: 'Allotment ID and Roll Number are required' });
+    }
+
+    const cleanRoll = roll_number.trim().toUpperCase();
+    const cleanEmail = (student_email || `${cleanRoll.toLowerCase()}@rgmcet.edu.in`).trim().toLowerCase();
+
+    // Check allotment exists
+    const allotCheck = await db.query('SELECT * FROM subject_allotments WHERE id = $1', [allotment_id]);
+    if (allotCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Subject allotment not found' });
+    }
+
+    let parsedJoinDate: string | null = null;
+    if (joining_date) {
+      try {
+        const d = new Date(joining_date);
+        if (!isNaN(d.getTime())) {
+          parsedJoinDate = d.toISOString().split('T')[0];
+        }
+      } catch {
+        parsedJoinDate = null;
+      }
+    }
+
+    const result = await db.query(
+      `INSERT INTO subject_rosters (allotment_id, roll_number, student_email, joining_date)
+       VALUES ($1, $2, $3, COALESCE($4::date, CURRENT_DATE))
+       ON CONFLICT (allotment_id, roll_number) DO UPDATE
+       SET student_email = EXCLUDED.student_email,
+           joining_date = COALESCE($4::date, subject_rosters.joining_date, CURRENT_DATE)
+       RETURNING *`,
+      [allotment_id, cleanRoll, cleanEmail, parsedJoinDate]
+    );
+
+    res.json({
+      success: true,
+      message: `Student ${cleanRoll} successfully enrolled in subject.`,
+      roster: result.rows[0],
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4d. Unassign / Delete Student from Subject Roster (Admin, HOD, Coordinator)
+app.delete('/attendance/rosters/:rosterId', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
+  try {
+    const { rosterId } = req.params;
+    const result = await db.query(
+      `DELETE FROM subject_rosters
+       WHERE id = $1
+       RETURNING roll_number, allotment_id`,
+      [rosterId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Student roster entry not found' });
+    }
+
+    res.json({
+      success: true,
+      message: `Student ${result.rows[0].roll_number} has been unassigned from this subject roster.`,
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -5527,7 +5671,7 @@ app.get('/attendance/reports/year-summary', requireRole('admin', 'hod', 'faculty
       });
     }
 
-    const allotmentIds = subjects.map(s => s.id);
+    const allotmentIds = subjects.map((s: any) => s.id);
 
     // Step 2: Get all students enrolled in any of these allotments with per-subject attendance
     const studentDataQuery = `
@@ -5609,6 +5753,388 @@ app.get('/attendance/reports/year-summary', requireRole('admin', 'hod', 'faculty
       section: sectionParam || 'All Sections',
       subjects,
       students,
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// 18. SEMESTER ATTENDANCE ANALYTICS (SUMMARY, SECTION DRILL-DOWN, MENTOR VIEW)
+// ============================================================================
+app.get('/attendance/analytics/semester-summary', requireRole('admin', 'hod', 'faculty', 'coordinator'), async (req: Request, res: Response) => {
+  try {
+    const semester = (req.query.semester as string) || '2-1';
+    const departmentParam = (req.query.department as string) || '';
+    const sectionParam = (req.query.section as string) || '';
+    const viewMode = (req.query.view_mode as string) || 'all';
+
+    const callerRole = req.auth?.role;
+    const callerEmail = req.auth?.email?.toLowerCase();
+    const callerDept = req.auth?.department;
+
+    let targetDept = departmentParam;
+    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+      targetDept = callerDept;
+    }
+
+    // ── MENTOR VIEW: If viewMode === 'mentor', return attendance for assigned mentees only ──
+    if (viewMode === 'mentor' && callerEmail) {
+      // 1. Resolve mentees for this faculty/mentor
+      const facQuery = await db.query(
+        'SELECT faculty_id FROM faculty WHERE LOWER(email) = LOWER($1)',
+        [callerEmail]
+      );
+      const facultyId = facQuery.rows[0]?.faculty_id || '';
+
+      const menteeRollsRes = await db.query(
+        `SELECT DISTINCT roll_number FROM (
+           SELECT student_id AS roll_number FROM mentor_assignments WHERE LOWER(faculty_email) = LOWER($1) OR faculty_id = $2
+           UNION
+           SELECT roll_number FROM students WHERE faculty_mentor_id = $2 OR LOWER(faculty_mentor_id) = LOWER($1)
+         ) m`,
+        [callerEmail, facultyId]
+      );
+
+      const menteeRolls = menteeRollsRes.rows.map((r: any) => r.roll_number);
+
+      if (menteeRolls.length === 0) {
+        return res.json({
+          semester,
+          viewMode: 'mentor',
+          totalMentees: 0,
+          overall: {
+            total_periods_held: 0,
+            total_periods_attended: 0,
+            total_periods_absent: 0,
+            present_percentage: 100,
+            absent_percentage: 0,
+            total_students: 0,
+            at_risk_count: 0,
+          },
+          mentees: [],
+        });
+      }
+
+      // Fetch attendance for these mentees in the selected semester
+      const menteeDataQuery = `
+        SELECT 
+          st.roll_number,
+          st.name AS student_name,
+          st.section AS student_section,
+          st.department AS student_department,
+          a.id AS allotment_id,
+          a.subject_name,
+          a.subject_type,
+          a.faculty_name,
+          COALESCE(SUM(CASE WHEN s.session_date >= COALESCE(r.joining_date, '1970-01-01'::date) THEN s.num_periods ELSE 0 END), 0) AS periods_held,
+          COALESCE(SUM(CASE WHEN s.session_date >= COALESCE(r.joining_date, '1970-01-01'::date) AND ar.is_present = true THEN s.num_periods ELSE 0 END), 0) AS periods_attended
+        FROM subject_rosters r
+        JOIN subject_allotments a ON a.id = r.allotment_id
+        JOIN students st ON st.roll_number = r.roll_number
+        LEFT JOIN attendance_sessions s ON s.allotment_id = a.id
+        LEFT JOIN attendance_records ar ON ar.session_id = s.id AND ar.roll_number = r.roll_number
+        WHERE a.semester_label = $1 AND r.roll_number = ANY($2)
+        GROUP BY st.roll_number, st.name, st.section, st.department, a.id, a.subject_name, a.subject_type, a.faculty_name
+        ORDER BY st.roll_number, a.subject_name
+      `;
+
+      const menteeDataRes = await db.query(menteeDataQuery, [semester, menteeRolls]);
+
+      const menteeMap: Record<string, any> = {};
+      let totalHeld = 0;
+      let totalAttended = 0;
+
+      menteeRolls.forEach((roll: string) => {
+        menteeMap[roll] = {
+          roll_number: roll,
+          name: roll,
+          section: 'A',
+          department: 'General',
+          total_held: 0,
+          total_attended: 0,
+          total_absent: 0,
+          overall_percentage: 100,
+          subjects: [],
+        };
+      });
+
+      menteeDataRes.rows.forEach((row: any) => {
+        const roll = row.roll_number;
+        if (menteeMap[roll]) {
+          menteeMap[roll].name = row.student_name || roll;
+          menteeMap[roll].section = row.student_section || 'A';
+          menteeMap[roll].department = row.student_department || 'General';
+
+          const held = parseInt(row.periods_held || '0');
+          const attended = parseInt(row.periods_attended || '0');
+          const absent = Math.max(0, held - attended);
+          const pct = held > 0 ? Math.round((attended / held) * 1000) / 10 : 100;
+
+          menteeMap[roll].total_held += held;
+          menteeMap[roll].total_attended += attended;
+          menteeMap[roll].total_absent += absent;
+
+          totalHeld += held;
+          totalAttended += attended;
+
+          menteeMap[roll].subjects.push({
+            allotment_id: row.allotment_id,
+            subject_name: row.subject_name,
+            subject_type: row.subject_type,
+            faculty_name: row.faculty_name,
+            periods_held: held,
+            periods_attended: attended,
+            periods_absent: absent,
+            percentage: pct,
+          });
+        }
+      });
+
+      let atRisk = 0;
+      const menteesList = Object.values(menteeMap).map((m: any) => {
+        const pct = m.total_held > 0 ? Math.round((m.total_attended / m.total_held) * 1000) / 10 : 100;
+        m.overall_percentage = pct;
+        if (pct < 75 && m.total_held > 0) atRisk++;
+        return m;
+      });
+
+      menteesList.sort((a, b) => a.roll_number.localeCompare(b.roll_number));
+
+      const totalAbsent = Math.max(0, totalHeld - totalAttended);
+      const overallPresentPct = totalHeld > 0 ? Math.round((totalAttended / totalHeld) * 1000) / 10 : 100;
+      const overallAbsentPct = totalHeld > 0 ? Math.round((totalAbsent / totalHeld) * 1000) / 10 : 0;
+
+      return res.json({
+        semester,
+        viewMode: 'mentor',
+        totalMentees: menteesList.length,
+        overall: {
+          total_periods_held: totalHeld,
+          total_periods_attended: totalAttended,
+          total_periods_absent: totalAbsent,
+          present_percentage: overallPresentPct,
+          absent_percentage: overallAbsentPct,
+          total_students: menteesList.length,
+          at_risk_count: atRisk,
+        },
+        mentees: menteesList,
+      });
+    }
+
+    // ── STANDARD / HOD / FACULTY SEMESTER-WIDE SUMMARY ──
+    let subjQuery = `
+      SELECT a.id, a.subject_name, a.subject_type, a.semester_label, a.section, a.faculty_name, a.faculty_email, a.department
+      FROM subject_allotments a
+      WHERE a.semester_label = $1
+    `;
+    const subjParams: any[] = [semester];
+
+    if (targetDept && targetDept !== 'All') {
+      subjParams.push(`%${targetDept}%`);
+      subjQuery += ` AND a.department ILIKE $${subjParams.length}`;
+    }
+    if (sectionParam && sectionParam !== 'All') {
+      subjParams.push(sectionParam.toUpperCase());
+      subjQuery += ` AND a.section = $${subjParams.length}`;
+    }
+    if (callerRole === 'faculty') {
+      subjParams.push(callerEmail);
+      subjQuery += ` AND LOWER(a.faculty_email) = LOWER($${subjParams.length})`;
+    }
+
+    subjQuery += ` ORDER BY a.department, a.section, a.subject_name`;
+    const subjectsRes = await db.query(subjQuery, subjParams);
+    const subjects = subjectsRes.rows;
+
+    if (subjects.length === 0) {
+      return res.json({
+        semester,
+        department: targetDept || 'All',
+        section: sectionParam || 'All',
+        overall: {
+          total_periods_held: 0,
+          total_periods_attended: 0,
+          total_periods_absent: 0,
+          present_percentage: 100,
+          absent_percentage: 0,
+          total_students: 0,
+          total_sessions: 0,
+          at_risk_count: 0,
+        },
+        sections: [],
+        subjects: [],
+        students: [],
+      });
+    }
+
+    const allotmentIds = subjects.map((s: any) => s.id);
+
+    // Get attendance per student per subject
+    const studentDataQuery = `
+      SELECT 
+        st.roll_number,
+        st.name AS student_name,
+        st.section AS student_section,
+        st.department AS student_department,
+        r.allotment_id,
+        a.subject_name,
+        a.subject_type,
+        a.section AS allotment_section,
+        a.department AS allotment_department,
+        COALESCE(SUM(CASE WHEN s.session_date >= COALESCE(r.joining_date, '1970-01-01'::date) THEN s.num_periods ELSE 0 END), 0) AS periods_held,
+        COALESCE(SUM(CASE WHEN s.session_date >= COALESCE(r.joining_date, '1970-01-01'::date) AND ar.is_present = true THEN s.num_periods ELSE 0 END), 0) AS periods_attended
+      FROM subject_rosters r
+      JOIN subject_allotments a ON a.id = r.allotment_id
+      LEFT JOIN students st ON st.roll_number = r.roll_number
+      LEFT JOIN attendance_sessions s ON s.allotment_id = a.id
+      LEFT JOIN attendance_records ar ON ar.session_id = s.id AND ar.roll_number = r.roll_number
+      WHERE r.allotment_id = ANY($1)
+      GROUP BY st.roll_number, st.name, st.section, st.department, r.allotment_id, a.subject_name, a.subject_type, a.section, a.department
+      ORDER BY st.roll_number, a.subject_name
+    `;
+
+    const studentDataRes = await db.query(studentDataQuery, [allotmentIds]);
+
+    // Aggregate statistics
+    let grandHeld = 0;
+    let grandAttended = 0;
+
+    const studentMap: Record<string, any> = {};
+    const sectionMap: Record<string, any> = {};
+    const subjectStatsMap: Record<string, any> = {};
+
+    subjects.forEach((sub: any) => {
+      subjectStatsMap[sub.id] = {
+        ...sub,
+        total_students: 0,
+        periods_held: 0,
+        periods_attended: 0,
+        periods_absent: 0,
+        present_percentage: 100,
+      };
+    });
+
+    studentDataRes.rows.forEach((row: any) => {
+      const roll = row.roll_number || 'UNKNOWN';
+      const sec = row.allotment_section || row.student_section || 'A';
+      const dept = row.allotment_department || row.student_department || 'General';
+      const secKey = `${dept}__${sec}`;
+
+      const held = parseInt(row.periods_held || '0');
+      const attended = parseInt(row.periods_attended || '0');
+      const absent = Math.max(0, held - attended);
+
+      grandHeld += held;
+      grandAttended += attended;
+
+      // Subject stats
+      if (subjectStatsMap[row.allotment_id]) {
+        subjectStatsMap[row.allotment_id].total_students += 1;
+        subjectStatsMap[row.allotment_id].periods_held += held;
+        subjectStatsMap[row.allotment_id].periods_attended += attended;
+        subjectStatsMap[row.allotment_id].periods_absent += absent;
+      }
+
+      // Section stats
+      if (!sectionMap[secKey]) {
+        sectionMap[secKey] = {
+          section: sec,
+          department: dept,
+          studentsSet: new Set<string>(),
+          periods_held: 0,
+          periods_attended: 0,
+          periods_absent: 0,
+        };
+      }
+      sectionMap[secKey].studentsSet.add(roll);
+      sectionMap[secKey].periods_held += held;
+      sectionMap[secKey].periods_attended += attended;
+      sectionMap[secKey].periods_absent += absent;
+
+      // Student aggregate
+      if (!studentMap[roll]) {
+        studentMap[roll] = {
+          roll_number: roll,
+          name: row.student_name || roll,
+          section: sec,
+          department: dept,
+          total_held: 0,
+          total_attended: 0,
+          total_absent: 0,
+          subjects: {},
+        };
+      }
+      studentMap[roll].total_held += held;
+      studentMap[roll].total_attended += attended;
+      studentMap[roll].total_absent += absent;
+      studentMap[roll].subjects[row.allotment_id] = {
+        subject_name: row.subject_name,
+        periods_held: held,
+        periods_attended: attended,
+        percentage: held > 0 ? Math.round((attended / held) * 1000) / 10 : 100,
+      };
+    });
+
+    // Compute subject percentages
+    const finalSubjects = Object.values(subjectStatsMap).map((s: any) => {
+      s.present_percentage = s.periods_held > 0 ? Math.round((s.periods_attended / s.periods_held) * 1000) / 10 : 100;
+      return s;
+    });
+
+    // Compute section percentages
+    const finalSections = Object.values(sectionMap).map((sec: any) => {
+      const held = sec.periods_held;
+      const attended = sec.periods_attended;
+      const absent = sec.periods_absent;
+      const presentPct = held > 0 ? Math.round((attended / held) * 1000) / 10 : 100;
+      const absentPct = held > 0 ? Math.round((absent / held) * 1000) / 10 : 0;
+      return {
+        section: sec.section,
+        department: sec.department,
+        total_students: sec.studentsSet.size,
+        periods_held: held,
+        periods_attended: attended,
+        periods_absent: absent,
+        present_percentage: presentPct,
+        absent_percentage: absentPct,
+      };
+    });
+
+    finalSections.sort((a, b) => a.section.localeCompare(b.section));
+
+    // Compute student percentages & at-risk counts
+    let atRiskCount = 0;
+    const finalStudents = Object.values(studentMap).map((st: any) => {
+      const pct = st.total_held > 0 ? Math.round((st.total_attended / st.total_held) * 1000) / 10 : 100;
+      st.overall_percentage = pct;
+      if (pct < 75 && st.total_held > 0) atRiskCount++;
+      return st;
+    });
+
+    finalStudents.sort((a, b) => a.roll_number.localeCompare(b.roll_number));
+
+    const grandAbsent = Math.max(0, grandHeld - grandAttended);
+    const overallPresentPct = grandHeld > 0 ? Math.round((grandAttended / grandHeld) * 1000) / 10 : 100;
+    const overallAbsentPct = grandHeld > 0 ? Math.round((grandAbsent / grandHeld) * 1000) / 10 : 0;
+
+    res.json({
+      semester,
+      department: targetDept || 'All',
+      section: sectionParam || 'All',
+      overall: {
+        total_periods_held: grandHeld,
+        total_periods_attended: grandAttended,
+        total_periods_absent: grandAbsent,
+        present_percentage: overallPresentPct,
+        absent_percentage: overallAbsentPct,
+        total_students: finalStudents.length,
+        at_risk_count: atRiskCount,
+      },
+      sections: finalSections,
+      subjects: finalSubjects,
+      students: finalStudents,
       generatedAt: new Date().toISOString(),
     });
   } catch (err: any) {
