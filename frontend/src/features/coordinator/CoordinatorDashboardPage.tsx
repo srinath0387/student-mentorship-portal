@@ -98,7 +98,28 @@ export const CoordinatorDashboardPage: React.FC = () => {
         const wb = XLSX.read(bstr, { type: 'binary' });
         const wsName = wb.SheetNames[0];
         const ws = wb.Sheets[wsName];
-        const data = XLSX.utils.sheet_to_json(ws);
+        // Skip any leading non-data rows (instruction rows) by finding the real header row
+        // The header row has 'Admission ID' or 'Full Name'. Parse from that row onward.
+        const allRows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as any[][];
+        const headerRowIdx = allRows.findIndex(
+          (row) =>
+            row.some((cell) =>
+              String(cell).toLowerCase().includes('admission') ||
+              String(cell).toLowerCase().includes('full name')
+            )
+        );
+        let data: any[] = [];
+        if (headerRowIdx >= 0) {
+          const headers = allRows[headerRowIdx].map((h) => String(h).trim());
+          data = allRows.slice(headerRowIdx + 1).reduce((acc: any[], row) => {
+            const obj: any = {};
+            headers.forEach((h, i) => { obj[h] = row[i] ?? ''; });
+            if (Object.values(obj).some((v) => String(v).trim())) acc.push(obj);
+            return acc;
+          }, []);
+        } else {
+          data = XLSX.utils.sheet_to_json(ws);
+        }
         setParsedRoster(data);
       } catch {
         setUploadStatus({ type: 'error', message: 'Failed to parse Excel sheet. Ensure valid .xlsx/.csv format.' });
@@ -158,12 +179,18 @@ export const CoordinatorDashboardPage: React.FC = () => {
 
   const downloadAdmissionTemplate = () => {
     const wsData = [
-      ['Admission ID', 'Full Name', 'Date of Birth (YYYY-MM-DD)', 'Personal Mobile', 'Personal Email', 'Department', 'Section'],
+      // Row 1: Instructions
+      ['⚠ LOGIN CREDENTIALS: Username = Personal Mobile | Initial Password = Date of Birth (YYYY-MM-DD)', '', '', '', '', '', ''],
+      // Row 2: Column headers
+      ['Admission ID', 'Full Name', 'Date of Birth (YYYY-MM-DD) [= Initial Password]', 'Personal Mobile [= Username]', 'Personal Email', 'Department', 'Section'],
+      // Sample rows
       ['ADM2025001', 'Rahul Kumar', '2007-05-14', '9876543210', 'rahul.personal@gmail.com', 'CSE', 'A'],
       ['ADM2025002', 'Pooja Reddy', '2007-08-22', '9876543211', 'pooja.personal@gmail.com', 'CSE (Data Science)', 'A'],
       ['ADM2025003', 'Sai Teja', '2007-02-10', '9876543212', 'saiteja@gmail.com', 'ECE', 'B'],
     ];
     const ws = XLSX.utils.aoa_to_sheet(wsData);
+    // Merge instruction row across columns A-G
+    ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 6 } }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Fresher_Admissions');
     XLSX.writeFile(wb, 'Fresher_Admission_Roster_Template.xlsx');

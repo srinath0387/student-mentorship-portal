@@ -450,7 +450,7 @@ export const PersonalInfoTab: React.FC<PersonalInfoTabProps> = ({ student, acade
       </form>
 
       {/* ── 1st Year Self-Service Migration & Account Credentials Section ── */}
-      {!readOnly && (
+      {!readOnly && s?.year === '1st Year' && (
         <div className="mt-8 pt-6 border-t border-borderLine space-y-4">
           <div>
             <h4 className="text-sm font-bold text-textPrimary flex items-center gap-2">

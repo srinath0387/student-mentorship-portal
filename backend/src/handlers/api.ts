@@ -6388,14 +6388,27 @@ app.post('/admin/freshers/upload-roster', requireRole('admin', 'coordinator'), a
 
       const rollNumber = admissionId;
       const placeholderEmail = `adm_${admissionId.toLowerCase()}@fresher.rgmcet.edu.in`;
+      const cleanMobile = mobile.replace(/\D/g, '');
+      const defaultUsername = cleanMobile || admissionId.toLowerCase();
+
+      // Pre-compute password hash using DOB (YYYY-MM-DD or rawDob or admissionId)
+      let initialPasswordHash: string | null = null;
+      if (parsedDob || rawDob) {
+        const passwordPlain = parsedDob || rawDob;
+        initialPasswordHash = await bcrypt.hash(passwordPlain, 10);
+      }
 
       try {
         const existing = await db.query(
-          'SELECT roll_number, admission_id, migration_stage, email FROM students WHERE LOWER(admission_id) = LOWER($1) OR roll_number = $2',
+          'SELECT roll_number, admission_id, migration_stage, email, password_hash, username FROM students WHERE LOWER(admission_id) = LOWER($1) OR roll_number = $2',
           [admissionId, rollNumber]
         );
 
         if (existing.rows.length > 0) {
+          const ex = existing.rows[0];
+          const finalHash = ex.password_hash || initialPasswordHash;
+          const finalUsername = ex.username || defaultUsername;
+
           await db.query(
             `UPDATE students
              SET name = $1,
@@ -6406,20 +6419,36 @@ app.post('/admin/freshers/upload-roster', requireRole('admin', 'coordinator'), a
                  department = $5,
                  section = $6,
                  admission_id = $7,
+                 username = COALESCE(username, $8),
+                 password_hash = COALESCE(password_hash, $9),
+                 is_first_year_setup_complete = CASE WHEN $9 IS NOT NULL THEN TRUE ELSE is_first_year_setup_complete END,
                  year = '1st Year',
                  updated_at = NOW()
-             WHERE roll_number = $8 OR LOWER(admission_id) = LOWER($7)`,
-            [fullName, parsedDob, mobile, personalEmail, dept, section, admissionId, rollNumber]
+             WHERE roll_number = $10 OR LOWER(admission_id) = LOWER($7)`,
+            [fullName, parsedDob, mobile, personalEmail, dept, section, admissionId, finalUsername, finalHash, rollNumber]
           );
           updated++;
         } else {
           await db.query(
             `INSERT INTO students (
               roll_number, name, email, year, department, section, batch,
-              admission_id, dob, personal_mobile, personal_email, migration_stage, is_first_year_setup_complete
+              admission_id, dob, personal_mobile, personal_email, username, password_hash, migration_stage, is_first_year_setup_complete
              )
-             VALUES ($1, $2, $3, '1st Year', $4, $5, '2025-2029', $6, $7, $8, $9, 0, FALSE)`,
-            [rollNumber, fullName, placeholderEmail, dept, section, admissionId, parsedDob, mobile, personalEmail]
+             VALUES ($1, $2, $3, '1st Year', $4, $5, '2025-2029', $6, $7, $8, $9, $10, $11, 0, $12)`,
+            [
+              rollNumber,
+              fullName,
+              placeholderEmail,
+              dept,
+              section,
+              admissionId,
+              parsedDob,
+              mobile,
+              personalEmail,
+              defaultUsername,
+              initialPasswordHash,
+              initialPasswordHash ? true : false,
+            ]
           );
           inserted++;
         }
@@ -6478,14 +6507,20 @@ app.post('/auth/fresher-login', async (req: Request, res: Response) => {
     const { admissionId, dob, username, password } = req.body;
 
     if (username && password) {
+      const cleanUser = username.trim();
       const uRes = await db.query(
-        `SELECT roll_number, name, email, year, department, section, admission_id, dob, username, password_hash, migration_stage, is_first_year_setup_complete
-         FROM students WHERE LOWER(username) = LOWER($1)`,
-        [username.trim()]
+        `SELECT roll_number, name, email, year, department, section, admission_id, dob, personal_mobile, username, password_hash, migration_stage, is_first_year_setup_complete
+         FROM students 
+         WHERE LOWER(username) = LOWER($1) 
+            OR LOWER(admission_id) = LOWER($1)
+            OR roll_number = $1
+            OR personal_mobile = $1
+            OR REPLACE(personal_mobile, ' ', '') = REPLACE($1, ' ', '')`,
+        [cleanUser]
       );
 
       if (uRes.rows.length === 0) {
-        return res.status(401).json({ valid: false, error: 'Invalid username or password.' });
+        return res.status(401).json({ valid: false, error: 'Invalid username / mobile number or password.' });
       }
 
       const stu = uRes.rows[0];
@@ -6496,16 +6531,21 @@ app.post('/auth/fresher-login', async (req: Request, res: Response) => {
         });
       }
 
-      if (!stu.password_hash) {
-        return res.status(400).json({
-          valid: false,
-          error: 'Password setup not completed. Please log in using your Admission ID and Date of Birth first.',
-        });
+      let passwordMatches = false;
+      if (stu.password_hash) {
+        passwordMatches = await bcrypt.compare(password, stu.password_hash);
+      }
+      // Also allow direct DOB comparison (e.g. 2007-05-14 or YYYYMMDD) if password matches DOB
+      if (!passwordMatches && stu.dob) {
+        const studentDobIso = new Date(stu.dob).toISOString().split('T')[0];
+        const inputDobIso = !isNaN(new Date(password).getTime()) ? new Date(password).toISOString().split('T')[0] : '';
+        if (password === studentDobIso || inputDobIso === studentDobIso || password.replace(/\D/g, '') === studentDobIso.replace(/\D/g, '')) {
+          passwordMatches = true;
+        }
       }
 
-      const match = await bcrypt.compare(password, stu.password_hash);
-      if (!match) {
-        return res.status(401).json({ valid: false, error: 'Invalid username or password.' });
+      if (!passwordMatches) {
+        return res.status(401).json({ valid: false, error: 'Invalid username or password (use your registered Mobile Number and DOB).' });
       }
 
       const token = `demo_token_student_${encodeURIComponent(stu.email || stu.admission_id)}_${Date.now()}`;
@@ -6521,7 +6561,7 @@ app.post('/auth/fresher-login', async (req: Request, res: Response) => {
           year: stu.year,
           department: stu.department,
           section: stu.section,
-          username: stu.username,
+          username: stu.username || stu.personal_mobile || stu.admission_id,
           migration_stage: stu.migration_stage,
         },
       });

@@ -276,10 +276,15 @@ export const AuthPage: React.FC = () => {
       let res: any;
       if (fresherLoginType === 'dob') {
         if (!fresherAdmissionId || !fresherDob) {
-          throw new Error('Please enter both Admission ID and Date of Birth.');
+          throw new Error('Please enter your Mobile Number (or Admission ID) and Date of Birth.');
         }
+        const identifier = fresherAdmissionId.trim();
+        // Try as username+password first (backend supports mobile, admissionId, username lookups)
+        // Also fall back to admissionId+dob for legacy Admission ID lookups
         res = await api.fresherLogin({
-          admissionId: fresherAdmissionId.trim(),
+          username: identifier,
+          password: fresherDob,
+          admissionId: identifier,
           dob: fresherDob,
         });
       } else {
@@ -1363,18 +1368,18 @@ export const AuthPage: React.FC = () => {
                         <span>1st Year Fresher Admission Access</span>
                       </div>
                       <p className="text-[11px] text-textSecondary leading-relaxed">
-                        Log in using your <strong>Admission ID & Date of Birth</strong> provided at admission, or your chosen username once initialized.
+                        Log in using your <strong>Mobile Number &amp; Date of Birth</strong> as registered at admission. After first login, you can also log in using your Admission ID + DOB.
                       </p>
                     </div>
 
-                    {/* Method Toggle: DOB vs Username */}
+                    {/* Method Toggle: DOB (Mobile/AdmID) vs Username */}
                     <div className="flex justify-end gap-3 text-xs font-semibold">
                       <button
                         type="button"
                         onClick={() => setFresherLoginType('dob')}
                         className={`hover:underline ${fresherLoginType === 'dob' ? 'text-brand-primary underline font-bold' : 'text-textSecondary'}`}
                       >
-                        Login with Admission ID + DOB
+                        Mobile Number + DOB
                       </button>
                       <span className="text-textMuted">•</span>
                       <button
@@ -1382,20 +1387,20 @@ export const AuthPage: React.FC = () => {
                         onClick={() => setFresherLoginType('username')}
                         className={`hover:underline ${fresherLoginType === 'username' ? 'text-brand-primary underline font-bold' : 'text-textSecondary'}`}
                       >
-                        Login with Username
+                        Username + Password
                       </button>
                     </div>
 
                     {fresherLoginType === 'dob' ? (
                       <>
                         <div>
-                          <label className="block text-xs font-semibold text-textPrimary mb-1">Admission ID / Application No *</label>
+                          <label className="block text-xs font-semibold text-textPrimary mb-1">Mobile Number / Admission ID *</label>
                           <input
                             type="text"
                             value={fresherAdmissionId}
-                            onChange={(e) => setFresherAdmissionId(e.target.value.toUpperCase())}
-                            placeholder="e.g. ADM2025001"
-                            className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary uppercase font-mono"
+                            onChange={(e) => setFresherAdmissionId(e.target.value)}
+                            placeholder="e.g. 9876543210 or ADM2025001"
+                            className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary font-mono"
                           />
                         </div>
 
