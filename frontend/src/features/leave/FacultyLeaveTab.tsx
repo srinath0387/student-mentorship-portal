@@ -142,8 +142,12 @@ export const FacultyLeaveTab: React.FC = () => {
   };
 
   const handleAddAdjustment = () => {
-    if (!adjSubject.trim() || !adjFacultyEmail.trim()) {
-      alert('Please provide subject/duty and select a reassigned faculty.');
+    if (!adjSubject.trim()) {
+      alert('Please enter the Subject or Duty name (e.g. Data Structures Lab, Mid Exam).');
+      return;
+    }
+    if (!adjFacultyEmail.trim()) {
+      alert('Please select or enter the reassigned faculty colleague email.');
       return;
     }
     const facultyObj = facultyDirectory.find((f: any) => f.email?.toLowerCase() === adjFacultyEmail.toLowerCase());
@@ -153,9 +157,9 @@ export const FacultyLeaveTab: React.FC = () => {
       ...prev,
       {
         adjustment_type: adjType,
-        date: adjDate,
+        date: adjDate || formFromDate,
         subject_or_duty: adjSubject.trim(),
-        timing_slot: adjSlot.trim(),
+        timing_slot: adjSlot.trim() || 'Period 1 (09:00 - 09:50 AM)',
         reassigned_faculty_email: adjFacultyEmail.toLowerCase().trim(),
         reassigned_faculty_name: facultyName,
       },
@@ -185,12 +189,27 @@ export const FacultyLeaveTab: React.FC = () => {
       return;
     }
 
+    // Auto-capture any adjustment currently filled in the input fields if not yet added to list
+    let finalAdjustments = [...formAdjustments];
+    if (adjSubject.trim() && adjFacultyEmail.trim()) {
+      const facultyObj = facultyDirectory.find((f: any) => f.email?.toLowerCase() === adjFacultyEmail.toLowerCase());
+      const facultyName = facultyObj?.name || adjFacultyName || adjFacultyEmail;
+      finalAdjustments.push({
+        adjustment_type: adjType,
+        date: adjDate || formFromDate,
+        subject_or_duty: adjSubject.trim(),
+        timing_slot: adjSlot.trim() || 'Period 1 (09:00 - 09:50 AM)',
+        reassigned_faculty_email: adjFacultyEmail.toLowerCase().trim(),
+        reassigned_faculty_name: facultyName,
+      });
+    }
+
     applyMutation.mutate({
       leave_type: formLeaveType,
       from_date: formFromDate,
       to_date: formToDate,
       reason: formReason.trim(),
-      adjustments: formAdjustments,
+      adjustments: finalAdjustments,
     });
   };
 
@@ -693,7 +712,12 @@ export const FacultyLeaveTab: React.FC = () => {
                             <td className="p-2">{a.date}</td>
                             <td className="p-2 font-sans font-medium text-textPrimary">{a.subject_or_duty}</td>
                             <td className="p-2">{a.timing_slot}</td>
-                            <td className="p-2 font-sans font-bold text-textPrimary">{a.reassigned_faculty_email}</td>
+                            <td className="p-2 font-sans">
+                              <span className="font-bold text-textPrimary block">{a.reassigned_faculty_name || a.reassigned_faculty_email}</span>
+                              {a.reassigned_faculty_name && a.reassigned_faculty_name !== a.reassigned_faculty_email && (
+                                <span className="text-[10px] text-textMuted font-mono block">{a.reassigned_faculty_email}</span>
+                              )}
+                            </td>
                             <td className="p-2 text-right">
                               <button
                                 type="button"
