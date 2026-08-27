@@ -7673,7 +7673,7 @@ app.put('/hod/leaves/faculty/:id/status', requireRole('hod', 'admin'), async (re
     await ensureLeaveAndSubjectsHandledTables();
     const { id } = req.params;
     const { status, hod_remarks } = req.body;
-    const approvedBy = req.auth?.name || req.auth?.email || 'HOD';
+    const approvedBy = req.auth?.email || 'HOD';
 
     if (!['Approved', 'Rejected'].includes(status)) {
       return res.status(400).json({ error: "Status must be 'Approved' or 'Rejected'" });
@@ -7720,7 +7720,7 @@ app.post('/student/permissions/apply', requireAuth, async (req: Request, res: Re
     // Fetch student info
     const stRes = await db.query('SELECT name, department, section, year FROM students WHERE UPPER(roll_number) = $1 LIMIT 1', [rollNumber]);
     const st = stRes.rows[0] || {
-      name: req.auth?.name || rollNumber,
+      name: rollNumber,
       department: req.auth?.department || 'General',
       section: 'A',
       year: '2nd Year',
@@ -7791,7 +7791,7 @@ app.put('/hod/permissions/students/:id/status', requireRole('hod', 'admin'), asy
     await ensureLeaveAndSubjectsHandledTables();
     const { id } = req.params;
     const { status, hod_remarks } = req.body;
-    const approvedBy = req.auth?.name || req.auth?.email || 'HOD';
+    const approvedBy = req.auth?.email || 'HOD';
 
     if (!['Approved', 'Rejected'].includes(status)) {
       return res.status(400).json({ error: "Status must be 'Approved' or 'Rejected'" });
