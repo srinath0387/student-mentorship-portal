@@ -4503,8 +4503,12 @@ app.post('/attendance/allotments/upload', requireRole('admin', 'hod', 'coordinat
       try {
         const existing = await db.query(
           `SELECT id FROM subject_allotments 
-           WHERE semester_label = $1 AND LOWER(subject_name) = LOWER($2) AND section = $3 AND LOWER(faculty_email) = LOWER($4)`,
-          [semester, subjectName, section, facultyEmail]
+           WHERE semester_label = $1 
+             AND LOWER(COALESCE(department, '')) = LOWER($2) 
+             AND section = $3 
+             AND LOWER(subject_name) = LOWER($4) 
+             AND LOWER(faculty_email) = LOWER($5)`,
+          [semester, department || 'General', section, subjectName, facultyEmail]
         );
 
         if (existing.rows.length > 0) {
@@ -4512,14 +4516,14 @@ app.post('/attendance/allotments/upload', requireRole('admin', 'hod', 'coordinat
             `UPDATE subject_allotments
              SET subject_type = $1, faculty_name = $2, department = $3
              WHERE id = $4`,
-            [subjectType, facultyName, department, existing.rows[0].id]
+            [subjectType, facultyName, department || 'General', existing.rows[0].id]
           );
           updatedCount++;
         } else {
           await db.query(
             `INSERT INTO subject_allotments (semester_label, subject_name, subject_type, section, faculty_email, faculty_name, department)
              VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [semester, subjectName, subjectType, section, facultyEmail, facultyName, department]
+            [semester, subjectName, subjectType, section, facultyEmail, facultyName, department || 'General']
           );
           addedCount++;
         }
@@ -4577,8 +4581,12 @@ app.post('/attendance/allotments/single', requireRole('admin', 'hod', 'coordinat
 
     const existing = await db.query(
       `SELECT id FROM subject_allotments 
-       WHERE semester_label = $1 AND LOWER(subject_name) = LOWER($2) AND section = $3 AND LOWER(faculty_email) = LOWER($4)`,
-      [semester, cleanSubj, cleanSection, cleanEmail]
+       WHERE semester_label = $1 
+         AND LOWER(COALESCE(department, '')) = LOWER($2) 
+         AND section = $3 
+         AND LOWER(subject_name) = LOWER($4) 
+         AND LOWER(faculty_email) = LOWER($5)`,
+      [semester, cleanDept, cleanSection, cleanSubj, cleanEmail]
     );
 
     let allotmentId: string;
@@ -4603,7 +4611,7 @@ app.post('/attendance/allotments/single', requireRole('admin', 'hod', 'coordinat
     const fullAllotment = await db.query('SELECT * FROM subject_allotments WHERE id = $1', [allotmentId]);
     res.json({
       success: true,
-      message: `Subject allocation for "${cleanSubj}" (Section ${cleanSection}) saved successfully.`,
+      message: `Subject allocation for "${cleanSubj}" (${cleanDept} Section ${cleanSection}) saved successfully.`,
       allotment: fullAllotment.rows[0],
     });
   } catch (err: any) {

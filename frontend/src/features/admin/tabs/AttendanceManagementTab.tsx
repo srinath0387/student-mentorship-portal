@@ -19,7 +19,8 @@ import {
   Check,
   Edit2,
   FileText,
-  Eye
+  Eye,
+  UserPlus
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { api } from '../../../lib/api';
@@ -93,6 +94,8 @@ export const AttendanceManagementTab: React.FC = () => {
 
   // ── Allotment Upload State ──
   const [allotmentDepartment, setAllotmentDepartment] = useState<string>(defaultFilterDept);
+  const [allotmentSection, setAllotmentSection] = useState<string>('A');
+  const [allotmentSectionFilter, setAllotmentSectionFilter] = useState<string>('All');
   const [allotmentFile, setAllotmentFile] = useState<File | null>(null);
   const [parsedAllotments, setParsedAllotments] = useState<any[]>([]);
   const [allotmentUploadStatus, setAllotmentUploadStatus] = useState<{
@@ -105,6 +108,7 @@ export const AttendanceManagementTab: React.FC = () => {
   // ── Roster Upload State ──
   const [rosterDepartment, setRosterDepartment] = useState<string>(user?.department && user.department !== 'All' ? user.department : 'All');
   const [rosterSemester, setRosterSemester] = useState<SemesterLabel>('2-1');
+  const [rosterSection, setRosterSection] = useState<string>('All');
   const [selectedAllotmentId, setSelectedAllotmentId] = useState<string>('');
   const [rosterFile, setRosterFile] = useState<File | null>(null);
   const [parsedRoster, setParsedRoster] = useState<any[]>([]);
@@ -256,10 +260,13 @@ export const AttendanceManagementTab: React.FC = () => {
   const handleDownloadAllotmentTemplate = () => {
     const defaultDept = allotmentDepartment === 'All' ? 'CSE' : allotmentDepartment;
     const wsData = [
-      ['Faculty Name', 'Faculty Email', 'Subject Allotted', 'Section', 'Subject Type', 'Department'],
-      ['Dr. K. V. Subbaiah', 'kvsubbaiah@rgmcet.edu.in', 'Database Management Systems', 'A', 'Theory', defaultDept],
-      ['Dr. K. V. Subbaiah', 'kvsubbaiah@rgmcet.edu.in', 'DBMS Lab', 'A', 'Lab', defaultDept],
-      ['Prof. M. Ramesh', 'mramesh@rgmcet.edu.in', 'Microprocessors & Microcontrollers', 'B', 'Theory', 'ECE'],
+      ['Faculty Name', 'Faculty Email', 'Subject Allotted', 'Department', 'Section', 'Subject Type (Theory/Lab)'],
+      ['Dr. K. V. Subbaiah', 'kvsubbaiah@rgmcet.edu.in', 'Database Management Systems', defaultDept, 'A', 'Theory'],
+      ['Dr. K. V. Subbaiah', 'kvsubbaiah@rgmcet.edu.in', 'Database Management Systems', defaultDept, 'B', 'Theory'],
+      ['Dr. K. V. Subbaiah', 'kvsubbaiah@rgmcet.edu.in', 'Database Management Systems', 'ECE', 'A', 'Theory'],
+      ['Dr. K. V. Subbaiah', 'kvsubbaiah@rgmcet.edu.in', 'DBMS Lab', defaultDept, 'A', 'Lab'],
+      ['Prof. M. Ramesh', 'mramesh@rgmcet.edu.in', 'Operating Systems', defaultDept, 'A', 'Theory'],
+      ['Prof. M. Ramesh', 'mramesh@rgmcet.edu.in', 'Operating Systems', defaultDept, 'B', 'Theory'],
     ];
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     const wb = XLSX.utils.book_new();
@@ -475,7 +482,12 @@ export const AttendanceManagementTab: React.FC = () => {
     setAllotmentUploadStatus({ type: 'idle', message: '' });
 
     try {
-      const res = await api.uploadAllotments(selectedSemester, parsedAllotments);
+      const enrichedAllotments = parsedAllotments.map((row: any) => ({
+        ...row,
+        department: (row.department || row['Department'] || row['DEPT'] || row['Dept'] || (allotmentDepartment === 'All' ? 'CSE' : allotmentDepartment)).trim(),
+        section: (row.section || row['Section'] || row['SEC'] || row['Sec'] || allotmentSection || 'A').trim().toUpperCase(),
+      }));
+      const res = await api.uploadAllotments(selectedSemester, enrichedAllotments);
       setAllotmentUploadStatus({
         type: res.errorsCount > 0 ? 'error' : 'success',
         message: res.message,
@@ -556,6 +568,12 @@ export const AttendanceManagementTab: React.FC = () => {
   };
 
   const filteredAllotments = allotments.filter((a: SubjectAllotment) => {
+    if (allotmentDepartment !== 'All' && a.department && !a.department.toLowerCase().includes(allotmentDepartment.toLowerCase()) && !allotmentDepartment.toLowerCase().includes(a.department.toLowerCase())) {
+      return false;
+    }
+    if (allotmentSectionFilter !== 'All' && a.section !== allotmentSectionFilter) {
+      return false;
+    }
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -1039,28 +1057,11 @@ export const AttendanceManagementTab: React.FC = () => {
             {/* ── MODE 1: BULK EXCEL UPLOAD ── */}
             {allotmentMode === 'upload' && (
               <div className="space-y-4 pt-2">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {/* Step 1: Semester */}
                   <div>
                     <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
-                      Department
-                    </label>
-                    <select
-                      value={allotmentDepartment}
-                      onChange={(e) => setAllotmentDepartment(e.target.value)}
-                      className="w-full bg-surface-2 border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary font-medium"
-                    >
-                      <option value="All">All Departments</option>
-                      {VALID_DEPARTMENT_NAMES.map((dept) => (
-                        <option key={dept} value={dept}>
-                          {dept}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
-                      Select Semester
+                      1. Select Semester *
                     </label>
                     <div className="grid grid-cols-4 gap-1.5 bg-surface-2 p-1.5 rounded-xl border border-borderLine">
                       {ALL_SEMESTERS.map((sem) => (
@@ -1079,9 +1080,52 @@ export const AttendanceManagementTab: React.FC = () => {
                     </div>
                   </div>
 
+                  {/* Step 2: Department */}
                   <div>
                     <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
-                      Upload Excel File (.xlsx)
+                      2. Department *
+                    </label>
+                    <select
+                      value={allotmentDepartment}
+                      onChange={(e) => setAllotmentDepartment(e.target.value)}
+                      className="w-full bg-surface-2 border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary font-medium"
+                    >
+                      <option value="All">All Departments</option>
+                      {VALID_DEPARTMENT_NAMES.map((dept) => (
+                        <option key={dept} value={dept}>
+                          {dept}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Step 3: Section */}
+                  <div>
+                    <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
+                      3. Section *
+                    </label>
+                    <div className="grid grid-cols-6 gap-1 bg-surface-2 p-1.5 rounded-xl border border-borderLine">
+                      {['A', 'B', 'C', 'D', 'E', 'F'].map((sec) => (
+                        <button
+                          key={sec}
+                          type="button"
+                          onClick={() => setAllotmentSection(sec)}
+                          className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
+                            allotmentSection === sec
+                              ? 'bg-brand-primary text-white shadow-brand'
+                              : 'text-textSecondary hover:text-textPrimary hover:bg-surface-3'
+                          }`}
+                        >
+                          {sec}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Step 4: File Upload */}
+                  <div>
+                    <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
+                      4. Upload File (.xlsx) *
                     </label>
                     <input
                       type="file"
@@ -1094,10 +1138,10 @@ export const AttendanceManagementTab: React.FC = () => {
 
                 {parsedAllotments.length > 0 && (
                   <div className="p-4 rounded-xl bg-surface-2 border border-borderLine space-y-3">
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <p className="text-xs font-bold text-textPrimary flex items-center gap-2">
                         <FileSpreadsheet className="w-4 h-4 text-brand-primary" />
-                        Parsed {parsedAllotments.length} Allotment Row(s) for Semester {selectedSemester}
+                        Parsed {parsedAllotments.length} Allotment Row(s) for Semester {selectedSemester} (Dept: {allotmentDepartment}, Sec: {allotmentSection})
                       </p>
                       <button
                         onClick={handleUploadAllotments}
@@ -1116,6 +1160,34 @@ export const AttendanceManagementTab: React.FC = () => {
                           </>
                         )}
                       </button>
+                    </div>
+
+                    {/* Preview Table */}
+                    <div className="max-h-48 overflow-y-auto rounded-lg border border-borderLine bg-surface text-[11px]">
+                      <table className="w-full text-left">
+                        <thead className="bg-surface-3 text-textMuted font-bold uppercase sticky top-0">
+                          <tr>
+                            <th className="py-2 px-3">Subject</th>
+                            <th className="py-2 px-3">Type</th>
+                            <th className="py-2 px-3">Dept</th>
+                            <th className="py-2 px-3">Sec</th>
+                            <th className="py-2 px-3">Faculty Name</th>
+                            <th className="py-2 px-3">Faculty Email</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-borderLine">
+                          {parsedAllotments.slice(0, 10).map((row: any, idx: number) => (
+                            <tr key={idx}>
+                              <td className="py-1.5 px-3 font-semibold">{row.subject_name || row['Subject Allotted'] || row['Subject Name']}</td>
+                              <td className="py-1.5 px-3">{row.subject_type || row['Subject Type'] || 'Theory'}</td>
+                              <td className="py-1.5 px-3">{row.department || row['Department'] || (allotmentDepartment === 'All' ? 'CSE' : allotmentDepartment)}</td>
+                              <td className="py-1.5 px-3 font-bold">{row.section || row['Section'] || allotmentSection}</td>
+                              <td className="py-1.5 px-3">{row.faculty_name || row['Faculty Name']}</td>
+                              <td className="py-1.5 px-3 font-mono">{row.faculty_email || row['Faculty Email']}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 )}
@@ -1165,7 +1237,7 @@ export const AttendanceManagementTab: React.FC = () => {
                     {/* Semester */}
                     <div>
                       <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5">
-                        Semester *
+                        1. Semester *
                       </label>
                       <select
                         value={singleAllotSemester}
@@ -1183,7 +1255,7 @@ export const AttendanceManagementTab: React.FC = () => {
                     {/* Department */}
                     <div>
                       <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5">
-                        Department *
+                        2. Department *
                       </label>
                       <select
                         value={singleAllotDept}
@@ -1201,7 +1273,7 @@ export const AttendanceManagementTab: React.FC = () => {
                     {/* Section */}
                     <div>
                       <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5">
-                        Section *
+                        3. Section *
                       </label>
                       <select
                         value={singleAllotSection}
@@ -1219,7 +1291,7 @@ export const AttendanceManagementTab: React.FC = () => {
                     {/* Subject Type */}
                     <div>
                       <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5">
-                        Subject Type *
+                        4. Subject Type *
                       </label>
                       <div className="grid grid-cols-2 gap-1.5 bg-surface p-1 rounded-xl border border-borderLine">
                         <button
@@ -1250,7 +1322,7 @@ export const AttendanceManagementTab: React.FC = () => {
                     {/* Subject Name */}
                     <div className="sm:col-span-2">
                       <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5">
-                        Subject Name *
+                        5. Subject Name *
                       </label>
                       <input
                         type="text"
@@ -1265,7 +1337,7 @@ export const AttendanceManagementTab: React.FC = () => {
                     {/* Faculty Selection / Autocomplete */}
                     <div className="sm:col-span-2">
                       <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5">
-                        Select Registered Faculty or Enter Custom Email *
+                        6. Select Registered Faculty or Enter Custom Email *
                       </label>
                       <select
                         onChange={(e) => {
@@ -1355,11 +1427,38 @@ export const AttendanceManagementTab: React.FC = () => {
                   Allotted Subjects Directory — Semester {selectedSemester}
                 </h3>
                 <p className="text-xs text-textSecondary mt-0.5">
-                  Showing {filteredAllotments.length} allocated subjects for this semester. Feeds directly into student roster enrollment.
+                  Showing {filteredAllotments.length} allocated subjects for this semester across sections and departments.
                 </p>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Section Filter Pills */}
+                <div className="flex items-center gap-1 bg-surface-2 p-1 rounded-xl border border-borderLine text-xs">
+                  <button
+                    onClick={() => setAllotmentSectionFilter('All')}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
+                      allotmentSectionFilter === 'All'
+                        ? 'bg-brand-primary text-white shadow-xs'
+                        : 'text-textSecondary hover:text-textPrimary'
+                    }`}
+                  >
+                    All Sec
+                  </button>
+                  {['A', 'B', 'C', 'D', 'E', 'F'].map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setAllotmentSectionFilter(s)}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
+                        allotmentSectionFilter === s
+                          ? 'bg-brand-primary text-white shadow-xs'
+                          : 'text-textSecondary hover:text-textPrimary'
+                      }`}
+                    >
+                      Sec {s}
+                    </button>
+                  ))}
+                </div>
+
                 <div className="relative">
                   <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-textMuted" />
                   <input
@@ -1367,7 +1466,7 @@ export const AttendanceManagementTab: React.FC = () => {
                     placeholder="Search subject or faculty..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-8 pr-3 py-1.5 text-xs bg-surface-2 border border-borderLine rounded-xl text-textPrimary placeholder:text-textMuted focus:outline-none focus:border-brand-primary"
+                    className="pl-8 pr-3 py-1.5 text-xs bg-surface-2 border border-borderLine rounded-xl text-textPrimary placeholder:text-textMuted focus:outline-none focus:border-brand-primary w-48 sm:w-56"
                   />
                 </div>
               </div>
@@ -1446,6 +1545,445 @@ export const AttendanceManagementTab: React.FC = () => {
                 </table>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {/* SUB-TAB 2: STUDENT ROSTER MANAGEMENT */}
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {activeSubTab === 'rosters' && (
+        <div className="space-y-6">
+          {/* Top Configuration & Entry Form Card */}
+          <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-base font-bold text-textPrimary flex items-center gap-2">
+                  <Users className="w-4 h-4 text-brand-primary" />
+                  Student Roster Enrollment Management
+                </h3>
+                <p className="text-xs text-textSecondary mt-0.5">
+                  Flow: Semester → Department → Section → Select Target Subject Allotment → Document Upload or Single Entry.
+                </p>
+              </div>
+
+              {/* Mode Toggle: Bulk Upload vs Single Manual Entry */}
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 bg-surface-2 p-1 rounded-xl border border-borderLine">
+                  <button
+                    onClick={() => setRosterMode('upload')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      rosterMode === 'upload'
+                        ? 'bg-brand-primary text-white shadow-brand'
+                        : 'text-textSecondary hover:text-textPrimary'
+                    }`}
+                  >
+                    Bulk Upload (Excel)
+                  </button>
+                  <button
+                    onClick={() => setRosterMode('single')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      rosterMode === 'single'
+                        ? 'bg-brand-primary text-white shadow-brand'
+                        : 'text-textSecondary hover:text-textPrimary'
+                    }`}
+                  >
+                    + Single Manual Entry
+                  </button>
+                </div>
+
+                {rosterMode === 'upload' && (
+                  <button
+                    onClick={handleDownloadRosterTemplate}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-textSecondary bg-surface-2 hover:bg-surface-3 border border-borderLine transition-all shrink-0"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Template
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Target Selectors: Semester, Department, Section, and Target Allotment Dropdown */}
+            <div className="p-4 rounded-xl bg-surface-2 border border-borderLine space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* 1. Semester */}
+                <div>
+                  <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
+                    1. Select Semester *
+                  </label>
+                  <div className="grid grid-cols-4 gap-1.5 bg-surface p-1.5 rounded-xl border border-borderLine">
+                    {ALL_SEMESTERS.map((sem) => (
+                      <button
+                        key={sem}
+                        onClick={() => {
+                          setRosterSemester(sem);
+                          setSelectedAllotmentId('');
+                        }}
+                        className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
+                          rosterSemester === sem
+                            ? 'bg-brand-primary text-white shadow-brand'
+                            : 'text-textSecondary hover:text-textPrimary hover:bg-surface-2'
+                        }`}
+                      >
+                        {sem}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 2. Department */}
+                <div>
+                  <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
+                    2. Department *
+                  </label>
+                  <select
+                    value={rosterDepartment}
+                    onChange={(e) => {
+                      setRosterDepartment(e.target.value);
+                      setSelectedAllotmentId('');
+                    }}
+                    className="w-full bg-surface border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary font-medium"
+                  >
+                    <option value="All">All Departments</option>
+                    {VALID_DEPARTMENT_NAMES.map((dept) => (
+                      <option key={dept} value={dept}>
+                        {dept}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 3. Section Filter */}
+                <div>
+                  <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
+                    3. Section *
+                  </label>
+                  <div className="grid grid-cols-7 gap-1 bg-surface p-1.5 rounded-xl border border-borderLine">
+                    {['All', 'A', 'B', 'C', 'D', 'E', 'F'].map((sec) => (
+                      <button
+                        key={sec}
+                        type="button"
+                        onClick={() => {
+                          setRosterSection(sec);
+                          setSelectedAllotmentId('');
+                        }}
+                        className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
+                          rosterSection === sec
+                            ? 'bg-brand-primary text-white shadow-brand'
+                            : 'text-textSecondary hover:text-textPrimary hover:bg-surface-2'
+                        }`}
+                      >
+                        {sec}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 4. Target Subject Allotment Dropdown */}
+                <div>
+                  <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
+                    4. Target Subject Allotment *
+                  </label>
+                  <select
+                    value={selectedAllotmentId}
+                    onChange={(e) => setSelectedAllotmentId(e.target.value)}
+                    className="w-full bg-surface border border-brand-primary/50 text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary font-bold shadow-xs"
+                  >
+                    <option value="">-- Choose Subject Allocation --</option>
+                    {rosterAllotments
+                      .filter((a: SubjectAllotment) => {
+                        if (rosterSection !== 'All' && a.section !== rosterSection) return false;
+                        return true;
+                      })
+                      .map((a: SubjectAllotment) => (
+                        <option key={a.id} value={a.id}>
+                          [{a.department}] {a.subject_name} (Sec {a.section}) — {a.faculty_name} [{a.subject_type}]
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+
+              {selectedAllotmentId ? (
+                <div className="p-3 rounded-lg bg-brand-primary/10 border border-brand-primary/20 flex items-center justify-between text-xs">
+                  <span className="font-semibold text-brand-primary">
+                    Selected Subject Allotment: <strong>
+                      {rosterAllotments.find((a: SubjectAllotment) => a.id === selectedAllotmentId)?.subject_name} (Sec {rosterAllotments.find((a: SubjectAllotment) => a.id === selectedAllotmentId)?.section})
+                    </strong> — {rosterAllotments.find((a: SubjectAllotment) => a.id === selectedAllotmentId)?.faculty_name} ({rosterAllotments.find((a: SubjectAllotment) => a.id === selectedAllotmentId)?.department})
+                  </span>
+                  <span className="text-textSecondary font-mono">
+                    Current Roster: <strong>{rosterAllotments.find((a: SubjectAllotment) => a.id === selectedAllotmentId)?.roster_count || 0}</strong> students
+                  </span>
+                </div>
+              ) : (
+                <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-semibold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  Please select a Target Subject Allotment above to upload an Excel roster or add single students.
+                </div>
+              )}
+            </div>
+
+            {/* ── MODE 1: BULK EXCEL UPLOAD ── */}
+            {rosterMode === 'upload' && (
+              <div className="space-y-4 pt-2">
+                <div>
+                  <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
+                    Upload Student Roster Sheet (.xlsx)
+                  </label>
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    onChange={handleRosterFileChange}
+                    className="w-full text-xs text-textSecondary file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-brand-primary file:text-white hover:file:bg-brand-primary/90 cursor-pointer bg-surface-2 p-1 rounded-xl border border-borderLine"
+                  />
+                </div>
+
+                {parsedRoster.length > 0 && (
+                  <div className="p-4 rounded-xl bg-surface-2 border border-borderLine space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <p className="text-xs font-bold text-textPrimary flex items-center gap-2">
+                        <FileSpreadsheet className="w-4 h-4 text-brand-primary" />
+                        Parsed {parsedRoster.length} Student Roster Row(s)
+                      </p>
+                      <button
+                        onClick={handleUploadRoster}
+                        disabled={isUploadingRoster || !selectedAllotmentId}
+                        className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold text-white bg-brand-primary hover:bg-brand-primary/90 shadow-brand transition-all disabled:opacity-50"
+                      >
+                        {isUploadingRoster ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            Enrolling Students...
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            Confirm & Save Student Roster
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Preview Table */}
+                    <div className="max-h-48 overflow-y-auto rounded-lg border border-borderLine bg-surface text-[11px]">
+                      <table className="w-full text-left">
+                        <thead className="bg-surface-3 text-textMuted font-bold uppercase sticky top-0">
+                          <tr>
+                            <th className="py-2 px-3">#</th>
+                            <th className="py-2 px-3">Roll Number</th>
+                            <th className="py-2 px-3">Student Name</th>
+                            <th className="py-2 px-3">Date of Joining</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-borderLine">
+                          {parsedRoster.slice(0, 10).map((row: any, idx: number) => (
+                            <tr key={idx}>
+                              <td className="py-1.5 px-3 font-mono text-textMuted">{idx + 1}</td>
+                              <td className="py-1.5 px-3 font-bold font-mono text-brand-primary">{row.roll_number || row['Roll Number'] || row['Roll No']}</td>
+                              <td className="py-1.5 px-3 font-medium">{row.student_name || row['Student Name'] || row['Name'] || '—'}</td>
+                              <td className="py-1.5 px-3 font-mono text-textSecondary">{row.joining_date || row['Date of Joining'] || 'Default (Start)'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {rosterUploadStatus.type !== 'idle' && (
+                  <div
+                    className={`p-4 rounded-xl border ${
+                      rosterUploadStatus.type === 'success'
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                        : 'bg-alert-soft border-alert/30 text-alert'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2.5">
+                      {rosterUploadStatus.type === 'success' ? (
+                        <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                      )}
+                      <div className="text-xs space-y-1">
+                        <p className="font-bold">{rosterUploadStatus.message}</p>
+                        {rosterUploadStatus.details && rosterUploadStatus.details.length > 0 && (
+                          <div className="mt-2 space-y-1 max-h-32 overflow-y-auto text-[11px] opacity-90">
+                            {rosterUploadStatus.details.map((err, idx) => (
+                              <p key={idx}>
+                                • Row {err.row}: {err.reason}
+                              </p>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── MODE 2: SINGLE MANUAL STUDENT ENTRY FORM ── */}
+            {rosterMode === 'single' && (
+              <form onSubmit={handleSingleRosterSubmit} className="space-y-4 pt-2">
+                <div className="p-4 rounded-xl bg-surface-2 border border-borderLine space-y-4">
+                  <h4 className="text-xs font-bold text-textPrimary uppercase tracking-wider flex items-center gap-2">
+                    <UserPlus className="w-3.5 h-3.5 text-brand-primary" />
+                    Enroll Single Student to Subject Roster
+                  </h4>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5">
+                        Student Roll Number *
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 22091A3201"
+                        value={singleRosterRollNo}
+                        onChange={(e) => setSingleRosterRollNo(e.target.value)}
+                        className="w-full bg-surface border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary font-mono"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5">
+                        Student Name (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. K. Srinath Reddy"
+                        value={singleRosterStudentName}
+                        onChange={(e) => setSingleRosterStudentName(e.target.value)}
+                        className="w-full bg-surface border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5">
+                        Date of Joining (Optional for late joiner)
+                      </label>
+                      <input
+                        type="date"
+                        value={singleRosterJoiningDate}
+                        onChange={(e) => setSingleRosterJoiningDate(e.target.value)}
+                        className="w-full bg-surface border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-borderLine">
+                    <div className="text-xs">
+                      {singleRosterStatus.type === 'error' && (
+                        <p className="text-alert font-bold flex items-center gap-1.5">
+                          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                          {singleRosterStatus.message}
+                        </p>
+                      )}
+                      {singleRosterStatus.type === 'success' && (
+                        <p className="text-emerald-400 font-bold flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                          {singleRosterStatus.message}
+                        </p>
+                      )}
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isSubmittingSingleRoster || !selectedAllotmentId}
+                      className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold text-white bg-brand-primary hover:bg-brand-primary/90 shadow-brand transition-all disabled:opacity-50 shrink-0"
+                    >
+                      {isSubmittingSingleRoster ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          Enrolling Student...
+                        </>
+                      ) : (
+                        <>
+                          <UserPlus className="w-3.5 h-3.5" />
+                          Enroll Student to Subject
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            )}
+          </div>
+
+          {/* Roster Directory Table */}
+          <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-base font-bold text-textPrimary flex items-center gap-2">
+                  <Users className="w-4 h-4 text-brand-primary" />
+                  Subject Roster Directory — Semester {rosterSemester}
+                </h3>
+                <p className="text-xs text-textSecondary mt-0.5">
+                  Click on "Inspect & Manage Students" on any subject to view enrolled students, unassign wrongly added students, or edit joining dates.
+                </p>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-borderLine">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-surface-2 text-textMuted font-bold uppercase tracking-wider border-b border-borderLine">
+                  <tr>
+                    <th className="py-3 px-4">Subject Name</th>
+                    <th className="py-3 px-4">Type</th>
+                    <th className="py-3 px-4">Dept</th>
+                    <th className="py-3 px-4">Sec</th>
+                    <th className="py-3 px-4">Faculty Name</th>
+                    <th className="py-3 px-4 text-center">Enrolled Students</th>
+                    <th className="py-3 px-4 text-right">Roster Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-borderLine">
+                  {rosterAllotments.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-textMuted">
+                        No subject allocations found for Semester {rosterSemester}. Allocate subjects in Tab 1 first.
+                      </td>
+                    </tr>
+                  ) : (
+                    rosterAllotments.map((a: SubjectAllotment) => (
+                      <tr key={a.id} className="hover:bg-surface-2/40 transition-colors">
+                        <td className="py-3 px-4 font-bold text-textPrimary">{a.subject_name}</td>
+                        <td className="py-3 px-4">
+                          <span
+                            className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${
+                              a.subject_type === 'Lab'
+                                ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+                                : 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
+                            }`}
+                          >
+                            {a.subject_type}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 font-medium text-textSecondary">{a.department || 'General'}</td>
+                        <td className="py-3 px-4 font-bold text-textSecondary">{a.section || 'A'}</td>
+                        <td className="py-3 px-4 font-medium text-textPrimary">{a.faculty_name}</td>
+                        <td className="py-3 px-4 text-center">
+                          <span className="font-mono font-bold text-brand-primary">
+                            {a.roster_count || 0} Students
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <button
+                            onClick={() => setInspectAllotment(a)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-surface-2 hover:bg-surface-3 border border-borderLine text-textPrimary text-xs font-bold transition-all"
+                          >
+                            <Users className="w-3.5 h-3.5 text-brand-primary" />
+                            Inspect & Manage Students
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
