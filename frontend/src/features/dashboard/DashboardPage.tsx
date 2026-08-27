@@ -17,12 +17,14 @@ import {
   Bell,
   Sparkles,
   ArrowRight,
-  ShieldCheck,
   CheckCircle,
   Github,
   BarChart2,
   GraduationCap,
   BookOpen,
+  CalendarCheck,
+  CalendarDays,
+  AlertCircle,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { calculateProfileCompletion } from '../../lib/profileCompletion';
@@ -82,6 +84,12 @@ export const DashboardPage: React.FC = () => {
       )
     : null;
 
+  const liveOverallPct = attendanceSummary?.overall_percentage != null
+    ? attendanceSummary.overall_percentage
+    : avgAttendance != null
+    ? avgAttendance
+    : null;
+
   const latestSemGpa = validAcademics.length > 0
     ? Number(validAcademics[validAcademics.length - 1].semester_gpa).toFixed(2)
     : null;
@@ -137,6 +145,29 @@ export const DashboardPage: React.FC = () => {
           {/* Stat Cards Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <StatCard
+              icon={<CalendarCheck className="w-5 h-5" />}
+              iconBgColor={
+                liveOverallPct == null
+                  ? 'bg-surface-2 text-textSecondary'
+                  : liveOverallPct >= 75
+                  ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400'
+                  : liveOverallPct >= 65
+                  ? 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400'
+                  : 'bg-rose-50 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400'
+              }
+              accentColor={
+                liveOverallPct == null ? 'brand' : liveOverallPct >= 75 ? 'emerald' : liveOverallPct >= 65 ? 'amber' : 'alert'
+              }
+              label="Overall Attendance"
+              value={liveOverallPct != null ? `${liveOverallPct}%` : '0.0%'}
+              subtext={
+                attendanceSummary?.total_periods_held
+                  ? `${attendanceSummary.total_periods_attended} / ${attendanceSummary.total_periods_held} Periods Held`
+                  : 'Live Attendance Register'
+              }
+              onClick={() => navigate('/attendance')}
+            />
+            <StatCard
               icon={<GraduationCap className="w-5 h-5" />}
               iconBgColor="bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400"
               accentColor="emerald"
@@ -160,7 +191,7 @@ export const DashboardPage: React.FC = () => {
               accentColor="sky"
               label="Latest Sem GPA"
               value={latestSemGpa ? `${latestSemGpa} GPA` : '0.00 GPA'}
-              subtext={avgAttendance != null ? `Avg Attendance: ${avgAttendance}%` : 'Semester performance'}
+              subtext={liveOverallPct != null ? `Avg Attendance: ${liveOverallPct}%` : 'Semester performance'}
               onClick={role !== 'parent' ? () => navigate('/profile?tab=academics') : undefined}
             />
             <StatCard
@@ -181,15 +212,171 @@ export const DashboardPage: React.FC = () => {
               subtext={`${certifications.filter((c) => c.suggested).length} recommended certs`}
               onClick={role !== 'parent' ? () => navigate('/profile?tab=certifications') : undefined}
             />
-            <StatCard
-              icon={<Award className="w-5 h-5" />}
-              iconBgColor="bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400"
-              accentColor="amber"
-              label="Tech Skills Tracked"
-              value={techSkills.length}
-              subtext="Self & faculty verified skills"
-              onClick={role !== 'parent' ? () => navigate('/profile?tab=tech-skills') : undefined}
-            />
+          </div>
+
+          {/* ── DEDICATED OVERALL ATTENDANCE & LIVE SUBJECT REGISTER CARD ── */}
+          <div className="bg-surface border border-borderLine rounded-2xl p-6 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 ${
+                  liveOverallPct == null || liveOverallPct >= 75
+                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                    : liveOverallPct >= 65
+                    ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                    : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                }`}>
+                  <CalendarCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm font-bold text-textPrimary">Semester Attendance & Live Subject Register</h3>
+                    {liveOverallPct != null && (
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                        liveOverallPct >= 75
+                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                          : liveOverallPct >= 65
+                          ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                          : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                      }`}>
+                        {liveOverallPct >= 75 ? '✓ Exam Eligible (≥75%)' : liveOverallPct >= 65 ? '⚠️ Condonation Risk (<75%)' : '🚨 Ineligible (<65%)'}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-textSecondary mt-0.5">
+                    Real-time period-by-period tracking across all registered theory and laboratory courses.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => navigate('/attendance')}
+                className="text-xs font-semibold text-brand-primary hover:underline flex items-center gap-1 shrink-0 self-start sm:self-auto"
+              >
+                <span>View Day-Wise Matrix</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Visual Aggregate Bar & Stat Summary */}
+            <div className="p-4 rounded-xl bg-surface-2 border border-borderLine space-y-3">
+              <div className="flex items-end justify-between">
+                <div>
+                  <p className="text-[11px] font-bold text-textMuted uppercase tracking-wider">Overall Aggregate</p>
+                  <p className="text-2xl font-black font-mono text-textPrimary mt-0.5">
+                    {liveOverallPct != null ? `${liveOverallPct}%` : '0.0%'}
+                  </p>
+                </div>
+
+                {attendanceSummary && (
+                  <div className="text-right text-xs">
+                    <p className="text-textSecondary">
+                      Attended: <strong className="text-emerald-400 font-mono">{attendanceSummary.total_periods_attended}</strong> / {attendanceSummary.total_periods_held} Periods Held
+                    </p>
+                    <p className="text-[11px] text-rose-400 font-mono">
+                      {attendanceSummary.total_periods_held - attendanceSummary.total_periods_attended} Absence{(attendanceSummary.total_periods_held - attendanceSummary.total_periods_attended) === 1 ? '' : 's'}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Dual Progress Bar */}
+              <div className="h-3 w-full rounded-full bg-surface overflow-hidden flex border border-borderLine/50">
+                <div
+                  className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full transition-all duration-500"
+                  style={{ width: `${Math.min(100, liveOverallPct ?? 0)}%` }}
+                  title={`Present: ${liveOverallPct ?? 0}%`}
+                />
+                <div
+                  className="bg-rose-500/80 h-full transition-all duration-500"
+                  style={{ width: `${Math.max(0, 100 - (liveOverallPct ?? 0))}%` }}
+                  title={`Absent: ${Math.max(0, 100 - (liveOverallPct ?? 0))}%`}
+                />
+              </div>
+
+              <div className="flex items-center justify-between text-[11px] text-textSecondary pt-1">
+                <span className="flex items-center gap-1.5 font-medium">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
+                  Present: <strong>{liveOverallPct ?? 0}%</strong>
+                </span>
+                <span className="flex items-center gap-1.5 font-medium">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block" />
+                  Absent: <strong>{liveOverallPct != null ? (Math.round((100 - liveOverallPct) * 10) / 10) : 0}%</strong>
+                </span>
+                <span className="font-semibold text-textMuted">
+                  Required: 75.0%
+                </span>
+              </div>
+            </div>
+
+            {/* Subject Breakdown Table / List */}
+            {attendanceSummary?.subjects && attendanceSummary.subjects.length > 0 ? (
+              <div className="overflow-x-auto rounded-xl border border-borderLine">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-surface-2 text-textMuted font-bold uppercase tracking-wider border-b border-borderLine">
+                    <tr>
+                      <th className="py-2.5 px-3.5">Subject</th>
+                      <th className="py-2.5 px-3.5">Type</th>
+                      <th className="py-2.5 px-3.5">Faculty</th>
+                      <th className="py-2.5 px-3.5 text-center">Attended / Held</th>
+                      <th className="py-2.5 px-3.5 text-center">Attendance %</th>
+                      <th className="py-2.5 px-3.5 text-right">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-borderLine">
+                    {attendanceSummary.subjects.map((sub: any) => {
+                      const subPct = sub.percentage;
+                      const isSubGood = subPct >= 75;
+                      const isSubWarn = subPct >= 65 && subPct < 75;
+
+                      return (
+                        <tr key={sub.allotment_id} className="hover:bg-surface-2/40 transition-colors">
+                          <td className="py-2.5 px-3.5 font-bold text-textPrimary">{sub.subject_name}</td>
+                          <td className="py-2.5 px-3.5">
+                            <span className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${
+                              sub.subject_type === 'Lab'
+                                ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+                                : 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
+                            }`}>
+                              {sub.subject_type}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3.5 text-textSecondary font-medium">{sub.faculty_name}</td>
+                          <td className="py-2.5 px-3.5 text-center font-mono font-bold">
+                            <span className="text-emerald-400">{sub.periods_attended}</span> / <span className="text-textSecondary">{sub.periods_held}</span>
+                          </td>
+                          <td className="py-2.5 px-3.5 text-center font-mono font-black">
+                            <span className={`px-2 py-0.5 rounded-md ${
+                              isSubGood
+                                ? 'bg-emerald-500/10 text-emerald-400'
+                                : isSubWarn
+                                ? 'bg-amber-500/10 text-amber-400'
+                                : 'bg-red-500/10 text-red-400'
+                            }`}>
+                              {subPct}%
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3.5 text-right">
+                            {isSubGood ? (
+                              <span className="text-emerald-400 font-bold text-[11px] inline-flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3" /> Eligible
+                              </span>
+                            ) : (
+                              <span className="text-rose-400 font-bold text-[11px] inline-flex items-center gap-1">
+                                <AlertCircle className="w-3 h-3" /> Deficit
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="py-6 text-center text-xs text-textMuted bg-surface-2/40 rounded-xl border border-dashed border-borderLine">
+                No attendance session records published yet for your registered courses.
+              </div>
+            )}
           </div>
 
           {/* Semester GPA & CGPA Progress Summary Card */}
