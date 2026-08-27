@@ -6960,7 +6960,59 @@ app.get('/coordinator/freshers', requireRole('coordinator', 'admin'), async (req
   }
 });
 
-// 19h. Coordinator & Admin: 1st Year Freshers KPI Statistics
+// GET /coordinator/freshers/duplicates — Detect duplicate 1st-year fresher entries
+// Duplicates = same (LOWER(name) + department + section) OR same personal_mobile
+app.get('/coordinator/freshers/duplicates', requireRole('coordinator', 'admin'), async (_req: Request, res: Response) => {
+  try {
+    const result = await db.query(`
+      SELECT
+        s.roll_number,
+        s.admission_id,
+        s.name,
+        s.email,
+        s.dob,
+        s.personal_mobile,
+        s.personal_email,
+        s.department,
+        s.section,
+        s.username,
+        s.migration_stage,
+        s.created_at,
+        CASE
+          WHEN s.personal_mobile IS NOT NULL AND s.personal_mobile != ''
+            AND (SELECT COUNT(*) FROM students s2 WHERE s2.year = '1st Year' AND s2.personal_mobile = s.personal_mobile) > 1
+          THEN 'duplicate_mobile'
+          ELSE 'duplicate_name'
+        END AS duplicate_reason
+      FROM students s
+      WHERE s.year = '1st Year'
+        AND (
+          -- Same mobile used by multiple students
+          (
+            s.personal_mobile IS NOT NULL
+            AND s.personal_mobile != ''
+            AND (SELECT COUNT(*) FROM students s2 WHERE s2.year = '1st Year' AND s2.personal_mobile = s.personal_mobile) > 1
+          )
+          OR
+          -- Same name + department + section (uploaded twice)
+          (
+            (SELECT COUNT(*) FROM students s2
+             WHERE s2.year = '1st Year'
+               AND LOWER(TRIM(s2.name)) = LOWER(TRIM(s.name))
+               AND LOWER(s2.department) = LOWER(s.department)
+               AND UPPER(COALESCE(s2.section, 'A')) = UPPER(COALESCE(s.section, 'A'))
+            ) > 1
+          )
+        )
+      ORDER BY s.department ASC, s.section ASC, LOWER(s.name) ASC, s.created_at ASC
+    `);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 app.get('/coordinator/freshers/stats', requireRole('coordinator', 'admin'), async (_req: Request, res: Response) => {
   try {
     const totalRes = await db.query(`SELECT COUNT(*) as count FROM students WHERE year = '1st Year'`);

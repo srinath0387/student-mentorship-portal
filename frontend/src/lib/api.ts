@@ -916,6 +916,10 @@ export const api = {
     return fetchWithAuth('/coordinator/freshers/stats');
   },
 
+  getFresherDuplicates: async (): Promise<any[]> => {
+    return fetchWithAuth('/coordinator/freshers/duplicates');
+  },
+
   assignClassIncharge: async (data: {
     semester_label: '1-1' | '1-2';
     department: string;

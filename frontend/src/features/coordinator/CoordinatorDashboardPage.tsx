@@ -620,6 +620,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
                     <th className="py-3 px-4">Personal Contact</th>
                     <th className="py-3 px-4">Active Login Email / User</th>
                     <th className="py-3 px-4">Migration Stage</th>
+                    <th className="py-3 px-4">🔑 Login Credentials</th>
                     <th className="py-3 px-4 text-center">Attendance %</th>
                     <th className="py-3 px-4 text-right">360 Profile</th>
                   </tr>
@@ -627,13 +628,13 @@ export const CoordinatorDashboardPage: React.FC = () => {
                 <tbody className="divide-y divide-borderLine">
                   {freshersLoading ? (
                     <tr>
-                      <td colSpan={9} className="py-12 text-center text-textMuted">
+                      <td colSpan={10} className="py-12 text-center text-textMuted">
                         Loading 1st-year freshers directory...
                       </td>
                     </tr>
                   ) : freshers.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="py-12 text-center text-textMuted">
+                      <td colSpan={10} className="py-12 text-center text-textMuted">
                         No 1st-year freshers found matching the selected filters.
                       </td>
                     </tr>
@@ -679,6 +680,26 @@ export const CoordinatorDashboardPage: React.FC = () => {
                               Stage 0 (Admission ID)
                             </span>
                           )}
+                        </td>
+                        <td className="py-3 px-4 font-mono text-[11px]">
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1 text-textPrimary">
+                              <span className="text-textMuted text-[10px]">User:</span>
+                              <span className="font-semibold text-pink-400">{st.username || st.personal_mobile || st.admission_id || st.roll_number}</span>
+                            </div>
+                            <div className="flex items-center gap-1 text-textSecondary">
+                              <span className="text-textMuted text-[10px]">Pass:</span>
+                              <span className="font-semibold text-emerald-400">
+                                {st.dob ? (() => {
+                                  const d = new Date(st.dob);
+                                  const day = String(d.getDate()).padStart(2, '0');
+                                  const mon = String(d.getMonth() + 1).padStart(2, '0');
+                                  const yr = d.getFullYear();
+                                  return `${day}${mon}${yr}`;
+                                })() : 'DOB (DDMMYYYY)'}
+                              </span>
+                            </div>
+                          </div>
                         </td>
                         <td className="py-3 px-4 text-center">
                           <span
