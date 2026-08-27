@@ -451,4 +451,105 @@ export interface YearAttendanceReportResponse {
   generatedAt: string;
 }
 
+// ── MODULE 4: Subjects Handled (Results) ────────────────────────────────────
+export interface FacultySubjectHandledRecord {
+  id: string;
+  faculty_email: string;
+  year_batch: string; // e.g. 'I B.Tech. II Sem. & 2025'
+  section: string;    // e.g. 'A'
+  subject: string;    // e.g. 'DS Lab'
+  branch: string;     // e.g. 'CSE (DS)'
+  registered: number;
+  appeared: number;
+  failed: number;
+  pass_percentage: number;
+  highest_marks: number;
+  created_at?: string;
+}
 
+// ── MODULE 5: Holiday Calendar ──────────────────────────────────────────────
+export interface HolidayCalendarEntry {
+  id: string;
+  date: string; // YYYY-MM-DD
+  title: string;
+  type: string;
+  created_at?: string;
+}
+
+// ── MODULE 5: Faculty Leaves & Adjustments ──────────────────────────────────
+export type FacultyLeaveType = 'Casual Leave' | 'Academic Leave' | 'SP CL' | 'Paid Leave';
+export type LeaveStatus = 'Pending' | 'Approved' | 'Rejected';
+
+export interface FacultyLeaveAdjustment {
+  id?: string;
+  leave_id?: string;
+  adjustment_type: 'classwork' | 'exam_duty';
+  date: string; // YYYY-MM-DD
+  subject_or_duty: string;
+  timing_slot: string;
+  reassigned_faculty_email: string;
+  reassigned_faculty_name: string;
+  original_faculty_name?: string;
+  original_faculty_email?: string;
+  department?: string;
+  leave_type?: string;
+  leave_status?: LeaveStatus;
+}
+
+export interface FacultyLeaveRecord {
+  id: string;
+  faculty_email: string;
+  faculty_name: string;
+  department: string;
+  leave_type: FacultyLeaveType;
+  from_date: string;
+  to_date: string;
+  num_days: number;
+  reason: string;
+  status: LeaveStatus;
+  hod_remarks?: string;
+  approved_by?: string;
+  approved_at?: string;
+  created_at: string;
+  adjustments?: FacultyLeaveAdjustment[];
+}
+
+export interface FacultyLeaveSummaryResponse {
+  faculty_email: string;
+  year: number;
+  balances: {
+    'Casual Leave': { quota: number; used: number; remaining: number };
+    'Academic Leave': { quota: number; used: number; remaining: number };
+    'SP CL': { quota: number; used: number; remaining: number };
+    'Paid Leave': { quota: number; used: number; remaining: number };
+  };
+  leaves: FacultyLeaveRecord[];
+}
+
+// ── MODULE 5: Student Permissions (On-Duty / Leaves) ────────────────────────
+export type StudentPermissionType =
+  | 'Attending Workshop'
+  | 'Conference'
+  | 'Industry Visit'
+  | 'Hackathon'
+  | 'Others';
+
+export interface StudentPermissionRecord {
+  id: string;
+  roll_number: string;
+  student_name: string;
+  department: string;
+  section: string;
+  year: string;
+  permission_type: StudentPermissionType;
+  from_date: string;
+  to_date: string;
+  num_days: number;
+  reason: string;
+  proof_url: string;
+  status: LeaveStatus;
+  hod_remarks?: string;
+  approved_by?: string;
+  approved_at?: string;
+  created_at: string;
+}

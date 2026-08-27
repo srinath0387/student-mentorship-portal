@@ -24,6 +24,7 @@ import { SoftSkillsTab } from './tabs/SoftSkillsTab';
 import { AchievementsTab } from './tabs/AchievementsTab';
 import { PlacementPreferencesTab } from './tabs/PlacementPreferencesTab';
 import { AttendanceTrackingTab } from '../attendance/AttendanceTrackingTab';
+import { StudentPermissionTab } from '../leave/StudentPermissionTab';
 
 export const ProfilePage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -95,6 +96,7 @@ export const ProfilePage: React.FC = () => {
   const tabs = [
     { slug: 'personal-info', label: 'Personal Info', icon: User },
     { slug: 'attendance', label: 'Attendance & Periods', icon: CalendarCheck },
+    { slug: 'permissions', label: 'On-Duty Permissions', icon: CalendarCheck },
     { slug: 'academics', label: 'Academics', icon: BookOpen },
     { slug: 'coding-profiles', label: 'Coding Profiles', icon: Code2 },
     { slug: 'tech-skills', label: 'Tech Skills', icon: Cpu },
@@ -232,6 +234,7 @@ export const ProfilePage: React.FC = () => {
         <div className="p-6">
           {currentTab === 'personal-info' && <PersonalInfoTab student={student} academics={academics} onRefresh={handleRefreshAll} readOnly={isReadOnly} />}
           {currentTab === 'attendance' && <AttendanceTrackingTab role={user?.role || 'student'} targetRollNumber={activeRollNo} />}
+          {currentTab === 'permissions' && <StudentPermissionTab rollNumber={activeRollNo} />}
           {currentTab === 'academics' && <AcademicsTab academics={academics} studentYear={student?.year} onRefresh={handleRefreshAll} readOnly={isReadOnly} />}
           {currentTab === 'tech-skills' && <TechSkillsTab skills={techSkills} onRefresh={handleRefreshAll} readOnly={isReadOnly} />}
           {currentTab === 'certifications' && <CertificationsTab certifications={certifications} onRefresh={handleRefreshAll} readOnly={isReadOnly} />}

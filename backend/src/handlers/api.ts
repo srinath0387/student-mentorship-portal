@@ -5101,12 +5101,28 @@ app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin'), async (
       sessionId = ins.rows[0].id;
     }
 
+    // Check for approved student permissions (On-Duty / Leaves) active on session_date
+    let approvedODRolls = new Set<string>();
+    try {
+      const odRes = await db.query(
+        `SELECT roll_number FROM student_permissions 
+         WHERE status = 'Approved' 
+           AND $1::date >= from_date 
+           AND $1::date <= to_date`,
+        [session_date]
+      );
+      approvedODRolls = new Set(odRes.rows.map((r: any) => r.roll_number?.trim().toUpperCase()));
+    } catch (_) { /* ignore if table not created yet */ }
+
     // Insert or update individual student records
     let presentCount = 0;
     for (const rec of records) {
       const rollNumber = rec.roll_number?.trim().toUpperCase();
-      const isPresent = Boolean(rec.is_present);
       if (!rollNumber) continue;
+
+      // If student has an approved permission on this date, auto-lock as present (On-Duty)
+      const hasApprovedPermission = approvedODRolls.has(rollNumber);
+      const isPresent = hasApprovedPermission || Boolean(rec.is_present);
       if (isPresent) presentCount++;
 
       await db.query(
@@ -7105,10 +7121,707 @@ app.post('/coordinator/promote-section', requireRole('coordinator', 'admin'), as
   }
 });
 
+// ============================================================================
+// MODULE 4: Faculty Profile — Subjects Handled (Results)
+// MODULE 5: Leave Management (Faculty + Student) Approved by HOD + Holiday Calendar
+// ============================================================================
+
+const ensureLeaveAndSubjectsHandledTables = async () => {
+  if (db.isMock) return;
+  try {
+    // 1. Faculty Subjects Handled (Results)
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS faculty_subjects_handled (
+        id TEXT PRIMARY KEY,
+        faculty_email TEXT NOT NULL,
+        year_batch TEXT NOT NULL,
+        section TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        branch TEXT NOT NULL,
+        registered INT NOT NULL DEFAULT 0,
+        appeared INT NOT NULL DEFAULT 0,
+        failed INT NOT NULL DEFAULT 0,
+        pass_percentage NUMERIC(5,2) NOT NULL DEFAULT 0,
+        highest_marks NUMERIC(5,2) NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // 2. Holiday Calendar
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS holiday_calendar (
+        id TEXT PRIMARY KEY,
+        date DATE UNIQUE NOT NULL,
+        title TEXT NOT NULL,
+        type TEXT DEFAULT 'Holiday',
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Seed default holidays if table is empty
+    const holCount = await db.query('SELECT COUNT(*) FROM holiday_calendar');
+    if (parseInt(holCount.rows[0]?.count || '0') === 0) {
+      const defaultHolidays = [
+        { id: 'HOL_01', date: '2025-01-01', title: 'New Year Day' },
+        { id: 'HOL_02', date: '2025-01-14', title: 'Bhogi' },
+        { id: 'HOL_03', date: '2025-01-15', title: 'Makara Sankranti' },
+        { id: 'HOL_04', date: '2025-01-26', title: 'Republic Day' },
+        { id: 'HOL_05', date: '2025-02-26', title: 'Maha Shivaratri' },
+        { id: 'HOL_06', date: '2025-03-14', title: 'Holi' },
+        { id: 'HOL_07', date: '2025-03-30', title: 'Ugadi' },
+        { id: 'HOL_08', date: '2025-03-31', title: 'Ramzan (Eid-ul-Fitr)' },
+        { id: 'HOL_09', date: '2025-04-05', title: 'Babu Jagjivan Ram Birthday' },
+        { id: 'HOL_10', date: '2025-04-14', title: 'Dr. B.R. Ambedkar Birthday' },
+        { id: 'HOL_11', date: '2025-04-18', title: 'Good Friday' },
+        { id: 'HOL_12', date: '2025-08-15', title: 'Independence Day' },
+        { id: 'HOL_13', date: '2025-08-27', title: 'Vinayaka Chavithi' },
+        { id: 'HOL_14', date: '2025-10-02', title: 'Mahatma Gandhi Birthday' },
+        { id: 'HOL_15', date: '2025-10-02', title: 'Vijaya Dasami / Dussehra' },
+        { id: 'HOL_16', date: '2025-10-20', title: 'Deepavali' },
+        { id: 'HOL_17', date: '2025-12-25', title: 'Christmas' },
+      ];
+      for (const h of defaultHolidays) {
+        await db.query(
+          `INSERT INTO holiday_calendar (id, date, title) VALUES ($1, $2, $3) ON CONFLICT (date) DO NOTHING`,
+          [h.id, h.date, h.title]
+        ).catch(() => {});
+      }
+    }
+
+    // 3. Faculty Leaves
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS faculty_leaves (
+        id TEXT PRIMARY KEY,
+        faculty_email TEXT NOT NULL,
+        faculty_name TEXT NOT NULL,
+        department TEXT NOT NULL,
+        leave_type TEXT NOT NULL,
+        from_date DATE NOT NULL,
+        to_date DATE NOT NULL,
+        num_days NUMERIC(4,1) NOT NULL,
+        reason TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'Pending',
+        hod_remarks TEXT,
+        approved_by TEXT,
+        approved_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // 4. Faculty Leave Adjustments (Classwork & Exam Duty)
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS faculty_leave_adjustments (
+        id TEXT PRIMARY KEY,
+        leave_id TEXT NOT NULL REFERENCES faculty_leaves(id) ON DELETE CASCADE,
+        adjustment_type TEXT NOT NULL,
+        date DATE NOT NULL,
+        subject_or_duty TEXT NOT NULL,
+        timing_slot TEXT NOT NULL,
+        reassigned_faculty_email TEXT NOT NULL,
+        reassigned_faculty_name TEXT NOT NULL
+      );
+    `);
+
+    // 5. Student Permissions (On-Duty / Leaves)
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS student_permissions (
+        id TEXT PRIMARY KEY,
+        roll_number TEXT NOT NULL,
+        student_name TEXT NOT NULL,
+        department TEXT NOT NULL,
+        section TEXT NOT NULL,
+        year TEXT NOT NULL,
+        permission_type TEXT NOT NULL,
+        from_date DATE NOT NULL,
+        to_date DATE NOT NULL,
+        num_days INT NOT NULL,
+        reason TEXT NOT NULL,
+        proof_url TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'Pending',
+        hod_remarks TEXT,
+        approved_by TEXT,
+        approved_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  } catch (err: any) {
+    console.warn('[Schema] Failed to ensure leave/subjects handled tables:', err.message);
+  }
+};
+
+// ── SUBJECTS HANDLED ENDPOINTS ──────────────────────────────────────────────
+
+// GET /faculty/subjects-handled/:email — Get all subject result records for a faculty
+app.get('/faculty/subjects-handled/:email', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const email = req.params.email.toLowerCase().trim();
+    const result = await db.query(
+      `SELECT * FROM faculty_subjects_handled 
+       WHERE LOWER(faculty_email) = $1 
+       ORDER BY created_at DESC, year_batch DESC`,
+      [email]
+    );
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /faculty/subjects-handled/:email — Add single or bulk subject handled records
+app.post('/faculty/subjects-handled/:email', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const email = req.params.email.toLowerCase().trim();
+    const rawData = req.body;
+    const rows = Array.isArray(rawData) ? rawData : (Array.isArray(rawData.rows) ? rawData.rows : [rawData]);
+
+    if (rows.length === 0) {
+      return res.status(400).json({ error: 'No subject records provided' });
+    }
+
+    const inserted: any[] = [];
+    for (const r of rows) {
+      const id = r.id || `SUBJ_RES_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const yearBatch = String(r.year_batch || r.year || '').trim();
+      const section = String(r.section || 'A').trim().toUpperCase();
+      const subject = String(r.subject || r.subject_name || '').trim();
+      const branch = String(r.branch || r.department || '').trim();
+      const registered = parseInt(r.registered || r.registered_count || '0');
+      const appeared = parseInt(r.appeared || r.appeared_count || '0');
+      const failed = parseInt(r.failed || r.failed_count || '0');
+      let passPct = parseFloat(r.pass_percentage || r.pass_pct || '0');
+      if (!passPct && appeared > 0) {
+        passPct = Math.round(((appeared - failed) / appeared) * 10000) / 100;
+      }
+      const highest = parseFloat(r.highest_marks || r.highest || '0');
+
+      if (!yearBatch || !subject) continue;
+
+      const ins = await db.query(
+        `INSERT INTO faculty_subjects_handled 
+         (id, faculty_email, year_batch, section, subject, branch, registered, appeared, failed, pass_percentage, highest_marks)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         RETURNING *`,
+        [id, email, yearBatch, section, subject, branch, registered, appeared, failed, passPct, highest]
+      );
+      inserted.push(ins.rows[0]);
+    }
+
+    res.json({
+      success: true,
+      message: `Successfully saved ${inserted.length} subject handled record(s).`,
+      records: inserted,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /faculty/subjects-handled/:id — Delete a record
+app.delete('/faculty/subjects-handled/:id', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const { id } = req.params;
+    await db.query('DELETE FROM faculty_subjects_handled WHERE id = $1', [id]);
+    res.json({ success: true, message: 'Record deleted successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── HOLIDAY CALENDAR ENDPOINTS ──────────────────────────────────────────────
+
+// GET /holidays — Get all recorded holidays
+app.get('/holidays', requireAuth, async (_req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const result = await db.query('SELECT * FROM holiday_calendar ORDER BY date ASC');
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /holidays — Add a holiday (Admin)
+app.post('/holidays', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const { date, title, type } = req.body;
+    if (!date || !title) return res.status(400).json({ error: 'Date and Title are required' });
+
+    const id = `HOL_${Date.now()}`;
+    const ins = await db.query(
+      `INSERT INTO holiday_calendar (id, date, title, type)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (date) DO UPDATE SET title = EXCLUDED.title, type = EXCLUDED.type
+       RETURNING *`,
+      [id, date, title.trim(), type || 'Holiday']
+    );
+    res.json({ success: true, holiday: ins.rows[0] });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /holidays/:id — Delete a holiday (Admin)
+app.delete('/holidays/:id', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const { id } = req.params;
+    await db.query('DELETE FROM holiday_calendar WHERE id = $1', [id]);
+    res.json({ success: true, message: 'Holiday deleted' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Helper: calculate working days between two dates excluding Sundays and holidays
+const calculateLeaveDaysFromDb = async (fromDateStr: string, toDateStr: string): Promise<number> => {
+  const holidaysRes = await db.query('SELECT date FROM holiday_calendar');
+  const holidaySet = new Set(
+    holidaysRes.rows.map((r: any) => {
+      return typeof r.date === 'string' ? r.date.split('T')[0] : new Date(r.date).toISOString().split('T')[0];
+    })
+  );
+
+  const start = new Date(fromDateStr);
+  const end = new Date(toDateStr);
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) return 0;
+
+  let days = 0;
+  const cur = new Date(start);
+  while (cur <= end) {
+    const dayOfWeek = cur.getDay(); // 0 is Sunday
+    const curIso = cur.toISOString().split('T')[0];
+
+    // Skip Sundays and declared holidays
+    if (dayOfWeek !== 0 && !holidaySet.has(curIso)) {
+      days++;
+    }
+    cur.setDate(cur.getDate() + 1);
+  }
+  return days;
+};
+
+// ── FACULTY LEAVE MANAGEMENT ENDPOINTS ──────────────────────────────────────
+
+const LEAVE_QUOTAS: Record<string, number> = {
+  'Casual Leave': 15,
+  'Academic Leave': 6,
+  'SP CL': 7,
+  'Paid Leave': 999, // Unlimited / Loss of pay fallback
+};
+
+// GET /faculty/leaves/my-summary — Current faculty's leave balances & history
+app.get('/faculty/leaves/my-summary', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const email = req.auth?.email?.toLowerCase().trim();
+    if (!email) return res.status(401).json({ error: 'Unauthorized' });
+
+    const currentYear = new Date().getFullYear();
+    const yearStart = `${currentYear}-01-01`;
+    const yearEnd = `${currentYear}-12-31`;
+
+    // Fetch leaves taken in current year
+    const leavesRes = await db.query(
+      `SELECT * FROM faculty_leaves 
+       WHERE LOWER(faculty_email) = $1 
+         AND from_date >= $2 
+         AND from_date <= $3
+       ORDER BY created_at DESC`,
+      [email, yearStart, yearEnd]
+    );
+
+    const leaves = leavesRes.rows;
+
+    // Fetch adjustments for these leaves
+    const leaveIds = leaves.map((l: any) => l.id);
+    let adjustments: any[] = [];
+    if (leaveIds.length > 0) {
+      const adjRes = await db.query(
+        `SELECT * FROM faculty_leave_adjustments WHERE leave_id = ANY($1)`,
+        [leaveIds]
+      );
+      adjustments = adjRes.rows;
+    }
+
+    const leavesWithAdj = leaves.map((l: any) => ({
+      ...l,
+      adjustments: adjustments.filter((a: any) => a.leave_id === l.id),
+    }));
+
+    // Compute used balances (Approved + Pending applications)
+    const usedCounts: Record<string, number> = {
+      'Casual Leave': 0,
+      'Academic Leave': 0,
+      'SP CL': 0,
+      'Paid Leave': 0,
+    };
+
+    leaves.forEach((l: any) => {
+      if (l.status === 'Approved' || l.status === 'Pending') {
+        const type = l.leave_type;
+        const days = parseFloat(l.num_days || '0');
+        if (usedCounts[type] !== undefined) {
+          usedCounts[type] += days;
+        }
+      }
+    });
+
+    const balances = {
+      'Casual Leave': {
+        quota: LEAVE_QUOTAS['Casual Leave'],
+        used: usedCounts['Casual Leave'],
+        remaining: Math.max(0, LEAVE_QUOTAS['Casual Leave'] - usedCounts['Casual Leave']),
+      },
+      'Academic Leave': {
+        quota: LEAVE_QUOTAS['Academic Leave'],
+        used: usedCounts['Academic Leave'],
+        remaining: Math.max(0, LEAVE_QUOTAS['Academic Leave'] - usedCounts['Academic Leave']),
+      },
+      'SP CL': {
+        quota: LEAVE_QUOTAS['SP CL'],
+        used: usedCounts['SP CL'],
+        remaining: Math.max(0, LEAVE_QUOTAS['SP CL'] - usedCounts['SP CL']),
+      },
+      'Paid Leave': {
+        quota: 0,
+        used: usedCounts['Paid Leave'],
+        remaining: 999,
+      },
+    };
+
+    res.json({
+      faculty_email: email,
+      year: currentYear,
+      balances,
+      leaves: leavesWithAdj,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /faculty/leaves/reassigned-duties — Get duties reassigned to the current faculty
+app.get('/faculty/leaves/reassigned-duties', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const email = req.auth?.email?.toLowerCase().trim();
+    if (!email) return res.status(401).json({ error: 'Unauthorized' });
+
+    const result = await db.query(
+      `SELECT 
+         a.*,
+         l.faculty_name AS original_faculty_name,
+         l.faculty_email AS original_faculty_email,
+         l.department,
+         l.leave_type,
+         l.status AS leave_status
+       FROM faculty_leave_adjustments a
+       JOIN faculty_leaves l ON l.id = a.leave_id
+       WHERE LOWER(a.reassigned_faculty_email) = $1
+       ORDER BY a.date DESC`,
+      [email]
+    );
+
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /faculty/leaves/apply — Apply for leave with classwork & exam duty adjustments
+app.post('/faculty/leaves/apply', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const email = req.auth?.email?.toLowerCase().trim();
+    const { leave_type, from_date, to_date, reason, adjustments = [] } = req.body;
+
+    if (!email || !leave_type || !from_date || !to_date || !reason) {
+      return res.status(400).json({ error: 'Leave type, from date, to date, and reason are required' });
+    }
+
+    // Auto-calculate days excluding holidays & Sundays
+    const calculatedDays = await calculateLeaveDaysFromDb(from_date, to_date);
+    if (calculatedDays <= 0) {
+      return res.status(400).json({ error: 'The selected date range contains 0 working days (all dates fall on Sundays/holidays).' });
+    }
+
+    // Check balance if not Paid Leave
+    if (leave_type !== 'Paid Leave') {
+      const currentYear = new Date().getFullYear();
+      const usedRes = await db.query(
+        `SELECT COALESCE(SUM(num_days), 0) AS total_used 
+         FROM faculty_leaves 
+         WHERE LOWER(faculty_email) = $1 
+           AND leave_type = $2 
+           AND (status = 'Approved' OR status = 'Pending')
+           AND from_date >= $3 AND from_date <= $4`,
+        [email, leave_type, `${currentYear}-01-01`, `${currentYear}-12-31`]
+      );
+      const usedDays = parseFloat(usedRes.rows[0]?.total_used || '0');
+      const maxQuota = LEAVE_QUOTAS[leave_type] || 0;
+      const remaining = maxQuota - usedDays;
+
+      if (calculatedDays > remaining) {
+        return res.status(400).json({
+          error: `Insufficient leave balance. You have ${Math.max(0, remaining)} day(s) remaining for ${leave_type}, but requested ${calculatedDays} day(s). You may apply as 'Paid Leave' instead.`,
+          remaining,
+          requested: calculatedDays,
+          allowPaidLeave: true,
+        });
+      }
+    }
+
+    // Fetch faculty metadata
+    const facRes = await db.query('SELECT name, department FROM faculty WHERE LOWER(email) = $1 LIMIT 1', [email]);
+    const fac = facRes.rows[0] || { name: email.split('@')[0], department: 'CSE (Data Science)' };
+
+    const leaveId = `FAC_LV_${Date.now()}`;
+    const insLeave = await db.query(
+      `INSERT INTO faculty_leaves 
+       (id, faculty_email, faculty_name, department, leave_type, from_date, to_date, num_days, reason, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'Pending')
+       RETURNING *`,
+      [leaveId, email, fac.name, fac.department, leave_type, from_date, to_date, calculatedDays, reason.trim()]
+    );
+
+    // Save adjustments
+    const savedAdj: any[] = [];
+    if (Array.isArray(adjustments)) {
+      for (const adj of adjustments) {
+        if (!adj.date || !adj.reassigned_faculty_email) continue;
+        const adjId = `ADJ_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        const insAdj = await db.query(
+          `INSERT INTO faculty_leave_adjustments 
+           (id, leave_id, adjustment_type, date, subject_or_duty, timing_slot, reassigned_faculty_email, reassigned_faculty_name)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           RETURNING *`,
+          [
+            adjId,
+            leaveId,
+            adj.adjustment_type || 'classwork',
+            adj.date,
+            adj.subject_or_duty || 'Classwork',
+            adj.timing_slot || 'Regular Slot',
+            adj.reassigned_faculty_email.toLowerCase().trim(),
+            adj.reassigned_faculty_name || adj.reassigned_faculty_email,
+          ]
+        );
+        savedAdj.push(insAdj.rows[0]);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Leave application submitted (${calculatedDays} working days) and sent to HOD for approval.`,
+      leave: {
+        ...insLeave.rows[0],
+        adjustments: savedAdj,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /hod/leaves/faculty — HOD fetch faculty leave requests (filtered by HOD department or all for admin)
+app.get('/hod/leaves/faculty', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const callerRole = req.auth?.role;
+    const callerDept = req.auth?.department;
+
+    let query = `SELECT * FROM faculty_leaves WHERE 1=1`;
+    const params: any[] = [];
+
+    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+      params.push(callerDept);
+      query += ` AND (LOWER(REPLACE(department, ' ', '')) ILIKE '%' || LOWER(REPLACE($1, ' ', '')) || '%' OR LOWER(REPLACE($1, ' ', '')) ILIKE '%' || LOWER(REPLACE(department, ' ', '')) || '%')`;
+    }
+
+    query += ` ORDER BY created_at DESC`;
+    const result = await db.query(query, params);
+    const leaves = result.rows;
+
+    const leaveIds = leaves.map((l: any) => l.id);
+    let adjustments: any[] = [];
+    if (leaveIds.length > 0) {
+      const adjRes = await db.query(
+        `SELECT * FROM faculty_leave_adjustments WHERE leave_id = ANY($1)`,
+        [leaveIds]
+      );
+      adjustments = adjRes.rows;
+    }
+
+    const responseData = leaves.map((l: any) => ({
+      ...l,
+      adjustments: adjustments.filter((a: any) => a.leave_id === l.id),
+    }));
+
+    res.json(responseData);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /hod/leaves/faculty/:id/status — HOD Approve or Reject leave with remarks
+app.put('/hod/leaves/faculty/:id/status', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const { id } = req.params;
+    const { status, hod_remarks } = req.body;
+    const approvedBy = req.auth?.name || req.auth?.email || 'HOD';
+
+    if (!['Approved', 'Rejected'].includes(status)) {
+      return res.status(400).json({ error: "Status must be 'Approved' or 'Rejected'" });
+    }
+
+    const result = await db.query(
+      `UPDATE faculty_leaves 
+       SET status = $1, hod_remarks = $2, approved_by = $3, approved_at = CURRENT_TIMESTAMP
+       WHERE id = $4
+       RETURNING *`,
+      [status, hod_remarks || null, approvedBy, id]
+    );
+
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Leave record not found' });
+
+    res.json({
+      success: true,
+      message: `Leave application ${status.toLowerCase()} successfully.`,
+      leave: result.rows[0],
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── STUDENT PERMISSIONS (LEAVES / ON-DUTY) ENDPOINTS ────────────────────────
+
+// POST /student/permissions/apply — Student apply for permission with proof file
+app.post('/student/permissions/apply', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const rollNumber = (req.auth?.regNo || req.body.roll_number || '').toUpperCase().trim();
+    const { permission_type, from_date, to_date, reason, proof_url } = req.body;
+
+    if (!rollNumber || !permission_type || !from_date || !to_date || !reason || !proof_url) {
+      return res.status(400).json({
+        error: 'Permission type, from date, to date, description/reason, and proof document upload are required.',
+      });
+    }
+
+    const calculatedDays = await calculateLeaveDaysFromDb(from_date, to_date);
+    const numDays = Math.max(1, calculatedDays);
+
+    // Fetch student info
+    const stRes = await db.query('SELECT name, department, section, year FROM students WHERE UPPER(roll_number) = $1 LIMIT 1', [rollNumber]);
+    const st = stRes.rows[0] || {
+      name: req.auth?.name || rollNumber,
+      department: req.auth?.department || 'General',
+      section: 'A',
+      year: '2nd Year',
+    };
+
+    const permId = `ST_PERM_${Date.now()}`;
+    const ins = await db.query(
+      `INSERT INTO student_permissions 
+       (id, roll_number, student_name, department, section, year, permission_type, from_date, to_date, num_days, reason, proof_url, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'Pending')
+       RETURNING *`,
+      [permId, rollNumber, st.name, st.department, st.section, st.year, permission_type, from_date, to_date, numDays, reason.trim(), proof_url]
+    );
+
+    res.json({
+      success: true,
+      message: `Permission application submitted (${numDays} days) and forwarded to HOD for approval.`,
+      permission: ins.rows[0],
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /student/permissions/my-history — Student view permission history
+app.get('/student/permissions/my-history', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const rollNumber = (req.auth?.regNo || req.query.rollNumber as string || '').toUpperCase().trim();
+    if (!rollNumber) return res.status(400).json({ error: 'Roll number required' });
+
+    const result = await db.query(
+      `SELECT * FROM student_permissions WHERE UPPER(roll_number) = $1 ORDER BY created_at DESC`,
+      [rollNumber]
+    );
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /hod/permissions/students — HOD/Mentor view pending student permissions
+app.get('/hod/permissions/students', requireRole('hod', 'admin', 'faculty'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const callerRole = req.auth?.role;
+    const callerDept = req.auth?.department;
+
+    let query = `SELECT * FROM student_permissions WHERE 1=1`;
+    const params: any[] = [];
+
+    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+      params.push(callerDept);
+      query += ` AND (LOWER(REPLACE(department, ' ', '')) ILIKE '%' || LOWER(REPLACE($1, ' ', '')) || '%' OR LOWER(REPLACE($1, ' ', '')) ILIKE '%' || LOWER(REPLACE(department, ' ', '')) || '%')`;
+    }
+
+    query += ` ORDER BY created_at DESC`;
+    const result = await db.query(query, params);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /hod/permissions/students/:id/status — HOD Approve or Reject student permission
+app.put('/hod/permissions/students/:id/status', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const { id } = req.params;
+    const { status, hod_remarks } = req.body;
+    const approvedBy = req.auth?.name || req.auth?.email || 'HOD';
+
+    if (!['Approved', 'Rejected'].includes(status)) {
+      return res.status(400).json({ error: "Status must be 'Approved' or 'Rejected'" });
+    }
+
+    const result = await db.query(
+      `UPDATE student_permissions 
+       SET status = $1, hod_remarks = $2, approved_by = $3, approved_at = CURRENT_TIMESTAMP
+       WHERE id = $4
+       RETURNING *`,
+      [status, hod_remarks || null, approvedBy, id]
+    );
+
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Permission record not found' });
+
+    res.json({
+      success: true,
+      message: `Student permission ${status.toLowerCase()} successfully. Approved dates will lock attendance as Present / On-Duty.`,
+      permission: result.rows[0],
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Catch-all SPA route fallback for client-side React routes
 app.get('*', (_req: Request, res: Response) => {
   return sendIndexHtml(res);
 });
+
 
 // ============================================================================
 // Startup Migration: Enforce Semester Lock on Existing Data

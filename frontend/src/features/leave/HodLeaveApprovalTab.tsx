@@ -1,0 +1,568 @@
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Calendar,
+  Users,
+  GraduationCap,
+  FileText,
+  Building,
+  Printer,
+  ShieldCheck,
+  AlertCircle,
+  ExternalLink,
+  Search,
+  Filter
+} from 'lucide-react';
+import { api } from '../../lib/api';
+import { useAuth } from '../../context/AuthContext';
+import {
+  FacultyLeaveRecord,
+  StudentPermissionRecord
+} from '../../types';
+import { LeaveLetterModal } from './LeaveLetterModal';
+import { PermissionLetterModal } from './PermissionLetterModal';
+
+export const HodLeaveApprovalTab: React.FC = () => {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+
+  const [activeSubTab, setActiveSubTab] = useState<'faculty' | 'students'>('faculty');
+  const [filterStatus, setFilterStatus] = useState<string>('All');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Remarks modal for rejection / approval notes
+  const [actionModal, setActionModal] = useState<{
+    type: 'faculty' | 'student';
+    id: string;
+    action: 'Approved' | 'Rejected';
+    title: string;
+  } | null>(null);
+  const [remarksText, setRemarksText] = useState('');
+
+  const [viewingLeave, setViewingLeave] = useState<FacultyLeaveRecord | null>(null);
+  const [viewingPermission, setViewingPermission] = useState<StudentPermissionRecord | null>(null);
+
+  // Queries
+  const { data: facultyLeaves = [], isLoading: isLoadingFaculty } = useQuery<FacultyLeaveRecord[]>({
+    queryKey: ['hodFacultyLeaves'],
+    queryFn: () => api.getHodFacultyLeaves(),
+  });
+
+  const { data: studentPermissions = [], isLoading: isLoadingStudents } = useQuery<StudentPermissionRecord[]>({
+    queryKey: ['hodStudentPermissions'],
+    queryFn: () => api.getHodStudentPermissions(),
+  });
+
+  // Mutations
+  const updateFacultyLeaveMutation = useMutation({
+    mutationFn: ({ id, status, remarks }: { id: string; status: 'Approved' | 'Rejected'; remarks?: string }) =>
+      api.updateFacultyLeaveStatus(id, status, remarks),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['hodFacultyLeaves'] });
+      setActionModal(null);
+      setRemarksText('');
+    },
+  });
+
+  const updateStudentPermissionMutation = useMutation({
+    mutationFn: ({ id, status, remarks }: { id: string; status: 'Approved' | 'Rejected'; remarks?: string }) =>
+      api.updateStudentPermissionStatus(id, status, remarks),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['hodStudentPermissions'] });
+      setActionModal(null);
+      setRemarksText('');
+    },
+  });
+
+  const handleConfirmAction = () => {
+    if (!actionModal) return;
+    if (actionModal.type === 'faculty') {
+      updateFacultyLeaveMutation.mutate({
+        id: actionModal.id,
+        status: actionModal.action,
+        remarks: remarksText.trim(),
+      });
+    } else {
+      updateStudentPermissionMutation.mutate({
+        id: actionModal.id,
+        status: actionModal.action,
+        remarks: remarksText.trim(),
+      });
+    }
+  };
+
+  // Filtered Faculty Leaves
+  const filteredFacultyLeaves = facultyLeaves.filter((l) => {
+    const matchStatus = filterStatus === 'All' || l.status === filterStatus;
+    const matchSearch =
+      !searchQuery ||
+      l.faculty_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      l.faculty_email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      l.leave_type.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchStatus && matchSearch;
+  });
+
+  // Filtered Student Permissions
+  const filteredStudentPermissions = studentPermissions.filter((p) => {
+    const matchStatus = filterStatus === 'All' || p.status === filterStatus;
+    const matchSearch =
+      !searchQuery ||
+      p.student_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.roll_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.permission_type.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchStatus && matchSearch;
+  });
+
+  const pendingFacultyCount = facultyLeaves.filter((l) => l.status === 'Pending').length;
+  const pendingStudentCount = studentPermissions.filter((p) => p.status === 'Pending').length;
+
+  return (
+    <div className="space-y-6">
+      {/* ── Main Approval Card ── */}
+      <div className="bg-surface border border-borderLine rounded-2xl p-6 shadow-xs space-y-5">
+        {/* Navigation Tabs & Counts */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-borderLine pb-4">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setActiveSubTab('faculty')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+                activeSubTab === 'faculty'
+                  ? 'bg-brand-primary text-white shadow-sm'
+                  : 'bg-surface-2 text-textSecondary hover:text-textPrimary'
+              }`}
+            >
+              <Users className="w-4 h-4" />
+              <span>Faculty Leaves</span>
+              {pendingFacultyCount > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black">
+                  {pendingFacultyCount}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setActiveSubTab('students')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+                activeSubTab === 'students'
+                  ? 'bg-brand-primary text-white shadow-sm'
+                  : 'bg-surface-2 text-textSecondary hover:text-textPrimary'
+              }`}
+            >
+              <GraduationCap className="w-4 h-4" />
+              <span>Student On-Duty Permissions</span>
+              {pendingStudentCount > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black">
+                  {pendingStudentCount}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* Search & Filter Toolbar */}
+          <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-borderLine bg-background text-xs w-48 sm:w-60">
+              <Search className="w-3.5 h-3.5 text-textSecondary shrink-0" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Filter by name, reg no, type..."
+                className="w-full bg-transparent focus:outline-none text-textPrimary"
+              />
+            </div>
+
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="px-3 py-1.5 rounded-xl border border-borderLine bg-background text-textPrimary text-xs font-bold"
+            >
+              <option value="All">All Statuses</option>
+              <option value="Pending">Pending Only</option>
+              <option value="Approved">Approved</option>
+              <option value="Rejected">Rejected</option>
+            </select>
+          </div>
+        </div>
+
+        {/* ── SECTION 1: Faculty Leave Requests ── */}
+        {activeSubTab === 'faculty' && (
+          <div className="space-y-4">
+            {isLoadingFaculty ? (
+              <div className="py-12 text-center text-xs text-textMuted">Loading faculty leave applications...</div>
+            ) : filteredFacultyLeaves.length === 0 ? (
+              <div className="py-12 text-center text-xs text-textMuted bg-surface-2/30 rounded-xl border border-dashed border-borderLine space-y-1">
+                <Calendar className="w-8 h-8 text-textMuted mx-auto" />
+                <p className="font-bold text-textPrimary">No Faculty Leave Requests</p>
+                <p className="text-[11px] text-textSecondary">There are no faculty leave requests matching your current filter.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {filteredFacultyLeaves.map((l) => {
+                  const isPending = l.status === 'Pending';
+                  const isApproved = l.status === 'Approved';
+                  const isRejected = l.status === 'Rejected';
+
+                  return (
+                    <div
+                      key={l.id}
+                      className="p-4.5 rounded-2xl border border-borderLine bg-surface-2/40 hover:bg-surface-2/70 transition-all space-y-3"
+                    >
+                      {/* Top Row: Applicant & Leave Type */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-brand-soft text-brand-primary flex items-center justify-center font-black text-xs shrink-0">
+                            {l.faculty_name.charAt(0)}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="text-xs font-bold text-textPrimary">{l.faculty_name}</h4>
+                              <span className="text-[10px] px-2 py-0.5 rounded-md bg-surface border border-borderLine font-bold text-textSecondary">
+                                {l.department}
+                              </span>
+                              <span className="text-[10px] px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 font-bold border border-indigo-500/20">
+                                {l.leave_type}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-textMuted mt-0.5">{l.faculty_email}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2.5 self-start sm:self-auto">
+                          <span
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
+                              isApproved
+                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                : isRejected
+                                ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                                : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                            }`}
+                          >
+                            {l.status}
+                          </span>
+
+                          {isApproved && (
+                            <button
+                              onClick={() => setViewingLeave(l)}
+                              className="px-2.5 py-1 rounded-lg bg-surface border border-borderLine hover:bg-surface-2 text-brand-primary text-xs font-bold inline-flex items-center gap-1 shadow-xs"
+                              title="Print Sanction Order"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                              <span>Order</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Middle: Dates, Working Days & Reason */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 bg-surface rounded-xl border border-borderLine text-xs">
+                        <div>
+                          <span className="text-[10px] font-bold text-textMuted block">DURATION</span>
+                          <span className="font-mono font-bold text-textPrimary">{l.from_date} to {l.to_date}</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] font-bold text-textMuted block">TOTAL WORKING DAYS</span>
+                          <span className="font-bold text-brand-primary">{l.num_days} Day(s) (Excl. Holidays &amp; Sundays)</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] font-bold text-textMuted block">REASON</span>
+                          <span className="text-textSecondary italic">&ldquo;{l.reason}&rdquo;</span>
+                        </div>
+                      </div>
+
+                      {/* Classwork & Exam Duty Adjustments */}
+                      {l.adjustments && l.adjustments.length > 0 && (
+                        <div className="space-y-1.5">
+                          <p className="text-[11px] font-bold text-textSecondary uppercase tracking-wider">
+                            Reassignments / Covered Classes:
+                          </p>
+                          <div className="rounded-xl border border-borderLine overflow-hidden">
+                            <table className="w-full text-left text-[11px]">
+                              <thead className="bg-surface font-bold text-textMuted border-b border-borderLine">
+                                <tr>
+                                  <th className="p-2">Type</th>
+                                  <th className="p-2">Date</th>
+                                  <th className="p-2">Subject / Duty</th>
+                                  <th className="p-2">Slot</th>
+                                  <th className="p-2">Reassigned Colleague</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-borderLine font-mono">
+                                {l.adjustments.map((adj, i) => (
+                                  <tr key={i}>
+                                    <td className="p-2 font-sans font-bold uppercase text-[10px]">{adj.adjustment_type}</td>
+                                    <td className="p-2">{adj.date}</td>
+                                    <td className="p-2 font-sans font-medium text-textPrimary">{adj.subject_or_duty}</td>
+                                    <td className="p-2">{adj.timing_slot}</td>
+                                    <td className="p-2 font-sans font-bold text-textPrimary">{adj.reassigned_faculty_name}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Action Buttons for Pending */}
+                      {isPending && (
+                        <div className="flex items-center justify-end gap-2.5 pt-1 border-t border-borderLine">
+                          <button
+                            onClick={() =>
+                              setActionModal({
+                                type: 'faculty',
+                                id: l.id,
+                                action: 'Rejected',
+                                title: `Reject Leave for ${l.faculty_name}`,
+                              })
+                            }
+                            className="px-3.5 py-1.5 rounded-xl border border-alert/30 text-alert hover:bg-alert-soft text-xs font-bold flex items-center gap-1.5 transition-all"
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>Reject</span>
+                          </button>
+                          <button
+                            onClick={() =>
+                              setActionModal({
+                                type: 'faculty',
+                                id: l.id,
+                                action: 'Approved',
+                                title: `Approve Leave for ${l.faculty_name}`,
+                              })
+                            }
+                            className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Approve Leave</span>
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Remarks display if already processed */}
+                      {l.hod_remarks && (
+                        <p className="text-[11px] text-textMuted bg-surface p-2 rounded-lg border border-borderLine">
+                          <strong>HOD Remarks:</strong> {l.hod_remarks}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── SECTION 2: Student On-Duty Permissions ── */}
+        {activeSubTab === 'students' && (
+          <div className="space-y-4">
+            {isLoadingStudents ? (
+              <div className="py-12 text-center text-xs text-textMuted">Loading student permissions...</div>
+            ) : filteredStudentPermissions.length === 0 ? (
+              <div className="py-12 text-center text-xs text-textMuted bg-surface-2/30 rounded-xl border border-dashed border-borderLine space-y-1">
+                <GraduationCap className="w-8 h-8 text-textMuted mx-auto" />
+                <p className="font-bold text-textPrimary">No Student Permissions Found</p>
+                <p className="text-[11px] text-textSecondary">There are no student on-duty permission requests matching your filter.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {filteredStudentPermissions.map((p) => {
+                  const isPending = p.status === 'Pending';
+                  const isApproved = p.status === 'Approved';
+                  const isRejected = p.status === 'Rejected';
+
+                  return (
+                    <div
+                      key={p.id}
+                      className="p-4.5 rounded-2xl border border-borderLine bg-surface-2/40 hover:bg-surface-2/70 transition-all space-y-3"
+                    >
+                      {/* Top Row */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-purple-500/10 text-purple-400 flex items-center justify-center font-black text-xs shrink-0">
+                            {p.student_name.charAt(0)}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-mono font-black text-xs text-brand-primary">{p.roll_number}</span>
+                              <h4 className="text-xs font-bold text-textPrimary">{p.student_name}</h4>
+                              <span className="text-[10px] px-2 py-0.5 rounded-md bg-surface border border-borderLine font-bold text-textSecondary">
+                                {p.department} · Sec {p.section} · {p.year}
+                              </span>
+                              <span className="text-[10px] px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-400 font-bold border border-purple-500/20">
+                                {p.permission_type}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2.5 self-start sm:self-auto">
+                          <span
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
+                              isApproved
+                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                : isRejected
+                                ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                                : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                            }`}
+                          >
+                            {p.status}
+                          </span>
+
+                          {isApproved && (
+                            <button
+                              onClick={() => setViewingPermission(p)}
+                              className="px-2.5 py-1 rounded-lg bg-surface border border-borderLine hover:bg-surface-2 text-brand-primary text-xs font-bold inline-flex items-center gap-1 shadow-xs"
+                              title="Print On-Duty Sanction Order"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                              <span>Sanction Order</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Details & Proof Document */}
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 p-3 bg-surface rounded-xl border border-borderLine text-xs">
+                        <div>
+                          <span className="text-[10px] font-bold text-textMuted block">EVENT DATES</span>
+                          <span className="font-mono font-bold text-textPrimary">{p.from_date} to {p.to_date}</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] font-bold text-textMuted block">WORKING DAYS</span>
+                          <span className="font-bold text-brand-primary">{p.num_days} Day(s)</span>
+                        </div>
+                        <div className="sm:col-span-2">
+                          <span className="text-[10px] font-bold text-textMuted block">PURPOSE / DESCRIPTION</span>
+                          <span className="text-textSecondary italic">&ldquo;{p.reason}&rdquo;</span>
+                        </div>
+                      </div>
+
+                      {/* Proof Document Link */}
+                      <div className="flex items-center justify-between p-2.5 rounded-xl bg-surface border border-borderLine text-xs">
+                        <span className="font-bold text-textSecondary flex items-center gap-1.5">
+                          <FileText className="w-4 h-4 text-brand-primary" />
+                          <span>Uploaded Proof Document:</span>
+                        </span>
+                        {p.proof_url ? (
+                          <a
+                            href={p.proof_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-3 py-1 rounded-lg bg-brand-soft text-brand-primary font-bold text-xs hover:bg-brand-primary hover:text-white transition-all inline-flex items-center gap-1"
+                          >
+                            <span>Inspect Proof File</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        ) : (
+                          <span className="text-textMuted">No proof attached</span>
+                        )}
+                      </div>
+
+                      {/* Action Buttons for Pending */}
+                      {isPending && (
+                        <div className="flex items-center justify-end gap-2.5 pt-1 border-t border-borderLine">
+                          <button
+                            onClick={() =>
+                              setActionModal({
+                                type: 'student',
+                                id: p.id,
+                                action: 'Rejected',
+                                title: `Reject Permission for ${p.student_name} (${p.roll_number})`,
+                              })
+                            }
+                            className="px-3.5 py-1.5 rounded-xl border border-alert/30 text-alert hover:bg-alert-soft text-xs font-bold flex items-center gap-1.5 transition-all"
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>Reject</span>
+                          </button>
+                          <button
+                            onClick={() =>
+                              setActionModal({
+                                type: 'student',
+                                id: p.id,
+                                action: 'Approved',
+                                title: `Approve On-Duty for ${p.student_name} (${p.roll_number})`,
+                              })
+                            }
+                            className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Approve On-Duty (Locks Attendance as Present)</span>
+                          </button>
+                        </div>
+                      )}
+
+                      {p.hod_remarks && (
+                        <p className="text-[11px] text-textMuted bg-surface p-2 rounded-lg border border-borderLine">
+                          <strong>HOD Remarks:</strong> {p.hod_remarks}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── ACTION CONFIRMATION MODAL (Approve / Reject with Remarks) ── */}
+      {actionModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-surface border border-borderLine rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <h4 className="text-base font-bold text-textPrimary">{actionModal.title}</h4>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-textSecondary block">
+                {actionModal.action === 'Approved' ? 'Approval Remarks (Optional)' : 'Reason for Rejection *'}
+              </label>
+              <textarea
+                rows={3}
+                value={remarksText}
+                onChange={(e) => setRemarksText(e.target.value)}
+                placeholder={
+                  actionModal.action === 'Approved'
+                    ? 'e.g. Sanctioned on-duty leave. All attendance will be credited.'
+                    : 'e.g. Incomplete proof / mid-term exam dates conflict.'
+                }
+                className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-background text-textPrimary focus:outline-none focus:border-brand-primary resize-none"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2.5 pt-2 border-t border-borderLine">
+              <button
+                onClick={() => setActionModal(null)}
+                className="px-4 py-2 rounded-xl border border-borderLine text-textSecondary font-bold text-xs hover:bg-surface-2"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmAction}
+                className={`px-5 py-2 rounded-xl text-white font-bold text-xs shadow-sm transition-all ${
+                  actionModal.action === 'Approved'
+                    ? 'bg-emerald-600 hover:bg-emerald-700'
+                    : 'bg-alert hover:bg-alert/90'
+                }`}
+              >
+                Confirm {actionModal.action}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Official Letters Modals */}
+      <LeaveLetterModal
+        isOpen={Boolean(viewingLeave)}
+        onClose={() => setViewingLeave(null)}
+        leave={viewingLeave}
+      />
+      <PermissionLetterModal
+        isOpen={Boolean(viewingPermission)}
+        onClose={() => setViewingPermission(null)}
+        permission={viewingPermission}
+      />
+    </div>
+  );
+};

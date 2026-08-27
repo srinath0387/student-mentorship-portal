@@ -42,6 +42,7 @@ import { PlacementEligibilitySection } from '../hod/components/PlacementEligibil
 import { FacultyProfileTab } from './tabs/FacultyProfileTab';
 import { calculateFacultyProfileCompletion } from '../../lib/facultyUtils';
 import { AttendanceTrackingTab } from '../attendance/AttendanceTrackingTab';
+import { FacultyLeaveTab } from '../leave/FacultyLeaveTab';
 
 // Helper: compute academic standing from CGPA
 const getStanding = (cgpa: number | string | undefined | null) => {
@@ -295,6 +296,16 @@ export const FacultyDashboardPage: React.FC = () => {
               }`}
             >
               <span>📋 Attendance Records</span>
+            </button>
+            <button
+              onClick={() => setSearchParams({ tab: 'leaves' })}
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold border-b-2 whitespace-nowrap transition-all rounded-t-lg ${
+                activeTab === 'leaves'
+                  ? 'border-brand-primary text-brand-primary bg-brand-soft'
+                  : 'border-transparent text-textSecondary hover:text-textPrimary hover:bg-surface-2'
+              }`}
+            >
+              <span>🌴 Leave & Duties</span>
             </button>
             <button
               onClick={() => setSearchParams({ tab: 'profile' })}
@@ -815,6 +826,9 @@ export const FacultyDashboardPage: React.FC = () => {
         </div>
         </div>
       )}
+
+      {/* Tab: Leave & Covering Duties */}
+      {activeTab === 'leaves' && <FacultyLeaveTab />}
 
       {/* Tab: My Faculty Profile */}
       {activeTab === 'profile' && <FacultyProfileTab />}

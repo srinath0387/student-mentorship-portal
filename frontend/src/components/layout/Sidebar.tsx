@@ -7,6 +7,7 @@ import {
   User,
   CheckCircle2,
   FileText,
+  FileCheck,
   Users,
   LogOut,
   ShieldCheck,
@@ -15,6 +16,7 @@ import {
   Building2,
   UserCheck,
   CalendarCheck,
+  Calendar,
   ClipboardCheck,
   LucideIcon,
 } from 'lucide-react';
@@ -72,6 +74,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
       items: [
         { label: 'My 360° Profile', path: '/profile?tab=personal-info', icon: User },
         { label: 'My Attendance', path: '/profile?tab=attendance', icon: CalendarCheck },
+        { label: 'On-Duty Permissions', path: '/profile?tab=permissions', icon: FileCheck },
         { label: 'My Mentor', path: '/mentor', icon: UserCheck },
         { label: 'Certificates', path: '/profile?tab=certifications', icon: CheckCircle2 },
         { label: 'Resume Builder', path: '/resume-builder', icon: FileText, soon: true },
@@ -86,6 +89,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
         { label: 'Faculty Dashboard', path: '/faculty/dashboard', icon: LayoutDashboard },
         { label: 'Take Attendance', path: '/attendance', icon: ClipboardCheck },
         { label: 'Attendance Records', path: '/faculty/dashboard?tab=attendance', icon: CalendarCheck },
+        { label: 'Leave & Duties', path: '/faculty/dashboard?tab=leaves', icon: CalendarCheck },
         { label: 'My Faculty Profile', path: '/faculty/dashboard?tab=profile', icon: User },
         { label: 'Mentee Directory', path: '/faculty/dashboard?tab=mentees', icon: Users },
         { label: 'Dept CGPA Analytics', path: '/faculty/dashboard?tab=analytics', icon: FileBarChart },
@@ -98,6 +102,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
       title: 'ADMINISTRATION',
       items: [
         { label: 'Admin Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
+        { label: 'Leave & OD Approvals', path: '/admin/dashboard?tab=leaves', icon: ShieldCheck },
+        { label: 'Holiday Calendar', path: '/admin/dashboard?tab=holidays', icon: Calendar },
         { label: 'Attendance Mgmt', path: '/admin/dashboard?tab=attendance', icon: CalendarCheck },
         { label: 'Student Directory', path: '/admin/dashboard?tab=students', icon: Users },
         { label: 'CGPA & Top Performers', path: '/admin/dashboard?tab=performance', icon: Award },
@@ -113,6 +119,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
       title: 'HOD PORTAL',
       items: [
         { label: 'Department Overview', path: '/hod/dashboard?tab=overview', icon: Building2 },
+        { label: 'Leave & OD Approvals', path: '/hod/dashboard?tab=leaves', icon: ShieldCheck },
         { label: 'Attendance Tracker', path: '/hod/dashboard?tab=attendance', icon: CalendarCheck },
         { label: 'Student Directory', path: '/hod/dashboard?tab=students', icon: Users },
         { label: 'CGPA & Rankings', path: '/hod/dashboard?tab=rankings', icon: Award },
@@ -142,6 +149,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
       items: [
         { label: 'Ward Dashboard', path: '/dashboard', icon: LayoutDashboard },
         { label: 'Ward Attendance', path: '/profile?tab=attendance', icon: CalendarCheck },
+        { label: 'On-Duty Permissions', path: '/profile?tab=permissions', icon: FileCheck },
         { label: 'Academics & CGPA', path: '/profile?tab=academics', icon: PieChart },
         { label: 'Coding & Platforms', path: '/profile?tab=coding-profiles', icon: BarChart2 },
         { label: 'Assigned Mentor', path: '/mentor', icon: UserCheck },

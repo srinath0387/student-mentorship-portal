@@ -50,6 +50,8 @@ import { FacultyRecordsTable } from './components/FacultyRecordsTable';
 import { PlacementEligibilitySection } from '../hod/components/PlacementEligibilitySection';
 import { AttendanceManagementTab } from './tabs/AttendanceManagementTab';
 import { AttendanceTrackingTab } from '../attendance/AttendanceTrackingTab';
+import { HodLeaveApprovalTab } from '../leave/HodLeaveApprovalTab';
+import { HolidayCalendarTab } from './tabs/HolidayCalendarTab';
 
 const DEPARTMENTS = VALID_DEPARTMENT_NAMES;
 const YEARS = ['1st Year', '2nd Year', '3rd Year', '4th Year'] as const;
@@ -535,6 +537,8 @@ export const AdminDashboardPage: React.FC = () => {
           <nav className="flex px-2 pt-2 pb-0 gap-1 border-b border-borderLine">
             {[
               { key: 'students', label: 'Student Directory (CRUD)' },
+              { key: 'leaves', label: '🌴 Leave & OD Approvals' },
+              { key: 'holidays', label: '📅 Holiday Calendar' },
               { key: 'attendance', label: '📊 Attendance System' },
               { key: 'performance', label: 'CGPA & Coding Rankings' },
               { key: 'faculty', label: 'Faculty & Mentor Assignments' },
@@ -592,6 +596,12 @@ export const AdminDashboardPage: React.FC = () => {
         <StatCard icon={<Code2 className="w-5 h-5" />} iconBgColor="bg-[#FFA116]/10 text-[#FFA116]"
           accentColor="brand" label="LeetCode Profiles" value={`${leetcodeCount} Linked`} subtext="Students with LeetCode connected" />
       </div>
+
+      {/* ── TAB: Leave & OD Approvals ── */}
+      {activeTab === 'leaves' && <HodLeaveApprovalTab />}
+
+      {/* ── TAB: Holiday Calendar ── */}
+      {activeTab === 'holidays' && <HolidayCalendarTab />}
 
       {/* ── TAB: Attendance Management & Tracking ── */}
       {activeTab === 'attendance' && (

@@ -28,6 +28,7 @@ import {
   calculateFacultyProfileCompletion,
 } from '../../../lib/facultyUtils';
 import { formatExternalUrl } from '../../../lib/urlUtils';
+import { SubjectsHandledSection } from './SubjectsHandledSection';
 
 interface Props {
   faculty: {
@@ -364,11 +365,12 @@ export const FacultyProfileInspectionModal: React.FC<Props> = ({ faculty, onClos
                       {d}
                     </span>
                   ))
-                ) : (
-                  <span className="text-xs text-textSecondary italic">No domain specializations specified yet.</span>
-                )}
+                ) : null}
               </div>
             </div>
+
+            {/* ── 8. Subjects Handled (Results Archive) ── */}
+            <SubjectsHandledSection facultyEmail={email} isReadOnly={true} />
           </div>
         )}
       </div>

@@ -40,6 +40,7 @@ import { AchievementsTab } from '../profile/tabs/AchievementsTab';
 import { PlacementPreferencesTab } from '../profile/tabs/PlacementPreferencesTab';
 import { AttendanceManagementTab } from '../admin/tabs/AttendanceManagementTab';
 import { AttendanceTrackingTab } from '../attendance/AttendanceTrackingTab';
+import { HodLeaveApprovalTab } from '../leave/HodLeaveApprovalTab';
 
 const YEARS = ['1st Year', '2nd Year', '3rd Year', '4th Year'] as const;
 const SECTIONS = ['Section A', 'Section B', 'Section C'] as const;
@@ -117,7 +118,7 @@ function mapStudentToHodEntry(student: any, index: number, liveSolved?: number):
 }
 
 export const HodDashboardPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'attendance' | 'analytics' | 'students' | 'rankings' | 'placement' | 'mentees' | 'settings'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'leaves' | 'attendance' | 'analytics' | 'students' | 'rankings' | 'placement' | 'mentees' | 'settings'>('overview');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Interactive Filter Slicers
@@ -175,7 +176,7 @@ export const HodDashboardPage: React.FC = () => {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const tab = params.get('tab');
-    if (tab === 'overview' || tab === 'attendance' || tab === 'analytics' || tab === 'students' || tab === 'rankings' || tab === 'placement' || tab === 'mentees' || tab === 'settings') {
+    if (tab === 'overview' || tab === 'leaves' || tab === 'attendance' || tab === 'analytics' || tab === 'students' || tab === 'rankings' || tab === 'placement' || tab === 'mentees' || tab === 'settings') {
       setActiveTab(tab as any);
     }
   }, [location.search]);
@@ -585,6 +586,7 @@ export const HodDashboardPage: React.FC = () => {
           <nav className="flex px-2 pt-2 pb-0 gap-1 border-b border-borderLine">
             {[
               { key: 'overview', label: '📊 Year-Wise Overview' },
+              { key: 'leaves', label: '🌴 Leave & OD Approvals' },
               { key: 'attendance', label: '📋 Attendance Tracker' },
               { key: 'analytics', label: '📈 Academic Analytics' },
               { key: 'placement', label: '🎯 Placement Eligibility Engine (T&P)' },
@@ -608,6 +610,9 @@ export const HodDashboardPage: React.FC = () => {
           </nav>
         </div>
       </div>
+
+      {/* ── TAB: Leave & OD Approvals ── */}
+      {activeTab === 'leaves' && <HodLeaveApprovalTab />}
 
       {/* ── TAB: Attendance Tracker & Management ── */}
       {activeTab === 'attendance' && (

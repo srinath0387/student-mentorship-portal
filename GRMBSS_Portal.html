@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GRMBSS - Family Members Register & Data Portal</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Font Awesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+  <!-- SheetJS for Excel export -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- QRCode.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #f1f5f9;
+    }
+    .table-input {
+      width: 100%;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 0.875rem;
+      outline: none;
+      transition: all 0.2s ease;
+      background-color: #ffffff;
+    }
+    .table-input:focus {
+      border-color: #2563eb;
+      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+    }
+    @media print {
+      .no-print { display: none !important; }
+      body { background-color: #ffffff; }
+      .print-border { border: 1px solid #000 !important; }
+    }
+  </style>
+</head>
+<body class="min-h-screen text-slate-800 pb-16">
+
+  <!-- Header Banner -->
+  <header class="bg-gradient-to-r from-blue-900 via-indigo-900 to-blue-800 text-white shadow-lg py-6 px-4 sm:px-8">
+    <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+      <div class="text-center md:text-left">
+        <div class="flex items-center justify-center md:justify-start gap-3">
+          <span class="bg-amber-400 text-blue-950 font-black px-3 py-1 rounded-md text-xl tracking-wider">GRMBSS</span>
+          <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">Details of Family Members</h1>
+        </div>
+        <p class="text-blue-200 text-sm mt-1">Official Family Register & Dynamic Data Collection Portal</p>
+      </div>
+
+      <!-- Quick Action Buttons -->
+      <div class="flex flex-wrap gap-2 justify-center no-print">
+        <button onclick="addRow()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2.5 rounded-lg shadow flex items-center gap-2 transition active:scale-95 cursor-pointer">
+          <i class="fa-solid fa-plus-circle text-lg"></i>
+          <span>Add Member (+)</span>
+        </button>
+        <button onclick="exportToExcel()" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2.5 rounded-lg shadow flex items-center gap-2 transition active:scale-95 cursor-pointer">
+          <i class="fa-solid fa-file-excel text-lg"></i>
+          <span>Export Excel (.xlsx)</span>
+        </button>
+        <button onclick="openDriveModal()" class="bg-amber-500 hover:bg-amber-600 text-blue-950 font-bold px-4 py-2.5 rounded-lg shadow flex items-center gap-2 transition active:scale-95 cursor-pointer">
+          <i class="fa-brands fa-google-drive text-lg"></i>
+          <span>Connect Drive</span>
+        </button>
+        <button onclick="openQRModal()" class="bg-slate-700 hover:bg-slate-800 text-white font-semibold px-4 py-2.5 rounded-lg shadow flex items-center gap-2 transition active:scale-95 cursor-pointer">
+          <i class="fa-solid fa-qrcode text-lg"></i>
+          <span>Scan QR</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 mt-6">
+
+    <!-- District / Mandal / Village Header Box -->
+    <div class="bg-white rounded-xl shadow-md p-5 border border-slate-200 mb-6">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-xs font-bold text-slate-600 uppercase tracking-wide mb-1">
+            <i class="fa-solid fa-map-location-dot text-blue-600 mr-1"></i> District Name:
+          </label>
+          <input type="text" id="districtName" placeholder="e.g. Srikakulam / Hyderabad / Guntur" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-600 uppercase tracking-wide mb-1">
+            <i class="fa-solid fa-landmark text-blue-600 mr-1"></i> Mandal Name:
+          </label>
+          <input type="text" id="mandalName" placeholder="e.g. Kotabommali / Mandal" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-600 uppercase tracking-wide mb-1">
+            <i class="fa-solid fa-house-chimney text-blue-600 mr-1"></i> Village Name:
+          </label>
+          <input type="text" id="villageName" placeholder="e.g. Rampuram / Village" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+        </div>
+      </div>
+    </div>
+
+    <!-- Table Container -->
+    <div class="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden">
+      <!-- Toolbar -->
+      <div class="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 no-print">
+        <div class="flex items-center gap-2">
+          <span class="text-sm font-semibold text-slate-700">Total Members:</span>
+          <span id="rowCountBadge" class="bg-blue-100 text-blue-800 text-xs font-bold px-2.5 py-1 rounded-full">0</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="loadSampleData()" class="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-medium px-3 py-1.5 rounded-md border border-indigo-200 transition cursor-pointer">
+            <i class="fa-solid fa-wand-magic-sparkles mr-1"></i> Fill Sample (from handwritten note)
+          </button>
+          <button onclick="clearAllRows()" class="text-xs bg-rose-50 hover:bg-rose-100 text-rose-700 font-medium px-3 py-1.5 rounded-md border border-rose-200 transition cursor-pointer">
+            <i class="fa-solid fa-trash-can mr-1"></i> Clear All
+          </button>
+        </div>
+      </div>
+
+      <!-- Scrollable Table -->
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm text-slate-700 border-collapse" id="membersTable">
+          <thead class="bg-blue-900 text-white text-xs uppercase font-semibold">
+            <tr>
+              <th scope="col" class="py-3 px-2 text-center w-12 border-r border-blue-800">Sl. No</th>
+              <th scope="col" class="py-3 px-3 min-w-[180px] border-r border-blue-800">
+                <div class="flex items-center justify-between">
+                  <span>Name</span>
+                  <button onclick="addRow()" title="Click to add another member row" class="text-emerald-300 hover:text-white bg-blue-800 hover:bg-emerald-600 px-2 py-0.5 rounded text-xs no-print transition cursor-pointer">
+                    <i class="fa-solid fa-plus"></i>
+                  </button>
+                </div>
+              </th>
+              <th scope="col" class="py-3 px-3 min-w-[140px] border-r border-blue-800">Relation</th>
+              <th scope="col" class="py-3 px-3 min-w-[150px] border-r border-blue-800">DOB</th>
+              <th scope="col" class="py-3 px-2 text-center w-16 border-r border-blue-800">Age</th>
+              <th scope="col" class="py-3 px-3 min-w-[160px] border-r border-blue-800">Edu Qualification</th>
+              <th scope="col" class="py-3 px-3 min-w-[170px] border-r border-blue-800">Present Profession</th>
+              <th scope="col" class="py-3 px-3 min-w-[180px] border-r border-blue-800">Area of Interest</th>
+              <th scope="col" class="py-3 px-3 min-w-[140px] border-r border-blue-800">Mobile Number</th>
+              <th scope="col" class="py-3 px-3 min-w-[160px] border-r border-blue-800">Remarks</th>
+              <th scope="col" class="py-3 px-2 text-center w-12 no-print">Action</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody" class="divide-y divide-slate-200">
+            <!-- Dynamic Rows -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Add Row Bottom Banner -->
+      <div class="p-4 bg-slate-50 border-t border-slate-200 text-center no-print">
+        <button onclick="addRow()" class="inline-flex items-center gap-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold px-6 py-2.5 rounded-lg border border-blue-300 shadow-sm transition hover:scale-105 active:scale-95 cursor-pointer">
+          <i class="fa-solid fa-plus-circle text-lg text-blue-600"></i>
+          <span>Click Here to Add Another Family Member (+)</span>
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <!-- Drive Sync Modal -->
+  <div id="driveModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 border border-slate-200">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center text-amber-600">
+            <i class="fa-brands fa-google-drive text-xl"></i>
+          </div>
+          <div>
+            <h3 class="text-lg font-bold text-slate-800">Connect to Google Drive &amp; Sheets</h3>
+            <p class="text-xs text-slate-500">Sync all family data live into your Google Drive Spreadsheet</p>
+          </div>
+        </div>
+        <button onclick="closeDriveModal()" class="text-slate-400 hover:text-slate-600 p-2 text-xl">&times;</button>
+      </div>
+
+      <div class="space-y-4 text-sm text-slate-600">
+        <div class="bg-blue-50 p-4 rounded-xl border border-blue-200">
+          <h4 class="font-bold text-blue-900 mb-1"><i class="fa-solid fa-circle-check text-blue-600 mr-1.5"></i>Option 1: Upload the Generated Excel to Google Drive</h4>
+          <p class="text-xs text-blue-800 leading-relaxed">
+            1. Download your prepared template: <span class="font-semibold text-blue-950">GRMBSS_Family_Members_Template.xlsx</span><br>
+            2. Open <b>drive.google.com</b> &rarr; Click <b>+ New</b> &rarr; <b>File upload</b> &rarr; Select this file.<br>
+            3. Right-click the file &rarr; <b>Open with Google Sheets</b> &rarr; Click <b>Share</b> &rarr; Copy Link!
+          </p>
+        </div>
+
+        <div class="bg-slate-50 p-4 rounded-xl border border-slate-200">
+          <h4 class="font-bold text-slate-800 mb-1"><i class="fa-solid fa-bolt text-amber-500 mr-1.5"></i>Option 2: Live Sync Web App to Google Sheets (Automated)</h4>
+          <p class="text-xs text-slate-600 mb-2">
+            You can paste your Google Apps Script Web App URL below to submit directly to Google Drive:
+          </p>
+          <div class="flex gap-2">
+            <input type="text" id="scriptUrlInput" placeholder="https://script.google.com/macros/s/.../exec" class="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-xs">
+            <button onclick="saveDriveUrl()" class="bg-blue-600 text-white font-semibold px-4 py-2 rounded-lg text-xs hover:bg-blue-700">Save Link</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-6 flex justify-end">
+        <button onclick="closeDriveModal()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold px-5 py-2 rounded-lg text-sm">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- QR Code Modal -->
+  <div id="qrModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 border border-slate-200 text-center">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+        <h3 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+          <i class="fa-solid fa-qrcode text-blue-600"></i> Scan to Open Register
+        </h3>
+        <button onclick="closeQRModal()" class="text-slate-400 hover:text-slate-600 p-1 text-xl">&times;</button>
+      </div>
+
+      <p class="text-xs text-slate-500 mb-4">Scan with any mobile camera to open this portal or your Google Drive sheet directly!</p>
+
+      <div class="flex justify-center p-4 bg-slate-50 rounded-xl border border-slate-200 mb-4">
+        <div id="qrcodeCanvas" class="p-2 bg-white rounded-lg shadow-sm"></div>
+      </div>
+
+      <div class="text-left mb-4">
+        <label class="block text-xs font-semibold text-slate-600 mb-1">Target Link for QR Code:</label>
+        <input type="text" id="qrTargetLink" value="https://drive.google.com" oninput="updateQRCode(this.value)" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+
+      <div class="flex gap-2 justify-center">
+        <button onclick="window.print()" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg text-xs flex items-center gap-1.5">
+          <i class="fa-solid fa-print"></i> Print QR Poster
+        </button>
+        <button onclick="closeQRModal()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold px-4 py-2 rounded-lg text-xs">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let rowCounter = 0;
+
+    const RELATIONS = [
+      "Head", "Wife", "Husband", "Son", "Daughter", 
+      "D.i.L (Daughter-in-law)", "S.i.L (Son-in-law)", 
+      "G.Son (Grandson)", "G.Daughter (Granddaughter)", 
+      "Father", "Mother", "Brother", "Sister", "Other"
+    ];
+
+    function calculateAge(dobStr) {
+      if (!dobStr) return "";
+      const dob = new Date(dobStr);
+      if (isNaN(dob.getTime())) return "";
+      const today = new Date();
+      let age = today.getFullYear() - dob.getFullYear();
+      const m = today.getMonth() - dob.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
+        age--;
+      }
+      return age >= 0 ? age : "";
+    }
+
+    function addRow(data = {}) {
+      rowCounter++;
+      const tbody = document.getElementById("tableBody");
+      const tr = document.createElement("tr");
+      tr.id = `row_${rowCounter}`;
+      tr.className = "hover:bg-slate-50 transition border-b border-slate-200";
+
+      const relationOptions = RELATIONS.map(rel => 
+        `<option value="${rel}" ${data.relation === rel ? 'selected' : ''}>${rel}</option>`
+      ).join("");
+
+      tr.innerHTML = `
+        <td class="py-2.5 px-2 text-center font-bold text-slate-500 bg-slate-50 border-r border-slate-200 row-index"></td>
+        <td class="py-2 px-2 border-r border-slate-200">
+          <input type="text" class="table-input member-name font-medium" placeholder="Full Name" value="${data.name || ''}">
+        </td>
+        <td class="py-2 px-2 border-r border-slate-200">
+          <select class="table-input member-relation">
+            <option value="">-- Select --</option>
+            ${relationOptions}
+          </select>
+        </td>
+        <td class="py-2 px-2 border-r border-slate-200">
+          <input type="date" class="table-input member-dob" value="${data.dob || ''}" onchange="updateRowAge(this)">
+        </td>
+        <td class="py-2 px-2 text-center border-r border-slate-200">
+          <input type="number" class="table-input member-age text-center font-semibold bg-slate-50" placeholder="Age" value="${data.age || ''}">
+        </td>
+        <td class="py-2 px-2 border-r border-slate-200">
+          <input type="text" class="table-input member-edu" placeholder="e.g. B.Tech / SSC / MA" value="${data.edu || ''}">
+        </td>
+        <td class="py-2 px-2 border-r border-slate-200">
+          <input type="text" class="table-input member-prof" placeholder="e.g. Software / Teacher / Student" value="${data.prof || ''}">
+        </td>
+        <td class="py-2 px-2 border-r border-slate-200">
+          <input type="text" class="table-input member-interest" placeholder="e.g. Social Service / Business" value="${data.interest || ''}">
+        </td>
+        <td class="py-2 px-2 border-r border-slate-200">
+          <input type="tel" class="table-input member-mobile" placeholder="10-digit Mobile" value="${data.mobile || ''}">
+        </td>
+        <td class="py-2 px-2 border-r border-slate-200">
+          <input type="text" class="table-input member-remarks" placeholder="Optional notes" value="${data.remarks || ''}">
+        </td>
+        <td class="py-2 px-2 text-center no-print">
+          <button onclick="removeRow('row_${rowCounter}')" class="text-rose-500 hover:text-rose-700 hover:bg-rose-50 p-1.5 rounded transition" title="Delete Row">
+            <i class="fa-solid fa-trash-can"></i>
+          </button>
+        </td>
+      `;
+
+      tbody.appendChild(tr);
+      reindexRows();
+    }
+
+    function removeRow(rowId) {
+      const row = document.getElementById(rowId);
+      if (row) {
+        row.remove();
+        reindexRows();
+      }
+    }
+
+    function updateRowAge(dobInput) {
+      const row = dobInput.closest("tr");
+      const ageInput = row.querySelector(".member-age");
+      const age = calculateAge(dobInput.value);
+      if (age !== "") {
+        ageInput.value = age;
+      }
+    }
+
+    function reindexRows() {
+      const rows = document.querySelectorAll("#tableBody tr");
+      rows.forEach((row, index) => {
+        const indexCell = row.querySelector(".row-index");
+        if (indexCell) indexCell.textContent = index + 1;
+      });
+      document.getElementById("rowCountBadge").textContent = rows.length;
+    }
+
+    function clearAllRows() {
+      if (confirm("Are you sure you want to clear all rows?")) {
+        document.getElementById("tableBody").innerHTML = "";
+        reindexRows();
+      }
+    }
+
+    function loadSampleData() {
+      document.getElementById("tableBody").innerHTML = "";
+      document.getElementById("districtName").value = "Srikakulam";
+      document.getElementById("mandalName").value = "Kotabommali";
+      document.getElementById("villageName").value = "Rampuram";
+
+      const sample = [
+        { name: "A. Satya Rao", relation: "Head", dob: "1960-04-10", age: 67, edu: "MA B.Ed", prof: "Teach. Rtd", interest: "Social Community", mobile: "9634828790", remarks: "" },
+        { name: "A. Venkamma", relation: "Wife", dob: "1962-06-08", age: 65, edu: "B.A", prof: "House Wife", interest: "Social Community", mobile: "", remarks: "" },
+        { name: "A. Venkatesh", relation: "Son", dob: "", age: 40, edu: "B.Tech", prof: "Software", interest: "Employment", mobile: "", remarks: "" },
+        { name: "A. Ramesh", relation: "Son", dob: "", age: 36, edu: "B.Tech", prof: "Software", interest: "Employment", mobile: "", remarks: "" },
+        { name: "A. Sulochana", relation: "Daughter", dob: "", age: 35, edu: "Ag.BSc", prof: "Bank Employee", interest: "Employment", mobile: "", remarks: "" },
+        { name: "A. Kavitha", relation: "Daughter", dob: "", age: 32, edu: "B.Tech", prof: "Software", interest: "Employment", mobile: "", remarks: "" },
+        { name: "A. Harika", relation: "D.i.L (Daughter-in-law)", dob: "", age: 38, edu: "B.Tech", prof: "House Wife", interest: "Social Service", mobile: "", remarks: "" },
+        { name: "A. Ramya", relation: "D.i.L (Daughter-in-law)", dob: "", age: 33, edu: "BSc", prof: "Teacher", interest: "Service to Community", mobile: "", remarks: "" },
+        { name: "K. Ramaiah", relation: "S.i.L (Son-in-law)", dob: "", age: 36, edu: "Ag.BSc", prof: "Govt. Job", interest: "Employment", mobile: "", remarks: "" },
+        { name: "M. Subhash", relation: "S.i.L (Son-in-law)", dob: "", age: 34, edu: "BSc, Computers", prof: "Pvt. Job", interest: "Employment", mobile: "", remarks: "" },
+        { name: "A. Advik", relation: "G.Son (Grandson)", dob: "", age: 15, edu: "X Th Class", prof: "Student", interest: "Education", mobile: "", remarks: "" },
+        { name: "A. Rajesh", relation: "G.Son (Grandson)", dob: "", age: 11, edu: "8 Th Class", prof: "Student", interest: "Education", mobile: "", remarks: "" },
+        { name: "A. Gowthami", relation: "G.Daughter (Granddaughter)", dob: "", age: 13, edu: "9th Class", prof: "Student", interest: "Education", mobile: "", remarks: "" },
+        { name: "A. Arundhathi", relation: "G.Daughter (Granddaughter)", dob: "", age: 11, edu: "7th Class", prof: "Student", interest: "Education", mobile: "", remarks: "" },
+        { name: "K. Gopi", relation: "G.Son (Grandson)", dob: "", age: 10, edu: "6th Class", prof: "Student", interest: "Education", mobile: "", remarks: "" },
+        { name: "M. Rajesh", relation: "G.Son (Grandson)", dob: "", age: 8, edu: "4th Class", prof: "Student", interest: "Education", mobile: "" }
+      ];
+
+      sample.forEach(item => addRow(item));
+    }
+
+    function exportToExcel() {
+      const district = document.getElementById("districtName").value;
+      const mandal = document.getElementById("mandalName").value;
+      const village = document.getElementById("villageName").value;
+
+      const rows = document.querySelectorAll("#tableBody tr");
+      if (rows.length === 0) {
+        alert("Please add at least one member row before exporting!");
+        return;
+      }
+
+      const wb = XLSX.utils.book_new();
+      const wsData = [
+        ["GRMBSS - DETAILS OF FAMILY MEMBERS"],
+        ["Official Data Collection & Family Record Register"],
+        [],
+        ["District Name:", district, "", "Mandal Name:", mandal, "", "Village Name:", village],
+        [],
+        ["Sl. No", "Name", "Relation", "DOB", "Age", "Edu Qualification", "Present Profession", "Area of Interest", "Mobile Number", "Remarks"]
+      ];
+
+      rows.forEach((row, i) => {
+        wsData.push([
+          i + 1,
+          row.querySelector(".member-name")?.value || "",
+          row.querySelector(".member-relation")?.value || "",
+          row.querySelector(".member-dob")?.value || "",
+          row.querySelector(".member-age")?.value || "",
+          row.querySelector(".member-edu")?.value || "",
+          row.querySelector(".member-prof")?.value || "",
+          row.querySelector(".member-interest")?.value || "",
+          row.querySelector(".member-mobile")?.value || "",
+          row.querySelector(".member-remarks")?.value || ""
+        ]);
+      });
+
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      ws['!cols'] = [
+        { wch: 8 }, { wch: 24 }, { wch: 18 }, { wch: 14 }, { wch: 8 },
+        { wch: 22 }, { wch: 22 }, { wch: 24 }, { wch: 16 }, { wch: 22 }
+      ];
+
+      XLSX.utils.book_append_sheet(wb, ws, "Family Members");
+      const filename = `GRMBSS_Family_Members_${village || 'Register'}.xlsx`;
+      XLSX.writeFile(wb, filename);
+    }
+
+    function openDriveModal() { document.getElementById("driveModal").classList.remove("hidden"); }
+    function closeDriveModal() { document.getElementById("driveModal").classList.add("hidden"); }
+    function openQRModal() { 
+      document.getElementById("qrModal").classList.remove("hidden");
+      updateQRCode(document.getElementById("qrTargetLink").value);
+    }
+    function closeQRModal() { document.getElementById("qrModal").classList.add("hidden"); }
+
+    let qrcodeObj = null;
+    function updateQRCode(url) {
+      const container = document.getElementById("qrcodeCanvas");
+      container.innerHTML = "";
+      if (typeof QRCode !== "undefined") {
+        qrcodeObj = new QRCode(container, {
+          text: url || "https://drive.google.com",
+          width: 180,
+          height: 180,
+          colorDark: "#1e3a8a",
+          colorLight: "#ffffff",
+          correctLevel: QRCode.CorrectLevel.M
+        });
+      }
+    }
+
+    function saveDriveUrl() {
+      const url = document.getElementById("scriptUrlInput").value.trim();
+      if (url) {
+        document.getElementById("qrTargetLink").value = url;
+        alert("Google Drive Link saved! Now scan the QR code to open directly.");
+        closeDriveModal();
+        openQRModal();
+      } else {
+        alert("Please enter a valid Google Sheets / Apps Script URL");
+      }
+    }
+
+    window.addEventListener("DOMContentLoaded", () => {
+      for (let i = 0; i < 5; i++) {
+        addRow();
+      }
+    });
+  </script>
+</body>
+</html>

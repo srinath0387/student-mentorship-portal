@@ -1,0 +1,32 @@
+spring:
+  config:
+    activate:
+      on-profile: cloud
+
+  datasource:
+    url: ${CLOUD_DATABASE_URL:jdbc:postgresql://ep-rgmcet-portal.aws.neon.tech/portal_db?sslmode=require}
+    username: ${CLOUD_DATABASE_USER:rgmcet_admin}
+    password: ${CLOUD_DATABASE_PASSWORD:CloudSecret2026!}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      idle-timeout: 300000
+      connection-timeout: 20000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  data:
+    redis:
+      host: ${CLOUD_REDIS_HOST:localhost}
+      port: ${CLOUD_REDIS_PORT:6379}

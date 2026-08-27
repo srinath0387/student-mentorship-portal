@@ -49,6 +49,7 @@ import {
 } from '../../../lib/facultyUtils';
 import { PillButton } from '../../../components/common/PillButton';
 import { formatExternalUrl } from '../../../lib/urlUtils';
+import { SubjectsHandledSection } from '../components/SubjectsHandledSection';
 
 const BLOOD_GROUPS: BloodGroup[] = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'];
 const DESIGNATIONS: FacultyDesignation[] = ['Assistant Professor', 'Associate Professor', 'Professor'];
@@ -1405,6 +1406,9 @@ export const FacultyProfileTab: React.FC = () => {
           </PillButton>
         </div>
       </div>
+
+      {/* ── 6. Section: Subjects Handled (Results Archive) ── */}
+      <SubjectsHandledSection facultyEmail={email} />
 
       {/* ── Bottom Save Action Bar ── */}
       <div className="flex items-center justify-between p-5 rounded-2xl bg-surface border border-borderLine shadow-sm">

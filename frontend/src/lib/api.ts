@@ -966,5 +966,106 @@ export const api = {
       body: JSON.stringify({ department, section }),
     });
   },
+
+  // ── MODULE 4: Subjects Handled (Results) ──────────────────────────────────
+  getFacultySubjectsHandled: async (email: string) => {
+    return fetchWithAuth(`/faculty/subjects-handled/${encodeURIComponent(email)}`);
+  },
+
+  saveFacultySubjectsHandled: async (email: string, records: any | any[]) => {
+    return fetchWithAuth(`/faculty/subjects-handled/${encodeURIComponent(email)}`, {
+      method: 'POST',
+      body: JSON.stringify(records),
+    });
+  },
+
+  deleteFacultySubjectHandled: async (id: string) => {
+    return fetchWithAuth(`/faculty/subjects-handled/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // ── MODULE 5: Holiday Calendar ────────────────────────────────────────────
+  getHolidays: async () => {
+    return fetchWithAuth('/holidays');
+  },
+
+  addHoliday: async (date: string, title: string, type?: string) => {
+    return fetchWithAuth('/holidays', {
+      method: 'POST',
+      body: JSON.stringify({ date, title, type }),
+    });
+  },
+
+  deleteHoliday: async (id: string) => {
+    return fetchWithAuth(`/holidays/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // ── MODULE 5: Faculty Leaves ──────────────────────────────────────────────
+  getMyFacultyLeaveSummary: async () => {
+    return fetchWithAuth('/faculty/leaves/my-summary');
+  },
+
+  getReassignedDuties: async () => {
+    return fetchWithAuth('/faculty/leaves/reassigned-duties');
+  },
+
+  applyFacultyLeave: async (data: {
+    leave_type: string;
+    from_date: string;
+    to_date: string;
+    reason: string;
+    adjustments?: any[];
+  }) => {
+    return fetchWithAuth('/faculty/leaves/apply', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  getHodFacultyLeaves: async () => {
+    return fetchWithAuth('/hod/leaves/faculty');
+  },
+
+  updateFacultyLeaveStatus: async (id: string, status: 'Approved' | 'Rejected', hod_remarks?: string) => {
+    return fetchWithAuth(`/hod/leaves/faculty/${encodeURIComponent(id)}/status`, {
+      method: 'PUT',
+      body: JSON.stringify({ status, hod_remarks }),
+    });
+  },
+
+  // ── MODULE 5: Student Permissions (On-Duty / Leaves) ──────────────────────
+  applyStudentPermission: async (data: {
+    roll_number?: string;
+    permission_type: string;
+    from_date: string;
+    to_date: string;
+    reason: string;
+    proof_url: string;
+  }) => {
+    return fetchWithAuth('/student/permissions/apply', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  getMyStudentPermissions: async (rollNumber?: string) => {
+    const query = rollNumber ? `?rollNumber=${encodeURIComponent(rollNumber)}` : '';
+    return fetchWithAuth(`/student/permissions/my-history${query}`);
+  },
+
+  getHodStudentPermissions: async () => {
+    return fetchWithAuth('/hod/permissions/students');
+  },
+
+  updateStudentPermissionStatus: async (id: string, status: 'Approved' | 'Rejected', hod_remarks?: string) => {
+    return fetchWithAuth(`/hod/permissions/students/${encodeURIComponent(id)}/status`, {
+      method: 'PUT',
+      body: JSON.stringify({ status, hod_remarks }),
+    });
+  },
 };
+
 
