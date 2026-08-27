@@ -140,6 +140,12 @@ export const HodDashboardPage: React.FC = () => {
     const next = new Set(prev); if (next.has(year)) next.delete(year); else next.add(year); return next;
   });
 
+  // Student → Mentor Lookup state
+  const [mentorLookupQuery, setMentorLookupQuery] = useState('');
+  const [mentorLookupResults, setMentorLookupResults] = useState<any[]>([]);
+  const [mentorLookupLoading, setMentorLookupLoading] = useState(false);
+  const [mentorLookupSearched, setMentorLookupSearched] = useState(false);
+
   const { data: hodMentees = [] } = useQuery({
     queryKey: ['hodMentees', user?.email],
     queryFn: () => user?.email ? api.getMenteesByEmail(user.email) : Promise.resolve([]),
@@ -981,12 +987,131 @@ export const HodDashboardPage: React.FC = () => {
 
       {/* ── TAB 3: Student Directory & 360 Inspection ── */}
       {activeTab === 'students' && (
-        <div className="bg-surface border border-borderLine rounded-2xl p-6 shadow-sm space-y-4">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <h3 className="text-base font-bold text-textPrimary">Student Directory & 360° Inspection</h3>
-              <p className="text-xs text-textSecondary">Click "Inspect Profile" on any student to view their complete academic growth and coding stats</p>
+        <div className="space-y-4">
+
+          {/* ── STUDENT → MENTOR LOOKUP WIDGET ── */}
+          <div className="bg-surface border border-borderLine rounded-2xl p-5 shadow-xs">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-8 h-8 rounded-xl bg-brand-soft text-brand-primary flex items-center justify-center shrink-0">
+                <Search className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-textPrimary">Student → Mentor Lookup</h3>
+                <p className="text-xs text-textSecondary mt-0.5">Type a student's reg no or name to find who is their assigned faculty mentor</p>
+              </div>
             </div>
+
+            <div className="flex gap-2">
+              <div className="flex-1 flex items-center gap-2 px-3 py-2.5 rounded-xl border border-borderLine bg-background text-xs focus-within:border-brand-primary/60 focus-within:ring-1 focus-within:ring-brand-primary/20 transition-all">
+                <Search className="w-3.5 h-3.5 text-textSecondary shrink-0" />
+                <input
+                  type="text"
+                  value={mentorLookupQuery}
+                  onChange={(e) => setMentorLookupQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && mentorLookupQuery.trim().length >= 2) {
+                      setMentorLookupLoading(true);
+                      setMentorLookupSearched(true);
+                      api.studentMentorLookup(mentorLookupQuery.trim()).then((res) => {
+                        setMentorLookupResults(res);
+                        setMentorLookupLoading(false);
+                      }).catch(() => setMentorLookupLoading(false));
+                    }
+                  }}
+                  placeholder="Type student reg no (e.g. 22B91A0501) or name, then press Enter…"
+                  className="w-full bg-transparent focus:outline-none text-textPrimary placeholder:text-textMuted"
+                />
+                {mentorLookupQuery && (
+                  <button onClick={() => { setMentorLookupQuery(''); setMentorLookupResults([]); setMentorLookupSearched(false); }}
+                    className="text-textMuted hover:text-textPrimary shrink-0">✕</button>
+                )}
+              </div>
+              <button
+                disabled={mentorLookupQuery.trim().length < 2 || mentorLookupLoading}
+                onClick={() => {
+                  setMentorLookupLoading(true);
+                  setMentorLookupSearched(true);
+                  api.studentMentorLookup(mentorLookupQuery.trim()).then((res) => {
+                    setMentorLookupResults(res);
+                    setMentorLookupLoading(false);
+                  }).catch(() => setMentorLookupLoading(false));
+                }}
+                className="px-4 py-2.5 rounded-xl bg-brand-primary text-white text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-brand-primary/90 transition-all flex items-center gap-1.5 shrink-0"
+              >
+                {mentorLookupLoading ? (
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />Searching…</span>
+                ) : (
+                  <span>Search</span>
+                )}
+              </button>
+            </div>
+
+            {/* Results */}
+            {mentorLookupSearched && !mentorLookupLoading && (
+              <div className="mt-4">
+                {mentorLookupResults.length === 0 ? (
+                  <p className="text-xs text-textMuted text-center py-4">No student found matching <strong>{mentorLookupQuery}</strong>.</p>
+                ) : (
+                  <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                    {mentorLookupResults.map((r: any) => (
+                      <div key={r.roll_number} className="p-3.5 rounded-xl border border-borderLine bg-surface-2 flex flex-col sm:flex-row sm:items-start gap-3">
+                        {/* Student Info */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono font-black text-xs text-brand-primary">{r.roll_number}</span>
+                            <span className="text-xs font-bold text-textPrimary">{r.student_name}</span>
+                            <span className="text-[10px] px-2 py-0.5 rounded-md bg-surface border border-borderLine text-textSecondary font-medium">
+                              {r.year} · Sec {r.section}
+                            </span>
+                            <span className="text-[10px] px-2 py-0.5 rounded-md bg-surface border border-borderLine text-textSecondary font-medium">
+                              {r.student_department}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-textMuted mt-0.5">{r.student_email}</p>
+                        </div>
+
+                        {/* Arrow */}
+                        <div className="text-textMuted text-xs font-bold hidden sm:flex items-center self-center shrink-0">→</div>
+
+                        {/* Mentor Info */}
+                        <div className="flex-1 min-w-0">
+                          {r.mentor_assigned ? (
+                            <div className="flex items-start gap-2.5">
+                              <div className="w-7 h-7 rounded-lg bg-brand-primary/10 text-brand-primary flex items-center justify-center font-black text-[11px] shrink-0">
+                                {r.mentor_name?.charAt(0) || 'M'}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-xs font-bold text-textPrimary truncate">{r.mentor_name}</p>
+                                <p className="text-[11px] text-brand-primary font-mono truncate">{r.mentor_email}</p>
+                                {r.mentor_designation && (
+                                  <p className="text-[10px] text-textSecondary">{r.mentor_designation} · {r.mentor_department}</p>
+                                )}
+                                {r.mentor_phone && (
+                                  <p className="text-[10px] text-textMuted">📞 {r.mentor_phone}</p>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2 text-amber-500">
+                              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                              <span className="text-[11px] font-bold">No mentor assigned</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-surface border border-borderLine rounded-2xl p-6 shadow-sm space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-base font-bold text-textPrimary">Student Directory & 360° Inspection</h3>
+                <p className="text-xs text-textSecondary">Click "Inspect Profile" on any student to view their complete academic growth and coding stats</p>
+              </div>
             <span className="text-xs font-bold text-brand-primary bg-brand-soft px-3 py-1 rounded-full border border-brand-primary/20 shrink-0 self-start md:self-auto">
               Showing {filteredDataset.length} Students
             </span>
@@ -1121,6 +1246,7 @@ export const HodDashboardPage: React.FC = () => {
             </table>
           </div>
         </div>
+      </div>
       )}
 
       {/* ── TAB 4: Department Leaderboard ── */}

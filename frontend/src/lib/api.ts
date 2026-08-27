@@ -470,6 +470,12 @@ export const api = {
     return fetchWithAuth(`/students/search-assignable?q=${encodeURIComponent(query)}`);
   },
 
+  // HOD & Admin: look up a student by roll no / name and get their assigned mentor details
+  studentMentorLookup: async (query: string): Promise<any[]> => {
+    return fetchWithAuth(`/students/mentor-lookup?q=${encodeURIComponent(query)}`);
+  },
+
+
   // Upload mentor assignment CSV rows
   uploadMentorAssignments: async (rows: { rolls: string[]; facultyName: string }[]): Promise<any> => {
     return fetchWithAuth(`/mentor-assignments/upload`, {

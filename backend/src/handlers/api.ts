@@ -4070,6 +4070,83 @@ app.get('/students/search-assignable', requireRole('admin'), async (req: Request
   }
 });
 
+// GET /students/mentor-lookup — HOD & Admin: search a student by roll no / name and return their assigned mentor details
+app.get('/students/mentor-lookup', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (!q || q.length < 2) return res.json([]);
+
+    const pattern = `%${q.toLowerCase()}%`;
+
+    const result = await db.query(
+      `SELECT
+         s.roll_number,
+         s.name        AS student_name,
+         s.year,
+         s.section,
+         s.department  AS student_department,
+         s.email       AS student_email,
+         s.batch,
+         -- Mentor from mentor_assignments (preferred) or students.faculty_mentor_id fallback
+         COALESCE(f.name, f2.name)        AS mentor_name,
+         COALESCE(f.email, f2.email)      AS mentor_email,
+         COALESCE(f.department, f2.department) AS mentor_department,
+         COALESCE(f.faculty_id, f2.faculty_id) AS mentor_faculty_id,
+         COALESCE(f.role, f2.role)        AS mentor_role
+       FROM students s
+       LEFT JOIN mentor_assignments ma ON UPPER(ma.roll_number) = UPPER(s.roll_number)
+       LEFT JOIN faculty f  ON UPPER(f.faculty_id) = UPPER(ma.faculty_id)
+       LEFT JOIN faculty f2 ON UPPER(f2.faculty_id) = UPPER(s.faculty_mentor_id)
+       WHERE LOWER(s.roll_number) LIKE $1 OR LOWER(s.name) LIKE $1
+       ORDER BY s.roll_number
+       LIMIT 20`,
+      [pattern]
+    );
+
+    // Enrich with mentor phone + designation from faculty_full_profiles if available
+    const rows = await Promise.all(result.rows.map(async (row: any) => {
+      let mentorPhone: string | null = null;
+      let mentorDesignation: string | null = null;
+      if (row.mentor_email) {
+        try {
+          const profRes = await db.query(
+            `SELECT personal FROM faculty_full_profiles WHERE LOWER(email) = LOWER($1) LIMIT 1`,
+            [row.mentor_email]
+          );
+          if (profRes.rows.length > 0 && profRes.rows[0].personal) {
+            const p = typeof profRes.rows[0].personal === 'string'
+              ? JSON.parse(profRes.rows[0].personal)
+              : profRes.rows[0].personal;
+            mentorPhone = p?.phone || p?.mobile || null;
+            mentorDesignation = p?.designation || null;
+          }
+        } catch (_) { /* ignore */ }
+      }
+      return {
+        roll_number: row.roll_number,
+        student_name: row.student_name,
+        year: row.year,
+        section: row.section,
+        student_department: row.student_department,
+        student_email: row.student_email,
+        batch: row.batch,
+        mentor_assigned: Boolean(row.mentor_name),
+        mentor_name: row.mentor_name || null,
+        mentor_email: row.mentor_email || null,
+        mentor_department: row.mentor_department || null,
+        mentor_faculty_id: row.mentor_faculty_id || null,
+        mentor_designation: mentorDesignation,
+        mentor_phone: mentorPhone,
+        mentor_role: row.mentor_role || null,
+      };
+    }));
+
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /mentor-assignments/upload — Bulk assign students to faculty mentors from CSV data
 app.post('/mentor-assignments/upload', requireRole('admin'), async (req: Request, res: Response) => {
   try {
