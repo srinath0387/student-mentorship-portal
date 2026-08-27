@@ -2346,17 +2346,17 @@ app.get('/proxy/leetcode/:handle', async (req: Request, res: Response) => {
 
     // Auto-sync live stats into Postgres coding_profiles database so leaderboards update in real-time
     if (result && result.totalSolved !== undefined && !db.isMock) {
+      const cleanH = handle.replace(/^https?:\/\/(www\.)?leetcode\.(com|cn)\/(u\/|profile\/)?/i, '').replace(/\/$/, '').trim();
       db.query(
         `UPDATE coding_profiles
          SET score_rating = $1, easy_count = $2, medium_count = $3, hard_count = $4,
              contest_rating = $5, streak = COALESCE(NULLIF($6, 0), streak), updated_at = CURRENT_TIMESTAMP
          WHERE (
-           LOWER(REPLACE(handle, ' ', '')) = LOWER(REPLACE($7, ' ', ''))
-           OR LOWER(REPLACE(handle, 'https://leetcode.com/u/', '')) = LOWER(REPLACE($7, ' ', ''))
-           OR LOWER(REPLACE(handle, 'https://leetcode.com/', '')) = LOWER(REPLACE($7, ' ', ''))
-           OR LOWER(REPLACE(handle, '@', '')) = LOWER(REPLACE($7, ' ', ''))
+           LOWER(TRIM(BOTH '/' FROM REPLACE(handle, ' ', ''))) = LOWER($7)
+           OR LOWER(TRIM(BOTH '/' FROM REPLACE(REPLACE(REPLACE(handle, 'https://leetcode.com/u/', ''), 'https://leetcode.com/', ''), 'http://leetcode.com/', ''))) = LOWER($7)
+           OR LOWER(handle) ILIKE '%' || LOWER($7) || '%'
          ) AND LOWER(platform) = 'leetcode'`,
-        [result.totalSolved, result.easySolved, result.mediumSolved, result.hardSolved, result.contestRating || 0, result.streak || 0, handle]
+        [result.totalSolved, result.easySolved, result.mediumSolved, result.hardSolved, result.contestRating || 0, result.streak || 0, cleanH]
       ).catch((e) => console.warn('[LC DB Sync warn]', e.message));
     }
 
@@ -2412,6 +2412,31 @@ app.get('/proxy/github/:handle', async (req: Request, res: Response) => {
                followers: user.followers ?? 0, following: user.following ?? 0, avatar_url: user.avatar_url,
                repos: Array.isArray(repos) ? repos : [], events: Array.isArray(events) ? events : [] };
     });
+
+    // Auto-sync GitHub stats into Postgres coding_profiles database so leaderboards update in real-time
+    if (result && result.public_repos !== undefined && !db.isMock) {
+      const cleanGh = handle.replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/\/$/, '').trim();
+      const stars = Array.isArray(result.repos) ? result.repos.reduce((acc: number, r: any) => acc + (r.stargazers_count || 0), 0) : 0;
+      const langCounts: Record<string, number> = {};
+      if (Array.isArray(result.repos)) {
+        for (const r of result.repos) {
+          if (r.language) langCounts[r.language] = (langCounts[r.language] || 0) + 1;
+        }
+      }
+      const topLanguage = Object.entries(langCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+
+      db.query(
+        `UPDATE coding_profiles
+         SET repositories_count = $1, followers_count = $2, stars_count = $3,
+             top_language = $4, updated_at = CURRENT_TIMESTAMP
+         WHERE (
+           LOWER(TRIM(BOTH '/' FROM REPLACE(handle, ' ', ''))) = LOWER($5)
+           OR LOWER(TRIM(BOTH '/' FROM REPLACE(REPLACE(handle, 'https://github.com/', ''), 'http://github.com/', ''))) = LOWER($5)
+           OR LOWER(handle) ILIKE '%' || LOWER($5) || '%'
+         ) AND LOWER(platform) = 'github'`,
+        [result.public_repos, result.followers || 0, stars, topLanguage, cleanGh]
+      ).catch((e) => console.warn('[GH DB Sync warn]', e.message));
+    }
 
     res.set('X-Cache', fromCache ? 'HIT' : 'MISS');
     res.json(result);

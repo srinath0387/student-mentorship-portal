@@ -138,6 +138,13 @@ export interface CodingProfile {
   commits_count: number;
   prs_merged: number;
   score_rating: number;
+  easy_count?: number;
+  medium_count?: number;
+  hard_count?: number;
+  contest_rating?: number;
+  followers_count?: number;
+  stars_count?: number;
+  top_language?: string;
   last_synced?: string;
 }
 

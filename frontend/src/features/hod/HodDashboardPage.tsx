@@ -1419,7 +1419,10 @@ export const HodDashboardPage: React.FC = () => {
                 </div>
               </div>
               <button
-                onClick={() => setInspectStudent(null)}
+                onClick={() => {
+                  setInspectStudent(null);
+                  refetch();
+                }}
                 className="p-2 rounded-full hover:bg-background text-textSecondary transition-colors"
               >
                 <X className="w-5 h-5" />

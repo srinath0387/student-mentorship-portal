@@ -130,6 +130,61 @@ export const CodingProfilesSection: React.FC<CodingProfilesSectionProps> = ({
           try {
             const liveData = await fetchLivePlatformSnapshot(normalizedId, item.handle);
             newSnapshots[normalizedId] = liveData;
+
+            // Direct sync to backend DB using activeRollNo
+            if (activeRollNo && liveData) {
+              if (normalizedId === 'leetcode') {
+                const solvedVal = liveData.kpis?.find((k) => k.label.includes('Solved'))?.value ?? (typeof liveData.kpis[0]?.value === 'number' ? liveData.kpis[0].value : 0);
+                const easyVal = liveData.breakdown?.find((b) => b.label === 'Easy')?.solved ?? 0;
+                const medVal = liveData.breakdown?.find((b) => b.label === 'Medium')?.solved ?? 0;
+                const hardVal = liveData.breakdown?.find((b) => b.label === 'Hard')?.solved ?? 0;
+                const solvedNum = Number(solvedVal) || (Number(easyVal) + Number(medVal) + Number(hardVal));
+
+                if (solvedNum > 0) {
+                  api.saveCodingProfile(activeRollNo, {
+                    platform: 'LeetCode',
+                    handle: item.handle,
+                    score_rating: solvedNum,
+                    easy_count: Number(easyVal) || 0,
+                    medium_count: Number(medVal) || 0,
+                    hard_count: Number(hardVal) || 0,
+                    streak: 0,
+                    contest_rating: 0,
+                    repositories_count: 0,
+                    commits_count: 0,
+                    prs_merged: 0,
+                  }).then(() => {
+                    queryClient.invalidateQueries({ queryKey: ['hodStudents'] });
+                    queryClient.invalidateQueries({ queryKey: ['leaderboardStudents'] });
+                    queryClient.invalidateQueries({ queryKey: ['students'] });
+                    queryClient.invalidateQueries({ queryKey: ['facultyMentees'] });
+                  }).catch(() => {});
+                }
+              } else if (normalizedId === 'github') {
+                const reposVal = liveData.kpis?.find((k) => k.label.toLowerCase().includes('repo'))?.value ?? 0;
+                const reposNum = Number(reposVal) || 0;
+                if (reposNum > 0) {
+                  api.saveCodingProfile(activeRollNo, {
+                    platform: 'GitHub',
+                    handle: item.handle,
+                    score_rating: 0,
+                    easy_count: 0,
+                    medium_count: 0,
+                    hard_count: 0,
+                    streak: 0,
+                    contest_rating: 0,
+                    repositories_count: reposNum,
+                    commits_count: 0,
+                    prs_merged: 0,
+                  }).then(() => {
+                    queryClient.invalidateQueries({ queryKey: ['hodStudents'] });
+                    queryClient.invalidateQueries({ queryKey: ['leaderboardStudents'] });
+                    queryClient.invalidateQueries({ queryKey: ['students'] });
+                    queryClient.invalidateQueries({ queryKey: ['facultyMentees'] });
+                  }).catch(() => {});
+                }
+              }
+            }
           } catch (e) {
             console.error(`Failed to fetch live data for ${normalizedId}:`, e);
           }
