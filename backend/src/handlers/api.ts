@@ -1794,7 +1794,11 @@ app.get('/students/:id', async (req: Request, res: Response) => {
        FROM students s
        LEFT JOIN academics a ON a.student_id = s.roll_number
        WHERE UPPER(s.roll_number) = $1
-       GROUP BY s.roll_number, s.name, s.email, s.year, s.phone, s.address, s.native_place, s.department, s.batch, s.section, s.hostel_day_scholar, s.driving_license, s.passport, s.relocation_willingness, s.family_business, s.financial_background, s.faculty_mentor_id, s.photo_url, s.resume_url, s.linkedin_url, s.linkedin_updated, s.created_at, s.updated_at, s.cgpa`,
+          OR UPPER(s.admission_id) = $1
+          OR LOWER(s.email) = LOWER($1)
+          OR s.personal_mobile = $1
+       GROUP BY s.roll_number, s.name, s.email, s.year, s.phone, s.address, s.native_place, s.department, s.batch, s.section, s.hostel_day_scholar, s.driving_license, s.passport, s.relocation_willingness, s.family_business, s.financial_background, s.faculty_mentor_id, s.photo_url, s.resume_url, s.linkedin_url, s.linkedin_updated, s.created_at, s.updated_at, s.cgpa
+       LIMIT 1`,
       [studentId]
     );
     if (result.rows.length === 0) {

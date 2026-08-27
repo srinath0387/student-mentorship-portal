@@ -16,17 +16,39 @@ import {
   Plus,
   BookOpen,
   BarChart3,
+  Calendar,
+  Palmtree,
+  Sliders,
+  Eye,
+  X,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { api } from '../../lib/api';
 import { PillButton } from '../../components/common/PillButton';
 import { VALID_DEPARTMENT_NAMES } from '../../lib/validation/auth';
 import { FresherStudent, ClassIncharge } from '../../types';
+import { HodLeaveApprovalTab } from '../leave/HodLeaveApprovalTab';
+import { HolidayCalendarTab } from '../admin/tabs/HolidayCalendarTab';
+import { AttendanceManagementTab } from '../admin/tabs/AttendanceManagementTab';
+import { AttendanceTrackingTab } from '../attendance/AttendanceTrackingTab';
+import { PersonalInfoTab } from '../profile/tabs/PersonalInfoTab';
+import { CodingProfilesTab } from '../profile/tabs/CodingProfilesTab';
+import { TechSkillsTab } from '../profile/tabs/TechSkillsTab';
+import { CertificationsTab } from '../profile/tabs/CertificationsTab';
+import { SoftSkillsTab } from '../profile/tabs/SoftSkillsTab';
+import { AchievementsTab } from '../profile/tabs/AchievementsTab';
+import { PlacementPreferencesTab } from '../profile/tabs/PlacementPreferencesTab';
 
 export const CoordinatorDashboardPage: React.FC = () => {
   const queryClient = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<'freshers' | 'subjects' | 'attendance' | 'incharge' | 'promotion'>('freshers');
+  const [activeTab, setActiveTab] = useState<
+    'freshers' | 'subjects' | 'attendance' | 'manage-attendance' | 'leaves' | 'calendar' | 'incharge' | 'promotion'
+  >('freshers');
+
+  // Inspection Modal State for 360 Fresher Profile
+  const [inspectStudentRoll, setInspectStudentRoll] = useState<string | null>(null);
+  const [inspectTab, setInspectTab] = useState<string>('personal-info');
 
   // Directory Filters
   const [selectedDept, setSelectedDept] = useState<string>('All');
@@ -112,6 +134,55 @@ export const CoordinatorDashboardPage: React.FC = () => {
   const { data: fresherAttendanceData, isLoading: attLoading, refetch: refetchFresherAtt } = useQuery({
     queryKey: ['coordinator-fresher-attendance', attSem, attDept, attSection],
     queryFn: () => api.getCoordinatorFresherAttendance({ semester: attSem, department: attDept, section: attSection }),
+  });
+
+  // Queries for Inspected 360 Fresher Student Profile
+  const { data: inspectedStudent, refetch: refetchInspectedStudent } = useQuery({
+    queryKey: ['coordinatorInspectedStudent', inspectStudentRoll],
+    queryFn: () => (inspectStudentRoll ? api.getStudentProfile(inspectStudentRoll) : Promise.resolve(null)),
+    enabled: Boolean(inspectStudentRoll),
+  });
+
+  const { data: inspectedAcademics = [], refetch: refetchInspectedAcademics } = useQuery({
+    queryKey: ['coordinatorInspectedAcademics', inspectStudentRoll],
+    queryFn: () => (inspectStudentRoll ? api.getAcademics(inspectStudentRoll) : Promise.resolve([])),
+    enabled: Boolean(inspectStudentRoll),
+  });
+
+  const { data: inspectedCoding = [], refetch: refetchInspectedCoding } = useQuery({
+    queryKey: ['coordinatorInspectedCoding', inspectStudentRoll],
+    queryFn: () => (inspectStudentRoll ? api.getCodingProfiles(inspectStudentRoll) : Promise.resolve([])),
+    enabled: Boolean(inspectStudentRoll),
+  });
+
+  const { data: inspectedSkills = [], refetch: refetchInspectedSkills } = useQuery({
+    queryKey: ['coordinatorInspectedSkills', inspectStudentRoll],
+    queryFn: () => (inspectStudentRoll ? api.getTechSkills(inspectStudentRoll) : Promise.resolve([])),
+    enabled: Boolean(inspectStudentRoll),
+  });
+
+  const { data: inspectedCerts = [], refetch: refetchInspectedCerts } = useQuery({
+    queryKey: ['coordinatorInspectedCerts', inspectStudentRoll],
+    queryFn: () => (inspectStudentRoll ? api.getCertifications(inspectStudentRoll) : Promise.resolve([])),
+    enabled: Boolean(inspectStudentRoll),
+  });
+
+  const { data: inspectedSoft = [], refetch: refetchInspectedSoft } = useQuery({
+    queryKey: ['coordinatorInspectedSoft', inspectStudentRoll],
+    queryFn: () => (inspectStudentRoll ? api.getSoftSkills(inspectStudentRoll) : Promise.resolve([])),
+    enabled: Boolean(inspectStudentRoll),
+  });
+
+  const { data: inspectedAchievements = [], refetch: refetchInspectedAchievements } = useQuery({
+    queryKey: ['coordinatorInspectedAchievements', inspectStudentRoll],
+    queryFn: () => (inspectStudentRoll ? api.getAchievements(inspectStudentRoll) : Promise.resolve([])),
+    enabled: Boolean(inspectStudentRoll),
+  });
+
+  const { data: inspectedPlacement, refetch: refetchInspectedPlacement } = useQuery({
+    queryKey: ['coordinatorInspectedPlacement', inspectStudentRoll],
+    queryFn: () => (inspectStudentRoll ? api.getPlacementProfile(inspectStudentRoll) : Promise.resolve(null)),
+    enabled: Boolean(inspectStudentRoll),
   });
 
   // ── Excel Parser for Admission Roster ──
@@ -377,7 +448,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
       </div>
 
       {/* ── Main Tab Navigation ── */}
-      <div className="flex flex-wrap bg-surface-2 p-1 rounded-2xl border border-borderLine max-w-3xl gap-1">
+      <div className="flex flex-wrap bg-surface-2 p-1 rounded-2xl border border-borderLine max-w-5xl gap-1">
         <button
           onClick={() => setActiveTab('freshers')}
           className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
@@ -412,6 +483,42 @@ export const CoordinatorDashboardPage: React.FC = () => {
         >
           <BarChart3 className="w-3.5 h-3.5" />
           <span>Attendance Overview</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('manage-attendance')}
+          className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+            activeTab === 'manage-attendance'
+              ? 'bg-pink-600 text-white shadow-md'
+              : 'text-textSecondary hover:text-textPrimary'
+          }`}
+        >
+          <Sliders className="w-3.5 h-3.5" />
+          <span>Allotments & Rosters</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('leaves')}
+          className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+            activeTab === 'leaves'
+              ? 'bg-pink-600 text-white shadow-md'
+              : 'text-textSecondary hover:text-textPrimary'
+          }`}
+        >
+          <Palmtree className="w-3.5 h-3.5" />
+          <span>Leave & OD Approvals</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('calendar')}
+          className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+            activeTab === 'calendar'
+              ? 'bg-pink-600 text-white shadow-md'
+              : 'text-textSecondary hover:text-textPrimary'
+          }`}
+        >
+          <Calendar className="w-3.5 h-3.5" />
+          <span>Academic & Holiday Calendar</span>
         </button>
 
         <button
@@ -514,18 +621,19 @@ export const CoordinatorDashboardPage: React.FC = () => {
                     <th className="py-3 px-4">Active Login Email / User</th>
                     <th className="py-3 px-4">Migration Stage</th>
                     <th className="py-3 px-4 text-center">Attendance %</th>
+                    <th className="py-3 px-4 text-right">360 Profile</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-borderLine">
                   {freshersLoading ? (
                     <tr>
-                      <td colSpan={8} className="py-12 text-center text-textMuted">
+                      <td colSpan={9} className="py-12 text-center text-textMuted">
                         Loading 1st-year freshers directory...
                       </td>
                     </tr>
                   ) : freshers.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="py-12 text-center text-textMuted">
+                      <td colSpan={9} className="py-12 text-center text-textMuted">
                         No 1st-year freshers found matching the selected filters.
                       </td>
                     </tr>
@@ -580,6 +688,19 @@ export const CoordinatorDashboardPage: React.FC = () => {
                           >
                             {st.attendance_pct !== undefined ? `${st.attendance_pct}%` : '100%'}
                           </span>
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setInspectStudentRoll(st.roll_number || st.admission_id || '');
+                              setInspectTab('personal-info');
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-pink-500/10 hover:bg-pink-500/20 text-pink-400 font-bold text-xs border border-pink-500/30 transition-all cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Inspect 360</span>
+                          </button>
                         </td>
                       </tr>
                     ))
@@ -1032,6 +1153,28 @@ export const CoordinatorDashboardPage: React.FC = () => {
       )}
 
       {/* ════════════════════════════════════════════════════════════════════════ */}
+      {/* TAB: ATTENDANCE MANAGEMENT & TIMETABLES (HOD/COORDINATOR) */}
+      {/* ════════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'manage-attendance' && (
+        <div className="space-y-6">
+          <AttendanceTrackingTab role="hod" />
+          <div className="pt-4 border-t border-borderLine">
+            <AttendanceManagementTab />
+          </div>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════════════════════════ */}
+      {/* TAB: LEAVE & OD APPROVALS (HOD/COORDINATOR) */}
+      {/* ════════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'leaves' && <HodLeaveApprovalTab />}
+
+      {/* ════════════════════════════════════════════════════════════════════════ */}
+      {/* TAB: ACADEMIC & HOLIDAY CALENDAR */}
+      {/* ════════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'calendar' && <HolidayCalendarTab />}
+
+      {/* ════════════════════════════════════════════════════════════════════════ */}
       {/* TAB 4: SEMESTER PROMOTION (1-2 → 2-1) */}
       {/* ════════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'promotion' && (
@@ -1443,6 +1586,129 @@ export const CoordinatorDashboardPage: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: 360 Fresher Student Profile Inspection ── */}
+      {inspectStudentRoll && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-surface border border-borderLine rounded-2xl max-w-5xl w-full max-h-[90vh] shadow-2xl flex flex-col overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-4 px-6 border-b border-borderLine flex items-center justify-between bg-surface-2">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-pink-500/10 text-pink-400 font-bold flex items-center justify-center border border-pink-500/20">
+                  <GraduationCap className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-textPrimary flex items-center gap-2">
+                    <span>{inspectedStudent?.name || inspectStudentRoll}</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-pink-500/10 text-pink-400 font-mono font-semibold border border-pink-500/20">
+                      {inspectedStudent?.roll_number || inspectStudentRoll}
+                    </span>
+                  </h2>
+                  <p className="text-xs text-textSecondary">
+                    1st-Year Fresher Profile • {inspectedStudent?.department} • Section {inspectedStudent?.section || 'A'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setInspectStudentRoll(null)}
+                className="p-1.5 rounded-lg text-textSecondary hover:text-textPrimary hover:bg-surface border border-borderLine transition-all cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Sub-Tabs */}
+            <div className="px-6 border-b border-borderLine bg-surface overflow-x-auto flex gap-1 pt-2">
+              {[
+                { key: 'personal-info', label: '👤 Personal & Academic' },
+                { key: 'coding-profiles', label: '💻 Coding Profiles' },
+                { key: 'tech-skills', label: '🛠️ Technical Skills' },
+                { key: 'certifications', label: '📜 Certifications' },
+                { key: 'soft-skills', label: '🤝 Soft Skills' },
+                { key: 'achievements', label: '🏆 Achievements' },
+                { key: 'placement', label: '🎯 Career Preferences' },
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setInspectTab(tab.key)}
+                  className={`px-3 py-2 text-xs font-bold border-b-2 rounded-t-lg transition-all whitespace-nowrap cursor-pointer ${
+                    inspectTab === tab.key
+                      ? 'border-pink-500 text-pink-400 bg-pink-500/10'
+                      : 'border-transparent text-textSecondary hover:text-textPrimary hover:bg-surface-2'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Modal Content Area */}
+            <div className="p-6 overflow-y-auto flex-1 space-y-4">
+              {inspectTab === 'personal-info' && (
+                <PersonalInfoTab
+                  student={inspectedStudent}
+                  academics={inspectedAcademics}
+                  readOnly={true}
+                  onRefresh={() => {
+                    refetchInspectedStudent();
+                    refetchInspectedAcademics();
+                  }}
+                />
+              )}
+
+              {inspectTab === 'coding-profiles' && (
+                <CodingProfilesTab
+                  profiles={inspectedCoding}
+                  readOnly={true}
+                  onRefresh={() => refetchInspectedCoding()}
+                />
+              )}
+
+              {inspectTab === 'tech-skills' && (
+                <TechSkillsTab
+                  skills={inspectedSkills}
+                  readOnly={true}
+                  onRefresh={() => refetchInspectedSkills()}
+                />
+              )}
+
+              {inspectTab === 'certifications' && (
+                <CertificationsTab
+                  certifications={inspectedCerts}
+                  readOnly={true}
+                  onRefresh={() => refetchInspectedCerts()}
+                />
+              )}
+
+              {inspectTab === 'soft-skills' && (
+                <SoftSkillsTab
+                  softSkills={inspectedSoft}
+                  readOnly={true}
+                  onRefresh={() => refetchInspectedSoft()}
+                />
+              )}
+
+              {inspectTab === 'achievements' && (
+                <AchievementsTab
+                  achievements={inspectedAchievements}
+                  readOnly={true}
+                  onRefresh={() => refetchInspectedAchievements()}
+                />
+              )}
+
+              {inspectTab === 'placement' && (
+                <PlacementPreferencesTab
+                  placement={inspectedPlacement}
+                  readOnly={true}
+                  onRefresh={() => refetchInspectedPlacement()}
+                />
+              )}
+            </div>
           </div>
         </div>
       )}
