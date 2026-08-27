@@ -386,23 +386,51 @@ export const FacultyLeaveTab: React.FC = () => {
                               </button>
                             )}
 
-                            <button
-                              onClick={() => {
-                                if (
-                                  window.confirm(
-                                    `Cancel leave request (${l.leave_type} for ${l.num_days} days)?\n\nThis will restore ${l.num_days} days to your balance and remove covering duty adjustments.`
-                                  )
-                                ) {
-                                  cancelLeaveMutation.mutate(l.id);
-                                }
-                              }}
-                              disabled={cancelLeaveMutation.isPending}
-                              className="px-2.5 py-1 rounded-lg bg-surface border border-alert/30 hover:bg-alert-soft text-alert text-xs font-bold inline-flex items-center gap-1 shadow-xs transition-all"
-                              title="Cancel leave and restore leave balance"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                              <span>Cancel</span>
-                            </button>
+                            {(() => {
+                              const fromDateStr = typeof l.from_date === 'string' ? l.from_date.split('T')[0] : '';
+                              const nowUtc = new Date();
+                              const istOffsetMs = 5.5 * 60 * 60 * 1000;
+                              const nowIst = new Date(nowUtc.getTime() + istOffsetMs);
+                              const todayIstStr = nowIst.toISOString().split('T')[0];
+                              const istHours = nowIst.getUTCHours();
+                              const istMinutes = nowIst.getUTCMinutes();
+                              const isPast9Am = istHours > 9 || (istHours === 9 && istMinutes > 0);
+                              const isCutoffPassed = todayIstStr > fromDateStr || (todayIstStr === fromDateStr && isPast9Am);
+
+                              return (
+                                <button
+                                  onClick={() => {
+                                    if (isCutoffPassed) {
+                                      alert(
+                                        `Cancellation Window Closed:\n\nLeaves starting today (${fromDateStr}) or in the past cannot be cancelled after 9:00 AM.\n\nPlease contact your HOD to cancel this leave and credit your balance back.`
+                                      );
+                                      return;
+                                    }
+                                    if (
+                                      window.confirm(
+                                        `Cancel leave request (${l.leave_type} for ${l.num_days} days)?\n\nThis will restore ${l.num_days} days to your balance and remove covering duty adjustments.`
+                                      )
+                                    ) {
+                                      cancelLeaveMutation.mutate(l.id);
+                                    }
+                                  }}
+                                  disabled={cancelLeaveMutation.isPending}
+                                  className={`px-2.5 py-1 rounded-lg bg-surface border text-xs font-bold inline-flex items-center gap-1 shadow-xs transition-all ${
+                                    isCutoffPassed
+                                      ? 'border-borderLine text-textMuted hover:bg-surface-2 opacity-60 cursor-not-allowed'
+                                      : 'border-alert/30 hover:bg-alert-soft text-alert'
+                                  }`}
+                                  title={
+                                    isCutoffPassed
+                                      ? 'Cancellation window passed (after 9:00 AM on start date). Contact HOD to cancel.'
+                                      : 'Cancel leave and restore leave balance (allowed before 9:00 AM on start date)'
+                                  }
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                  <span>{isCutoffPassed ? 'HOD Only' : 'Cancel'}</span>
+                                </button>
+                              );
+                            })()}
                           </td>
                         </tr>
                       );

@@ -7879,6 +7879,31 @@ app.delete('/faculty/leaves/:id', requireRole('faculty', 'hod', 'admin'), async 
     }
 
     const leave = chk.rows[0];
+
+    // ── 9:00 AM CUTOFF CHECK (IST) ──
+    // Faculty can only cancel their leave BEFORE 9:00 AM on the start date (from_date).
+    // If it is on or after 9:00 AM on from_date (or past from_date), only HOD/Admin can delete/cancel it.
+    const fromDateStr = typeof leave.from_date === 'string'
+      ? leave.from_date.split('T')[0]
+      : new Date(leave.from_date).toISOString().split('T')[0];
+
+    // Convert current time to IST (UTC+5:30)
+    const nowUtc = new Date();
+    const istOffsetMs = 5.5 * 60 * 60 * 1000;
+    const nowIst = new Date(nowUtc.getTime() + istOffsetMs);
+    const todayIstStr = nowIst.toISOString().split('T')[0];
+    const istHours = nowIst.getUTCHours();
+    const istMinutes = nowIst.getUTCMinutes();
+    const isPast9Am = istHours > 9 || (istHours === 9 && istMinutes > 0);
+
+    const isCutoffPassed = todayIstStr > fromDateStr || (todayIstStr === fromDateStr && isPast9Am);
+
+    if (isCutoffPassed) {
+      return res.status(403).json({
+        error: `Cancellation window closed: Leaves starting today (${fromDateStr}) or in the past cannot be cancelled by faculty after 9:00 AM. Please contact your HOD to cancel this leave and restore your leave credit.`,
+      });
+    }
+
     await db.query('DELETE FROM faculty_leave_adjustments WHERE leave_id = $1', [id]);
     await db.query('DELETE FROM faculty_leaves WHERE id = $1', [id]);
 
