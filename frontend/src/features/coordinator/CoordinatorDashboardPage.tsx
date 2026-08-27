@@ -1291,11 +1291,18 @@ export const CoordinatorDashboardPage: React.FC = () => {
                   }}
                   className="w-full px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-background text-textPrimary font-semibold"
                 >
-                  <option value="">-- Choose Faculty --</option>
-                  {facultyList.map((f: any) => (
-                    <option key={f.faculty_id || f.email} value={f.email}>
-                      {f.name} ({f.department || 'Faculty'}) • {f.email}
-                    </option>
+                  <option value="">-- Choose Faculty (All Departments) --</option>
+                  {/* Group faculty by department */}
+                  {Array.from(new Set(facultyList.map((f: any) => f.department || 'General'))).sort().map((deptName) => (
+                    <optgroup key={deptName} label={`Department: ${deptName}`}>
+                      {facultyList
+                        .filter((f: any) => (f.department || 'General') === deptName)
+                        .map((f: any) => (
+                          <option key={f.faculty_id || f.email} value={f.email}>
+                            {f.name} • {f.email}
+                          </option>
+                        ))}
+                    </optgroup>
                   ))}
                 </select>
               </div>
@@ -1403,11 +1410,18 @@ export const CoordinatorDashboardPage: React.FC = () => {
                   required
                   className="w-full px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-background text-textPrimary font-semibold"
                 >
-                  <option value="">-- Choose Faculty --</option>
-                  {facultyList.map((f: any) => (
-                    <option key={f.faculty_id || f.email} value={f.email}>
-                      {f.name} ({f.department || 'Faculty'}) • {f.email}
-                    </option>
+                  <option value="">-- Choose Faculty (All Departments) --</option>
+                  {/* Group faculty by department */}
+                  {Array.from(new Set(facultyList.map((f: any) => f.department || 'General'))).sort().map((deptName) => (
+                    <optgroup key={deptName} label={`Department: ${deptName}`}>
+                      {facultyList
+                        .filter((f: any) => (f.department || 'General') === deptName)
+                        .map((f: any) => (
+                          <option key={f.faculty_id || f.email} value={f.email}>
+                            {f.name} • {f.email}
+                          </option>
+                        ))}
+                    </optgroup>
                   ))}
                 </select>
               </div>

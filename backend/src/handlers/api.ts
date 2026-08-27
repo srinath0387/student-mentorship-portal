@@ -3579,11 +3579,12 @@ app.get('/faculty/mentees/by-email/:email', async (req: Request, res: Response) 
   }
 });
 
-// GET /faculty — List all faculty with mentee counts (admin/HOD view, scoped by department)
-app.get('/faculty', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+// GET /faculty — List all faculty with mentee counts (admin/HOD/coordinator view, scoped by department)
+app.get('/faculty', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
   try {
+    const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
-    const isSuper = req.auth?.isSuperAdmin || callerDept === '*';
+    const isSuper = req.auth?.isSuperAdmin || callerDept === '*' || callerRole === 'coordinator' || callerRole === 'admin';
     const reqDept = req.query.department ? String(req.query.department) : undefined;
 
     let targetDept: string | undefined;
