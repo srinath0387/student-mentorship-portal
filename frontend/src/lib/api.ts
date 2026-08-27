@@ -1036,6 +1036,18 @@ export const api = {
     });
   },
 
+  deleteFacultyLeave: async (id: string): Promise<{ success: boolean; message: string }> => {
+    return fetchWithAuth(`/faculty/leaves/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  deleteHodFacultyLeave: async (id: string): Promise<{ success: boolean; message: string }> => {
+    return fetchWithAuth(`/hod/leaves/faculty/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  },
+
   // ── MODULE 5: Student Permissions (On-Duty / Leaves) ──────────────────────
   applyStudentPermission: async (data: {
     roll_number?: string;
@@ -1064,6 +1076,12 @@ export const api = {
     return fetchWithAuth(`/hod/permissions/students/${encodeURIComponent(id)}/status`, {
       method: 'PUT',
       body: JSON.stringify({ status, hod_remarks }),
+    });
+  },
+
+  deleteHodStudentPermission: async (id: string): Promise<{ success: boolean; message: string }> => {
+    return fetchWithAuth(`/hod/permissions/students/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
     });
   },
 };

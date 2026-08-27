@@ -14,7 +14,9 @@ import {
   ShieldCheck,
   Building,
   Briefcase,
-  AlertTriangle
+  AlertTriangle,
+  Trash2,
+  Undo2
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
@@ -115,6 +117,19 @@ export const FacultyLeaveTab: React.FC = () => {
     },
     onError: (err: any) => {
       alert(`Failed to apply: ${err.message}`);
+    },
+  });
+
+  // Cancel Leave Mutation (Restores quota balance)
+  const cancelLeaveMutation = useMutation({
+    mutationFn: (leaveId: string) => api.deleteFacultyLeave(leaveId),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['facultyLeaveSummary', email] });
+      queryClient.invalidateQueries({ queryKey: ['hodFacultyLeaves'] });
+      alert(res.message || 'Leave cancelled and credited back to your balance.');
+    },
+    onError: (err: any) => {
+      alert(`Failed to cancel leave: ${err.message}`);
     },
   });
 
@@ -340,7 +355,7 @@ export const FacultyLeaveTab: React.FC = () => {
                               {l.status}
                             </span>
                           </td>
-                          <td className="py-2.5 px-3.5 text-right whitespace-nowrap">
+                          <td className="py-2.5 px-3.5 text-right whitespace-nowrap space-x-1.5">
                             {isApproved && (
                               <button
                                 onClick={() => setViewingLeave(l)}
@@ -351,6 +366,24 @@ export const FacultyLeaveTab: React.FC = () => {
                                 <span>Sanction Order</span>
                               </button>
                             )}
+
+                            <button
+                              onClick={() => {
+                                if (
+                                  window.confirm(
+                                    `Cancel leave request (${l.leave_type} for ${l.num_days} days)?\n\nThis will restore ${l.num_days} days to your balance and remove covering duty adjustments.`
+                                  )
+                                ) {
+                                  cancelLeaveMutation.mutate(l.id);
+                                }
+                              }}
+                              disabled={cancelLeaveMutation.isPending}
+                              className="px-2.5 py-1 rounded-lg bg-surface border border-alert/30 hover:bg-alert-soft text-alert text-xs font-bold inline-flex items-center gap-1 shadow-xs transition-all"
+                              title="Cancel leave and restore leave balance"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              <span>Cancel</span>
+                            </button>
                           </td>
                         </tr>
                       );

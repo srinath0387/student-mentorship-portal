@@ -7697,7 +7697,68 @@ app.put('/hod/leaves/faculty/:id/status', requireRole('hod', 'admin'), async (re
   }
 });
 
-// ── STUDENT PERMISSIONS (LEAVES / ON-DUTY) ENDPOINTS ────────────────────────
+// DELETE /faculty/leaves/:id — Faculty cancel own leave (Approved, Pending, or Rejected) -> restores balance & removes reassigned adjustments
+app.delete('/faculty/leaves/:id', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const { id } = req.params;
+    const email = req.auth?.email?.toLowerCase().trim();
+    if (!email) return res.status(401).json({ error: 'Unauthorized' });
+
+    // Check ownership
+    const chk = await db.query('SELECT * FROM faculty_leaves WHERE id = $1 AND LOWER(faculty_email) = $2', [id, email]);
+    if (chk.rows.length === 0) {
+      return res.status(404).json({ error: 'Leave request not found or does not belong to you' });
+    }
+
+    const leave = chk.rows[0];
+    await db.query('DELETE FROM faculty_leave_adjustments WHERE leave_id = $1', [id]);
+    await db.query('DELETE FROM faculty_leaves WHERE id = $1', [id]);
+
+    res.json({
+      success: true,
+      message: `Leave request for ${leave.num_days} day(s) (${leave.leave_type}) has been cancelled and credited back to your balance.`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /hod/leaves/faculty/:id — HOD or Admin delete/cancel a faculty leave -> restores faculty leave balance & deletes adjustments
+app.delete('/hod/leaves/faculty/:id', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const { id } = req.params;
+
+    const chk = await db.query('SELECT * FROM faculty_leaves WHERE id = $1', [id]);
+    if (chk.rows.length === 0) {
+      return res.status(404).json({ error: 'Leave request not found' });
+    }
+
+    const leave = chk.rows[0];
+    await db.query('DELETE FROM faculty_leave_adjustments WHERE leave_id = $1', [id]);
+    await db.query('DELETE FROM faculty_leaves WHERE id = $1', [id]);
+
+    res.json({
+      success: true,
+      message: `Leave request for ${leave.faculty_name} (${leave.num_days} days) deleted. Leave balance has been credited back to faculty account.`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /hod/permissions/students/:id — HOD or Admin delete/cancel a student permission
+app.delete('/hod/permissions/students/:id', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const { id } = req.params;
+    await db.query('DELETE FROM student_permissions WHERE id = $1', [id]);
+    res.json({ success: true, message: 'Student permission request deleted successfully.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // POST /student/permissions/apply — Student apply for permission with proof file
 app.post('/student/permissions/apply', requireAuth, async (req: Request, res: Response) => {

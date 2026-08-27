@@ -14,7 +14,8 @@ import {
   AlertCircle,
   ExternalLink,
   Search,
-  Filter
+  Filter,
+  Trash2
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
@@ -76,6 +77,29 @@ export const HodLeaveApprovalTab: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['hodStudentPermissions'] });
       setActionModal(null);
       setRemarksText('');
+    },
+  });
+
+  const deleteFacultyLeaveMutation = useMutation({
+    mutationFn: (id: string) => api.deleteHodFacultyLeave(id),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['hodFacultyLeaves'] });
+      queryClient.invalidateQueries({ queryKey: ['facultyLeaveSummary'] });
+      alert(res.message || 'Leave request deleted. Leave balance credited back to faculty.');
+    },
+    onError: (err: any) => {
+      alert(`Failed to delete leave: ${err.message}`);
+    },
+  });
+
+  const deleteStudentPermissionMutation = useMutation({
+    mutationFn: (id: string) => api.deleteHodStudentPermission(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['hodStudentPermissions'] });
+      queryClient.invalidateQueries({ queryKey: ['studentPermissions'] });
+    },
+    onError: (err: any) => {
+      alert(`Failed to delete permission: ${err.message}`);
     },
   });
 
@@ -232,7 +256,7 @@ export const HodLeaveApprovalTab: React.FC = () => {
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2.5 self-start sm:self-auto">
+                        <div className="flex items-center gap-2 self-start sm:self-auto">
                           <span
                             className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
                               isApproved
@@ -255,6 +279,23 @@ export const HodLeaveApprovalTab: React.FC = () => {
                               <span>Order</span>
                             </button>
                           )}
+
+                          <button
+                            onClick={() => {
+                              if (
+                                window.confirm(
+                                  `Delete leave request for ${l.faculty_name} (${l.num_days} days)?\n\nThis will remove the leave application and credit ${l.num_days} days back to ${l.faculty_name}'s leave balance.`
+                                )
+                              ) {
+                                deleteFacultyLeaveMutation.mutate(l.id);
+                              }
+                            }}
+                            disabled={deleteFacultyLeaveMutation.isPending}
+                            className="p-1.5 rounded-lg border border-alert/30 hover:bg-alert-soft text-alert text-xs font-bold inline-flex items-center gap-1 shadow-xs transition-all"
+                            title="Delete leave request & restore faculty balance"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
 
@@ -398,7 +439,7 @@ export const HodLeaveApprovalTab: React.FC = () => {
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2.5 self-start sm:self-auto">
+                        <div className="flex items-center gap-2 self-start sm:self-auto">
                           <span
                             className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
                               isApproved
@@ -421,6 +462,19 @@ export const HodLeaveApprovalTab: React.FC = () => {
                               <span>Sanction Order</span>
                             </button>
                           )}
+
+                          <button
+                            onClick={() => {
+                              if (window.confirm(`Delete permission request for ${p.student_name} (${p.roll_number})?`)) {
+                                deleteStudentPermissionMutation.mutate(p.id);
+                              }
+                            }}
+                            disabled={deleteStudentPermissionMutation.isPending}
+                            className="p-1.5 rounded-lg border border-alert/30 hover:bg-alert-soft text-alert text-xs font-bold inline-flex items-center gap-1 shadow-xs transition-all"
+                            title="Delete student permission request"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
 
