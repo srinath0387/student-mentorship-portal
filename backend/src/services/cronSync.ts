@@ -31,12 +31,13 @@ export function cleanGitHubHandle(handle: string): string {
     .trim();
 }
 
-// Fetch live LeetCode stats directly via LeetCode GraphQL API
+// Fetch live LeetCode stats with GraphQL and multi-proxy fallback
 export async function fetchLeetCodeStatsDirect(handle: string): Promise<{ solved: number; easy: number; medium: number; hard: number; ranking?: number; streak?: number } | null> {
-  try {
-    const cleanHandle = cleanLeetCodeHandle(handle);
-    if (!cleanHandle || cleanHandle.toLowerCase() === 'not linked') return null;
+  const cleanHandle = cleanLeetCodeHandle(handle);
+  if (!cleanHandle || cleanHandle.toLowerCase() === 'not linked') return null;
 
+  // 1. Try official LeetCode GraphQL
+  try {
     const gql = `
       query userProblemsSolved($username: String!) {
         matchedUser(username: $username) {
@@ -52,7 +53,7 @@ export async function fetchLeetCodeStatsDirect(handle: string): Promise<{ solved
 
     const postData = JSON.stringify({ query: gql, variables: { username: cleanHandle } });
 
-    return new Promise((resolve) => {
+    const graphRes: any = await new Promise((resolve) => {
       const opts = {
         hostname: 'leetcode.com',
         path: '/graphql',
@@ -73,43 +74,85 @@ export async function fetchLeetCodeStatsDirect(handle: string): Promise<{ solved
         res.on('end', () => {
           try {
             if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-              const parsed = JSON.parse(raw);
-              const user = parsed?.data?.matchedUser;
-              if (user) {
-                const stats = user.submitStats?.acSubmissionNum || [];
-                const total = stats.find((s: any) => s.difficulty === 'All')?.count || 0;
-                const easy = stats.find((s: any) => s.difficulty === 'Easy')?.count || 0;
-                const medium = stats.find((s: any) => s.difficulty === 'Medium')?.count || 0;
-                const hard = stats.find((s: any) => s.difficulty === 'Hard')?.count || 0;
-                resolve({
-                  solved: total || (easy + medium + hard),
-                  easy,
-                  medium,
-                  hard,
-                  ranking: user.profile?.ranking || 0,
-                  streak: user.userCalendar?.streak || 0,
-                });
-                return;
-              }
+              resolve(JSON.parse(raw));
+            } else {
+              resolve(null);
             }
-            resolve(null);
-          } catch (_) {
+          } catch {
             resolve(null);
           }
         });
       });
 
       req.on('error', () => resolve(null));
-      req.setTimeout(6000, () => {
+      req.setTimeout(5000, () => {
         req.destroy();
         resolve(null);
       });
       req.write(postData);
       req.end();
     });
-  } catch (_) {
-    return null;
-  }
+
+    const user = graphRes?.data?.matchedUser;
+    if (user) {
+      const stats = user.submitStats?.acSubmissionNum || [];
+      const total = stats.find((s: any) => s.difficulty === 'All')?.count || 0;
+      const easy = stats.find((s: any) => s.difficulty === 'Easy')?.count || 0;
+      const medium = stats.find((s: any) => s.difficulty === 'Medium')?.count || 0;
+      const hard = stats.find((s: any) => s.difficulty === 'Hard')?.count || 0;
+      return {
+        solved: total || (easy + medium + hard),
+        easy,
+        medium,
+        hard,
+        ranking: user.profile?.ranking || 0,
+        streak: user.userCalendar?.streak || 0,
+      };
+    }
+  } catch (_) {}
+
+  // 2. Fallback to alfa-leetcode-api
+  try {
+    const alfaRes: any = await new Promise((resolve) => {
+      const req = https.get(
+        `https://alfa-leetcode-api.onrender.com/${encodeURIComponent(cleanHandle)}/solved`,
+        { headers: { 'User-Agent': 'Mozilla/5.0' } },
+        (res) => {
+          let raw = '';
+          res.on('data', (c) => (raw += c));
+          res.on('end', () => {
+            try {
+              if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+                resolve(JSON.parse(raw));
+              } else {
+                resolve(null);
+              }
+            } catch {
+              resolve(null);
+            }
+          });
+        }
+      );
+      req.on('error', () => resolve(null));
+      req.setTimeout(6000, () => {
+        req.destroy();
+        resolve(null);
+      });
+    });
+
+    if (alfaRes && typeof alfaRes.solvedProblem === 'number') {
+      return {
+        solved: alfaRes.solvedProblem,
+        easy: alfaRes.easySolved || 0,
+        medium: alfaRes.mediumSolved || 0,
+        hard: alfaRes.hardSolved || 0,
+        ranking: 0,
+        streak: 0,
+      };
+    }
+  } catch (_) {}
+
+  return null;
 }
 
 // Fetch live GitHub stats via GitHub API

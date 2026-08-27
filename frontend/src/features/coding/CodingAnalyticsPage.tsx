@@ -65,6 +65,7 @@ export const CodingAnalyticsPage: React.FC = () => {
   const [yearFilter, setYearFilter] = useState('');
   const [sectionFilter, setSectionFilter] = useState('');
   const [search, setSearch] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Fetch real students dynamically from Database Backend API
   const { data: students = [], isLoading, refetch } = useQuery({
@@ -75,6 +76,18 @@ export const CodingAnalyticsPage: React.FC = () => {
     staleTime: 0,
     refetchOnMount: 'always',
   });
+
+  const handleRefreshRealTimeData = async () => {
+    setIsSyncing(true);
+    try {
+      if (['admin', 'hod', 'faculty'].includes(user?.role || '')) {
+        await api.triggerCronSync().catch(() => {});
+      }
+      await refetch();
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   // Deduplicate students by roll_number so no duplicate profiles exist
   const uniqueStudents = Array.from(
@@ -193,11 +206,12 @@ export const CodingAnalyticsPage: React.FC = () => {
           </p>
         </div>
         <button
-          onClick={() => { refetch(); }}
+          onClick={handleRefreshRealTimeData}
+          disabled={isSyncing || isLoading}
           className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-background hover:bg-surface border border-borderLine text-textSecondary text-xs font-semibold transition-all shrink-0"
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-          Refresh Real-Time Data
+          <RefreshCw className={`w-3.5 h-3.5 ${isSyncing || isLoading ? 'animate-spin text-brand-primary' : ''}`} />
+          <span>{isSyncing ? 'Syncing Live Stats...' : 'Refresh Real-Time Data'}</span>
         </button>
       </div>
 

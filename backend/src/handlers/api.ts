@@ -2172,8 +2172,8 @@ app.post('/students/:id/coding-profiles', requireOwnerOrRole('id', 'faculty', 'h
   }
 });
 
-// POST /admin/sync-coding-profiles — Admin/HOD triggers batch sync for student coding profiles
-app.post('/admin/sync-coding-profiles', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+// POST /admin/sync-coding-profiles — Admin/HOD/Faculty triggers batch sync for student coding profiles
+app.post('/admin/sync-coding-profiles', requireRole('admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
   try {
     const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 100;
     const result = await runCodingProfileCronSync(limit);
@@ -2255,7 +2255,7 @@ app.get('/proxy/leetcode/:handle', async (req: Request, res: Response) => {
       `;
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 6000);
-      let lcFetch: Awaited<ReturnType<typeof fetch>>;
+      let lcFetch: Awaited<ReturnType<typeof fetch>> | null = null;
       try {
         lcFetch = await fetch('https://leetcode.com/graphql', {
           method: 'POST', signal: controller.signal,
@@ -2269,53 +2269,96 @@ app.get('/proxy/leetcode/:handle', async (req: Request, res: Response) => {
         });
       } catch (fetchErr: any) {
         clearTimeout(timeoutId);
-        if (fetchErr.name === 'AbortError') throw Object.assign(new Error('timeout'), { isTimeout: true });
-        throw fetchErr;
       }
       clearTimeout(timeoutId);
 
-      if (!lcFetch.ok) throw Object.assign(new Error(`LC_HTTP_${lcFetch.status}`), { httpStatus: lcFetch.status });
+      if (lcFetch && lcFetch.ok) {
+        const json: any = await lcFetch.json();
+        const matchedUser = json?.data?.matchedUser;
+        if (matchedUser) {
+          const stats = matchedUser.submitStats?.acSubmissionNum || [];
+          let easySolved = 0, mediumSolved = 0, hardSolved = 0, totalSolved = 0;
+          stats.forEach((s: any) => {
+            if (s.difficulty === 'Easy')   easySolved   = s.count || 0;
+            if (s.difficulty === 'Medium') mediumSolved = s.count || 0;
+            if (s.difficulty === 'Hard')   hardSolved   = s.count || 0;
+            if (s.difficulty === 'All')    totalSolved  = s.count || 0;
+          });
+          if (!totalSolved) totalSolved = easySolved + mediumSolved + hardSolved;
+          const contestInfo = json?.data?.userContestRanking || {};
 
-      const json: any = await lcFetch.json();
-      const matchedUser = json?.data?.matchedUser;
-      if (!matchedUser) throw Object.assign(new Error('not_found'), { isNotFound: true });
+          const rawCalendar = matchedUser.userCalendar?.submissionCalendar;
+          let submissionCalendar = {};
+          if (rawCalendar) {
+            try {
+              submissionCalendar = typeof rawCalendar === 'string' ? JSON.parse(rawCalendar) : rawCalendar;
+            } catch { /* ignore */ }
+          }
+          const recentSubmissions = json?.data?.recentAcSubmissionList || [];
 
-      const stats = matchedUser.submitStats?.acSubmissionNum || [];
-      let easySolved = 0, mediumSolved = 0, hardSolved = 0, totalSolved = 0;
-      stats.forEach((s: any) => {
-        if (s.difficulty === 'Easy')   easySolved   = s.count || 0;
-        if (s.difficulty === 'Medium') mediumSolved = s.count || 0;
-        if (s.difficulty === 'Hard')   hardSolved   = s.count || 0;
-        if (s.difficulty === 'All')    totalSolved  = s.count || 0;
-      });
-      if (!totalSolved) totalSolved = easySolved + mediumSolved + hardSolved;
-      const contestInfo = json?.data?.userContestRanking || {};
-
-      const rawCalendar = matchedUser.userCalendar?.submissionCalendar;
-      let submissionCalendar = {};
-      if (rawCalendar) {
-        try {
-          submissionCalendar = typeof rawCalendar === 'string' ? JSON.parse(rawCalendar) : rawCalendar;
-        } catch { /* ignore */ }
+          return {
+            handle: matchedUser.username || handle,
+            totalSolved,
+            easySolved,
+            mediumSolved,
+            hardSolved,
+            ranking: matchedUser.profile?.ranking || 0,
+            reputation: matchedUser.profile?.reputation || 0,
+            streak: matchedUser.userCalendar?.streak || 0,
+            totalActiveDays: matchedUser.userCalendar?.totalActiveDays || 0,
+            submissionCalendar,
+            recentSubmissions,
+            contestRating: Math.round(contestInfo.rating || 0),
+            attendedContestsCount: contestInfo.attendedContestsCount || 0,
+          };
+        }
       }
-      const recentSubmissions = json?.data?.recentAcSubmissionList || [];
 
-      return {
-        handle: matchedUser.username || handle,
-        totalSolved,
-        easySolved,
-        mediumSolved,
-        hardSolved,
-        ranking: matchedUser.profile?.ranking || 0,
-        reputation: matchedUser.profile?.reputation || 0,
-        streak: matchedUser.userCalendar?.streak || 0,
-        totalActiveDays: matchedUser.userCalendar?.totalActiveDays || 0,
-        submissionCalendar,
-        recentSubmissions,
-        contestRating: Math.round(contestInfo.rating || 0),
-        attendedContestsCount: contestInfo.attendedContestsCount || 0,
-      };
+      // Fallback: alfa-leetcode-api
+      try {
+        const alfaFetch = await fetch(`https://alfa-leetcode-api.onrender.com/${encodeURIComponent(handle)}/solved`, {
+          headers: { 'User-Agent': 'Mozilla/5.0' },
+        });
+        if (alfaFetch.ok) {
+          const alfaJson: any = await alfaFetch.json();
+          if (alfaJson && typeof alfaJson.solvedProblem === 'number') {
+            return {
+              handle,
+              totalSolved: alfaJson.solvedProblem || 0,
+              easySolved: alfaJson.easySolved || 0,
+              mediumSolved: alfaJson.mediumSolved || 0,
+              hardSolved: alfaJson.hardSolved || 0,
+              ranking: 0,
+              reputation: 0,
+              streak: 0,
+              totalActiveDays: 0,
+              submissionCalendar: {},
+              recentSubmissions: [],
+              contestRating: 0,
+              attendedContestsCount: 0,
+            };
+          }
+        }
+      } catch (_) {}
+
+      throw Object.assign(new Error('not_found'), { isNotFound: true });
     }, forceRefresh);
+
+    // Auto-sync live stats into Postgres coding_profiles database so leaderboards update in real-time
+    if (result && result.totalSolved !== undefined && !db.isMock) {
+      db.query(
+        `UPDATE coding_profiles
+         SET score_rating = $1, easy_count = $2, medium_count = $3, hard_count = $4,
+             contest_rating = $5, streak = COALESCE(NULLIF($6, 0), streak), updated_at = CURRENT_TIMESTAMP
+         WHERE (
+           LOWER(REPLACE(handle, ' ', '')) = LOWER(REPLACE($7, ' ', ''))
+           OR LOWER(REPLACE(handle, 'https://leetcode.com/u/', '')) = LOWER(REPLACE($7, ' ', ''))
+           OR LOWER(REPLACE(handle, 'https://leetcode.com/', '')) = LOWER(REPLACE($7, ' ', ''))
+           OR LOWER(REPLACE(handle, '@', '')) = LOWER(REPLACE($7, ' ', ''))
+         ) AND LOWER(platform) = 'leetcode'`,
+        [result.totalSolved, result.easySolved, result.mediumSolved, result.hardSolved, result.contestRating || 0, result.streak || 0, handle]
+      ).catch((e) => console.warn('[LC DB Sync warn]', e.message));
+    }
 
     res.set('X-Cache', fromCache ? 'HIT' : 'MISS');
     res.json(result);
@@ -3447,7 +3490,7 @@ app.get('/faculty/mentees/by-email/:email', async (req: Request, res: Response) 
            s.faculty_mentor_id,
            COALESCE(ROUND(AVG(a.semester_gpa), 2), 0.00) AS cgpa,
            MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN c.handle END) AS leetcode_handle,
-           COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN c.score_rating END), 0) AS leetcode_solved,
+           COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN GREATEST(c.score_rating, (c.easy_count + c.medium_count + c.hard_count)) END), 0) AS leetcode_solved,
            MAX(CASE WHEN LOWER(c.platform) = 'github' THEN c.handle END) AS github_handle,
            COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'github' THEN c.repositories_count END), 0) AS github_repos
          FROM mentor_assignments ma
