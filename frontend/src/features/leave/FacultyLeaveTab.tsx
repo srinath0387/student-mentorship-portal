@@ -544,23 +544,23 @@ export const FacultyLeaveTab: React.FC = () => {
                           </td>
 
                           <td className="py-2.5 px-3.5 text-right whitespace-nowrap space-x-1.5">
-                            {/* Sanction Order Button: Shown ONLY when both HOD and Principal have approved */}
-                            {isFullyApproved ? (
+                            {/* Sanction Order Button: Available once HOD has approved */}
+                            {l.hod_status === 'Approved' ? (
                               <button
                                 onClick={() => setViewingLeave(l)}
                                 className="px-2.5 py-1 rounded-lg bg-surface border border-brand-primary/40 hover:bg-brand-soft text-brand-primary text-xs font-bold inline-flex items-center gap-1 shadow-xs cursor-pointer"
-                                title="View and Print Official Sanction Order (Approved by HOD and Principal)"
+                                title="View and Print Official Sanction Order (HOD Approved)"
                               >
                                 <Printer className="w-3 h-3" />
                                 <span>Sanction Order</span>
                               </button>
                             ) : (
                               <span className="text-[10px] text-textMuted italic">
-                                {l.hod_status !== 'Approved' ? 'Awaiting HOD' : 'Awaiting Principal'}
+                                Awaiting HOD Approval
                               </span>
                             )}
 
-                            {!isFullyApproved && (
+                            {l.hod_status !== 'Approved' && (
                               <button
                                 onClick={() => {
                                   if (window.confirm(`Cancel leave request (${l.leave_type} for ${l.num_days} days)?`)) {

@@ -232,9 +232,13 @@ export const LeaveLetterModal: React.FC<LeaveLetterModalProps> = ({
 
               {/* 3. Principal */}
               <div className="text-center space-y-1">
-                <div className="inline-flex items-center justify-center p-1.5 rounded-lg bg-purple-50 border border-purple-300 text-purple-900 text-[9px] font-black uppercase mb-1">
-                  ✓ {leave.principal_approved_by || 'Principal Office'}
-                </div>
+                {leave.principal_status === 'Approved' ? (
+                  <div className="inline-flex items-center justify-center p-1.5 rounded-lg bg-purple-50 border border-purple-300 text-purple-900 text-[9px] font-black uppercase mb-1">
+                    ✓ {leave.principal_approved_by || 'Principal Office'}
+                  </div>
+                ) : (
+                  <div className="h-6" />
+                )}
                 <div className="border-b border-slate-400 pb-1" />
                 <p className="font-bold text-slate-900">Principal</p>
                 <p className="text-[10px] text-slate-500">RGMCET Autonomous</p>
