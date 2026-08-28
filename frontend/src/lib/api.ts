@@ -1192,6 +1192,27 @@ export const api = {
       method: 'DELETE',
     });
   },
+
+  // ── MODULE: First Year Bulk Onboarding ────────────────────────────────────
+  generateFirstYearRollNumbers: async (students: any[], batch_year?: string | number) => {
+    return fetchWithAuth('/first-year/generate-roll-numbers', {
+      method: 'POST',
+      body: JSON.stringify({ students, batch_year }),
+    });
+  },
+
+  bulkCreateFirstYearStudents: async (students: any[]) => {
+    return fetchWithAuth('/first-year/bulk-create', {
+      method: 'POST',
+      body: JSON.stringify({ students }),
+    });
+  },
+
+  getFirstYearStudents: async (dept?: string, batch_year?: string) => {
+    const params = new URLSearchParams();
+    if (dept) params.set('dept', dept);
+    if (batch_year) params.set('batch_year', batch_year);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return fetchWithAuth(`/first-year/students${qs}`);
+  },
 };
-
-

@@ -9017,5 +9017,207 @@ app.get('*', (_req: Request, res: Response) => {
   }
 })();
 
+
+// ── FIRST YEAR BULK ONBOARDING ─────────────────────────────────────────────
+
+// POST /first-year/generate-roll-numbers
+// Preview: given array of {name, dept, section?, is_lateral?} returns generated roll numbers without saving
+app.post('/first-year/generate-roll-numbers', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
+  try {
+    const { students, batch_year } = req.body;
+    if (!Array.isArray(students) || students.length === 0) {
+      return res.status(400).json({ error: 'students array is required' });
+    }
+
+    // Derive batch year: e.g. 2026 → "26"
+    const batchYear = String(batch_year || new Date().getFullYear()).slice(-2);
+    const COLLEGE_CODE = '09'; // RGMCET college code
+
+    // Count existing students per dept+batch to determine starting sequence
+    const seqCounters: Record<string, number> = {};
+
+    const getNextSeq = async (deptCode: string, isLateral: boolean): Promise<number> => {
+      const key = `${deptCode}_${isLateral ? '5' : '1'}`;
+      if (seqCounters[key] === undefined) {
+        // Count how many students already exist with this batch+dept prefix
+        const prefix = `${batchYear}${COLLEGE_CODE}${isLateral ? '5' : '1'}A${deptCode}`;
+        const existing = await db.query(
+          `SELECT COUNT(*) AS cnt FROM students WHERE UPPER(roll_number) LIKE $1`,
+          [`${prefix}%`]
+        );
+        seqCounters[key] = parseInt(existing.rows[0]?.cnt || '0', 10);
+      }
+      seqCounters[key]++;
+      return seqCounters[key];
+    };
+
+    const deptCodeFromName = (dept: string): string | null => {
+      const lower = dept.toLowerCase().trim();
+      for (const [code, name] of Object.entries(DEPARTMENT_CODE_MAP)) {
+        if (name.toLowerCase() === lower || code === dept.trim()) return code;
+      }
+      // fuzzy match
+      if (lower.includes('data science') || lower === 'ds') return '32';
+      if (lower.includes('ai') && lower.includes('ml')) return '33';
+      if (lower.includes('bs') || lower === 'blockchain') return '34';
+      if (lower.includes('cyber') || lower === 'cs') return '37';
+      if (lower === 'cse' || lower.includes('computer science')) return '05';
+      if (lower === 'ece' || lower.includes('electronics')) return '04';
+      if (lower === 'eee' || lower.includes('electrical')) return '02';
+      if (lower === 'mechanical' || lower === 'mech') return '03';
+      if (lower === 'civil' || lower === 'ce') return '01';
+      if (lower === 'mca') return 'MCA';
+      if (lower === 'mba') return 'MBA';
+      return null;
+    };
+
+    const results: any[] = [];
+    for (const s of students) {
+      const deptCode = deptCodeFromName(s.dept || s.department || '');
+      if (!deptCode) {
+        results.push({ ...s, error: `Unknown department: ${s.dept || s.department}` });
+        continue;
+      }
+      const isLateral = Boolean(s.is_lateral);
+      const seq = await getNextSeq(deptCode, isLateral);
+      // Sequence: 2-alphanumeric padded (01-99 then A0-Z9)
+      let seqStr: string;
+      if (seq <= 99) {
+        seqStr = String(seq).padStart(2, '0');
+      } else {
+        // Overflow to alphanumeric: 100→A0, 101→A1 ... 109→A9, 110→B0 ...
+        const overflow = seq - 100;
+        const letter = String.fromCharCode(65 + Math.floor(overflow / 10));
+        seqStr = `${letter}${overflow % 10}`;
+      }
+      const rollNumber = `${batchYear}${COLLEGE_CODE}${isLateral ? '5' : '1'}A${deptCode}${seqStr}`.toUpperCase();
+      const email = `${rollNumber.toLowerCase()}@rgmcet.edu.in`;
+      results.push({
+        name: s.name,
+        roll_number: rollNumber,
+        email,
+        department: DEPARTMENT_CODE_MAP[deptCode] || s.dept,
+        dept_code: deptCode,
+        section: s.section || 'A',
+        dob: s.dob || '',
+        is_lateral: isLateral,
+        batch: `20${batchYear}-${String(parseInt(batchYear, 10) + 4).padStart(2, '0')}`,
+      });
+    }
+
+    res.json({ students: results, batch_year: batchYear });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /first-year/bulk-create
+// Saves generated first-year students: creates DB records + stores DOB as hashed password
+app.post('/first-year/bulk-create', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
+  try {
+    const { students } = req.body; // Array from /first-year/generate-roll-numbers (with roll_number, email, dob etc.)
+    if (!Array.isArray(students) || students.length === 0) {
+      return res.status(400).json({ error: 'students array is required' });
+    }
+
+    const created: string[] = [];
+    const skipped: string[] = [];
+    const errors: string[] = [];
+
+    for (const s of students) {
+      if (!s.roll_number || !s.email || !s.name) {
+        errors.push(`Missing required fields for row: ${JSON.stringify(s)}`);
+        continue;
+      }
+      if (!s.dob) {
+        errors.push(`${s.roll_number}: DOB is required as initial password`);
+        continue;
+      }
+
+      try {
+        // Upsert student record
+        const existing = await db.query(`SELECT roll_number FROM students WHERE UPPER(roll_number) = $1`, [s.roll_number.toUpperCase()]);
+        if (existing.rows.length > 0) {
+          skipped.push(s.roll_number);
+          continue;
+        }
+
+        await db.query(
+          `INSERT INTO students (roll_number, name, email, year, department, batch, section, is_lateral_entry, dob, created_at, updated_at)
+           VALUES ($1, $2, $3, '1st Year', $4, $5, $6, $7, $8, NOW(), NOW())
+           ON CONFLICT (roll_number) DO NOTHING`,
+          [
+            s.roll_number.toUpperCase(),
+            s.name.trim(),
+            s.email.toLowerCase(),
+            s.department,
+            s.batch || `20${String(new Date().getFullYear()).slice(-2)}-${String(new Date().getFullYear() + 4)}`,
+            s.section || 'A',
+            Boolean(s.is_lateral),
+            s.dob || null,
+          ]
+        );
+
+        // Store DOB as password (bcrypt hashed) — DOB format: DDMMYYYY
+        const dobPassword = String(s.dob).replace(/[^0-9]/g, ''); // strip slashes/dashes → DDMMYYYY
+        if (dobPassword.length >= 6) {
+          const hashed = await bcrypt.hash(dobPassword, BCRYPT_ROUNDS);
+          await db.query(
+            `INSERT INTO student_passwords (roll_number, password, updated_at)
+             VALUES ($1, $2, NOW())
+             ON CONFLICT (roll_number) DO UPDATE SET password = EXCLUDED.password, updated_at = NOW()`,
+            [s.roll_number.toUpperCase(), hashed]
+          );
+        }
+
+        created.push(s.roll_number);
+      } catch (rowErr: any) {
+        errors.push(`${s.roll_number}: ${rowErr.message}`);
+      }
+    }
+
+    res.json({
+      success: true,
+      created: created.length,
+      skipped: skipped.length,
+      errors: errors.length,
+      created_roll_numbers: created,
+      skipped_roll_numbers: skipped,
+      error_details: errors,
+      message: `Created ${created.length} student(s). Skipped ${skipped.length} (already exist). ${errors.length > 0 ? `${errors.length} error(s).` : ''}`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /first-year/students — list all first-year temp students (roll numbers with T prefix or year=1st Year)
+app.get('/first-year/students', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
+  try {
+    const { dept, batch_year } = req.query;
+    let query = `SELECT s.*, sp.password IS NOT NULL AS has_password
+                 FROM students s
+                 LEFT JOIN student_passwords sp ON UPPER(sp.roll_number) = UPPER(s.roll_number)
+                 WHERE s.year = '1st Year'`;
+    const params: any[] = [];
+
+    if (dept) {
+      params.push(dept);
+      query += ` AND s.department = $${params.length}`;
+    }
+    if (batch_year) {
+      const by = String(batch_year).slice(-2);
+      params.push(`${by}%`);
+      query += ` AND UPPER(s.roll_number) LIKE $${params.length}`;
+    }
+    query += ` ORDER BY s.department, s.roll_number`;
+
+    const result = await db.query(query, params);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export const handler = serverless(app);
 export default app;

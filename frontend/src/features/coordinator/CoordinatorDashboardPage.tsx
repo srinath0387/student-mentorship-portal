@@ -38,13 +38,14 @@ import { CertificationsTab } from '../profile/tabs/CertificationsTab';
 import { SoftSkillsTab } from '../profile/tabs/SoftSkillsTab';
 import { AchievementsTab } from '../profile/tabs/AchievementsTab';
 import { PlacementPreferencesTab } from '../profile/tabs/PlacementPreferencesTab';
+import { FirstYearOnboardingTab } from './FirstYearOnboardingTab';
 
 export const CoordinatorDashboardPage: React.FC = () => {
   const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState<
-    'freshers' | 'subjects' | 'attendance' | 'manage-attendance' | 'leaves' | 'calendar' | 'incharge' | 'promotion'
-  >('freshers');
+    'onboarding' | 'freshers' | 'subjects' | 'attendance' | 'manage-attendance' | 'leaves' | 'calendar' | 'incharge' | 'promotion'
+  >('onboarding');
 
   // Inspection Modal State for 360 Fresher Profile
   const [inspectStudentRoll, setInspectStudentRoll] = useState<string | null>(null);
@@ -450,6 +451,18 @@ export const CoordinatorDashboardPage: React.FC = () => {
       {/* ── Main Tab Navigation ── */}
       <div className="flex flex-wrap bg-surface-2 p-1 rounded-2xl border border-borderLine max-w-5xl gap-1">
         <button
+          onClick={() => setActiveTab('onboarding')}
+          className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+            activeTab === 'onboarding'
+              ? 'bg-pink-600 text-white shadow-md'
+              : 'text-textSecondary hover:text-textPrimary'
+          }`}
+        >
+          <Upload className="w-3.5 h-3.5" />
+          <span>1st Year Onboarding</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('freshers')}
           className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'freshers'
@@ -458,7 +471,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
           }`}
         >
           <Users className="w-3.5 h-3.5" />
-          <span>Freshers</span>
+          <span>Freshers Directory</span>
         </button>
 
         <button
@@ -545,6 +558,11 @@ export const CoordinatorDashboardPage: React.FC = () => {
           <span>Promotion</span>
         </button>
       </div>
+
+      {/* ════════════════════════════════════════════════════════════════════════ */}
+      {/* TAB 0: 1ST YEAR ONBOARDING & ROLL NUMBER GENERATION */}
+      {/* ════════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'onboarding' && <FirstYearOnboardingTab />}
 
       {/* ════════════════════════════════════════════════════════════════════════ */}
       {/* TAB 1: FRESHER ADMISSIONS & MIGRATION DIRECTORY */}
