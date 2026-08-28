@@ -15,7 +15,7 @@ const ProfilePage = lazy(() => import('./features/profile/ProfilePage').then(m =
 const FacultyDashboardPage = lazy(() => import('./features/faculty/FacultyDashboardPage').then(m => ({ default: m.FacultyDashboardPage })));
 const AdminDashboardPage = lazy(() => import('./features/admin/AdminDashboardPage').then(m => ({ default: m.AdminDashboardPage })));
 const HodDashboardPage = lazy(() => import('./features/hod/HodDashboardPage').then(m => ({ default: m.HodDashboardPage })));
-const CoordinatorDashboardPage = lazy(() => import('./features/coordinator/CoordinatorDashboardPage'));
+const CoordinatorDashboardPage = lazy(() => import('./features/coordinator/CoordinatorDashboardPage').then(m => ({ default: m.CoordinatorDashboardPage || m.default })));
 const CodingAnalyticsPage = lazy(() => import('./features/coding/CodingAnalyticsPage').then(m => ({ default: m.CodingAnalyticsPage })));
 const PlatformStatsRedirect = lazy(() => import('./features/coding/PlatformStatsRedirect').then(m => ({ default: m.PlatformStatsRedirect })));
 const FacultyManagementPage = lazy(() => import('./features/admin/FacultyManagementPage'));

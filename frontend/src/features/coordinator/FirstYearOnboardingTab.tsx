@@ -58,6 +58,7 @@ export const FirstYearOnboardingTab: React.FC = () => {
     queryKey: ['firstYearStudents', batchYear],
     queryFn: () => api.getFirstYearStudents(undefined, batchYear),
   });
+  const studentList = Array.isArray(existingStudents) ? existingStudents : [];
 
   const generateMutation = useMutation({
     mutationFn: () => api.generateFirstYearRollNumbers(
@@ -178,7 +179,7 @@ export const FirstYearOnboardingTab: React.FC = () => {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-borderLine">
-        {[{ id: 'existing' as const, label: `📋 Existing 1st Years (${(existingStudents as any[]).length})` }, { id: 'new' as const, label: '➕ Add New Students' }].map(t => (
+        {[{ id: 'existing' as const, label: `📋 Existing 1st Years (${studentList.length})` }, { id: 'new' as const, label: '➕ Add New Students' }].map(t => (
           <button key={t.id} onClick={() => setActiveTab(t.id)}
             className={`px-4 py-2 text-xs font-bold rounded-t-lg transition-colors ${activeTab === t.id ? 'bg-brand-primary/10 text-brand-primary border-b-2 border-brand-primary' : 'text-textMuted hover:text-textPrimary'}`}>
             {t.label}
@@ -190,10 +191,10 @@ export const FirstYearOnboardingTab: React.FC = () => {
       {activeTab === 'existing' && (
         <div className="space-y-3">
           <div className="flex justify-between items-center">
-            <span className="text-xs text-textMuted">{(existingStudents as any[]).length} student(s) for batch {batchYear}</span>
+            <span className="text-xs text-textMuted">{studentList.length} student(s) for batch {batchYear}</span>
             <button onClick={() => refetchExisting()} className="text-xs text-brand-primary flex items-center gap-1 hover:underline"><RefreshCw className="w-3 h-3" /> Refresh</button>
           </div>
-          {(existingStudents as any[]).length === 0
+          {studentList.length === 0
             ? <div className="text-center py-10 text-textMuted text-sm">No 1st year students for batch {batchYear} yet.</div>
             : (
               <div className="rounded-xl border border-borderLine overflow-x-auto">
@@ -210,7 +211,7 @@ export const FirstYearOnboardingTab: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-borderLine">
-                    {(existingStudents as any[]).map((s: any) => (
+                    {studentList.map((s: any) => (
                       <tr key={s.roll_number} className="hover:bg-surface-2/40">
                         <td className="px-3 py-2 font-mono font-bold text-textPrimary">{s.roll_number}</td>
                         <td className="px-3 py-2 text-textPrimary">{s.name}</td>

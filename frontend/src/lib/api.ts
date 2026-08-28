@@ -42,9 +42,9 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
 
   // Only fall back to Cognito if sessionStorage has nothing (fresh page load for students)
   if (!token) {
-    // HOD/Admin use demo tokens — Cognito would return null or a wrong-role token.
+    // HOD/Admin/Coordinator use demo tokens — Cognito would return null or a wrong-role token.
     // Reconstruct the demo token directly from the saved user rather than hitting Cognito.
-    if ((userRole === 'hod' || userRole === 'admin') && userEmail) {
+    if ((userRole === 'hod' || userRole === 'admin' || userRole === 'coordinator') && userEmail) {
       token = `demo_token_${userRole}_${encodeURIComponent(userEmail)}_${Date.now()}`;
       // Restore it to sessionStorage so subsequent requests don't need to reconstruct
       sessionStorage.setItem('advitiyans_jwt_token', token);
