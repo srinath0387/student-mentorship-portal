@@ -123,7 +123,8 @@ export class AdvitiyansStack extends cdk.Stack {
       backupRetention: cdk.Duration.days(7),             // Daily automated snapshots (free)
       deletionProtection: true,                          // Prevent accidental delete via console
       enablePerformanceInsights: true,                   // FREE on t3.large — 7-day query analysis
-      storageEncrypted: true,                            // Encrypt data at rest (security best practice)
+      // NOTE: storageEncrypted cannot be enabled on an existing unencrypted instance.
+      // It requires a replace (snapshot + restore). Skipping to avoid data loss risk.
     });
 
     // ========================================================================
@@ -216,7 +217,7 @@ export class AdvitiyansStack extends cdk.Stack {
       code: lambda.Code.fromAsset(path.join(__dirname, '../../backend/dist')),
       timeout: cdk.Duration.seconds(29),       // API Gateway hard max; handles heavy HOD report queries
       memorySize: 512,                          // 2× CPU speed vs 256 MB; runs ~35% faster
-      reservedConcurrentExecutions: 200,        // Cap = 200 × max:1 pool = 200 DB connections (safe under 855)
+      reservedConcurrentExecutions: 100,        // 100 × max:2 pool = 200 DB connections; keeps ≥10 unreserved free
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
       securityGroups: [lambdaSg],
