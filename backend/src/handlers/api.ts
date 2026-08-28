@@ -1421,17 +1421,20 @@ app.get('/students', async (req: Request, res: Response) => {
     const FIRST_YEAR_SCOPE_DEPTS = ['Mathematics', 'English', 'Physics', 'Chemistry', '1st Year'];
 
     // Auto-apply department scoping if caller is non-super admin, HOD, or Student
+    const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
     const isSuper = req.auth?.isSuperAdmin || callerDept === '*';
-    if (!isSuper && callerDept && (req.auth?.role === 'admin' || req.auth?.role === 'hod' || req.auth?.role === 'student')) {
-      if (FIRST_YEAR_SCOPE_DEPTS.includes(callerDept)) {
-        // S&H / FY Coordinator — scope to 1st year only, no branch filter
-        conditions.push(`s.year = $${paramIndex++}`);
-        params.push('1st Year');
-      } else {
+
+    // Coordinator or S&H departments see ALL 1st-year students across all branches
+    if (callerRole === 'coordinator' || (callerDept && FIRST_YEAR_SCOPE_DEPTS.includes(callerDept))) {
+      conditions.push(`(s.year = '1st Year' OR s.year ILIKE '1%')`);
+      if (department && String(department) !== 'All' && String(department) !== 'undefined' && String(department) !== 'null') {
         conditions.push(`(LOWER(REPLACE(s.department, ' ', '')) = LOWER(REPLACE($${paramIndex++}, ' ', '')))`);
-        params.push(callerDept);
+        params.push(String(department));
       }
+    } else if (!isSuper && callerDept && (callerRole === 'admin' || callerRole === 'hod' || callerRole === 'student')) {
+      conditions.push(`(LOWER(REPLACE(s.department, ' ', '')) = LOWER(REPLACE($${paramIndex++}, ' ', '')))`);
+      params.push(callerDept);
     } else if (department && String(department) !== 'All' && String(department) !== 'undefined' && String(department) !== 'null') {
       conditions.push(`(LOWER(REPLACE(s.department, ' ', '')) = LOWER(REPLACE($${paramIndex++}, ' ', '')))`);
       params.push(String(department));
@@ -1441,7 +1444,7 @@ app.get('/students', async (req: Request, res: Response) => {
       conditions.push(`batch = $${paramIndex++}`);
       params.push(String(batch));
     }
-    if (year && String(year) !== 'All' && String(year) !== 'undefined' && String(year) !== 'null') {
+    if (callerRole !== 'coordinator' && !FIRST_YEAR_SCOPE_DEPTS.includes(callerDept || '') && year && String(year) !== 'All' && String(year) !== 'undefined' && String(year) !== 'null') {
       conditions.push(`year = $${paramIndex++}`);
       params.push(String(year));
     }
@@ -6984,7 +6987,8 @@ app.get('/coordinator/freshers', requireRole('coordinator', 'admin'), async (req
       LEFT JOIN subject_rosters sr ON sr.roll_number = s.roll_number
       LEFT JOIN subject_allotments a ON a.id = sr.allotment_id
       LEFT JOIN attendance_records ar ON ar.roll_number = s.roll_number
-      WHERE s.year = '1st Year'
+      WHERE (s.year = '1st Year' OR s.year ILIKE '1%' OR s.admission_id IS NOT NULL AND s.year IS NULL)
+        AND (s.year NOT ILIKE '2%' AND s.year NOT ILIKE '3%' AND s.year NOT ILIKE '4%')
     `;
     const params: any[] = [];
 
