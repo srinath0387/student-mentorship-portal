@@ -217,7 +217,9 @@ export class AdvitiyansStack extends cdk.Stack {
       code: lambda.Code.fromAsset(path.join(__dirname, '../../backend/dist')),
       timeout: cdk.Duration.seconds(29),       // API Gateway hard max; handles heavy HOD report queries
       memorySize: 512,                          // 2× CPU speed vs 256 MB; runs ~35% faster
-      reservedConcurrentExecutions: 100,        // 100 × max:2 pool = 200 DB connections; keeps ≥10 unreserved free
+      // NOTE: reservedConcurrentExecutions removed — account limit is only 10 total concurrent
+      // executions. With t3.large (855 max DB connections) and only 10 max Lambda executions,
+      // connection exhaustion is impossible. No reservation needed.
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
       securityGroups: [lambdaSg],
