@@ -305,7 +305,7 @@ export const HodLeaveApprovalTab: React.FC<{ studentsOnly?: boolean }> = ({ stud
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 bg-surface rounded-xl border border-borderLine text-xs">
                         <div>
                           <span className="text-[10px] font-bold text-textMuted block">DURATION</span>
-                          <span className="font-mono font-bold text-textPrimary">{l.from_date} to {l.to_date}</span>
+                          <span className="font-mono font-bold text-textPrimary">{l.from_date?.split('T')[0]} to {l.to_date?.split('T')[0]}</span>
                         </div>
                         <div>
                           <span className="text-[10px] font-bold text-textMuted block">TOTAL WORKING DAYS</span>
@@ -359,7 +359,7 @@ export const HodLeaveApprovalTab: React.FC<{ studentsOnly?: boolean }> = ({ stud
                                           {adj.adjustment_type === 'exam_duty' ? 'Exam Duty' : 'Classwork'}
                                         </span>
                                       </td>
-                                      <td className="p-2 font-mono text-textPrimary font-bold">{adj.date}</td>
+                                      <td className="p-2 font-mono text-textPrimary font-bold">{adj.date?.split('T')[0]}</td>
                                       <td className="p-2 font-medium text-textPrimary">{adj.subject_or_duty}</td>
                                       <td className="p-2 font-mono text-purple-300 font-semibold">{adj.periods?.join(', ') || adj.timing_slot}</td>
                                       <td className="p-2">

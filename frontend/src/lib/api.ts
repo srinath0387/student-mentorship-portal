@@ -1068,12 +1068,14 @@ export const api = {
   },
 
   // ── MODULE 5: Faculty Leaves ──────────────────────────────────────────────
-  getMyFacultyLeaveSummary: async () => {
-    return fetchWithAuth('/faculty/leaves/my-summary');
+  getMyFacultyLeaveSummary: async (email?: string) => {
+    const qs = email ? `?caller_email=${encodeURIComponent(email)}` : '';
+    return fetchWithAuth(`/faculty/leaves/my-summary${qs}`);
   },
 
-  getReassignedDuties: async () => {
-    return fetchWithAuth('/faculty/leaves/reassigned-duties');
+  getReassignedDuties: async (email?: string) => {
+    const qs = email ? `?caller_email=${encodeURIComponent(email)}` : '';
+    return fetchWithAuth(`/faculty/leaves/reassigned-duties${qs}`);
   },
 
   applyFacultyLeave: async (data: {
@@ -1082,6 +1084,7 @@ export const api = {
     to_date: string;
     reason: string;
     adjustments?: any[];
+    faculty_email?: string;
   }) => {
     return fetchWithAuth('/faculty/leaves/apply', {
       method: 'POST',
@@ -1112,10 +1115,10 @@ export const api = {
     });
   },
 
-  respondToAdjustment: async (adjId: string, status: 'Accepted' | 'Rejected', rejected_reason?: string) => {
+  respondToAdjustment: async (adjId: string, status: 'Accepted' | 'Rejected', rejected_reason?: string, callerEmail?: string) => {
     return fetchWithAuth(`/faculty/leaves/adjustments/${encodeURIComponent(adjId)}/respond`, {
       method: 'POST',
-      body: JSON.stringify({ status, rejected_reason }),
+      body: JSON.stringify({ status, rejected_reason, caller_email: callerEmail }),
     });
   },
 

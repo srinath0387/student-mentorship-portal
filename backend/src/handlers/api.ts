@@ -8117,7 +8117,8 @@ const LEAVE_QUOTAS: Record<string, number> = {
 app.get('/faculty/leaves/my-summary', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
   try {
     await ensureLeaveAndSubjectsHandledTables();
-    const email = req.auth?.email?.toLowerCase().trim();
+    // Prefer explicit caller_email query param (sent by frontend per-tab) over token-derived email
+    const email = ((req.query.caller_email as string) || req.auth?.email || '').toLowerCase().trim();
     if (!email) return res.status(401).json({ error: 'Unauthorized' });
 
     const currentYear = new Date().getFullYear();
@@ -8236,7 +8237,8 @@ app.get('/faculty/leaves/my-summary', requireRole('faculty', 'hod', 'admin'), as
 app.get('/faculty/leaves/reassigned-duties', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
   try {
     await ensureLeaveAndSubjectsHandledTables();
-    const email = req.auth?.email?.toLowerCase().trim();
+    // Prefer explicit caller_email query param (sent by frontend per-tab) over token-derived email
+    const email = ((req.query.caller_email as string) || req.auth?.email || '').toLowerCase().trim();
     if (!email) return res.status(401).json({ error: 'Unauthorized' });
 
     const result = await db.query(
@@ -8266,7 +8268,8 @@ app.get('/faculty/leaves/reassigned-duties', requireRole('faculty', 'hod', 'admi
 app.post('/faculty/leaves/adjustments/:adjId/respond', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
   try {
     await ensureLeaveAndSubjectsHandledTables();
-    const email = req.auth?.email?.toLowerCase().trim();
+    // Prefer explicit caller_email from body over token-derived email
+    const email = ((req.body.caller_email as string) || req.auth?.email || '').toLowerCase().trim();
     const { adjId } = req.params;
     const { status, rejected_reason } = req.body; // 'Accepted' | 'Rejected'
 
@@ -8360,7 +8363,8 @@ app.put('/faculty/leaves/adjustments/:adjId/reassign', requireRole('faculty', 'h
 app.post('/faculty/leaves/apply', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
   try {
     await ensureLeaveAndSubjectsHandledTables();
-    const email = req.auth?.email?.toLowerCase().trim();
+    // Prefer explicit faculty_email from request body (sent by frontend per-tab) over token-derived email
+    const email = ((req.body.faculty_email as string) || req.auth?.email || '').toLowerCase().trim();
     const { leave_type, from_date, to_date, reason, adjustments = [] } = req.body;
 
     if (!email || !leave_type || !from_date || !to_date || !reason) {

@@ -68,12 +68,15 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
       return next();
     }
 
+    // Check if caller email is passed explicitly via X-Caller-Email header
+    const explicitCallerEmail = req.headers['x-caller-email'] ? String(req.headers['x-caller-email']).toLowerCase().trim() : '';
+
     const token = authHeader.slice(7);
 
     // ── Attempt 1: Decode as a real Cognito JWT ──
     const payload = decodeJwtPayload(token);
-    if (payload && payload.email) {
-      const email = (payload.email || '').toLowerCase();
+    if (payload && (payload.email || explicitCallerEmail)) {
+      const email = (explicitCallerEmail || payload.email || '').toLowerCase();
       const derivedRegNo = (payload['custom:reg_no'] || (email.includes('@') ? email.split('@')[0] : '')).toUpperCase();
       const role = (payload['custom:role'] || 'student').toLowerCase();
       // Derive department from roll number for students, or from DB for faculty
@@ -96,12 +99,11 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
       // Format can be demo_token_<role>_<timestamp> or demo_token_<role>_<encodedEmail>_<timestamp>
       const demoRole = (parts.length >= 3 ? parts[2] : '').toLowerCase();
 
-      let email = '';
-      if (req.headers['x-caller-email']) email = String(req.headers['x-caller-email']).toLowerCase();
-      if (req.query.email) email = String(req.query.email).toLowerCase();
-      if (req.query.caller_email) email = String(req.query.caller_email).toLowerCase();
-      if (req.body?.email) email = String(req.body.email).toLowerCase();
-      if (req.body?.caller_email) email = String(req.body.caller_email).toLowerCase();
+      let email = explicitCallerEmail;
+      if (!email && req.query.email) email = String(req.query.email).toLowerCase();
+      if (!email && req.query.caller_email) email = String(req.query.caller_email).toLowerCase();
+      if (!email && req.body?.email) email = String(req.body.email).toLowerCase();
+      if (!email && req.body?.caller_email) email = String(req.body.caller_email).toLowerCase();
 
       if (!email && parts.length >= 5) {
         try {

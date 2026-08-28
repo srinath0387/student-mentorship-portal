@@ -42,6 +42,11 @@ const AVAILABLE_PERIODS = [
   { id: 'Period 7', label: 'Period 7 (03:20 - 04:10 PM)' },
 ];
 
+const formatDate = (d?: string) => {
+  if (!d) return '';
+  return d.split('T')[0];
+};
+
 export const FacultyLeaveTab: React.FC = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -80,7 +85,7 @@ export const FacultyLeaveTab: React.FC = () => {
   // Queries
   const { data: summary, isLoading: isLoadingSummary } = useQuery<FacultyLeaveSummaryResponse>({
     queryKey: ['facultyLeaveSummary', email],
-    queryFn: () => api.getMyFacultyLeaveSummary(),
+    queryFn: () => api.getMyFacultyLeaveSummary(email),
     enabled: Boolean(email),
   });
 
@@ -91,7 +96,7 @@ export const FacultyLeaveTab: React.FC = () => {
 
   const { data: reassignedDuties = [], isLoading: isLoadingDuties } = useQuery<FacultyLeaveAdjustment[]>({
     queryKey: ['facultyReassignedDuties', email],
-    queryFn: () => api.getReassignedDuties(),
+    queryFn: () => api.getReassignedDuties(email),
     enabled: Boolean(email),
   });
 
@@ -171,7 +176,7 @@ export const FacultyLeaveTab: React.FC = () => {
 
   const dutyResponseMutation = useMutation({
     mutationFn: ({ adjId, status, rejected_reason }: { adjId: string; status: 'Accepted' | 'Rejected'; rejected_reason?: string }) =>
-      api.respondToAdjustment(adjId, status, rejected_reason),
+      api.respondToAdjustment(adjId, status, rejected_reason, email),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['facultyReassignedDuties', email] });
       queryClient.invalidateQueries({ queryKey: ['facultyLeaveSummary'] });
@@ -308,6 +313,7 @@ export const FacultyLeaveTab: React.FC = () => {
       to_date: formToDate,
       reason: formReason.trim(),
       adjustments: finalAdjustments,
+      faculty_email: email,
     });
   };
 
@@ -453,7 +459,7 @@ export const FacultyLeaveTab: React.FC = () => {
                         <tr key={l.id} className="hover:bg-surface-2/40 transition-colors">
                           <td className="py-2.5 px-3.5 font-bold text-textPrimary whitespace-nowrap">{l.leave_type}</td>
                           <td className="py-2.5 px-3.5 text-textSecondary whitespace-nowrap font-mono">
-                            {l.from_date} to {l.to_date}
+                            {formatDate(l.from_date)} to {formatDate(l.to_date)}
                           </td>
                           <td className="py-2.5 px-3.5 text-center font-mono font-bold">{l.num_days}</td>
                           <td className="py-2.5 px-3.5 text-textSecondary max-w-xs truncate">{l.reason}</td>
@@ -462,7 +468,7 @@ export const FacultyLeaveTab: React.FC = () => {
                               <div className="space-y-1">
                                 {l.adjustments.map((a, i) => (
                                   <div key={a.id || i} className="flex items-center gap-1.5 text-[11px]">
-                                    <span className="font-semibold text-textPrimary">{a.subject_or_duty} ({a.date}):</span>
+                                    <span className="font-semibold text-textPrimary">{a.subject_or_duty} ({formatDate(a.date)}):</span>
                                     <span className="text-textSecondary">{a.reassigned_faculty_name}</span>
                                     {a.acceptance_status === 'Accepted' ? (
                                       <span className="px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-400 text-[10px] font-bold inline-flex items-center gap-0.5 border border-emerald-500/20">
@@ -629,7 +635,7 @@ export const FacultyLeaveTab: React.FC = () => {
                               {duty.adjustment_type === 'exam_duty' ? 'Exam Duty' : 'Classwork'}
                             </span>
                           </td>
-                          <td className="py-2.5 px-3.5 font-mono font-bold text-textPrimary whitespace-nowrap">{duty.date}</td>
+                          <td className="py-2.5 px-3.5 font-mono font-bold text-textPrimary whitespace-nowrap">{formatDate(duty.date)}</td>
                           <td className="py-2.5 px-3.5 font-bold text-textPrimary">{duty.subject_or_duty}</td>
                           <td className="py-2.5 px-3.5 text-textSecondary font-mono">{duty.timing_slot}</td>
                           <td className="py-2.5 px-3.5">
