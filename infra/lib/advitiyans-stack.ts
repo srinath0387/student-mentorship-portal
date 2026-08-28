@@ -123,6 +123,7 @@ export class AdvitiyansStack extends cdk.Stack {
       backupRetention: cdk.Duration.days(7),             // Daily automated snapshots (free)
       deletionProtection: true,                          // Prevent accidental delete via console
       enablePerformanceInsights: true,                   // FREE on t3.large — 7-day query analysis
+      monitoringInterval: cdk.Duration.seconds(60),      // Enhanced Monitoring — OS-level metrics every 60s (~$0.50/mo)
       // NOTE: storageEncrypted cannot be enabled on an existing unencrypted instance.
       // It requires a replace (snapshot + restore). Skipping to avoid data loss risk.
     });
