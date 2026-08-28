@@ -26,7 +26,6 @@ interface StudentRow {
   dept: string;
   dob: string;
   section: string;
-  is_lateral: boolean;
 }
 
 interface GeneratedStudent {
@@ -37,7 +36,6 @@ interface GeneratedStudent {
   dept_code: string;
   section: string;
   dob: string;
-  is_lateral: boolean;
   batch: string;
   error?: string;
 }
@@ -50,7 +48,7 @@ export const FirstYearOnboardingTab: React.FC = () => {
   const [batchYear, setBatchYear] = useState<string>(String(currentYear));
   const [step, setStep] = useState<'input' | 'preview' | 'done'>('input');
   const [rows, setRows] = useState<StudentRow[]>([
-    { name: '', dept: 'CSE (Data Science)', dob: '', section: 'A', is_lateral: false },
+    { name: '', dept: 'CSE (Data Science)', dob: '', section: 'A' },
   ]);
   const [generated, setGenerated] = useState<GeneratedStudent[]>([]);
   const [createResult, setCreateResult] = useState<any>(null);
@@ -68,7 +66,6 @@ export const FirstYearOnboardingTab: React.FC = () => {
         dept: r.dept,
         dob: r.dob.replace(/[^0-9]/g, ''),
         section: r.section || 'A',
-        is_lateral: r.is_lateral,
       })),
       batchYear
     ),
@@ -102,7 +99,6 @@ export const FirstYearOnboardingTab: React.FC = () => {
           dept: row['Department'] || row['dept'] || row['Branch'] || '',
           dob: String(row['DOB'] || row['dob'] || row['Date of Birth'] || '').replace(/[^0-9]/g, ''),
           section: row['Section'] || row['section'] || 'A',
-          is_lateral: String(row['Lateral'] || row['is_lateral'] || '').toLowerCase() === 'yes',
         })).filter(r => r.name);
         if (parsed.length === 0) { alert('No valid rows found. Expected columns: Name, Department, DOB, Section'); return; }
         setRows(parsed);
@@ -114,12 +110,12 @@ export const FirstYearOnboardingTab: React.FC = () => {
 
   const downloadTemplate = () => {
     const ws = XLSX.utils.aoa_to_sheet([
-      ['Name', 'Department', 'DOB', 'Section', 'Lateral'],
-      ['Sai Krishna', 'CSE (Data Science)', '15092007', 'A', 'No'],
-      ['Priya Reddy', 'ECE', '22042007', 'B', 'No'],
-      ['Ravi Kumar', 'CSE (AI & ML)', '01012006', 'A', 'Yes'],
+      ['Name', 'Department', 'DOB', 'Section'],
+      ['Sai Krishna', 'CSE (Data Science)', '15092007', 'A'],
+      ['Priya Reddy', 'ECE', '22042007', 'B'],
+      ['Ravi Kumar', 'CSE (AI & ML)', '01012007', 'A'],
     ]);
-    ws['!cols'] = [{ wch: 25 }, { wch: 22 }, { wch: 12 }, { wch: 9 }, { wch: 9 }];
+    ws['!cols'] = [{ wch: 25 }, { wch: 22 }, { wch: 12 }, { wch: 9 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'First Year Students');
     XLSX.writeFile(wb, '1st_year_upload_template.xlsx');
@@ -136,7 +132,7 @@ export const FirstYearOnboardingTab: React.FC = () => {
     XLSX.writeFile(wb, '1st_year_generated.xlsx');
   };
 
-  const addRow = () => setRows(r => [...r, { name: '', dept: 'CSE (Data Science)', dob: '', section: 'A', is_lateral: false }]);
+  const addRow = () => setRows(r => [...r, { name: '', dept: 'CSE (Data Science)', dob: '', section: 'A' }]);
   const removeRow = (i: number) => setRows(r => r.filter((_, idx) => idx !== i));
   const updateRow = (i: number, field: keyof StudentRow, val: any) =>
     setRows(r => r.map((row, idx) => idx === i ? { ...row, [field]: val } : row));
@@ -153,7 +149,7 @@ export const FirstYearOnboardingTab: React.FC = () => {
             1st Year Student Onboarding
           </h2>
           <p className="text-xs text-textMuted mt-0.5">
-            Auto-generate RGMCET roll numbers. Students log in with <code className="font-mono bg-surface px-1 rounded">regno@rgmcet.edu.in</code> / DOB as password.
+            Auto-generate regular RGMCET roll numbers. Students log in with <code className="font-mono bg-surface px-1 rounded">regno@rgmcet.edu.in</code> / DOB as password.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -174,8 +170,8 @@ export const FirstYearOnboardingTab: React.FC = () => {
       <div className="bg-brand-soft border border-brand-primary/20 rounded-xl p-3 flex gap-2 text-xs text-textSecondary">
         <Info className="w-4 h-4 text-brand-primary flex-shrink-0 mt-0.5" />
         <span>
-          Roll number format: <code className="font-mono bg-surface px-1 rounded">26091A3201</code>
-          &nbsp;→ batch <strong>26</strong>, college <strong>09</strong>, regular <strong>1</strong>, A, dept code <strong>32</strong>(DS), seq <strong>01</strong>.
+          Regular roll number format: <code className="font-mono bg-surface px-1 rounded">26091A3201</code>
+          &nbsp;→ batch <strong>26</strong>, college <strong>09</strong>, regular <strong>1A</strong>, dept code <strong>32</strong>(DS), seq <strong>01</strong>.
           DOB (<code className="font-mono bg-surface px-1 rounded">DDMMYYYY</code>) is stored as the initial login password.
         </span>
       </div>
@@ -257,11 +253,10 @@ export const FirstYearOnboardingTab: React.FC = () => {
                   <thead className="bg-surface-2 border-b border-borderLine text-textMuted font-bold">
                     <tr>
                       <th className="px-3 py-2 w-8">#</th>
-                      <th className="px-3 py-2 min-w-[170px]">Name *</th>
-                      <th className="px-3 py-2 min-w-[170px]">Department *</th>
-                      <th className="px-3 py-2 min-w-[130px]">DOB * (DDMMYYYY)</th>
-                      <th className="px-3 py-2 w-20">Section</th>
-                      <th className="px-3 py-2 w-20 text-center">Lateral</th>
+                      <th className="px-3 py-2 min-w-[180px]">Name *</th>
+                      <th className="px-3 py-2 min-w-[180px]">Department *</th>
+                      <th className="px-3 py-2 min-w-[140px]">DOB * (DDMMYYYY)</th>
+                      <th className="px-3 py-2 w-24">Section</th>
                       <th className="px-3 py-2 w-8"></th>
                     </tr>
                   </thead>
@@ -290,10 +285,6 @@ export const FirstYearOnboardingTab: React.FC = () => {
                             className="w-full bg-surface border border-borderLine rounded-lg px-2 py-1.5 text-xs text-textPrimary">
                             {['A', 'B', 'C', 'D'].map(s => <option key={s}>{s}</option>)}
                           </select>
-                        </td>
-                        <td className="px-2 py-1 text-center">
-                          <input type="checkbox" checked={row.is_lateral} onChange={e => updateRow(i, 'is_lateral', e.target.checked)}
-                            className="w-4 h-4 accent-brand-primary" />
                         </td>
                         <td className="px-2 py-1">
                           <button onClick={() => removeRow(i)} className="text-rose-400 hover:text-rose-300 p-1 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
@@ -401,7 +392,7 @@ export const FirstYearOnboardingTab: React.FC = () => {
               )}
               <div className="flex justify-center gap-3">
                 <button
-                  onClick={() => { setStep('input'); setRows([{ name: '', dept: 'CSE (Data Science)', dob: '', section: 'A', is_lateral: false }]); setGenerated([]); setCreateResult(null); }}
+                  onClick={() => { setStep('input'); setRows([{ name: '', dept: 'CSE (Data Science)', dob: '', section: 'A' }]); setGenerated([]); setCreateResult(null); }}
                   className="px-5 py-2.5 rounded-xl border border-borderLine text-sm font-bold text-textSecondary hover:bg-surface-2">
                   Add More
                 </button>

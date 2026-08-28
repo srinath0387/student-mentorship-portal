@@ -9036,11 +9036,11 @@ app.post('/first-year/generate-roll-numbers', requireRole('admin', 'hod', 'coord
     // Count existing students per dept+batch to determine starting sequence
     const seqCounters: Record<string, number> = {};
 
-    const getNextSeq = async (deptCode: string, isLateral: boolean): Promise<number> => {
-      const key = `${deptCode}_${isLateral ? '5' : '1'}`;
+    const getNextSeq = async (deptCode: string): Promise<number> => {
+      const key = `${deptCode}_1`;
       if (seqCounters[key] === undefined) {
-        // Count how many students already exist with this batch+dept prefix
-        const prefix = `${batchYear}${COLLEGE_CODE}${isLateral ? '5' : '1'}A${deptCode}`;
+        // Count how many regular students already exist with this batch+dept prefix
+        const prefix = `${batchYear}${COLLEGE_CODE}1A${deptCode}`;
         const existing = await db.query(
           `SELECT COUNT(*) AS cnt FROM students WHERE UPPER(roll_number) LIKE $1`,
           [`${prefix}%`]
@@ -9078,8 +9078,7 @@ app.post('/first-year/generate-roll-numbers', requireRole('admin', 'hod', 'coord
         results.push({ ...s, error: `Unknown department: ${s.dept || s.department}` });
         continue;
       }
-      const isLateral = Boolean(s.is_lateral);
-      const seq = await getNextSeq(deptCode, isLateral);
+      const seq = await getNextSeq(deptCode);
       // Sequence: 2-alphanumeric padded (01-99 then A0-Z9)
       let seqStr: string;
       if (seq <= 99) {
@@ -9090,7 +9089,8 @@ app.post('/first-year/generate-roll-numbers', requireRole('admin', 'hod', 'coord
         const letter = String.fromCharCode(65 + Math.floor(overflow / 10));
         seqStr = `${letter}${overflow % 10}`;
       }
-      const rollNumber = `${batchYear}${COLLEGE_CODE}${isLateral ? '5' : '1'}A${deptCode}${seqStr}`.toUpperCase();
+      // 1st Years are strictly Regular (1A)
+      const rollNumber = `${batchYear}${COLLEGE_CODE}1A${deptCode}${seqStr}`.toUpperCase();
       const email = `${rollNumber.toLowerCase()}@rgmcet.edu.in`;
       results.push({
         name: s.name,
@@ -9100,7 +9100,7 @@ app.post('/first-year/generate-roll-numbers', requireRole('admin', 'hod', 'coord
         dept_code: deptCode,
         section: s.section || 'A',
         dob: s.dob || '',
-        is_lateral: isLateral,
+        is_lateral: false,
         batch: `20${batchYear}-${String(parseInt(batchYear, 10) + 4).padStart(2, '0')}`,
       });
     }
