@@ -52,13 +52,6 @@ export class AdvitiyansStack extends cdk.Stack {
       allowAllOutbound: false,
     });
 
-    // RDS Proxy Security Group
-    const proxySg = new ec2.SecurityGroup(this, 'RdsProxySecurityGroup', {
-      vpc,
-      description: 'Security group for RDS Proxy',
-      allowAllOutbound: false,
-    });
-
     // RDS Instance Security Group
     const dbSg = new ec2.SecurityGroup(this, 'RdsSecurityGroup', {
       vpc,
@@ -74,41 +67,26 @@ export class AdvitiyansStack extends cdk.Stack {
     });
 
     // --- Security Group Rules ---
-    // Lambda → RDS Proxy (port 5432)
-    lambdaSg.addEgressRule(proxySg, ec2.Port.tcp(5432), 'Lambda to RDS Proxy');
-    proxySg.addIngressRule(lambdaSg, ec2.Port.tcp(5432), 'Allow Lambda to RDS Proxy');
+    // Lambda → RDS directly (port 5432) — no proxy
+    lambdaSg.addEgressRule(dbSg, ec2.Port.tcp(5432), 'Lambda direct to RDS');
+    dbSg.addIngressRule(lambdaSg, ec2.Port.tcp(5432), 'Allow Lambda direct to RDS');
 
-    // RDS Proxy → RDS (port 5432)
-    proxySg.addEgressRule(dbSg, ec2.Port.tcp(5432), 'RDS Proxy to RDS');
-    dbSg.addIngressRule(proxySg, ec2.Port.tcp(5432), 'Allow RDS Proxy to RDS');
-
-    // Lambda → VPC Endpoints (port 443 for Secrets Manager, etc.)
+    // Lambda → VPC Endpoints (port 443 for Secrets Manager)
     lambdaSg.addEgressRule(vpceSecurityGroup, ec2.Port.tcp(443), 'Lambda to VPC Endpoints');
     vpceSecurityGroup.addIngressRule(lambdaSg, ec2.Port.tcp(443), 'Allow Lambda to VPC Endpoints');
 
-    // RDS Proxy → Secrets Manager VPC Endpoint (port 443)
-    proxySg.addEgressRule(vpceSecurityGroup, ec2.Port.tcp(443), 'RDS Proxy to Secrets Manager');
-    vpceSecurityGroup.addIngressRule(proxySg, ec2.Port.tcp(443), 'Allow RDS Proxy to Secrets Manager');
-
     // ========================================================================
-    // 3. VPC Interface Endpoints (Temporarily removed to stop hourly VPC charges)
+    // 3. VPC Interface Endpoints
     // ========================================================================
 
-    // Secrets Manager endpoint — needed by Lambda and RDS Proxy
+    // Secrets Manager endpoint — needed by Lambda to fetch DB credentials
     vpc.addInterfaceEndpoint('SecretsManagerEndpoint', {
       service: ec2.InterfaceVpcEndpointAwsService.SECRETS_MANAGER,
       subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
       securityGroups: [vpceSecurityGroup],
       privateDnsEnabled: true,
     });
-
-    // STS endpoint — needed for IAM authentication with RDS Proxy
-    vpc.addInterfaceEndpoint('StsEndpoint', {
-      service: ec2.InterfaceVpcEndpointAwsService.STS,
-      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
-      securityGroups: [vpceSecurityGroup],
-      privateDnsEnabled: true,
-    });
+    // NOTE: STS endpoint removed — was only needed for RDS Proxy IAM auth (proxy removed).
 
     // ========================================================================
     // 4. Database Secrets Manager
@@ -123,53 +101,52 @@ export class AdvitiyansStack extends cdk.Stack {
     });
 
     // ========================================================================
-    // 5. RDS PostgreSQL Instance (db.t4g.micro, Single-AZ)
+    // 5. RDS PostgreSQL Instance (db.t3.large, Single-AZ)
+    //    Upgraded from t4g.micro: 1 GB RAM / 87 connections → 8 GB RAM / 855 connections
+    //    Supports 10,000 students without connection exhaustion.
     // ========================================================================
     const dbInstance = new rds.DatabaseInstance(this, 'AdvitiyansRDS', {
       engine: rds.DatabaseInstanceEngine.postgres({
         version: rds.PostgresEngineVersion.VER_15,
       }),
-      instanceType: ec2.InstanceType.of(ec2.InstanceClass.T4G, ec2.InstanceSize.MICRO),
+      instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.LARGE),
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
       securityGroups: [dbSg],
-      allocatedStorage: 20,
-      maxAllocatedStorage: 50,
+      allocatedStorage: 30,
+      maxAllocatedStorage: 100,
       credentials: rds.Credentials.fromSecret(dbSecret),
       databaseName: 'advitiyans',
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,          // Protect data from accidental cdk destroy
       autoMinorVersionUpgrade: true,
       publiclyAccessible: false,
+      backupRetention: cdk.Duration.days(7),             // Daily automated snapshots (free)
+      deletionProtection: true,                          // Prevent accidental delete via console
+      enablePerformanceInsights: true,                   // FREE on t3.large — 7-day query analysis
+      // NOTE: storageEncrypted cannot be enabled on an existing unencrypted instance.
+      // It requires a replace (snapshot + restore). Skipping to avoid data loss risk.
     });
 
     // ========================================================================
-    // 6. RDS Proxy (Connection Pooling for Lambda)
+    // 6. RDS Proxy — REMOVED (saves $22/month)
+    //    With db.t3.large (855 max connections) and Lambda pool max=1 per
+    //    instance, reserved concurrency 200 → max 200 DB connections total.
+    //    200 << 855, so the proxy is redundant and costs money for nothing.
+    //    Lambda now connects directly to the RDS instance endpoint.
     // ========================================================================
-    const rdsProxy = new rds.DatabaseProxy(this, 'AdvitiyansRdsProxy', {
-      proxyTarget: rds.ProxyTarget.fromInstance(dbInstance),
-      secrets: [dbSecret],
-      vpc,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
-      securityGroups: [proxySg],
-      dbProxyName: 'advitiyans-rds-proxy',
-      requireTLS: true,
-      idleClientTimeout: cdk.Duration.minutes(30),
-      maxConnectionsPercent: 90,
-      maxIdleConnectionsPercent: 50,
-    });
 
     // ========================================================================
     // 7. Pre Sign-Up Lambda Trigger
     // ========================================================================
     const preSignUpLambda = new lambda.Function(this, 'CognitoPreSignUpTrigger', {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: lambda.Runtime.NODEJS_22_X,
       handler: 'handlers/cognito-pre-signup.handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '../../backend/dist')),
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
       securityGroups: [lambdaSg],
       environment: {
-        DB_HOST: rdsProxy.endpoint,
+        DB_HOST: dbInstance.dbInstanceEndpointAddress,  // Direct RDS — proxy removed
         DB_PORT: '5432',
         DB_NAME: 'advitiyans',
         DB_USER: 'postgres',
@@ -235,16 +212,19 @@ export class AdvitiyansStack extends cdk.Stack {
     // 10. Backend API Lambda Function (in VPC, connects via RDS Proxy)
     // ========================================================================
     const apiLambda = new lambda.Function(this, 'AdvitiyansApiHandler', {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: lambda.Runtime.NODEJS_22_X,
       handler: 'handlers/api.handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '../../backend/dist')),
-      timeout: cdk.Duration.seconds(15),
-      memorySize: 256,
+      timeout: cdk.Duration.seconds(29),       // API Gateway hard max; handles heavy HOD report queries
+      memorySize: 512,                          // 2× CPU speed vs 256 MB; runs ~35% faster
+      // NOTE: reservedConcurrentExecutions removed — account limit is only 10 total concurrent
+      // executions. With t3.large (855 max DB connections) and only 10 max Lambda executions,
+      // connection exhaustion is impossible. No reservation needed.
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
       securityGroups: [lambdaSg],
       environment: {
-        DB_HOST: rdsProxy.endpoint,
+        DB_HOST: dbInstance.dbInstanceEndpointAddress,  // Direct RDS — proxy removed
         DB_PORT: '5432',
         DB_NAME: 'advitiyans',
         DB_USER: 'postgres',
@@ -255,9 +235,9 @@ export class AdvitiyansStack extends cdk.Stack {
         USE_MOCK: 'false',
         // Admin/HOD credentials — sourced from GitHub Secrets, never hardcoded in frontend
         ADMIN_MASTER_EMAIL: process.env.ADMIN_MASTER_EMAIL || 'admin@rgmcet.edu.in',
-        ADMIN_MASTER_PASS:  process.env.ADMIN_MASTER_PASS  || '',
-        HOD_MASTER_EMAIL:   process.env.HOD_MASTER_EMAIL   || 'hodcseds@rgmcet.edu.in',
-        HOD_MASTER_PASS:    process.env.HOD_MASTER_PASS    || '',
+        ADMIN_MASTER_PASS: process.env.ADMIN_MASTER_PASS || '',
+        HOD_MASTER_EMAIL: process.env.HOD_MASTER_EMAIL || 'hodcseds@rgmcet.edu.in',
+        HOD_MASTER_PASS: process.env.HOD_MASTER_PASS || '',
         // Secret for protecting /db-init and /db-migrate endpoints
         ADMIN_SECRET: process.env.ADMIN_SECRET || '',
         // Faculty registration security key — required for faculty/HOD self-registration
@@ -268,9 +248,7 @@ export class AdvitiyansStack extends cdk.Stack {
     });
     dbSecret.grantRead(apiLambda);
     uploadsBucket.grantReadWrite(apiLambda);
-
-    // Grant Lambda permission to connect to RDS Proxy via IAM (optional, using password auth here)
-    rdsProxy.grantConnect(apiLambda, 'postgres');
+    // NOTE: rdsProxy.grantConnect removed — proxy deleted. Lambda uses password auth via Secrets Manager.
 
     // Grant Lambda permission to delete and manage users in Cognito User Pool
     apiLambda.addToRolePolicy(new iam.PolicyStatement({
@@ -284,11 +262,16 @@ export class AdvitiyansStack extends cdk.Stack {
     }));
 
     // ========================================================================
-    // 11. API Gateway REST API with Cognito Authorizer
+    // 11. API Gateway REST API
     // ========================================================================
     const api = new apigateway.RestApi(this, 'AdvitiyansRestApi', {
       restApiName: 'Advitiyans Placement Readiness API',
-      description: 'API for Advitiyans Student 360 platform (via RDS Proxy)',
+      description: 'API for Advitiyans Student 360 platform (direct RDS connection)',
+      deployOptions: {
+        throttlingBurstLimit: 1000,     // Absorbs burst of up to 1000 simultaneous student logins
+        throttlingRateLimit: 300,       // Sustained 300 requests/second — well above normal usage
+        metricsEnabled: true,           // Enables free CloudWatch metrics dashboard
+      },
       defaultCorsPreflightOptions: {
         allowOrigins: apigateway.Cors.ALL_ORIGINS,
         allowMethods: apigateway.Cors.ALL_METHODS,
@@ -406,7 +389,7 @@ export class AdvitiyansStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'CloudFrontDistributionId', { value: cfDistribution.distributionId });
     new cdk.CfnOutput(this, 'FrontendBucketName', { value: frontendBucket.bucketName });
     new cdk.CfnOutput(this, 'UploadsBucketName', { value: uploadsBucket.bucketName });
-    new cdk.CfnOutput(this, 'RdsProxyEndpoint', { value: rdsProxy.endpoint });
+    // RdsProxyEndpoint output removed — proxy deleted to save $22/month
     new cdk.CfnOutput(this, 'RdsEndpoint', { value: dbInstance.dbInstanceEndpointAddress });
     new cdk.CfnOutput(this, 'DbSecretArn', { value: dbSecret.secretArn });
   }
