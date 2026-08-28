@@ -189,7 +189,7 @@ CREATE TABLE IF NOT EXISTS mentor_assignments (
     assigned_at  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Indexes for optimal performance
+-- Existing indexes (already deployed)
 CREATE INDEX IF NOT EXISTS idx_students_dept_batch ON students(department, batch);
 CREATE INDEX IF NOT EXISTS idx_students_email ON students(email);
 CREATE INDEX IF NOT EXISTS idx_academics_student ON academics(student_id);
@@ -197,6 +197,17 @@ CREATE INDEX IF NOT EXISTS idx_coding_profiles_student ON coding_profiles(studen
 CREATE INDEX IF NOT EXISTS idx_tech_skills_student ON tech_skills(student_id);
 CREATE INDEX IF NOT EXISTS idx_certifications_student ON certifications(student_id);
 CREATE INDEX IF NOT EXISTS idx_achievements_student ON achievements(student_id);
+
+-- New indexes for 10K student scale (added during t3.large upgrade)
+-- Run with CONCURRENTLY on live DB — no table locks, zero downtime
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_students_year_dept
+  ON students(year, department);           -- HOD dashboard: filter by year + department
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_students_mentor_id
+  ON students(faculty_mentor_id);          -- Faculty dashboard: "show my assigned students"
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_placement_student
+  ON placement_profile(student_id);        -- Placement reports: aggregate queries
 
 -- ============================================================================
 -- SAMPLE SEED DATA (5 Students across Departments, Years, and Complete Records)

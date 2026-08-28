@@ -56,9 +56,10 @@ async function getPool(): Promise<Pool> {
     user: process.env.DB_USER || 'postgres',
     password,
     database: process.env.DB_NAME || 'advitiyans',
-    // For Lambda + RDS Proxy: keep local pool small; proxy handles pooling
-    max: process.env.AWS_LAMBDA_FUNCTION_NAME ? 1 : 5,
-    idleTimeoutMillis: 120000,
+    // Direct RDS connection (RDS Proxy removed — t3.large has 855 max connections).
+    // Lambda reserved concurrency: 200 × max:2 = 400 total connections max → safe headroom.
+    max: process.env.AWS_LAMBDA_FUNCTION_NAME ? 2 : 5,
+    idleTimeoutMillis: 60000,           // Reduced from 120s: Lambda invocations are short-lived
     connectionTimeoutMillis: 5000,
     ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
   });
