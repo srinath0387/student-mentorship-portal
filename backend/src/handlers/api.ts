@@ -3641,12 +3641,12 @@ app.get('/faculty/mentees/by-email/:email', async (req: Request, res: Response) 
   }
 });
 
-// GET /faculty — List all faculty with mentee counts (admin/HOD/coordinator view, scoped by department)
-app.get('/faculty', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
+// GET /faculty — List all faculty with mentee counts (admin/HOD/coordinator/faculty view, scoped by department or all)
+app.get('/faculty', requireRole('admin', 'hod', 'coordinator', 'faculty'), async (req: Request, res: Response) => {
   try {
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
-    const isSuper = req.auth?.isSuperAdmin || callerDept === '*' || callerRole === 'coordinator' || callerRole === 'admin';
+    const isSuper = req.auth?.isSuperAdmin || callerDept === '*' || callerRole === 'coordinator' || callerRole === 'admin' || callerRole === 'faculty';
     const reqDept = req.query.department ? String(req.query.department) : undefined;
 
     let targetDept: string | undefined;
@@ -8749,10 +8749,6 @@ app.get('/admin/faculty/leave-credits/logs/:email', requireRole('admin'), async 
       [email.toLowerCase().trim()]
     );
     res.json(result.rows);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
