@@ -7761,12 +7761,24 @@ const ensureLeaveAndSubjectsHandledTables = async () => {
         num_days NUMERIC(4,1) NOT NULL,
         reason TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'Pending',
+        hod_status TEXT NOT NULL DEFAULT 'Pending',
         hod_remarks TEXT,
         approved_by TEXT,
         approved_at TIMESTAMPTZ,
+        principal_status TEXT NOT NULL DEFAULT 'Pending',
+        principal_remarks TEXT,
+        principal_approved_by TEXT,
+        principal_approved_at TIMESTAMPTZ,
+        is_deducted BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
     `);
+    await db.query(`ALTER TABLE faculty_leaves ADD COLUMN IF NOT EXISTS hod_status TEXT DEFAULT 'Pending';`).catch(() => {});
+    await db.query(`ALTER TABLE faculty_leaves ADD COLUMN IF NOT EXISTS principal_status TEXT DEFAULT 'Pending';`).catch(() => {});
+    await db.query(`ALTER TABLE faculty_leaves ADD COLUMN IF NOT EXISTS principal_remarks TEXT;`).catch(() => {});
+    await db.query(`ALTER TABLE faculty_leaves ADD COLUMN IF NOT EXISTS principal_approved_by TEXT;`).catch(() => {});
+    await db.query(`ALTER TABLE faculty_leaves ADD COLUMN IF NOT EXISTS principal_approved_at TIMESTAMPTZ;`).catch(() => {});
+    await db.query(`ALTER TABLE faculty_leaves ADD COLUMN IF NOT EXISTS is_deducted BOOLEAN DEFAULT FALSE;`).catch(() => {});
 
     // 4. Faculty Leave Adjustments (Classwork & Exam Duty)
     await db.query(`
@@ -7777,8 +7789,47 @@ const ensureLeaveAndSubjectsHandledTables = async () => {
         date DATE NOT NULL,
         subject_or_duty TEXT NOT NULL,
         timing_slot TEXT NOT NULL,
+        periods TEXT[],
         reassigned_faculty_email TEXT NOT NULL,
-        reassigned_faculty_name TEXT NOT NULL
+        reassigned_faculty_name TEXT NOT NULL,
+        acceptance_status TEXT NOT NULL DEFAULT 'Pending',
+        rejected_reason TEXT,
+        accepted_at TIMESTAMPTZ
+      );
+    `);
+    await db.query(`ALTER TABLE faculty_leave_adjustments ADD COLUMN IF NOT EXISTS periods TEXT[];`).catch(() => {});
+    await db.query(`ALTER TABLE faculty_leave_adjustments ADD COLUMN IF NOT EXISTS acceptance_status TEXT DEFAULT 'Pending';`).catch(() => {});
+    await db.query(`ALTER TABLE faculty_leave_adjustments ADD COLUMN IF NOT EXISTS rejected_reason TEXT;`).catch(() => {});
+    await db.query(`ALTER TABLE faculty_leave_adjustments ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ;`).catch(() => {});
+
+    // 4b. Faculty Leave Credits (Admin Quota Management)
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS faculty_leave_credits (
+        id TEXT PRIMARY KEY,
+        faculty_email TEXT NOT NULL,
+        year INT NOT NULL,
+        casual_leave_quota NUMERIC(4,1) DEFAULT 15.0,
+        sp_cl_quota NUMERIC(4,1) DEFAULT 7.0,
+        academic_leave_quota NUMERIC(4,1) DEFAULT 6.0,
+        paid_leave_quota NUMERIC(4,1) DEFAULT 0.0,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(faculty_email, year)
+      );
+    `);
+
+    // 4c. Faculty Leave Credit Adjustment Audit Logs
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS faculty_leave_credit_logs (
+        id TEXT PRIMARY KEY,
+        faculty_email TEXT NOT NULL,
+        leave_type TEXT NOT NULL,
+        old_quota NUMERIC(4,1) NOT NULL,
+        new_quota NUMERIC(4,1) NOT NULL,
+        change_amount NUMERIC(4,1) NOT NULL,
+        reason TEXT NOT NULL,
+        changed_by TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
@@ -8073,6 +8124,20 @@ app.get('/faculty/leaves/my-summary', requireRole('faculty', 'hod', 'admin'), as
     const yearStart = `${currentYear}-01-01`;
     const yearEnd = `${currentYear}-12-31`;
 
+    // Fetch custom credits if set by admin, otherwise default quotas
+    const creditRes = await db.query(
+      `SELECT * FROM faculty_leave_credits WHERE LOWER(faculty_email) = $1 AND year = $2 LIMIT 1`,
+      [email, currentYear]
+    );
+    const customCredits = creditRes.rows[0];
+
+    const activeQuotas = {
+      'Casual Leave': customCredits ? parseFloat(customCredits.casual_leave_quota) : LEAVE_QUOTAS['Casual Leave'],
+      'Academic Leave': customCredits ? parseFloat(customCredits.academic_leave_quota) : LEAVE_QUOTAS['Academic Leave'],
+      'SP CL': customCredits ? parseFloat(customCredits.sp_cl_quota) : LEAVE_QUOTAS['SP CL'],
+      'Paid Leave': 999,
+    };
+
     // Fetch leaves for this faculty
     const leavesRes = await db.query(
       `SELECT * FROM faculty_leaves 
@@ -8088,7 +8153,7 @@ app.get('/faculty/leaves/my-summary', requireRole('faculty', 'hod', 'admin'), as
     let adjustments: any[] = [];
     if (leaveIds.length > 0) {
       const adjRes = await db.query(
-        `SELECT * FROM faculty_leave_adjustments WHERE leave_id = ANY($1)`,
+        `SELECT * FROM faculty_leave_adjustments WHERE leave_id = ANY($1) ORDER BY date ASC`,
         [leaveIds]
       );
       adjustments = adjRes.rows;
@@ -8099,8 +8164,16 @@ app.get('/faculty/leaves/my-summary', requireRole('faculty', 'hod', 'admin'), as
       adjustments: adjustments.filter((a: any) => a.leave_id === l.id),
     }));
 
-    // Compute used balances (Approved + Pending applications)
-    const usedCounts: Record<string, number> = {
+    // Deducted counts (Only leaves approved by Principal are deducted)
+    const deductedCounts: Record<string, number> = {
+      'Casual Leave': 0,
+      'Academic Leave': 0,
+      'SP CL': 0,
+      'Paid Leave': 0,
+    };
+
+    // In-process pending counts (Submitted / HOD approved but not yet Principal approved)
+    const inProcessCounts: Record<string, number> = {
       'Casual Leave': 0,
       'Academic Leave': 0,
       'SP CL': 0,
@@ -8108,34 +8181,42 @@ app.get('/faculty/leaves/my-summary', requireRole('faculty', 'hod', 'admin'), as
     };
 
     leaves.forEach((l: any) => {
-      if (l.status === 'Approved' || l.status === 'Pending') {
-        const type = l.leave_type;
-        const days = parseFloat(l.num_days || '0');
-        if (usedCounts[type] !== undefined) {
-          usedCounts[type] += days;
+      const type = l.leave_type;
+      const days = parseFloat(l.num_days || '0');
+      if (l.principal_status === 'Approved' || l.is_deducted) {
+        if (deductedCounts[type] !== undefined) {
+          deductedCounts[type] += days;
+        }
+      } else if (l.status === 'Pending' || (l.hod_status === 'Approved' && l.principal_status === 'Pending')) {
+        if (inProcessCounts[type] !== undefined) {
+          inProcessCounts[type] += days;
         }
       }
     });
 
     const balances = {
       'Casual Leave': {
-        quota: LEAVE_QUOTAS['Casual Leave'],
-        used: usedCounts['Casual Leave'],
-        remaining: Math.max(0, LEAVE_QUOTAS['Casual Leave'] - usedCounts['Casual Leave']),
+        quota: activeQuotas['Casual Leave'],
+        used: deductedCounts['Casual Leave'],
+        in_process: inProcessCounts['Casual Leave'],
+        remaining: Math.max(0, activeQuotas['Casual Leave'] - deductedCounts['Casual Leave'] - inProcessCounts['Casual Leave']),
       },
       'Academic Leave': {
-        quota: LEAVE_QUOTAS['Academic Leave'],
-        used: usedCounts['Academic Leave'],
-        remaining: Math.max(0, LEAVE_QUOTAS['Academic Leave'] - usedCounts['Academic Leave']),
+        quota: activeQuotas['Academic Leave'],
+        used: deductedCounts['Academic Leave'],
+        in_process: inProcessCounts['Academic Leave'],
+        remaining: Math.max(0, activeQuotas['Academic Leave'] - deductedCounts['Academic Leave'] - inProcessCounts['Academic Leave']),
       },
       'SP CL': {
-        quota: LEAVE_QUOTAS['SP CL'],
-        used: usedCounts['SP CL'],
-        remaining: Math.max(0, LEAVE_QUOTAS['SP CL'] - usedCounts['SP CL']),
+        quota: activeQuotas['SP CL'],
+        used: deductedCounts['SP CL'],
+        in_process: inProcessCounts['SP CL'],
+        remaining: Math.max(0, activeQuotas['SP CL'] - deductedCounts['SP CL'] - inProcessCounts['SP CL']),
       },
       'Paid Leave': {
         quota: 0,
-        used: usedCounts['Paid Leave'],
+        used: deductedCounts['Paid Leave'],
+        in_process: inProcessCounts['Paid Leave'],
         remaining: 999,
       },
     };
@@ -8165,7 +8246,9 @@ app.get('/faculty/leaves/reassigned-duties', requireRole('faculty', 'hod', 'admi
          l.faculty_email AS original_faculty_email,
          l.department,
          l.leave_type,
-         l.status AS leave_status
+         l.status AS leave_status,
+         l.hod_status,
+         l.principal_status
        FROM faculty_leave_adjustments a
        JOIN faculty_leaves l ON l.id = a.leave_id
        WHERE LOWER(a.reassigned_faculty_email) = $1
@@ -8174,6 +8257,100 @@ app.get('/faculty/leaves/reassigned-duties', requireRole('faculty', 'hod', 'admi
     );
 
     res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /faculty/leaves/adjustments/:adjId/respond — Reassigned colleague Accept or Reject covering duty
+app.post('/faculty/leaves/adjustments/:adjId/respond', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const email = req.auth?.email?.toLowerCase().trim();
+    const { adjId } = req.params;
+    const { status, rejected_reason } = req.body; // 'Accepted' | 'Rejected'
+
+    if (!['Accepted', 'Rejected'].includes(status)) {
+      return res.status(400).json({ error: "Status must be 'Accepted' or 'Rejected'" });
+    }
+
+    // Verify colleague ownership
+    const chk = await db.query(
+      `SELECT * FROM faculty_leave_adjustments WHERE id = $1 AND LOWER(reassigned_faculty_email) = $2`,
+      [adjId, email]
+    );
+    if (chk.rows.length === 0) {
+      return res.status(404).json({ error: 'Adjustment duty record not found or not assigned to you' });
+    }
+
+    const updated = await db.query(
+      `UPDATE faculty_leave_adjustments 
+       SET acceptance_status = $1, 
+           rejected_reason = $2, 
+           accepted_at = CASE WHEN $1 = 'Accepted' THEN CURRENT_TIMESTAMP ELSE NULL END
+       WHERE id = $3
+       RETURNING *`,
+      [status, rejected_reason || null, adjId]
+    );
+
+    res.json({
+      success: true,
+      message: `Duty assignment ${status.toLowerCase()} successfully.`,
+      adjustment: updated.rows[0],
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /faculty/leaves/adjustments/:adjId/reassign — Replace rejected colleague with another colleague
+app.put('/faculty/leaves/adjustments/:adjId/reassign', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const email = req.auth?.email?.toLowerCase().trim();
+    const { adjId } = req.params;
+    const { new_faculty_email, new_faculty_name } = req.body;
+
+    if (!new_faculty_email) {
+      return res.status(400).json({ error: 'New colleague faculty email is required' });
+    }
+
+    // Verify that the caller is the owner of the parent leave
+    const chk = await db.query(
+      `SELECT a.*, l.faculty_email 
+       FROM faculty_leave_adjustments a 
+       JOIN faculty_leaves l ON l.id = a.leave_id 
+       WHERE a.id = $1 AND LOWER(l.faculty_email) = $2`,
+      [adjId, email]
+    );
+    if (chk.rows.length === 0) {
+      return res.status(404).json({ error: 'Adjustment not found or you are not the leave applicant' });
+    }
+
+    const cleanEmail = new_faculty_email.toLowerCase().trim();
+    let facultyName = new_faculty_name?.trim();
+    if (!facultyName || facultyName === cleanEmail) {
+      const fac = await db.query('SELECT name FROM faculty WHERE LOWER(email) = $1 LIMIT 1', [cleanEmail]);
+      facultyName = fac.rows[0]?.name || cleanEmail.split('@')[0];
+    }
+
+    const updated = await db.query(
+      `UPDATE faculty_leave_adjustments 
+       SET reassigned_faculty_email = $1,
+           reassigned_faculty_name = $2,
+           acceptance_status = 'Pending',
+           rejected_reason = NULL,
+           accepted_at = NULL
+       WHERE id = $3
+       RETURNING *`,
+      [cleanEmail, facultyName, adjId]
+    );
+
+    res.json({
+      success: true,
+      message: `Reassigned to ${facultyName}. Colleague notification sent.`,
+      adjustment: updated.rows[0],
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -8199,17 +8376,30 @@ app.post('/faculty/leaves/apply', requireRole('faculty', 'hod', 'admin'), async 
     // Check balance if not Paid Leave
     if (leave_type !== 'Paid Leave') {
       const currentYear = new Date().getFullYear();
+      const creditRes = await db.query(
+        `SELECT * FROM faculty_leave_credits WHERE LOWER(faculty_email) = $1 AND year = $2 LIMIT 1`,
+        [email, currentYear]
+      );
+      const customCredits = creditRes.rows[0];
+
+      const maxQuota = customCredits
+        ? (leave_type === 'Casual Leave' ? parseFloat(customCredits.casual_leave_quota)
+           : leave_type === 'SP CL' ? parseFloat(customCredits.sp_cl_quota)
+           : leave_type === 'Academic Leave' ? parseFloat(customCredits.academic_leave_quota)
+           : LEAVE_QUOTAS[leave_type] || 0)
+        : (LEAVE_QUOTAS[leave_type] || 0);
+
+      // Total used/in-process
       const usedRes = await db.query(
         `SELECT COALESCE(SUM(num_days), 0) AS total_used 
          FROM faculty_leaves 
          WHERE LOWER(faculty_email) = $1 
            AND leave_type = $2 
-           AND (status = 'Approved' OR status = 'Pending')
+           AND (status = 'Approved' OR status = 'Pending' OR hod_status = 'Approved')
            AND from_date >= $3 AND from_date <= $4`,
         [email, leave_type, `${currentYear}-01-01`, `${currentYear}-12-31`]
       );
       const usedDays = parseFloat(usedRes.rows[0]?.total_used || '0');
-      const maxQuota = LEAVE_QUOTAS[leave_type] || 0;
       const remaining = maxQuota - usedDays;
 
       if (calculatedDays > remaining) {
@@ -8229,8 +8419,8 @@ app.post('/faculty/leaves/apply', requireRole('faculty', 'hod', 'admin'), async 
     const leaveId = `FAC_LV_${Date.now()}`;
     const insLeave = await db.query(
       `INSERT INTO faculty_leaves 
-       (id, faculty_email, faculty_name, department, leave_type, from_date, to_date, num_days, reason, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'Pending')
+       (id, faculty_email, faculty_name, department, leave_type, from_date, to_date, num_days, reason, status, hod_status, principal_status, is_deducted)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'Pending', 'Pending', 'Pending', FALSE)
        RETURNING *`,
       [leaveId, email, fac.name, fac.department, leave_type, from_date, to_date, calculatedDays, reason.trim()]
     );
@@ -8248,10 +8438,12 @@ app.post('/faculty/leaves/apply', requireRole('faculty', 'hod', 'admin'), async 
           reassignedName = rfRes.rows[0]?.name || reassignedEmail.split('@')[0];
         }
 
+        const periodsArray = Array.isArray(adj.periods) ? adj.periods : (adj.timing_slot ? [adj.timing_slot] : ['Period 1']);
+
         const insAdj = await db.query(
           `INSERT INTO faculty_leave_adjustments 
-           (id, leave_id, adjustment_type, date, subject_or_duty, timing_slot, reassigned_faculty_email, reassigned_faculty_name)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           (id, leave_id, adjustment_type, date, subject_or_duty, timing_slot, periods, reassigned_faculty_email, reassigned_faculty_name, acceptance_status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'Pending')
            RETURNING *`,
           [
             adjId,
@@ -8259,7 +8451,8 @@ app.post('/faculty/leaves/apply', requireRole('faculty', 'hod', 'admin'), async 
             adj.adjustment_type || 'classwork',
             adj.date,
             adj.subject_or_duty || 'Classwork',
-            adj.timing_slot || 'Regular Slot',
+            adj.timing_slot || periodsArray.join(', '),
+            periodsArray,
             reassignedEmail,
             reassignedName,
           ]
@@ -8270,7 +8463,7 @@ app.post('/faculty/leaves/apply', requireRole('faculty', 'hod', 'admin'), async 
 
     res.json({
       success: true,
-      message: `Leave application submitted (${calculatedDays} working days) and sent to HOD for approval.`,
+      message: `Leave application submitted (${calculatedDays} working days). Adjustments forwarded to covering colleagues for acceptance.`,
       leave: {
         ...insLeave.rows[0],
         adjustments: savedAdj,
@@ -8281,7 +8474,7 @@ app.post('/faculty/leaves/apply', requireRole('faculty', 'hod', 'admin'), async 
   }
 });
 
-// GET /hod/leaves/faculty — HOD fetch faculty leave requests (filtered by HOD department or all for admin)
+// GET /hod/leaves/faculty — HOD fetch faculty leave requests (filtered by HOD department or all for admin/principal)
 app.get('/hod/leaves/faculty', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
   try {
     await ensureLeaveAndSubjectsHandledTables();
@@ -8304,7 +8497,7 @@ app.get('/hod/leaves/faculty', requireRole('hod', 'admin'), async (req: Request,
     let adjustments: any[] = [];
     if (leaveIds.length > 0) {
       const adjRes = await db.query(
-        `SELECT * FROM faculty_leave_adjustments WHERE leave_id = ANY($1)`,
+        `SELECT * FROM faculty_leave_adjustments WHERE leave_id = ANY($1) ORDER BY date ASC`,
         [leaveIds]
       );
       adjustments = adjRes.rows;
@@ -8321,7 +8514,7 @@ app.get('/hod/leaves/faculty', requireRole('hod', 'admin'), async (req: Request,
   }
 });
 
-// PUT /hod/leaves/faculty/:id/status — HOD Approve or Reject leave with remarks
+// PUT /hod/leaves/faculty/:id/status — HOD Approve or Reject leave (Stage 2)
 app.put('/hod/leaves/faculty/:id/status', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
   try {
     await ensureLeaveAndSubjectsHandledTables();
@@ -8333,21 +8526,233 @@ app.put('/hod/leaves/faculty/:id/status', requireRole('hod', 'admin'), async (re
       return res.status(400).json({ error: "Status must be 'Approved' or 'Rejected'" });
     }
 
+    // Check if any colleagues rejected duty
+    if (status === 'Approved') {
+      const adjRes = await db.query('SELECT * FROM faculty_leave_adjustments WHERE leave_id = $1', [id]);
+      const rejectedAdj = adjRes.rows.filter((a: any) => a.acceptance_status === 'Rejected');
+      if (rejectedAdj.length > 0) {
+        return res.status(400).json({
+          error: `Cannot approve leave: ${rejectedAdj.length} covering duty assignment(s) were rejected by the colleague. The applicant must reassign a colleague before HOD approval.`,
+        });
+      }
+    }
+
+    // If HOD rejects, whole leave is Rejected. If HOD approves, hod_status = 'Approved', principal_status = 'Pending', overall status = 'Pending' (waiting for Principal)
+    const newStatus = status === 'Rejected' ? 'Rejected' : 'Pending';
+
     const result = await db.query(
       `UPDATE faculty_leaves 
-       SET status = $1, hod_remarks = $2, approved_by = $3, approved_at = CURRENT_TIMESTAMP
-       WHERE id = $4
+       SET status = $1, 
+           hod_status = $2, 
+           hod_remarks = $3, 
+           approved_by = $4, 
+           approved_at = CURRENT_TIMESTAMP
+       WHERE id = $5
        RETURNING *`,
-      [status, hod_remarks || null, approvedBy, id]
+      [newStatus, status, hod_remarks || null, approvedBy, id]
     );
 
     if (result.rows.length === 0) return res.status(404).json({ error: 'Leave record not found' });
 
     res.json({
       success: true,
-      message: `Leave application ${status.toLowerCase()} successfully.`,
+      message: status === 'Approved'
+        ? 'Leave approved by HOD and forwarded to Principal Office for final sign-off.'
+        : 'Leave application rejected by HOD.',
       leave: result.rows[0],
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /principal/leaves/faculty/:id/status — Principal Final Approval (Stage 3 & Balance Deduction)
+app.put('/principal/leaves/faculty/:id/status', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const { id } = req.params;
+    const { status, principal_remarks } = req.body; // 'Approved' | 'Rejected'
+    const approvedBy = req.auth?.email || 'principaloffice@rgmcet.edu.in';
+
+    if (!['Approved', 'Rejected'].includes(status)) {
+      return res.status(400).json({ error: "Status must be 'Approved' or 'Rejected'" });
+    }
+
+    // Must be HOD approved first
+    const leaveChk = await db.query('SELECT * FROM faculty_leaves WHERE id = $1', [id]);
+    if (leaveChk.rows.length === 0) return res.status(404).json({ error: 'Leave record not found' });
+    const leave = leaveChk.rows[0];
+
+    if (leave.hod_status !== 'Approved' && status === 'Approved') {
+      return res.status(400).json({ error: 'Leave must be approved by the Department HOD before Principal final sign-off.' });
+    }
+
+    const finalStatus = status === 'Approved' ? 'Approved' : 'Rejected';
+    const isDeducted = status === 'Approved';
+
+    const result = await db.query(
+      `UPDATE faculty_leaves 
+       SET status = $1, 
+           principal_status = $2, 
+           principal_remarks = $3, 
+           principal_approved_by = $4, 
+           principal_approved_at = CURRENT_TIMESTAMP,
+           is_deducted = $5
+       WHERE id = $6
+       RETURNING *`,
+      [finalStatus, status, principal_remarks || null, approvedBy, isDeducted, id]
+    );
+
+    res.json({
+      success: true,
+      message: status === 'Approved'
+        ? 'Leave granted final Principal approval. Days successfully deducted from faculty balance.'
+        : 'Leave application rejected by Principal Office.',
+      leave: result.rows[0],
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── ADMIN FACULTY LEAVE CREDIT MANAGEMENT ENDPOINTS ─────────────────────────
+
+// GET /admin/faculty/leave-credits — List all faculty leave credits & computed usage
+app.get('/admin/faculty/leave-credits', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const currentYear = new Date().getFullYear();
+
+    // Fetch all registered faculty
+    const facRes = await db.query(
+      `SELECT f.name, f.email, f.department,
+              COALESCE(c.casual_leave_quota, 15.0) AS casual_leave_quota,
+              COALESCE(c.sp_cl_quota, 7.0) AS sp_cl_quota,
+              COALESCE(c.academic_leave_quota, 6.0) AS academic_leave_quota,
+              c.updated_at
+       FROM faculty f
+       LEFT JOIN faculty_leave_credits c ON LOWER(c.faculty_email) = LOWER(f.email) AND c.year = $1
+       ORDER BY f.department ASC, f.name ASC`,
+      [currentYear]
+    );
+
+    // Fetch usage for all faculty in current year
+    const usageRes = await db.query(
+      `SELECT LOWER(faculty_email) AS email, leave_type, SUM(num_days) AS total_used
+       FROM faculty_leaves
+       WHERE (status = 'Approved' OR is_deducted = TRUE)
+         AND from_date >= $1 AND from_date <= $2
+       GROUP BY LOWER(faculty_email), leave_type`,
+      [`${currentYear}-01-01`, `${currentYear}-12-31`]
+    );
+
+    const usageMap: Record<string, Record<string, number>> = {};
+    usageRes.rows.forEach((u: any) => {
+      if (!usageMap[u.email]) usageMap[u.email] = {};
+      usageMap[u.email][u.leave_type] = parseFloat(u.total_used || '0');
+    });
+
+    const enriched = facRes.rows.map((f: any) => {
+      const u = usageMap[f.email.toLowerCase()] || {};
+      return {
+        faculty_email: f.email,
+        faculty_name: f.name,
+        department: f.department,
+        year: currentYear,
+        casual_leave_quota: parseFloat(f.casual_leave_quota),
+        casual_leave_used: u['Casual Leave'] || 0,
+        sp_cl_quota: parseFloat(f.sp_cl_quota),
+        sp_cl_used: u['SP CL'] || 0,
+        academic_leave_quota: parseFloat(f.academic_leave_quota),
+        academic_leave_used: u['Academic Leave'] || 0,
+        updated_at: f.updated_at,
+      };
+    });
+
+    res.json(enriched);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /admin/faculty/leave-credits/adjust — Admin manually adjust/pro-rate credits with audit logging
+app.post('/admin/faculty/leave-credits/adjust', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const adminEmail = req.auth?.email || 'admin@rgmcet.edu.in';
+    const { faculty_email, leave_type, new_quota, reason } = req.body;
+
+    if (!faculty_email || !leave_type || new_quota === undefined || !reason?.trim()) {
+      return res.status(400).json({ error: 'Faculty email, leave type, new quota, and reason for change are required.' });
+    }
+
+    const currentYear = new Date().getFullYear();
+    const cleanEmail = faculty_email.toLowerCase().trim();
+    const numQuota = parseFloat(new_quota);
+
+    // Get current quota
+    const currRes = await db.query(
+      `SELECT * FROM faculty_leave_credits WHERE LOWER(faculty_email) = $1 AND year = $2 LIMIT 1`,
+      [cleanEmail, currentYear]
+    );
+
+    let oldQuota = 0;
+    if (currRes.rows.length > 0) {
+      const row = currRes.rows[0];
+      if (leave_type === 'Casual Leave') oldQuota = parseFloat(row.casual_leave_quota);
+      else if (leave_type === 'SP CL') oldQuota = parseFloat(row.sp_cl_quota);
+      else if (leave_type === 'Academic Leave') oldQuota = parseFloat(row.academic_leave_quota);
+    } else {
+      oldQuota = LEAVE_QUOTAS[leave_type] || 0;
+    }
+
+    const changeAmount = numQuota - oldQuota;
+
+    // Upsert into faculty_leave_credits
+    const creditId = `CRD_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const colName = leave_type === 'Casual Leave' ? 'casual_leave_quota'
+                  : leave_type === 'SP CL' ? 'sp_cl_quota'
+                  : 'academic_leave_quota';
+
+    await db.query(
+      `INSERT INTO faculty_leave_credits (id, faculty_email, year, ${colName}, updated_at)
+       VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+       ON CONFLICT (faculty_email, year) 
+       DO UPDATE SET ${colName} = $4, updated_at = CURRENT_TIMESTAMP`,
+      [creditId, cleanEmail, currentYear, numQuota]
+    );
+
+    // Record audit log
+    const logId = `LOG_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    await db.query(
+      `INSERT INTO faculty_leave_credit_logs (id, faculty_email, leave_type, old_quota, new_quota, change_amount, reason, changed_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [logId, cleanEmail, leave_type, oldQuota, numQuota, changeAmount, reason.trim(), adminEmail]
+    );
+
+    res.json({
+      success: true,
+      message: `${leave_type} quota for ${cleanEmail} updated from ${oldQuota} to ${numQuota}.`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /admin/faculty/leave-credits/logs/:email — Get audit logs for specific faculty
+app.get('/admin/faculty/leave-credits/logs/:email', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const { email } = req.params;
+    const result = await db.query(
+      `SELECT * FROM faculty_leave_credit_logs WHERE LOWER(faculty_email) = $1 ORDER BY created_at DESC`,
+      [email.toLowerCase().trim()]
+    );
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

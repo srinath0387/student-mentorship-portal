@@ -1,33 +1,46 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  CalendarCheck,
-  Plus,
   Calendar,
+  CalendarCheck,
   Clock,
   CheckCircle2,
+  XCircle,
   AlertCircle,
-  X,
-  FileText,
   Users,
+  Plus,
+  Trash2,
   Printer,
-  ShieldCheck,
+  FileText,
   Building,
   Briefcase,
-  AlertTriangle,
-  Trash2,
-  Undo2
+  HelpCircle,
+  X,
+  Search,
+  Check,
+  ChevronRight,
+  ShieldCheck
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import {
   FacultyLeaveRecord,
-  FacultyLeaveSummaryResponse,
   FacultyLeaveType,
+  FacultyLeaveAdjustment,
+  FacultyLeaveSummaryResponse,
   HolidayCalendarEntry,
-  FacultyLeaveAdjustment
 } from '../../types';
 import { LeaveLetterModal } from './LeaveLetterModal';
+
+const AVAILABLE_PERIODS = [
+  { id: 'Period 1', label: 'Period 1 (09:00 - 09:50 AM)' },
+  { id: 'Period 2', label: 'Period 2 (09:50 - 10:40 AM)' },
+  { id: 'Period 3', label: 'Period 3 (11:00 - 11:50 AM)' },
+  { id: 'Period 4', label: 'Period 4 (11:50 - 12:40 PM)' },
+  { id: 'Period 5', label: 'Period 5 (01:40 - 02:30 PM)' },
+  { id: 'Period 6', label: 'Period 6 (02:30 - 03:20 PM)' },
+  { id: 'Period 7', label: 'Period 7 (03:20 - 04:10 PM)' },
+];
 
 export const FacultyLeaveTab: React.FC = () => {
   const { user } = useAuth();
@@ -45,13 +58,24 @@ export const FacultyLeaveTab: React.FC = () => {
   const [formReason, setFormReason] = useState<string>('');
   const [formAdjustments, setFormAdjustments] = useState<FacultyLeaveAdjustment[]>([]);
 
-  // Adjustment Inputs (Temp for adding to list)
+  // Adjustment Inputs
   const [adjType, setAdjType] = useState<'classwork' | 'exam_duty'>('classwork');
   const [adjDate, setAdjDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [adjSubject, setAdjSubject] = useState<string>('');
-  const [adjSlot, setAdjSlot] = useState<string>('Period 1 (09:00 - 09:50 AM)');
+  const [adjPeriods, setAdjPeriods] = useState<string[]>(['Period 1']);
   const [adjFacultyEmail, setAdjFacultyEmail] = useState<string>('');
   const [adjFacultyName, setAdjFacultyName] = useState<string>('');
+  const [colleagueSearch, setColleagueSearch] = useState<string>('');
+
+  // Reassign Modal State
+  const [reassignModal, setReassignModal] = useState<{
+    adjId: string;
+    originalDuty: string;
+    date: string;
+  } | null>(null);
+  const [reassignNewEmail, setReassignNewEmail] = useState<string>('');
+  const [reassignNewName, setReassignNewName] = useState<string>('');
+  const [reassignColleagueSearch, setReassignColleagueSearch] = useState<string>('');
 
   // Queries
   const { data: summary, isLoading: isLoadingSummary } = useQuery<FacultyLeaveSummaryResponse>({
@@ -73,10 +97,38 @@ export const FacultyLeaveTab: React.FC = () => {
 
   const { data: facultyDirectory = [] } = useQuery({
     queryKey: ['facultyDirectoryForAdjustments'],
-    queryFn: () => api.getAllFaculty ? api.getAllFaculty() : Promise.resolve([]),
+    queryFn: () => (api.getAllFaculty ? api.getAllFaculty('All') : Promise.resolve([])),
   });
 
-  // Calculate working days excluding Sundays and Holidays
+  // Filtered Faculty Directory for Searchable Dropdowns
+  const filteredFacultyForDuty = useMemo(() => {
+    const q = colleagueSearch.toLowerCase().trim();
+    return facultyDirectory
+      .filter((f: any) => f.email && f.email.toLowerCase() !== email.toLowerCase())
+      .filter((f: any) => {
+        if (!q) return true;
+        return (
+          f.name?.toLowerCase().includes(q) ||
+          f.email?.toLowerCase().includes(q) ||
+          f.department?.toLowerCase().includes(q)
+        );
+      });
+  }, [facultyDirectory, email, colleagueSearch]);
+
+  const filteredFacultyForReassign = useMemo(() => {
+    const q = reassignColleagueSearch.toLowerCase().trim();
+    return facultyDirectory
+      .filter((f: any) => f.email && f.email.toLowerCase() !== email.toLowerCase())
+      .filter((f: any) => {
+        if (!q) return true;
+        return (
+          f.name?.toLowerCase().includes(q) ||
+          f.email?.toLowerCase().includes(q) ||
+          f.department?.toLowerCase().includes(q)
+        );
+      });
+  }, [facultyDirectory, email, reassignColleagueSearch]);
+
   const holidaySet = useMemo(() => {
     return new Set(
       holidays.map((h) => {
@@ -89,15 +141,12 @@ export const FacultyLeaveTab: React.FC = () => {
     const start = new Date(formFromDate);
     const end = new Date(formToDate);
     if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) return 0;
-
     let count = 0;
     const cur = new Date(start);
     while (cur <= end) {
-      const dayOfWeek = cur.getDay(); // 0 is Sunday
+      const dayOfWeek = cur.getDay();
       const iso = cur.toISOString().split('T')[0];
-      if (dayOfWeek !== 0 && !holidaySet.has(iso)) {
-        count++;
-      }
+      if (dayOfWeek !== 0 && !holidaySet.has(iso)) count++;
       cur.setDate(cur.getDate() + 1);
     }
     return count;
@@ -106,7 +155,6 @@ export const FacultyLeaveTab: React.FC = () => {
   const currentRemaining = summary?.balances?.[formLeaveType]?.remaining ?? 0;
   const isInsufficient = formLeaveType !== 'Paid Leave' && calculatedDays > currentRemaining;
 
-  // Apply Mutation
   const applyMutation = useMutation({
     mutationFn: (payload: any) => api.applyFacultyLeave(payload),
     onSuccess: (res) => {
@@ -120,13 +168,39 @@ export const FacultyLeaveTab: React.FC = () => {
     },
   });
 
-  // Cancel Leave Mutation (Restores quota balance)
+  const dutyResponseMutation = useMutation({
+    mutationFn: ({ adjId, status, rejected_reason }: { adjId: string; status: 'Accepted' | 'Rejected'; rejected_reason?: string }) =>
+      api.respondToAdjustment(adjId, status, rejected_reason),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['facultyReassignedDuties', email] });
+      queryClient.invalidateQueries({ queryKey: ['facultyLeaveSummary'] });
+      alert(res.message || 'Response recorded successfully.');
+    },
+    onError: (err: any) => {
+      alert(`Failed to record response: ${err.message}`);
+    },
+  });
+
+  const reassignMutation = useMutation({
+    mutationFn: ({ adjId, email, name }: { adjId: string; email: string; name?: string }) =>
+      api.reassignDutyColleague(adjId, email, name),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['facultyLeaveSummary', email] });
+      setReassignModal(null);
+      setReassignNewEmail('');
+      setReassignNewName('');
+      alert(res.message || 'Reassigned successfully.');
+    },
+    onError: (err: any) => {
+      alert(`Failed to reassign: ${err.message}`);
+    },
+  });
+
   const cancelLeaveMutation = useMutation({
     mutationFn: (leaveId: string) => api.deleteFacultyLeave(leaveId),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['facultyLeaveSummary', email] });
-      queryClient.invalidateQueries({ queryKey: ['hodFacultyLeaves'] });
-      alert(res.message || 'Leave cancelled and credited back to your balance.');
+      alert(res.message || 'Leave cancelled.');
     },
     onError: (err: any) => {
       alert(`Failed to cancel leave: ${err.message}`);
@@ -139,35 +213,40 @@ export const FacultyLeaveTab: React.FC = () => {
     setFormToDate(new Date().toISOString().split('T')[0]);
     setFormReason('');
     setFormAdjustments([]);
+    setAdjPeriods(['Period 1']);
+    setColleagueSearch('');
+  };
+
+  const togglePeriod = (pId: string) => {
+    setAdjPeriods((prev) =>
+      prev.includes(pId) ? (prev.length > 1 ? prev.filter((p) => p !== pId) : prev) : [...prev, pId].sort()
+    );
   };
 
   const handleAddAdjustment = () => {
-    if (!adjSubject.trim()) {
-      alert('Please enter the Subject or Duty name (e.g. Data Structures Lab, Mid Exam).');
-      return;
-    }
-    if (!adjFacultyEmail.trim()) {
-      alert('Please select or enter the reassigned faculty colleague email.');
+    if (!adjSubject.trim() || !adjFacultyEmail.trim() || adjPeriods.length === 0) {
+      alert('Please fill in all adjustment fields correctly.');
       return;
     }
     const facultyObj = facultyDirectory.find((f: any) => f.email?.toLowerCase() === adjFacultyEmail.toLowerCase());
     const facultyName = facultyObj?.name || adjFacultyName || adjFacultyEmail;
-
     setFormAdjustments((prev) => [
       ...prev,
       {
         adjustment_type: adjType,
         date: adjDate || formFromDate,
         subject_or_duty: adjSubject.trim(),
-        timing_slot: adjSlot.trim() || 'Period 1 (09:00 - 09:50 AM)',
+        periods: [...adjPeriods],
+        timing_slot: adjPeriods.join(', '),
         reassigned_faculty_email: adjFacultyEmail.toLowerCase().trim(),
         reassigned_faculty_name: facultyName,
+        acceptance_status: 'Pending',
       },
     ]);
-
     setAdjSubject('');
     setAdjFacultyEmail('');
     setAdjFacultyName('');
+    setColleagueSearch('');
   };
 
   const handleRemoveAdjustment = (idx: number) => {
@@ -176,34 +255,21 @@ export const FacultyLeaveTab: React.FC = () => {
 
   const handleSubmitLeave = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formReason.trim()) {
-      alert('Please enter a reason for leave.');
-      return;
-    }
-    if (calculatedDays <= 0) {
-      alert('Selected range has 0 working days (falls on Sunday or declared holiday).');
-      return;
-    }
-    if (isInsufficient) {
-      alert(`Insufficient balance for ${formLeaveType}. Please switch to 'Paid Leave'.`);
-      return;
-    }
-
-    // Auto-capture any adjustment currently filled in the input fields if not yet added to list
+    if (calculatedDays <= 0 || isInsufficient) return;
     let finalAdjustments = [...formAdjustments];
-    if (adjSubject.trim() && adjFacultyEmail.trim()) {
+    if (adjSubject.trim() && adjFacultyEmail.trim() && adjPeriods.length > 0) {
       const facultyObj = facultyDirectory.find((f: any) => f.email?.toLowerCase() === adjFacultyEmail.toLowerCase());
-      const facultyName = facultyObj?.name || adjFacultyName || adjFacultyEmail;
       finalAdjustments.push({
         adjustment_type: adjType,
         date: adjDate || formFromDate,
         subject_or_duty: adjSubject.trim(),
-        timing_slot: adjSlot.trim() || 'Period 1 (09:00 - 09:50 AM)',
+        periods: [...adjPeriods],
+        timing_slot: adjPeriods.join(', '),
         reassigned_faculty_email: adjFacultyEmail.toLowerCase().trim(),
-        reassigned_faculty_name: facultyName,
+        reassigned_faculty_name: facultyObj?.name || adjFacultyName || adjFacultyEmail,
+        acceptance_status: 'Pending',
       });
     }
-
     applyMutation.mutate({
       leave_type: formLeaveType,
       from_date: formFromDate,
@@ -214,583 +280,134 @@ export const FacultyLeaveTab: React.FC = () => {
   };
 
   const balances = summary?.balances || {
-    'Casual Leave': { quota: 15, used: 0, remaining: 15 },
-    'Academic Leave': { quota: 6, used: 0, remaining: 6 },
-    'SP CL': { quota: 7, used: 0, remaining: 7 },
-    'Paid Leave': { quota: 0, used: 0, remaining: 999 },
+    'Casual Leave': { quota: 15, used: 0, in_process: 0, remaining: 15 },
+    'Academic Leave': { quota: 6, used: 0, in_process: 0, remaining: 6 },
+    'SP CL': { quota: 7, used: 0, in_process: 0, remaining: 7 },
+    'Paid Leave': { quota: 0, used: 0, in_process: 0, remaining: 999 },
   };
+
+  const pendingCoveringDutiesCount = reassignedDuties.filter((d: any) => d.acceptance_status === 'Pending').length;
 
   return (
     <div className="space-y-6">
-      {/* ── Quota Cards ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-surface border border-borderLine rounded-2xl p-4.5 shadow-xs relative overflow-hidden">
+        <div className="bg-surface border border-borderLine rounded-2xl p-4.5 shadow-xs">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold text-textSecondary uppercase tracking-wider">Casual Leave (CL)</span>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-brand-soft text-brand-primary font-bold">Annual: 15</span>
+            <span className="text-xs font-bold text-textSecondary uppercase tracking-wider">Casual Leave</span>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-brand-soft text-brand-primary font-bold">Quota: 15</span>
           </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-black text-brand-primary">{balances['Casual Leave'].remaining}</span>
-            <span className="text-xs text-textSecondary">days remaining</span>
-          </div>
-          <p className="text-[11px] text-textMuted mt-1">Used: {balances['Casual Leave'].used} / 15 days</p>
+          <span className="text-2xl font-black text-brand-primary">{balances['Casual Leave'].remaining}</span>
+          <span className="text-xs text-textSecondary ml-1">remaining</span>
         </div>
-
-        <div className="bg-surface border border-borderLine rounded-2xl p-4.5 shadow-xs relative overflow-hidden">
+        <div className="bg-surface border border-borderLine rounded-2xl p-4.5 shadow-xs">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold text-textSecondary uppercase tracking-wider">Academic Leave (AL)</span>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 font-bold">Annual: 6</span>
+            <span className="text-xs font-bold text-textSecondary uppercase tracking-wider">Academic Leave</span>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 font-bold">Quota: 6</span>
           </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-black text-purple-400">{balances['Academic Leave'].remaining}</span>
-            <span className="text-xs text-textSecondary">days remaining</span>
-          </div>
-          <p className="text-[11px] text-textMuted mt-1">Used: {balances['Academic Leave'].used} / 6 days</p>
+          <span className="text-2xl font-black text-purple-400">{balances['Academic Leave'].remaining}</span>
+          <span className="text-xs text-textSecondary ml-1">remaining</span>
         </div>
-
-        <div className="bg-surface border border-borderLine rounded-2xl p-4.5 shadow-xs relative overflow-hidden">
+        <div className="bg-surface border border-borderLine rounded-2xl p-4.5 shadow-xs">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold text-textSecondary uppercase tracking-wider">Special CL (SP CL)</span>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 font-bold">Annual: 7</span>
+            <span className="text-xs font-bold text-textSecondary uppercase tracking-wider">Special CL</span>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-bold">Quota: 7</span>
           </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-black text-amber-400">{balances['SP CL'].remaining}</span>
-            <span className="text-xs text-textSecondary">days remaining</span>
-          </div>
-          <p className="text-[11px] text-textMuted mt-1">Used: {balances['SP CL'].used} / 7 days</p>
+          <span className="text-2xl font-black text-emerald-400">{balances['SP CL'].remaining}</span>
+          <span className="text-xs text-textSecondary ml-1">remaining</span>
         </div>
-
-        <div className="bg-surface border border-borderLine rounded-2xl p-4.5 shadow-xs relative overflow-hidden">
+        <div className="bg-surface border border-borderLine rounded-2xl p-4.5 shadow-xs">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-bold text-textSecondary uppercase tracking-wider">Covering Duties</span>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-400 font-bold">Assigned</span>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500 font-bold">Total</span>
           </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-black text-sky-400">{reassignedDuties.length}</span>
-            <span className="text-xs text-textSecondary">classes / duties</span>
-          </div>
-          <p className="text-[11px] text-textMuted mt-1">Covering for peers on leave</p>
+          <span className="text-2xl font-black text-amber-500">{reassignedDuties.length}</span>
+          <span className="text-xs text-textSecondary ml-1">assigned</span>
         </div>
       </div>
 
-      {/* ── Main Leave Portal Card ── */}
-      <div className="bg-surface border border-borderLine rounded-2xl p-6 shadow-xs space-y-5">
-        {/* Navigation & Action Bar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-borderLine pb-4">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setActiveSubTab('my-leaves')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                activeSubTab === 'my-leaves'
-                  ? 'bg-brand-primary text-white shadow-sm'
-                  : 'bg-surface-2 text-textSecondary hover:text-textPrimary'
-              }`}
-            >
-              My Leave Applications ({summary?.leaves?.length || 0})
-            </button>
-            <button
-              onClick={() => setActiveSubTab('reassigned-duties')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                activeSubTab === 'reassigned-duties'
-                  ? 'bg-brand-primary text-white shadow-sm'
-                  : 'bg-surface-2 text-textSecondary hover:text-textPrimary'
-              }`}
-            >
-              Duties Reassigned To Me ({reassignedDuties.length})
-            </button>
+      <div className="bg-surface border border-borderLine rounded-2xl p-6 shadow-xs space-y-6">
+        <div className="flex items-center justify-between border-b border-borderLine pb-4">
+          <div className="flex gap-2">
+            <button onClick={() => setActiveSubTab('my-leaves')} className={`px-4 py-2 rounded-xl text-xs font-bold ${activeSubTab === 'my-leaves' ? 'bg-brand-primary text-white' : 'bg-surface-2'}`}>My Leaves</button>
+            <button onClick={() => setActiveSubTab('reassigned-duties')} className={`px-4 py-2 rounded-xl text-xs font-bold ${activeSubTab === 'reassigned-duties' ? 'bg-brand-primary text-white' : 'bg-surface-2'}`}>Duties ({pendingCoveringDutiesCount})</button>
           </div>
-
-          <button
-            onClick={() => setShowApplyModal(true)}
-            className="px-4 py-2 rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm shrink-0 self-start sm:self-auto"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Apply for Leave</span>
-          </button>
+          <button onClick={() => setShowApplyModal(true)} className="px-4 py-2 rounded-xl bg-brand-primary text-white text-xs font-bold">Apply Leave</button>
         </div>
 
-        {/* ── SUB-TAB 1: My Leave History ── */}
         {activeSubTab === 'my-leaves' && (
-          <div>
-            {isLoadingSummary ? (
-              <div className="py-12 text-center text-xs text-textMuted">Loading leave history...</div>
-            ) : !summary?.leaves || summary.leaves.length === 0 ? (
-              <div className="py-12 text-center text-xs text-textMuted bg-surface-2/30 rounded-xl border border-dashed border-borderLine space-y-2">
-                <Calendar className="w-8 h-8 text-textMuted mx-auto" />
-                <p className="font-bold text-textPrimary">No Leave Applications Found</p>
-                <p className="text-[11px] text-textSecondary">You haven't submitted any leave requests for this calendar year.</p>
-                <button
-                  onClick={() => setShowApplyModal(true)}
-                  className="mt-2 px-3.5 py-1.5 rounded-lg bg-brand-primary text-white font-bold text-xs inline-flex items-center gap-1.5"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Apply Now
-                </button>
-              </div>
-            ) : (
-              <div className="overflow-x-auto rounded-xl border border-borderLine">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-surface-2 text-textMuted font-bold uppercase tracking-wider border-b border-borderLine">
-                    <tr>
-                      <th className="py-2.5 px-3.5">Leave Type</th>
-                      <th className="py-2.5 px-3.5">Date Range</th>
-                      <th className="py-2.5 px-3.5 text-center">Working Days</th>
-                      <th className="py-2.5 px-3.5">Reason</th>
-                      <th className="py-2.5 px-3.5">Adjustments</th>
-                      <th className="py-2.5 px-3.5 text-center">Status</th>
-                      <th className="py-2.5 px-3.5 text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-borderLine">
-                    {summary.leaves.map((l) => {
-                      const isApproved = l.status === 'Approved';
-                      const isRejected = l.status === 'Rejected';
-                      return (
-                        <tr key={l.id} className="hover:bg-surface-2/40 transition-colors">
-                          <td className="py-2.5 px-3.5 font-bold text-textPrimary whitespace-nowrap">{l.leave_type}</td>
-                          <td className="py-2.5 px-3.5 text-textSecondary whitespace-nowrap">
-                            {l.from_date} to {l.to_date}
-                          </td>
-                          <td className="py-2.5 px-3.5 text-center font-mono font-bold">{l.num_days}</td>
-                          <td className="py-2.5 px-3.5 text-textSecondary max-w-xs truncate">{l.reason}</td>
-                          <td className="py-2.5 px-3.5">
-                            {l.adjustments && l.adjustments.length > 0 ? (
-                              <span className="px-2 py-0.5 rounded-md bg-surface-2 border border-borderLine text-[10px] font-bold text-textPrimary">
-                                {l.adjustments.length} Reassignment(s)
-                              </span>
-                            ) : (
-                              <span className="text-[10px] text-textMuted">None</span>
-                            )}
-                          </td>
-                          <td className="py-2.5 px-3.5 text-center">
-                            <span
-                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                                isApproved
-                                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                                  : isRejected
-                                  ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                                  : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                              }`}
-                            >
-                              {l.status}
-                            </span>
-                          </td>
-                          <td className="py-2.5 px-3.5 text-right whitespace-nowrap space-x-1.5">
-                            {isApproved && (
-                              <button
-                                onClick={() => setViewingLeave(l)}
-                                className="px-2.5 py-1 rounded-lg bg-surface border border-borderLine hover:bg-surface-2 text-brand-primary text-xs font-bold inline-flex items-center gap-1 shadow-xs"
-                                title="View and Print Official Sanction Order"
-                              >
-                                <Printer className="w-3 h-3" />
-                                <span>Sanction Order</span>
-                              </button>
-                            )}
-
-                            {(() => {
-                              const fromDateStr = typeof l.from_date === 'string' ? l.from_date.split('T')[0] : '';
-                              const nowUtc = new Date();
-                              const istOffsetMs = 5.5 * 60 * 60 * 1000;
-                              const nowIst = new Date(nowUtc.getTime() + istOffsetMs);
-                              const todayIstStr = nowIst.toISOString().split('T')[0];
-                              const istHours = nowIst.getUTCHours();
-                              const istMinutes = nowIst.getUTCMinutes();
-                              const isPast9Am = istHours > 9 || (istHours === 9 && istMinutes > 0);
-                              const isCutoffPassed = todayIstStr > fromDateStr || (todayIstStr === fromDateStr && isPast9Am);
-
-                              return (
-                                <button
-                                  onClick={() => {
-                                    if (isCutoffPassed) {
-                                      alert(
-                                        `Cancellation Window Closed:\n\nLeaves starting today (${fromDateStr}) or in the past cannot be cancelled after 9:00 AM.\n\nPlease contact your HOD to cancel this leave and credit your balance back.`
-                                      );
-                                      return;
-                                    }
-                                    if (
-                                      window.confirm(
-                                        `Cancel leave request (${l.leave_type} for ${l.num_days} days)?\n\nThis will restore ${l.num_days} days to your balance and remove covering duty adjustments.`
-                                      )
-                                    ) {
-                                      cancelLeaveMutation.mutate(l.id);
-                                    }
-                                  }}
-                                  disabled={cancelLeaveMutation.isPending}
-                                  className={`px-2.5 py-1 rounded-lg bg-surface border text-xs font-bold inline-flex items-center gap-1 shadow-xs transition-all ${
-                                    isCutoffPassed
-                                      ? 'border-borderLine text-textMuted hover:bg-surface-2 opacity-60 cursor-not-allowed'
-                                      : 'border-alert/30 hover:bg-alert-soft text-alert'
-                                  }`}
-                                  title={
-                                    isCutoffPassed
-                                      ? 'Cancellation window passed (after 9:00 AM on start date). Contact HOD to cancel.'
-                                      : 'Cancel leave and restore leave balance (allowed before 9:00 AM on start date)'
-                                  }
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                  <span>{isCutoffPassed ? 'HOD Only' : 'Cancel'}</span>
-                                </button>
-                              );
-                            })()}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── SUB-TAB 2: Duties Reassigned To Me ── */}
-        {activeSubTab === 'reassigned-duties' && (
-          <div>
-            {isLoadingDuties ? (
-              <div className="py-12 text-center text-xs text-textMuted">Loading reassigned duties...</div>
-            ) : reassignedDuties.length === 0 ? (
-              <div className="py-12 text-center text-xs text-textMuted bg-surface-2/30 rounded-xl border border-dashed border-borderLine space-y-1">
-                <Briefcase className="w-8 h-8 text-textMuted mx-auto" />
-                <p className="font-bold text-textPrimary">No Reassigned Covering Duties</p>
-                <p className="text-[11px] text-textSecondary">You have not been assigned any covering classes or exam duties by peers on leave.</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto rounded-xl border border-borderLine">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-surface-2 text-textMuted font-bold uppercase tracking-wider border-b border-borderLine">
-                    <tr>
-                      <th className="py-2.5 px-3.5">Type</th>
-                      <th className="py-2.5 px-3.5">Date</th>
-                      <th className="py-2.5 px-3.5">Subject / Exam Duty</th>
-                      <th className="py-2.5 px-3.5">Class Timing / Slot</th>
-                      <th className="py-2.5 px-3.5">Faculty on Leave</th>
-                      <th className="py-2.5 px-3.5 text-center">Leave Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-borderLine">
-                    {reassignedDuties.map((duty, idx) => (
-                      <tr key={idx} className="hover:bg-surface-2/40 transition-colors">
-                        <td className="py-2.5 px-3.5 font-bold uppercase text-[10px]">
-                          <span className={`px-2 py-0.5 rounded-md ${
-                            duty.adjustment_type === 'exam_duty'
-                              ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                              : 'bg-brand-soft text-brand-primary border border-brand-primary/20'
-                          }`}>
-                            {duty.adjustment_type === 'exam_duty' ? 'Exam Duty' : 'Classwork'}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3.5 font-mono font-bold text-textPrimary whitespace-nowrap">{duty.date}</td>
-                        <td className="py-2.5 px-3.5 font-bold text-textPrimary">{duty.subject_or_duty}</td>
-                        <td className="py-2.5 px-3.5 text-textSecondary font-mono">{duty.timing_slot}</td>
-                        <td className="py-2.5 px-3.5">
-                          <p className="font-bold text-textPrimary">{duty.original_faculty_name}</p>
-                          <p className="text-[10px] text-textMuted">{duty.original_faculty_email}</p>
-                        </td>
-                        <td className="py-2.5 px-3.5 text-center">
-                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                            duty.leave_status === 'Approved'
-                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                              : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                          }`}>
-                            {duty.leave_status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+          <div className="overflow-x-auto rounded-xl border border-borderLine">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-surface-2 text-textMuted font-bold uppercase border-b border-borderLine">
+                <tr>
+                  <th className="py-2.5 px-3.5">Type</th>
+                  <th className="py-2.5 px-3.5">Date</th>
+                  <th className="py-2.5 px-3.5">Adjustments</th>
+                  <th className="py-2.5 px-3.5">Approval Flow</th>
+                  <th className="py-2.5 px-3.5">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-borderLine">
+                {summary?.leaves?.map((l) => (
+                  <tr key={l.id} className="hover:bg-surface-2/40">
+                    <td className="py-2.5 px-3.5 font-bold text-textPrimary">{l.leave_type}</td>
+                    <td className="py-2.5 px-3.5 font-mono">{l.from_date} to {l.to_date}</td>
+                    <td className="py-2.5 px-3.5">
+                      {l.adjustments?.map((a, i) => (
+                        <div key={i} className="text-[10px]">{a.subject_or_duty}: {a.reassigned_faculty_name} ({a.acceptance_status})</div>
+                      ))}
+                    </td>
+                    <td className="py-2.5 px-3.5 space-y-0.5">
+                      <div className="flex gap-1 text-[10px]">
+                        <span>Colleague: {l.adjustments?.every(a => a.acceptance_status === 'Accepted') ? '✅' : '⏳'}</span>
+                        <span>HOD: {l.hod_status === 'Approved' ? '✅' : '⏳'}</span>
+                      </div>
+                    </td>
+                    <td className="py-2.5 px-3.5">
+                      <button onClick={() => cancelLeaveMutation.mutate(l.id)} className="text-alert">Cancel</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
 
-      {/* ── APPLY FOR LEAVE MODAL ── */}
       {showApplyModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-surface border border-borderLine rounded-2xl p-6 max-w-2xl w-full shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150 max-h-[92vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-borderLine pb-3">
-              <h4 className="text-base font-bold text-textPrimary flex items-center gap-2">
-                <CalendarCheck className="w-5 h-5 text-brand-primary" /> Apply for Faculty Leave
-              </h4>
-              <button onClick={() => setShowApplyModal(false)} className="text-textMuted hover:text-textPrimary">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmitLeave} className="space-y-4 text-xs">
-              {/* Leave Type Selector with Pop-up Remaining Count */}
-              <div>
-                <label className="font-bold text-textSecondary block mb-1.5">Leave Type *</label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {(['Casual Leave', 'Academic Leave', 'SP CL', 'Paid Leave'] as FacultyLeaveType[]).map((t) => {
-                    const isSelected = formLeaveType === t;
-                    const rem = balances[t]?.remaining ?? 0;
-                    return (
-                      <button
-                        key={t}
-                        type="button"
-                        onClick={() => setFormLeaveType(t)}
-                        className={`p-3 rounded-xl border text-left transition-all relative ${
-                          isSelected
-                            ? 'border-brand-primary bg-brand-soft ring-1 ring-brand-primary/30'
-                            : 'border-borderLine bg-surface-2 hover:border-borderLine'
-                        }`}
-                      >
-                        <p className="font-bold text-textPrimary">{t}</p>
-                        <p className="text-[10px] text-textSecondary mt-0.5">
-                          {t === 'Paid Leave' ? 'Loss of Pay' : `${rem} days left`}
-                        </p>
-                      </button>
-                    );
-                  })}
-                </div>
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-surface border border-borderLine rounded-2xl p-6 max-w-2xl w-full shadow-2xl max-h-[90vh] overflow-y-auto">
+            <h4 className="font-bold text-lg mb-4">Apply for Leave</h4>
+            <form onSubmit={handleSubmitLeave} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <select value={formLeaveType} onChange={(e) => setFormLeaveType(e.target.value as any)} className="p-2 rounded-xl border border-borderLine">
+                  <option value="Casual Leave">Casual Leave</option>
+                  <option value="Academic Leave">Academic Leave</option>
+                  <option value="SP CL">SP CL</option>
+                  <option value="Paid Leave">Paid Leave</option>
+                </select>
+                <input type="date" value={formFromDate} onChange={(e) => setFormFromDate(e.target.value)} className="p-2 rounded-xl border border-borderLine" />
               </div>
-
-              {/* Insufficient balance alert */}
-              {isInsufficient && (
-                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 flex items-start gap-2.5">
-                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
-                  <div className="text-[11px] leading-tight">
-                    <p className="font-bold">Insufficient {formLeaveType} Balance</p>
-                    <p className="mt-0.5 text-textSecondary">
-                      You requested <strong>{calculatedDays} days</strong>, but only have <strong>{currentRemaining} days</strong> left.
-                      You can switch to <strong>Paid Leave</strong> to proceed.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => setFormLeaveType('Paid Leave')}
-                      className="mt-1.5 px-2.5 py-1 rounded-md bg-amber-500 text-slate-950 font-bold text-[10px]"
-                    >
-                      Switch to Paid Leave
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Date Range & Auto Calculation (excluding Sundays & Holidays) */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 bg-surface-2 rounded-xl border border-borderLine">
-                <div>
-                  <label className="font-bold text-textSecondary block mb-1">From Date *</label>
-                  <input
-                    type="date"
-                    required
-                    value={formFromDate}
-                    onChange={(e) => setFormFromDate(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-borderLine bg-background text-textPrimary font-mono focus:outline-none focus:border-brand-primary"
-                  />
-                </div>
-                <div>
-                  <label className="font-bold text-textSecondary block mb-1">To Date *</label>
-                  <input
-                    type="date"
-                    required
-                    value={formToDate}
-                    onChange={(e) => setFormToDate(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-borderLine bg-background text-textPrimary font-mono focus:outline-none focus:border-brand-primary"
-                  />
-                </div>
-                <div className="flex flex-col justify-center items-center bg-surface border border-borderLine rounded-xl p-2">
-                  <span className="text-[10px] font-bold text-textSecondary uppercase">Working Days</span>
-                  <span className="text-xl font-black text-brand-primary">{calculatedDays}</span>
-                  <span className="text-[9px] text-textMuted text-center">Excl. Sundays &amp; Holidays</span>
-                </div>
+              <div className="grid grid-cols-4 gap-2">
+                {AVAILABLE_PERIODS.map(p => (
+                  <button type="button" key={p.id} onClick={() => togglePeriod(p.id)} className={`px-2 py-1 text-[10px] rounded-lg border ${adjPeriods.includes(p.id) ? 'bg-purple-500 text-white' : ''}`}>
+                    {p.id}
+                  </button>
+                ))}
               </div>
-
-              {/* Reason */}
-              <div>
-                <label className="font-bold text-textSecondary block mb-1">Reason for Leave *</label>
-                <textarea
-                  required
-                  rows={2}
-                  value={formReason}
-                  onChange={(e) => setFormReason(e.target.value)}
-                  placeholder="State the purpose of leave..."
-                  className="w-full px-3 py-2 rounded-xl border border-borderLine bg-background text-textPrimary focus:outline-none focus:border-brand-primary resize-none"
-                />
-              </div>
-
-              {/* ── Classwork & Exam Duty Adjustment Section ── */}
-              <div className="space-y-3 pt-2 border-t border-borderLine">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h5 className="font-bold text-textPrimary flex items-center gap-1.5">
-                      <Users className="w-4 h-4 text-purple-400" /> Classwork &amp; Exam Duty Adjustments
-                    </h5>
-                    <p className="text-[11px] text-textSecondary">
-                      Reassign classes and exam duties for your leave days. Reassigned faculty will be notified on their dashboard.
-                    </p>
-                  </div>
-                </div>
-
-                {/* Adjustment Input Form */}
-                <div className="p-3 bg-surface-2 rounded-xl border border-borderLine space-y-2.5">
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
-                    <div>
-                      <label className="font-bold text-textMuted block mb-0.5 text-[10px]">Type</label>
-                      <select
-                        value={adjType}
-                        onChange={(e) => setAdjType(e.target.value as any)}
-                        className="w-full px-2 py-1.5 rounded-lg border border-borderLine bg-background text-textPrimary text-xs"
-                      >
-                        <option value="classwork">Classwork</option>
-                        <option value="exam_duty">Exam Duty</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="font-bold text-textMuted block mb-0.5 text-[10px]">Date</label>
-                      <input
-                        type="date"
-                        value={adjDate}
-                        onChange={(e) => setAdjDate(e.target.value)}
-                        className="w-full px-2 py-1.5 rounded-lg border border-borderLine bg-background text-textPrimary font-mono text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="font-bold text-textMuted block mb-0.5 text-[10px]">Subject / Duty</label>
-                      <input
-                        type="text"
-                        placeholder="e.g. DS Lab or Mid Exam Hall 101"
-                        value={adjSubject}
-                        onChange={(e) => setAdjSubject(e.target.value)}
-                        className="w-full px-2 py-1.5 rounded-lg border border-borderLine bg-background text-textPrimary text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="font-bold text-textMuted block mb-0.5 text-[10px]">Timing / Slot</label>
-                      <input
-                        type="text"
-                        placeholder="e.g. Period 2 (09:50 AM)"
-                        value={adjSlot}
-                        onChange={(e) => setAdjSlot(e.target.value)}
-                        className="w-full px-2 py-1.5 rounded-lg border border-borderLine bg-background text-textPrimary text-xs"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                    <div className="flex-1">
-                      <label className="font-bold text-textMuted block mb-0.5 text-[10px]">
-                        Reassigned Colleague Faculty *
-                      </label>
-                      <div className="flex gap-2">
-                        {facultyDirectory.length > 0 ? (
-                          <select
-                            value={adjFacultyEmail}
-                            onChange={(e) => {
-                              const selectedEmail = e.target.value;
-                              setAdjFacultyEmail(selectedEmail);
-                              const found = facultyDirectory.find(
-                                (f: any) => f.email?.toLowerCase() === selectedEmail.toLowerCase()
-                              );
-                              if (found) {
-                                setAdjFacultyName(found.name || '');
-                              }
-                            }}
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-borderLine bg-background text-textPrimary text-xs focus:outline-none focus:border-brand-primary"
-                          >
-                            <option value="">-- Select Colleague Faculty --</option>
-                            {facultyDirectory
-                              .filter((f: any) => f.email && f.email.toLowerCase() !== email.toLowerCase())
-                              .map((f: any) => (
-                                <option key={f.id || f.email} value={f.email}>
-                                  {f.name} ({f.department} - {f.email})
-                                </option>
-                              ))}
-                          </select>
-                        ) : (
-                          <input
-                            type="email"
-                            placeholder="colleague@rgmcet.edu.in"
-                            value={adjFacultyEmail}
-                            onChange={(e) => setAdjFacultyEmail(e.target.value)}
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-borderLine bg-background text-textPrimary text-xs focus:outline-none focus:border-brand-primary"
-                          />
-                        )}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleAddAdjustment}
-                      className="mt-auto px-4 py-2 rounded-lg bg-brand-primary hover:bg-brand-primary/90 text-white font-bold text-xs shadow-sm transition-all flex items-center justify-center gap-1 shrink-0"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Add Duty</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Adjustments Preview Table */}
-                {formAdjustments.length > 0 && (
-                  <div className="rounded-xl border border-borderLine overflow-hidden">
-                    <table className="w-full text-left text-[11px]">
-                      <thead className="bg-surface-2 text-textMuted font-bold border-b border-borderLine">
-                        <tr>
-                          <th className="p-2">Type</th>
-                          <th className="p-2">Date</th>
-                          <th className="p-2">Subject / Duty</th>
-                          <th className="p-2">Slot</th>
-                          <th className="p-2">Covering Faculty</th>
-                          <th className="p-2 text-right">Remove</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-borderLine font-mono">
-                        {formAdjustments.map((a, i) => (
-                          <tr key={i}>
-                            <td className="p-2 font-sans font-bold uppercase text-[10px]">{a.adjustment_type}</td>
-                            <td className="p-2">{a.date}</td>
-                            <td className="p-2 font-sans font-medium text-textPrimary">{a.subject_or_duty}</td>
-                            <td className="p-2">{a.timing_slot}</td>
-                            <td className="p-2 font-sans">
-                              <span className="font-bold text-textPrimary block">{a.reassigned_faculty_name || a.reassigned_faculty_email}</span>
-                              {a.reassigned_faculty_name && a.reassigned_faculty_name !== a.reassigned_faculty_email && (
-                                <span className="text-[10px] text-textMuted font-mono block">{a.reassigned_faculty_email}</span>
-                              )}
-                            </td>
-                            <td className="p-2 text-right">
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveAdjustment(i)}
-                                className="text-alert hover:underline"
-                              >
-                                ✕
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
-              {/* Submit Buttons */}
-              <div className="flex justify-end gap-2.5 pt-3 border-t border-borderLine">
-                <button
-                  type="button"
-                  onClick={() => setShowApplyModal(false)}
-                  className="px-4 py-2 rounded-xl border border-borderLine text-textSecondary font-bold hover:bg-surface-2"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={applyMutation.isPending || isInsufficient}
-                  className="px-5 py-2 rounded-xl bg-brand-primary text-white font-bold hover:bg-brand-primary/90 transition-all shadow-sm disabled:opacity-50"
-                >
-                  {applyMutation.isPending ? 'Submitting...' : 'Submit Application to HOD'}
-                </button>
+              <input type="text" placeholder="Subject/Duty Name" value={adjSubject} onChange={(e) => setAdjSubject(e.target.value)} className="w-full p-2 rounded-xl border border-borderLine" />
+              <input type="text" placeholder="Search colleague..." value={colleagueSearch} onChange={(e) => setColleagueSearch(e.target.value)} className="w-full p-2 rounded-xl border border-borderLine" />
+              <select onChange={(e) => setAdjFacultyEmail(e.target.value)} className="w-full p-2 rounded-xl border border-borderLine">
+                <option value="">Select Colleague</option>
+                {filteredFacultyForDuty.map((f: any) => <option key={f.email} value={f.email}>{f.name} ({f.department})</option>)}
+              </select>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setShowApplyModal(false)} className="px-4 py-2 rounded-xl border">Cancel</button>
+                <button type="submit" className="px-4 py-2 rounded-xl bg-brand-primary text-white">Submit</button>
               </div>
             </form>
           </div>
         </div>
       )}
-
-      {/* ── Official Leave Letter Modal ── */}
-      <LeaveLetterModal
-        isOpen={Boolean(viewingLeave)}
-        onClose={() => setViewingLeave(null)}
-        leave={viewingLeave}
-      />
     </div>
   );
 };

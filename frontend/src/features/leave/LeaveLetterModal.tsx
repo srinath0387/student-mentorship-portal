@@ -166,8 +166,9 @@ export const LeaveLetterModal: React.FC<LeaveLetterModalProps> = ({
                         <th className="p-1.5 border-r border-slate-300">Type</th>
                         <th className="p-1.5 border-r border-slate-300">Date</th>
                         <th className="p-1.5 border-r border-slate-300">Subject / Duty</th>
-                        <th className="p-1.5 border-r border-slate-300">Class Timing / Slot</th>
-                        <th className="p-1.5">Adjusted To Faculty</th>
+                        <th className="p-1.5 border-r border-slate-300">Periods / Slot</th>
+                        <th className="p-1.5 border-r border-slate-300">Covering Colleague</th>
+                        <th className="p-1.5 text-center">Colleague Acceptance</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
@@ -178,10 +179,17 @@ export const LeaveLetterModal: React.FC<LeaveLetterModalProps> = ({
                           </td>
                           <td className="p-1.5 border-r border-slate-200 whitespace-nowrap font-mono">{adj.date}</td>
                           <td className="p-1.5 border-r border-slate-200 font-medium">{adj.subject_or_duty}</td>
-                          <td className="p-1.5 border-r border-slate-200 font-mono">{adj.timing_slot}</td>
-                          <td className="p-1.5 font-bold text-slate-900">
+                          <td className="p-1.5 border-r border-slate-200 font-mono text-[10px]">{adj.periods?.join(', ') || adj.timing_slot}</td>
+                          <td className="p-1.5 border-r border-slate-200 font-bold text-slate-900">
                             {adj.reassigned_faculty_name}
                             <span className="block text-[9px] text-slate-500 font-normal">{adj.reassigned_faculty_email}</span>
+                          </td>
+                          <td className="p-1.5 text-center font-bold text-[10px]">
+                            {adj.acceptance_status === 'Accepted' ? (
+                              <span className="text-emerald-700 font-black">✓ Digitally Accepted</span>
+                            ) : (
+                              <span className="text-amber-700">{adj.acceptance_status || 'Pending'}</span>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -190,29 +198,46 @@ export const LeaveLetterModal: React.FC<LeaveLetterModalProps> = ({
                 </div>
               )}
 
-              {/* HOD Remarks */}
+              {/* Remarks */}
               {leave.hod_remarks && (
                 <div className="text-[11px] bg-emerald-50 border border-emerald-200 p-2.5 rounded-lg">
                   <strong>HOD Remarks:</strong> {leave.hod_remarks}
                 </div>
               )}
+              {leave.principal_remarks && (
+                <div className="text-[11px] bg-purple-50 border border-purple-200 p-2.5 rounded-lg">
+                  <strong>Principal Office Remarks:</strong> {leave.principal_remarks}
+                </div>
+              )}
             </div>
 
             {/* Approval Signatures */}
-            <div className="pt-8 border-t border-slate-300 flex items-end justify-between text-xs">
+            <div className="pt-8 border-t border-slate-300 grid grid-cols-3 gap-4 text-xs">
+              {/* 1. Applicant */}
               <div className="text-center space-y-1">
-                <div className="w-32 border-b border-slate-400 pb-8" />
+                <div className="border-b border-slate-400 pb-6" />
                 <p className="font-bold text-slate-800">Signature of Faculty</p>
                 <p className="text-[10px] text-slate-500">{leave.faculty_name}</p>
               </div>
 
+              {/* 2. HOD */}
               <div className="text-center space-y-1">
-                <div className="inline-flex items-center justify-center p-2 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-800 text-[10px] font-black uppercase mb-1">
-                  ✓ Digital Approval by {leave.approved_by || 'HOD'}
+                <div className="inline-flex items-center justify-center p-1.5 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-800 text-[9px] font-black uppercase mb-1">
+                  ✓ HOD: {leave.approved_by || 'HOD'}
                 </div>
-                <div className="w-40 border-b border-slate-400 pb-1" />
-                <p className="font-bold text-slate-900">Head of the Department</p>
-                <p className="text-[10px] text-slate-500">Dept. of {leave.department}, RGMCET</p>
+                <div className="border-b border-slate-400 pb-1" />
+                <p className="font-bold text-slate-900">Head of Department</p>
+                <p className="text-[10px] text-slate-500">Dept. of {leave.department}</p>
+              </div>
+
+              {/* 3. Principal */}
+              <div className="text-center space-y-1">
+                <div className="inline-flex items-center justify-center p-1.5 rounded-lg bg-purple-50 border border-purple-300 text-purple-900 text-[9px] font-black uppercase mb-1">
+                  ✓ {leave.principal_approved_by || 'Principal Office'}
+                </div>
+                <div className="border-b border-slate-400 pb-1" />
+                <p className="font-bold text-slate-900">Principal</p>
+                <p className="text-[10px] text-slate-500">RGMCET Autonomous</p>
               </div>
             </div>
 

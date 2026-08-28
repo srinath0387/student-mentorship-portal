@@ -479,6 +479,7 @@ export interface HolidayCalendarEntry {
 // ── MODULE 5: Faculty Leaves & Adjustments ──────────────────────────────────
 export type FacultyLeaveType = 'Casual Leave' | 'Academic Leave' | 'SP CL' | 'Paid Leave';
 export type LeaveStatus = 'Pending' | 'Approved' | 'Rejected';
+export type ColleagueDutyStatus = 'Pending' | 'Accepted' | 'Rejected';
 
 export interface FacultyLeaveAdjustment {
   id?: string;
@@ -487,8 +488,12 @@ export interface FacultyLeaveAdjustment {
   date: string; // YYYY-MM-DD
   subject_or_duty: string;
   timing_slot: string;
+  periods?: string[]; // e.g. ['Period 1', 'Period 2']
   reassigned_faculty_email: string;
   reassigned_faculty_name: string;
+  acceptance_status?: ColleagueDutyStatus;
+  rejected_reason?: string;
+  accepted_at?: string;
   original_faculty_name?: string;
   original_faculty_email?: string;
   department?: string;
@@ -507,21 +512,55 @@ export interface FacultyLeaveRecord {
   num_days: number;
   reason: string;
   status: LeaveStatus;
+  hod_status?: LeaveStatus;
   hod_remarks?: string;
   approved_by?: string;
   approved_at?: string;
+  principal_status?: LeaveStatus;
+  principal_remarks?: string;
+  principal_approved_by?: string;
+  principal_approved_at?: string;
+  is_deducted?: boolean;
   created_at: string;
   adjustments?: FacultyLeaveAdjustment[];
+}
+
+export interface FacultyLeaveCredit {
+  id?: string;
+  faculty_email: string;
+  faculty_name?: string;
+  department?: string;
+  year: number;
+  casual_leave_quota: number;
+  sp_cl_quota: number;
+  academic_leave_quota: number;
+  paid_leave_quota?: number;
+  casual_leave_used?: number;
+  sp_cl_used?: number;
+  academic_leave_used?: number;
+  updated_at?: string;
+}
+
+export interface FacultyLeaveCreditLog {
+  id: string;
+  faculty_email: string;
+  leave_type: string;
+  old_quota: number;
+  new_quota: number;
+  change_amount: number;
+  reason: string;
+  changed_by: string;
+  created_at: string;
 }
 
 export interface FacultyLeaveSummaryResponse {
   faculty_email: string;
   year: number;
   balances: {
-    'Casual Leave': { quota: number; used: number; remaining: number };
-    'Academic Leave': { quota: number; used: number; remaining: number };
-    'SP CL': { quota: number; used: number; remaining: number };
-    'Paid Leave': { quota: number; used: number; remaining: number };
+    'Casual Leave': { quota: number; used: number; in_process?: number; remaining: number };
+    'Academic Leave': { quota: number; used: number; in_process?: number; remaining: number };
+    'SP CL': { quota: number; used: number; in_process?: number; remaining: number };
+    'Paid Leave': { quota: number; used: number; in_process?: number; remaining: number };
   };
   leaves: FacultyLeaveRecord[];
 }

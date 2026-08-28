@@ -337,44 +337,94 @@ export const HodLeaveApprovalTab: React.FC<{ studentsOnly?: boolean }> = ({ stud
                                   <th className="p-2">Adjustment Type</th>
                                   <th className="p-2">Date</th>
                                   <th className="p-2">Subject / Duty Description</th>
-                                  <th className="p-2">Period / Slot</th>
+                                  <th className="p-2">Periods / Slot</th>
                                   <th className="p-2">Covering Faculty Colleague</th>
+                                  <th className="p-2 text-center">Colleague Acceptance</th>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-borderLine">
-                                {l.adjustments.map((adj, i) => (
-                                  <tr key={i} className="hover:bg-surface transition-colors">
-                                    <td className="p-2">
-                                      <span
-                                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${
-                                          adj.adjustment_type === 'exam_duty'
-                                            ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                                            : 'bg-brand-soft text-brand-primary border border-brand-primary/20'
-                                        }`}
-                                      >
-                                        {adj.adjustment_type === 'exam_duty' ? 'Exam Duty' : 'Classwork'}
-                                      </span>
-                                    </td>
-                                    <td className="p-2 font-mono text-textPrimary font-bold">{adj.date}</td>
-                                    <td className="p-2 font-medium text-textPrimary">{adj.subject_or_duty}</td>
-                                    <td className="p-2 font-mono text-textSecondary">{adj.timing_slot}</td>
-                                    <td className="p-2">
-                                      <p className="font-bold text-textPrimary">{adj.reassigned_faculty_name || adj.reassigned_faculty_email}</p>
-                                      {adj.reassigned_faculty_name && adj.reassigned_faculty_name !== adj.reassigned_faculty_email && (
-                                        <p className="text-[10px] text-textMuted font-mono">{adj.reassigned_faculty_email}</p>
-                                      )}
-                                    </td>
-                                  </tr>
-                                ))}
+                                {l.adjustments.map((adj, i) => {
+                                  const isAccepted = adj.acceptance_status === 'Accepted';
+                                  const isRejected = adj.acceptance_status === 'Rejected';
+                                  return (
+                                    <tr key={i} className="hover:bg-surface transition-colors">
+                                      <td className="p-2">
+                                        <span
+                                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${
+                                            adj.adjustment_type === 'exam_duty'
+                                              ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                              : 'bg-brand-soft text-brand-primary border border-brand-primary/20'
+                                          }`}
+                                        >
+                                          {adj.adjustment_type === 'exam_duty' ? 'Exam Duty' : 'Classwork'}
+                                        </span>
+                                      </td>
+                                      <td className="p-2 font-mono text-textPrimary font-bold">{adj.date}</td>
+                                      <td className="p-2 font-medium text-textPrimary">{adj.subject_or_duty}</td>
+                                      <td className="p-2 font-mono text-purple-300 font-semibold">{adj.periods?.join(', ') || adj.timing_slot}</td>
+                                      <td className="p-2">
+                                        <p className="font-bold text-textPrimary">{adj.reassigned_faculty_name || adj.reassigned_faculty_email}</p>
+                                        {adj.reassigned_faculty_name && adj.reassigned_faculty_name !== adj.reassigned_faculty_email && (
+                                          <p className="text-[10px] text-textMuted font-mono">{adj.reassigned_faculty_email}</p>
+                                        )}
+                                      </td>
+                                      <td className="p-2 text-center">
+                                        {isAccepted ? (
+                                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px] font-black inline-flex items-center gap-1">
+                                            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                            <span>Accepted</span>
+                                          </span>
+                                        ) : isRejected ? (
+                                          <span className="px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/30 text-[10px] font-black inline-flex items-center gap-1">
+                                            <XCircle className="w-3 h-3 text-rose-400" />
+                                            <span>Declined</span>
+                                          </span>
+                                        ) : (
+                                          <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 text-[10px] font-bold inline-flex items-center gap-1">
+                                            <Clock className="w-3 h-3 text-amber-400" />
+                                            <span>Pending</span>
+                                          </span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
                               </tbody>
                             </table>
                           </div>
                         )}
                       </div>
 
+                      {/* Approval Stepper Status Bar */}
+                      <div className="p-2.5 bg-surface rounded-xl border border-borderLine flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <div className="flex items-center gap-3">
+                          <span className="text-[10px] text-textMuted uppercase font-bold">Stage:</span>
+                          <span className={`text-xs font-bold ${l.hod_status === 'Approved' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                            HOD: {l.hod_status || 'Pending'}
+                          </span>
+                          <span className="text-textMuted">→</span>
+                          <span className={`text-xs font-bold ${l.principal_status === 'Approved' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                            Principal: {l.principal_status || 'Pending'}
+                          </span>
+                        </div>
+
+                        {l.is_deducted && (
+                          <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 text-[10px] font-bold border border-emerald-500/20">
+                            ✓ Balance Deducted
+                          </span>
+                        )}
+                      </div>
+
                       {/* Action Buttons for Pending */}
                       {isPending && (
                         <div className="flex items-center justify-end gap-2.5 pt-1 border-t border-borderLine">
+                          {/* Colleague Warning if any pending/rejected */}
+                          {l.adjustments && l.adjustments.some(a => a.acceptance_status === 'Rejected') && (
+                            <span className="text-xs text-rose-400 font-bold mr-auto">
+                              ⚠️ Colleague declined duty. Reassignment needed before approval.
+                            </span>
+                          )}
+
                           <button
                             onClick={() =>
                               setActionModal({
@@ -384,25 +434,52 @@ export const HodLeaveApprovalTab: React.FC<{ studentsOnly?: boolean }> = ({ stud
                                 title: `Reject Leave for ${l.faculty_name}`,
                               })
                             }
-                            className="px-3.5 py-1.5 rounded-xl border border-alert/30 text-alert hover:bg-alert-soft text-xs font-bold flex items-center gap-1.5 transition-all"
+                            className="px-3.5 py-1.5 rounded-xl border border-alert/30 text-alert hover:bg-alert-soft text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
                           >
                             <XCircle className="w-3.5 h-3.5" />
                             <span>Reject</span>
                           </button>
-                          <button
-                            onClick={() =>
-                              setActionModal({
-                                type: 'faculty',
-                                id: l.id,
-                                action: 'Approved',
-                                title: `Approve Leave for ${l.faculty_name}`,
-                              })
-                            }
-                            className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>Approve Leave</span>
-                          </button>
+
+                          {/* HOD Approval Button */}
+                          {l.hod_status !== 'Approved' && (
+                            <button
+                              onClick={() =>
+                                setActionModal({
+                                  type: 'faculty',
+                                  id: l.id,
+                                  action: 'Approved',
+                                  title: `Approve Leave as HOD for ${l.faculty_name}`,
+                                })
+                              }
+                              disabled={l.adjustments?.some(a => a.acceptance_status === 'Rejected')}
+                              className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm disabled:opacity-50 cursor-pointer"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Approve (HOD)</span>
+                            </button>
+                          )}
+
+                          {/* Principal Final Approval Button (For Admin / Principal) */}
+                          {(user?.role === 'admin' || user?.email?.toLowerCase().includes('principal')) && l.hod_status === 'Approved' && l.principal_status !== 'Approved' && (
+                            <button
+                              onClick={async () => {
+                                if (window.confirm(`Grant FINAL PRINCIPAL APPROVAL for ${l.faculty_name} (${l.num_days} days)?\n\nThis will deduct ${l.num_days} day(s) from their leave balance.`)) {
+                                  try {
+                                    await api.principalApproveFacultyLeave(l.id, 'Approved', 'Approved by Principal Office');
+                                    queryClient.invalidateQueries({ queryKey: ['hodFacultyLeaves'] });
+                                    queryClient.invalidateQueries({ queryKey: ['facultyLeaveSummary'] });
+                                    alert('Principal approval granted. Leave balance deducted.');
+                                  } catch (err: any) {
+                                    alert(`Failed: ${err.message}`);
+                                  }
+                                }
+                              }}
+                              className="px-4 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
+                            >
+                              <ShieldCheck className="w-3.5 h-3.5" />
+                              <span>Final Approval (Principal)</span>
+                            </button>
+                          )}
                         </div>
                       )}
 
@@ -410,6 +487,11 @@ export const HodLeaveApprovalTab: React.FC<{ studentsOnly?: boolean }> = ({ stud
                       {l.hod_remarks && (
                         <p className="text-[11px] text-textMuted bg-surface p-2 rounded-lg border border-borderLine">
                           <strong>HOD Remarks:</strong> {l.hod_remarks}
+                        </p>
+                      )}
+                      {l.principal_remarks && (
+                        <p className="text-[11px] text-textMuted bg-purple-500/5 p-2 rounded-lg border border-purple-500/20">
+                          <strong>Principal Office Remarks:</strong> {l.principal_remarks}
                         </p>
                       )}
                     </div>

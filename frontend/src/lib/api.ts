@@ -1112,6 +1112,47 @@ export const api = {
     });
   },
 
+  respondToAdjustment: async (adjId: string, status: 'Accepted' | 'Rejected', rejected_reason?: string) => {
+    return fetchWithAuth(`/faculty/leaves/adjustments/${encodeURIComponent(adjId)}/respond`, {
+      method: 'POST',
+      body: JSON.stringify({ status, rejected_reason }),
+    });
+  },
+
+  reassignDutyColleague: async (adjId: string, new_faculty_email: string, new_faculty_name?: string) => {
+    return fetchWithAuth(`/faculty/leaves/adjustments/${encodeURIComponent(adjId)}/reassign`, {
+      method: 'PUT',
+      body: JSON.stringify({ new_faculty_email, new_faculty_name }),
+    });
+  },
+
+  principalApproveFacultyLeave: async (id: string, status: 'Approved' | 'Rejected', principal_remarks?: string) => {
+    return fetchWithAuth(`/principal/leaves/faculty/${encodeURIComponent(id)}/status`, {
+      method: 'PUT',
+      body: JSON.stringify({ status, principal_remarks }),
+    });
+  },
+
+  getFacultyLeaveCredits: async (): Promise<any[]> => {
+    return fetchWithAuth('/admin/faculty/leave-credits');
+  },
+
+  adjustFacultyLeaveCredit: async (data: {
+    faculty_email: string;
+    leave_type: string;
+    new_quota: number;
+    reason: string;
+  }) => {
+    return fetchWithAuth('/admin/faculty/leave-credits/adjust', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  getFacultyCreditLogs: async (email: string): Promise<any[]> => {
+    return fetchWithAuth(`/admin/faculty/leave-credits/logs/${encodeURIComponent(email)}`);
+  },
+
   // ── MODULE 5: Student Permissions (On-Duty / Leaves) ──────────────────────
   applyStudentPermission: async (data: {
     roll_number?: string;

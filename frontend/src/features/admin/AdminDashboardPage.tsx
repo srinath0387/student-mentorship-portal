@@ -52,6 +52,7 @@ import { AttendanceManagementTab } from './tabs/AttendanceManagementTab';
 import { AttendanceTrackingTab } from '../attendance/AttendanceTrackingTab';
 import { HodLeaveApprovalTab } from '../leave/HodLeaveApprovalTab';
 import { HolidayCalendarTab } from './tabs/HolidayCalendarTab';
+import { LeaveCreditManagementTab } from './tabs/LeaveCreditManagementTab';
 
 const DEPARTMENTS = VALID_DEPARTMENT_NAMES;
 const YEARS = ['1st Year', '2nd Year', '3rd Year', '4th Year'] as const;
@@ -538,6 +539,7 @@ export const AdminDashboardPage: React.FC = () => {
             {[
               { key: 'students', label: 'Student Directory (CRUD)' },
               { key: 'leaves', label: '🌴 Leave & OD Approvals' },
+              { key: 'leave-credits', label: '🎫 Leave Credit Mgmt' },
               { key: 'holidays', label: '📅 Holiday Calendar' },
               { key: 'attendance', label: '📊 Attendance System' },
               { key: 'performance', label: 'CGPA & Coding Rankings' },
@@ -599,6 +601,9 @@ export const AdminDashboardPage: React.FC = () => {
 
       {/* ── TAB: Leave & OD Approvals ── */}
       {activeTab === 'leaves' && <HodLeaveApprovalTab />}
+
+      {/* ── TAB: Leave Credit Allotment & Management ── */}
+      {activeTab === 'leave-credits' && <LeaveCreditManagementTab />}
 
       {/* ── TAB: Holiday Calendar ── */}
       {activeTab === 'holidays' && <HolidayCalendarTab />}
