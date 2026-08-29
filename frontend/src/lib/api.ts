@@ -689,8 +689,9 @@ export const api = {
     });
   },
 
-  getRoster: async (allotmentId: string) => {
-    return fetchWithAuth(`/attendance/rosters/${allotmentId}`);
+  getRoster: async (allotmentId: string, date?: string) => {
+    const query = date ? `?date=${encodeURIComponent(date)}` : '';
+    return fetchWithAuth(`/attendance/rosters/${allotmentId}${query}`);
   },
 
   getMyAttendanceSubjects: async (semester?: string) => {

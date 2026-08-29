@@ -2015,11 +2015,25 @@ app.delete('/students/:id', requireRole('admin'), async (req: Request, res: Resp
       return res.status(404).json({ error: 'Student not found in database' });
     }
 
+    // Clean up all related tables across the entire platform
+    await Promise.allSettled([
+      db.query('DELETE FROM academics WHERE UPPER(student_id) = $1', [studentId]),
+      db.query('DELETE FROM coding_profiles WHERE UPPER(student_id) = $1', [studentId]),
+      db.query('DELETE FROM certifications WHERE UPPER(student_id) = $1', [studentId]),
+      db.query('DELETE FROM tech_skills WHERE UPPER(student_id) = $1', [studentId]),
+      db.query('DELETE FROM soft_skills WHERE UPPER(student_id) = $1', [studentId]),
+      db.query('DELETE FROM achievements WHERE UPPER(student_id) = $1', [studentId]),
+      db.query('DELETE FROM student_passwords WHERE UPPER(roll_number) = $1', [studentId]),
+      db.query('DELETE FROM student_permissions WHERE UPPER(roll_number) = $1', [studentId]),
+      db.query('DELETE FROM attendance_records WHERE UPPER(roll_number) = $1', [studentId]),
+      db.query('DELETE FROM mentor_assignments WHERE UPPER(roll_number) = $1', [studentId]),
+    ]);
+
     // Cognito + session cleanup — awaited so errors appear in Lambda logs
     // (does NOT throw — errors are caught and logged inside deleteCognitoUsers)
     await deleteCognitoUsers([studentId, studentEmail]);
 
-    res.json({ message: `Student ${studentId} deleted successfully` });
+    res.json({ message: `Student ${studentId} and all associated records deleted successfully` });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -2058,10 +2072,24 @@ app.post('/admin/students/bulk-delete', requireRole('admin'), async (req: Reques
     );
     const deleted = result.rows.length;
 
+    // Clean up all related tables in parallel
+    await Promise.allSettled([
+      db.query('DELETE FROM academics WHERE UPPER(student_id) = ANY($1)', [ids]),
+      db.query('DELETE FROM coding_profiles WHERE UPPER(student_id) = ANY($1)', [ids]),
+      db.query('DELETE FROM certifications WHERE UPPER(student_id) = ANY($1)', [ids]),
+      db.query('DELETE FROM tech_skills WHERE UPPER(student_id) = ANY($1)', [ids]),
+      db.query('DELETE FROM soft_skills WHERE UPPER(student_id) = ANY($1)', [ids]),
+      db.query('DELETE FROM achievements WHERE UPPER(student_id) = ANY($1)', [ids]),
+      db.query('DELETE FROM student_passwords WHERE UPPER(roll_number) = ANY($1)', [ids]),
+      db.query('DELETE FROM student_permissions WHERE UPPER(roll_number) = ANY($1)', [ids]),
+      db.query('DELETE FROM attendance_records WHERE UPPER(roll_number) = ANY($1)', [ids]),
+      db.query('DELETE FROM mentor_assignments WHERE UPPER(roll_number) = ANY($1)', [ids]),
+    ]);
+
     // Cognito + session cleanup — awaited so failures show in Lambda logs
     await deleteCognitoUsers([...ids, ...emailsToDelete]);
 
-    res.json({ deleted, message: `${deleted} student(s) deleted successfully` });
+    res.json({ deleted, message: `${deleted} student(s) and all associated records deleted successfully` });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -3162,6 +3190,12 @@ app.post('/faculty', async (req: Request, res: Response) => {
       return res.status(201).json({ message: 'Faculty registered successfully', faculty: newFaculty });
     }
 
+    // Check if email is in blocked_emails
+    const blockedCheck = await db.query('SELECT reason FROM blocked_emails WHERE LOWER(email) = $1', [cleanEmail]).catch(() => ({ rows: [] }));
+    if (blockedCheck.rows.length > 0) {
+      return res.status(403).json({ error: `This email (${cleanEmail}) has been removed and blocked by an administrator.` });
+    }
+
     // Upsert the new faculty record (on email conflict, update name/dept/role)
     const result = await db.query(
       `INSERT INTO faculty (faculty_id, name, email, department, role)
@@ -3293,6 +3327,12 @@ app.get('/faculty/by-email/:email', async (req: Request, res: Response) => {
     const email = req.params.email.toLowerCase().trim();
     if (db.isMock) {
       return res.json({ faculty_id: 'FAC001', name: 'Dr. M. V. Ramana', email, department: 'CSE', role: 'mentor' });
+    }
+
+    // Tier 0: Check if email is in blocked_emails
+    const blockedCheck = await db.query('SELECT reason FROM blocked_emails WHERE LOWER(email) = $1', [email]).catch(() => ({ rows: [] }));
+    if (blockedCheck.rows.length > 0) {
+      return res.status(403).json({ error: 'This faculty account has been removed and blocked by an administrator.', isBlocked: true });
     }
 
     // Tier 1: exact email match
@@ -3646,11 +3686,11 @@ app.get('/faculty', requireRole('admin', 'hod', 'coordinator', 'faculty'), async
   try {
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
-    const isSuper = req.auth?.isSuperAdmin || callerDept === '*' || callerRole === 'coordinator' || callerRole === 'admin' || callerRole === 'faculty';
+    const isSuper = req.auth?.isSuperAdmin === true || callerDept === '*' || callerDept === 'All' || callerRole === 'coordinator';
     const reqDept = req.query.department ? String(req.query.department) : undefined;
 
     let targetDept: string | undefined;
-    if (!isSuper && callerDept) {
+    if (!isSuper && callerDept && callerDept !== 'All' && callerDept !== '*') {
       targetDept = callerDept;
     } else if (reqDept && reqDept !== 'All' && reqDept !== 'undefined' && reqDept !== 'null') {
       targetDept = reqDept;
@@ -3831,10 +3871,12 @@ app.delete('/faculty/:id', requireRole('admin'), async (req: Request, res: Respo
         [facultyEmail, `Deleted by admin: ${facultyName} (${facId})`]
       ).catch(() => {});
 
-      // Cognito cleanup: fire-and-forget
-      deleteCognitoUsers([facultyEmail]).catch((e: any) =>
-        console.warn(`[Cognito] Faculty Cognito cleanup failed for ${facultyEmail}:`, e.message)
-      );
+      // Cognito cleanup: await deletion from Cognito
+      try {
+        await deleteCognitoUsers([facultyEmail, facId]);
+      } catch (e: any) {
+        console.warn(`[Cognito] Faculty Cognito cleanup failed for ${facultyEmail}:`, e.message);
+      }
     }
 
     res.json({ message: `Faculty ${facultyName} deleted. Their email is now blocked from re-registration.` });
@@ -5059,6 +5101,7 @@ app.delete('/attendance/rosters/:rosterId', requireRole('admin', 'hod', 'coordin
 app.get('/attendance/rosters/:allotmentId', requireRole('admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
   try {
     const { allotmentId } = req.params;
+    const sessionDate = (req.query.date as string || req.query.session_date as string || '').trim();
 
     // Fetch allotment details
     const allot = await db.query('SELECT * FROM subject_allotments WHERE id = $1', [allotmentId]);
@@ -5071,6 +5114,32 @@ app.get('/attendance/rosters/:allotmentId', requireRole('admin', 'hod', 'faculty
     if (req.auth?.role === 'faculty') {
       if (allotmentRow.faculty_email.toLowerCase() !== req.auth.email.toLowerCase()) {
         return res.status(403).json({ error: 'Access denied. You can only view rosters for your allotted subjects.' });
+      }
+    }
+
+    // Query active approved student permissions (OD) on sessionDate if provided
+    const approvedODMap = new Map<string, { permission_type: string; reason: string }>();
+    if (sessionDate) {
+      try {
+        await ensureLeaveAndSubjectsHandledTables();
+        const odRes = await db.query(
+          `SELECT UPPER(TRIM(roll_number)) as roll_number, permission_type, reason
+           FROM student_permissions
+           WHERE LOWER(status) = 'approved'
+             AND $1::date >= from_date::date
+             AND $1::date <= to_date::date`,
+          [sessionDate]
+        );
+        for (const r of odRes.rows) {
+          if (r.roll_number) {
+            approvedODMap.set(r.roll_number, {
+              permission_type: r.permission_type,
+              reason: r.reason,
+            });
+          }
+        }
+      } catch (err: any) {
+        console.warn('[Roster OD Check] Error querying student permissions:', err.message);
       }
     }
 
@@ -5097,19 +5166,37 @@ app.get('/attendance/rosters/:allotmentId', requireRole('admin', 'hod', 'faculty
          ORDER BY name ASC, roll_number ASC`,
         [dept, sec]
       );
-      return res.json(fresherRes.rows.map(f => ({
-        id: `fresher_${f.roll_number}`,
-        allotment_id: allotmentId,
-        roll_number: f.roll_number,
-        student_name: f.student_name,
-        student_email: f.student_email,
-        student_department: f.student_department,
-        student_section: f.student_section,
-        joining_date: f.joining_date,
-      })));
+      return res.json(fresherRes.rows.map(f => {
+        const rollUpper = (f.roll_number || '').trim().toUpperCase();
+        const odInfo = approvedODMap.get(rollUpper);
+        return {
+          id: `fresher_${f.roll_number}`,
+          allotment_id: allotmentId,
+          roll_number: f.roll_number,
+          student_name: f.student_name,
+          student_email: f.student_email,
+          student_department: f.student_department,
+          student_section: f.student_section,
+          joining_date: f.joining_date,
+          is_on_od: Boolean(odInfo),
+          od_type: odInfo?.permission_type || null,
+          od_reason: odInfo?.reason || null,
+        };
+      }));
     }
 
-    res.json(result.rows);
+    const rowsWithOD = result.rows.map((r: any) => {
+      const rollUpper = (r.roll_number || '').trim().toUpperCase();
+      const odInfo = approvedODMap.get(rollUpper);
+      return {
+        ...r,
+        is_on_od: Boolean(odInfo),
+        od_type: odInfo?.permission_type || null,
+        od_reason: odInfo?.reason || null,
+      };
+    });
+
+    res.json(rowsWithOD);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -5225,14 +5312,15 @@ app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin'), async (
     // Check for approved student permissions (On-Duty / Leaves) active on session_date
     let approvedODRolls = new Set<string>();
     try {
+      await ensureLeaveAndSubjectsHandledTables();
       const odRes = await db.query(
-        `SELECT roll_number FROM student_permissions 
-         WHERE status = 'Approved' 
-           AND $1::date >= from_date 
-           AND $1::date <= to_date`,
+        `SELECT UPPER(TRIM(roll_number)) as roll_number FROM student_permissions 
+         WHERE LOWER(status) = 'approved' 
+           AND $1::date >= from_date::date 
+           AND $1::date <= to_date::date`,
         [session_date]
       );
-      approvedODRolls = new Set(odRes.rows.map((r: any) => r.roll_number?.trim().toUpperCase()));
+      approvedODRolls = new Set(odRes.rows.map((r: any) => r.roll_number).filter(Boolean));
     } catch (_) { /* ignore if table not created yet */ }
 
     // Insert or update individual student records
@@ -5243,7 +5331,7 @@ app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin'), async (
 
       // If student has an approved permission on this date, auto-lock as present (On-Duty)
       const hasApprovedPermission = approvedODRolls.has(rollNumber);
-      const isPresent = hasApprovedPermission || Boolean(rec.is_present);
+      const isPresent = hasApprovedPermission ? true : Boolean(rec.is_present);
       if (isPresent) presentCount++;
 
       await db.query(
@@ -8949,26 +9037,28 @@ app.put('/hod/permissions/students/:id/status', requireRole('hod', 'admin', 'coo
 
     // ── Retroactive Attendance Credit ─────────────────────────────────────────
     // When HOD approves, find all attendance_records already saved for this
-    // student where the session_date falls within the approved date range and
-    // force is_present = true — fixing cases where faculty marked attendance
-    // BEFORE the HOD had a chance to approve.
+    // student where session_date falls within the approved range and force
+    // is_present = true — fixes cases where faculty marked Absent BEFORE HOD approved.
     let retroactiveCount = 0;
-    if (status === 'Approved') {
+    if (status === 'Approved' && permission.roll_number && permission.from_date && permission.to_date) {
       try {
+        const rollUpper = String(permission.roll_number).trim().toUpperCase();
         const retroRes = await db.query(
           `UPDATE attendance_records ar
            SET is_present = true
            FROM attendance_sessions s
            WHERE ar.session_id = s.id
-             AND UPPER(ar.roll_number) = UPPER($1)
-             AND s.session_date >= $2::date
-             AND s.session_date <= $3::date
+             AND UPPER(TRIM(ar.roll_number)) = $1
+             AND s.session_date::date >= $2::date
+             AND s.session_date::date <= $3::date
              AND ar.is_present = false`,
-          [permission.roll_number, permission.from_date, permission.to_date]
+          [rollUpper, permission.from_date, permission.to_date]
         );
         retroactiveCount = retroRes.rowCount ?? 0;
-      } catch (_retroErr) {
-        // Attendance tables may not exist yet — not a critical failure, approval still succeeds
+        console.log(`[OD Retroactive] Updated ${retroactiveCount} record(s) to Present for ${rollUpper} (${permission.from_date} → ${permission.to_date})`);
+      } catch (retroErr: any) {
+        // Attendance tables may not exist yet — not critical, approval still succeeds
+        console.warn('[OD Retroactive] Failed to update past sessions:', retroErr.message);
       }
     }
     // ─────────────────────────────────────────────────────────────────────────
@@ -8979,6 +9069,7 @@ app.put('/hod/permissions/students/:id/status', requireRole('hod', 'admin', 'coo
       permission,
       retroactiveAttendanceUpdated: retroactiveCount,
     });
+
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

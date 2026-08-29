@@ -65,6 +65,9 @@ export const AttendancePage: React.FC = () => {
     joining_date?: string;
     is_present: boolean;
     is_exempt?: boolean;
+    is_on_od?: boolean;
+    od_type?: string;
+    od_reason?: string;
   }[]>([]);
   const [searchFilter, setSearchFilter] = useState('');
 
@@ -110,10 +113,10 @@ export const AttendancePage: React.FC = () => {
   });
   const attachedPdfDoc = timetableDocRes?.document;
 
-  // ── Fetch Roster for selected subject ──
+  // ── Fetch Roster for selected subject and session date ──
   const { data: roster = [], isLoading: isLoadingRoster } = useQuery({
-    queryKey: ['subjectRosterForAttendance', selectedSubject?.id],
-    queryFn: () => (selectedSubject?.id ? api.getRoster(selectedSubject.id) : Promise.resolve([])),
+    queryKey: ['subjectRosterForAttendance', selectedSubject?.id, sessionDate],
+    queryFn: () => (selectedSubject?.id ? api.getRoster(selectedSubject.id, sessionDate) : Promise.resolve([])),
     enabled: Boolean(selectedSubject?.id),
   });
 
@@ -162,6 +165,7 @@ export const AttendancePage: React.FC = () => {
         roster.map((r: SubjectRosterEntry) => {
           const joinDate = r.joining_date ? new Date(r.joining_date).toISOString().split('T')[0] : '';
           const isExempt = Boolean(joinDate && sessionDate < joinDate);
+          const isOnOD = Boolean(r.is_on_od);
 
           return {
             roll_number: r.roll_number,
@@ -169,6 +173,9 @@ export const AttendancePage: React.FC = () => {
             joining_date: joinDate,
             is_present: true, // Default present
             is_exempt: isExempt,
+            is_on_od: isOnOD,
+            od_type: r.od_type,
+            od_reason: r.od_reason,
           };
         })
       );
@@ -211,15 +218,27 @@ export const AttendancePage: React.FC = () => {
     }
   };
 
-  // ── Toggle All Present / Absent ──
+  // ── Toggle All Present / Absent (OD students remain locked as Present) ──
   const handleToggleAll = (present: boolean) => {
-    setStudentRecords((prev) => prev.map((s) => (s.is_exempt ? s : { ...s, is_present: present })));
+    setStudentRecords((prev) =>
+      prev.map((s) => (s.is_exempt ? s : s.is_on_od ? { ...s, is_present: true } : { ...s, is_present: present }))
+    );
   };
 
-  // ── Toggle Individual Student ──
+  // ── Toggle Individual Student (Cannot uncheck if student is on approved OD) ──
   const handleToggleStudent = (rollNumber: string) => {
     setStudentRecords((prev) =>
-      prev.map((s) => (s.roll_number === rollNumber && !s.is_exempt ? { ...s, is_present: !s.is_present } : s))
+      prev.map((s) => {
+        if (s.roll_number === rollNumber) {
+          if (s.is_exempt) return s;
+          if (s.is_on_od) {
+            // Locked as Present due to approved On-Duty
+            return s;
+          }
+          return { ...s, is_present: !s.is_present };
+        }
+        return s;
+      })
     );
   };
 
@@ -727,7 +746,13 @@ export const AttendancePage: React.FC = () => {
               </button>
             </div>
 
-            <div className="flex items-center gap-4 text-xs font-bold">
+            <div className="flex flex-wrap items-center gap-4 text-xs font-bold">
+              {studentRecords.some(s => s.is_on_od && !s.is_exempt) && (
+                <span className="flex items-center gap-1.5 text-blue-400 bg-blue-500/10 px-2.5 py-1 rounded-lg border border-blue-500/20">
+                  <Lock className="w-3 h-3 text-blue-400" />
+                  On-Duty (OD): {studentRecords.filter(s => s.is_on_od && !s.is_exempt).length}
+                </span>
+              )}
               <span className="flex items-center gap-1.5 text-emerald-400">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
                 Present: {presentCount}
@@ -767,6 +792,7 @@ export const AttendancePage: React.FC = () => {
               {filteredStudents.map((student) => {
                 const isPresent = student.is_present;
                 const isExempt = student.is_exempt;
+                const isOnOD = student.is_on_od;
 
                 if (isExempt) {
                   return (
@@ -784,6 +810,39 @@ export const AttendancePage: React.FC = () => {
                       </div>
                       <div className="px-2 py-1 bg-surface-3 text-[10px] text-textMuted font-bold rounded">
                         EXEMPT
+                      </div>
+                    </div>
+                  );
+                }
+
+                // ── Student on Approved On-Duty (OD) — Locked Present ──
+                if (isOnOD) {
+                  return (
+                    <div
+                      key={student.roll_number}
+                      className="p-3 rounded-xl border border-blue-500/40 bg-blue-500/10 flex items-center justify-between shadow-xs select-none"
+                      title={`Approved On-Duty: ${student.od_type || 'OD'}${student.od_reason ? ` — ${student.od_reason}` : ''}. Attendance is locked as Present.`}
+                    >
+                      <div className="min-w-0 pr-2">
+                        <div className="flex items-center gap-1.5">
+                          <p className="font-mono font-bold text-xs text-textPrimary truncate">{student.roll_number}</p>
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-blue-600 text-white shadow-xs">
+                            <Lock className="w-2.5 h-2.5" /> OD
+                          </span>
+                        </div>
+                        {student.student_name && (
+                          <p className="text-[11px] text-textSecondary truncate">{student.student_name}</p>
+                        )}
+                        <p className="text-[9px] text-blue-400 font-semibold truncate mt-0.5">
+                          {student.od_type || 'On-Duty'} • Locked Present
+                        </p>
+                      </div>
+
+                      <div
+                        className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 bg-blue-600 text-white shadow-xs"
+                        title="Approved On-Duty (OD) — Locked Present"
+                      >
+                        P
                       </div>
                     </div>
                   );
