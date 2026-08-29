@@ -795,6 +795,7 @@ export const AuthPage: React.FC = () => {
         login(data.email, 'student', rollNo, displayName, jwtToken, studentDept);
       } else if (activeTab === 'faculty') {
         let faculty = await api.getFacultyByEmail(data.email).catch(() => null);
+        const selectedDept = loginDept || faculty?.department || 'CSE (Data Science)';
         if (!faculty) {
           const facId = `FAC_${data.email.split('@')[0].toUpperCase()}`;
           const facName = data.email.split('@')[0].replace(/\./g, ' ').toUpperCase();
@@ -802,10 +803,20 @@ export const AuthPage: React.FC = () => {
             faculty_id: facId,
             name: facName,
             email: data.email,
-            department: loginDept || 'CSE (Data Science)',
+            department: selectedDept,
             role: 'mentor',
           }).catch(() => {});
           faculty = await api.getFacultyByEmail(data.email).catch(() => null);
+        } else if (loginDept && faculty.department !== loginDept) {
+          // Synchronize faculty department in the database with their chosen department at login
+          await api.createFaculty({
+            faculty_id: faculty.faculty_id,
+            name: faculty.name,
+            email: data.email,
+            department: loginDept,
+            role: faculty.role || 'mentor',
+          }).catch(() => {});
+          faculty.department = loginDept;
         }
         rollNo = faculty?.faculty_id || `FAC_${data.email.split('@')[0].toUpperCase()}`;
         displayName = faculty?.name || 'Faculty Member';
