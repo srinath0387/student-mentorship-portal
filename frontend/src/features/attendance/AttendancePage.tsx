@@ -1,28 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  ClipboardCheck,
-  CheckCircle2,
-  Calendar,
-  Clock,
-  BookOpen,
-  Users,
-  Search,
-  Check,
-  X,
-  ArrowRight,
-  ArrowLeft,
-  RotateCcw,
-  LayoutDashboard,
-  AlertCircle,
-  Sparkles,
-  Zap,
-  FileText,
-  Download,
-  Lock,
-  CalendarOff,
-  AlertTriangle
+  ClipboardCheck, CheckCircle2, Calendar, Clock, BookOpen, Users,
+  Search, Check, X, ArrowRight, ArrowLeft, RotateCcw, AlertCircle,
+  Sparkles, Zap, FileText, Download, Lock, CalendarOff, AlertTriangle,
+  Edit, CheckSquare, Square
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { SemesterLabel, SubjectAllotment, SubjectRosterEntry, TimetableEntry, HolidayCalendarEntry, AcademicCalendarEntry } from '../../types';
@@ -51,43 +34,42 @@ export const AttendancePage: React.FC = () => {
   const urlDate = searchParams.get('date') || '';
   const urlPeriod = searchParams.get('period') ? parseInt(searchParams.get('period')!) : 1;
 
-  // Wizard Step: 1 = Sem, 2 = Subject, 3 = Session setup, 4 = Roster mark, 5 = Confirmation
-  const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 5>(urlSem ? 2 : 1);
-
-  // Step 1: Semester
-  const [selectedSemester, setSelectedSemester] = useState<SemesterLabel | null>(urlSem || null);
-
-  // Step 2: Subject
-  const [selectedSubject, setSelectedSubject] = useState<SubjectAllotment | null>(null);
-
-  // Step 3: Session Details
+  // ── Form Selection State (Matches dsattendance mark_attendance.php filter bar) ──
+  const [selectedSemester, setSelectedSemester] = useState<SemesterLabel | ''>(urlSem || '');
+  const [selectedSection, setSelectedSection] = useState<string>(urlSec || '');
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string>('');
   const [sessionDate, setSessionDate] = useState<string>(urlDate || new Date().toISOString().split('T')[0]);
+  const [isLoaded, setIsLoaded] = useState<boolean>(Boolean(urlSem && urlSubj));
+
   const [periodStart, setPeriodStart] = useState<number>(urlPeriod || 1);
   const [numPeriods, setNumPeriods] = useState<number>(1);
 
-  // Step 4: Roster & Marking
+  // Hour enable toggles (ported from dsattendance enable_hour1, enable_hour2, enable_hour3)
+  const [enableHour1, setEnableHour1] = useState<boolean>(true);
+  const [enableHour2, setEnableHour2] = useState<boolean>(false);
+  const [enableHour3, setEnableHour3] = useState<boolean>(false);
+
+  // Search filter inside roster
+  const [searchFilter, setSearchFilter] = useState('');
+  const [showAbsentModal, setShowAbsentModal] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+
+  // Student Attendance Records
   const [studentRecords, setStudentRecords] = useState<{
     roll_number: string;
     student_name?: string;
     joining_date?: string;
-    is_present: boolean;
+    hour1: boolean;
+    hour2: boolean;
+    hour3: boolean;
     is_exempt?: boolean;
     is_on_od?: boolean;
     od_type?: string;
     od_reason?: string;
   }[]>([]);
-  const [searchFilter, setSearchFilter] = useState('');
 
-  // Step 5: Save confirmation result
-  const [saveResult, setSaveResult] = useState<{
-    message: string;
-    presentCount: number;
-    totalCount: number;
-    subjectName: string;
-    numPeriods: number;
-  } | null>(null);
-
-  const [viewingPdfDoc, setViewingPdfDoc] = useState<{ name: string; data: string } | null>(null);
+  // Confirmation message banner
+  const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   // ── Fetch Faculty Allotted Subjects for selected semester ──
   const { data: mySubjects = [], isLoading: isLoadingSubjects } = useQuery({
@@ -96,111 +78,147 @@ export const AttendancePage: React.FC = () => {
     enabled: Boolean(selectedSemester),
   });
 
-  // ── Fetch Today's Timetable Slots for auto-detection ──
-  const { data: todaySlotsData } = useQuery({
-    queryKey: ['todayTimetableSlots', selectedSemester, selectedSubject?.section, sessionDate, user?.email],
-    queryFn: () => (selectedSemester && selectedSubject ? api.getTodayTimetableSlots({
-      semester: selectedSemester,
-      section: selectedSubject.section,
-      date: sessionDate,
-      faculty_email: user?.email,
-    }) : Promise.resolve({ slots: [] })),
-    enabled: Boolean(selectedSemester && selectedSubject),
-  });
+  // Distinct sections available for this semester from my allotted subjects
+  const availableSections = useMemo(() => {
+    const secs = new Set<string>();
+    mySubjects.forEach((s: SubjectAllotment) => {
+      if (s.section) secs.add(s.section);
+    });
+    return Array.from(secs).sort();
+  }, [mySubjects]);
 
-  // ── Fetch Uploaded Official Timetable PDF Document ──
-  const { data: timetableDocRes } = useQuery({
-    queryKey: ['attendancePageTimetableDoc', selectedSemester, selectedSubject?.section, selectedSubject?.department],
-    queryFn: () => (selectedSemester && selectedSubject ? api.getTimetableDocument({
-      semester: selectedSemester,
-      section: selectedSubject.section,
-      department: selectedSubject.department,
-    }) : Promise.resolve({ document: null })),
-    enabled: Boolean(selectedSemester && selectedSubject),
-  });
-  const attachedPdfDoc = timetableDocRes?.document;
+  // Filter subjects matching selected section
+  const filteredSubjects = useMemo(() => {
+    if (!selectedSection) return mySubjects;
+    return mySubjects.filter((s: SubjectAllotment) => s.section.toUpperCase() === selectedSection.toUpperCase());
+  }, [mySubjects, selectedSection]);
 
-  // ── Fetch Roster for selected subject and session date ──
-  const { data: roster = [], isLoading: isLoadingRoster } = useQuery({
-    queryKey: ['subjectRosterForAttendance', selectedSubject?.id, sessionDate],
-    queryFn: () => (selectedSubject?.id ? api.getRoster(selectedSubject.id, sessionDate) : Promise.resolve([])),
-    enabled: Boolean(selectedSubject?.id),
-  });
+  // Selected subject object
+  const activeSubject = useMemo(() => {
+    return mySubjects.find((s: SubjectAllotment) => s.id === selectedSubjectId) || null;
+  }, [mySubjects, selectedSubjectId]);
 
-  // ── Fetch Unposted Attendance for Logged-In Faculty Today ──
-  const { data: facultyPendingData } = useQuery({
-    queryKey: ['facultyPendingAttendanceToday', user?.email],
-    queryFn: () => api.getNotPostedAttendance({ faculty_email: user?.email }),
-    enabled: Boolean(user?.email && user?.role === 'faculty'),
-  });
-
-  // Auto-select subject and advance to step 4 when URL params match
+  // Auto-match subject from URL params
   useEffect(() => {
-    if (urlSubj && mySubjects.length > 0 && !selectedSubject) {
+    if (urlSubj && mySubjects.length > 0 && !selectedSubjectId) {
       const match = mySubjects.find(
         (s: SubjectAllotment) =>
           s.subject_name.toLowerCase().includes(urlSubj.toLowerCase()) &&
           (!urlSec || s.section.toUpperCase() === urlSec.toUpperCase())
       );
       if (match) {
-        setSelectedSubject(match);
-        setCurrentStep(4);
+        setSelectedSubjectId(match.id);
+        if (match.section) setSelectedSection(match.section);
+        setIsLoaded(true);
       }
     }
-  }, [urlSubj, urlSec, mySubjects, selectedSubject]);
+  }, [urlSubj, urlSec, mySubjects, selectedSubjectId]);
 
-  // ── Fetch Holidays and Academic Calendar for Date Validation ──
+  // ── Fetch Today's Timetable Slots for auto-detection ──
+  const { data: todaySlotsData } = useQuery({
+    queryKey: ['todayTimetableSlots', selectedSemester, selectedSection, sessionDate, user?.email],
+    queryFn: () => (selectedSemester && selectedSection ? api.getTodayTimetableSlots({
+      semester: selectedSemester,
+      section: selectedSection,
+      date: sessionDate,
+      faculty_email: user?.email,
+    }) : Promise.resolve({ slots: [] })),
+    enabled: Boolean(selectedSemester && selectedSection && isLoaded),
+  });
+
+  // Auto-apply timetable slot if found
+  useEffect(() => {
+    if (todaySlotsData?.slots && todaySlotsData.slots.length > 0 && isLoaded) {
+      const matchedSlot = todaySlotsData.slots.find(
+        (slot: any) =>
+          activeSubject &&
+          (slot.subject_name || '').toLowerCase() === (activeSubject.subject_name || '').toLowerCase()
+      ) || todaySlotsData.slots[0];
+
+      if (matchedSlot) {
+        setPeriodStart(parseInt(matchedSlot.period_start));
+        const span = parseInt(matchedSlot.num_periods || 1);
+        setNumPeriods(span);
+        setEnableHour1(true);
+        setEnableHour2(span >= 2);
+        setEnableHour3(span >= 3);
+      }
+    }
+  }, [todaySlotsData, activeSubject, isLoaded]);
+
+  // ── Fetch Roster for selected subject and session date ──
+  const { data: roster = [], isLoading: isLoadingRoster, refetch: refetchRoster } = useQuery({
+    queryKey: ['subjectRosterForAttendance', selectedSubjectId, sessionDate],
+    queryFn: () => (selectedSubjectId ? api.getRoster(selectedSubjectId, sessionDate) : Promise.resolve([])),
+    enabled: Boolean(selectedSubjectId && isLoaded),
+  });
+
+  // ── Fetch Existing Sessions to Check Already Posted / Same-Day Edit ──
+  const { data: existingSessions = [] } = useQuery({
+    queryKey: ['existingAttendanceSessions', selectedSubjectId, sessionDate],
+    queryFn: () => (selectedSubjectId ? api.getAttendanceSessions(selectedSubjectId, sessionDate, sessionDate) : Promise.resolve([])),
+    enabled: Boolean(selectedSubjectId && isLoaded),
+  });
+
+  const alreadyPostedSession = existingSessions.length > 0 ? existingSessions[0] : null;
+  const isAlreadyPosted = Boolean(alreadyPostedSession);
+  const todayStr = new Date().toISOString().split('T')[0];
+  const canEditToday = isAlreadyPosted && sessionDate === todayStr;
+
+  // ── Fetch Single Session Details if editing/already posted ──
+  const { data: existingSessionDetails } = useQuery({
+    queryKey: ['existingSessionDetails', alreadyPostedSession?.id],
+    queryFn: () => (alreadyPostedSession?.id ? api.getSessionDetails(alreadyPostedSession.id) : Promise.resolve(null)),
+    enabled: Boolean(alreadyPostedSession?.id),
+  });
+
+  // ── Fetch Holidays and Academic Calendar ──
   const { data: holidays = [] } = useQuery<HolidayCalendarEntry[]>({
     queryKey: ['holidayCalendar'],
     queryFn: () => api.getHolidays(),
   });
 
-  const { data: academicCalendars = [] } = useQuery<AcademicCalendarEntry[]>({
-    queryKey: ['academicCalendars'],
-    queryFn: () => api.getAcademicCalendars(),
-  });
-
-  // Check if chosen date is a declared Holiday
-  const matchedHoliday = React.useMemo(() => {
+  const matchedHoliday = useMemo(() => {
     return holidays.find((h) => {
       const hDate = typeof h.date === 'string' ? h.date.split('T')[0] : new Date(h.date).toISOString().split('T')[0];
       return hDate === sessionDate;
     });
   }, [holidays, sessionDate]);
 
-  // Check if chosen date falls within active semester academic calendar range
-  const semesterCalendarWindow = React.useMemo(() => {
-    if (!selectedSemester) return null;
-    return academicCalendars.find((c) => String(c.semester) === String(selectedSemester)) || null;
-  }, [academicCalendars, selectedSemester]);
+  // ── Fetch Pending Timetable Slots for Logged-In Faculty ──
+  const { data: facultyPendingData } = useQuery({
+    queryKey: ['facultyPendingAttendanceToday', user?.email],
+    queryFn: () => api.getNotPostedAttendance({ faculty_email: user?.email }),
+    enabled: Boolean(user?.email && user?.role === 'faculty'),
+  });
 
-  const isOutsideSemesterRange = React.useMemo(() => {
-    if (!semesterCalendarWindow) return false;
-    const startStr = typeof semesterCalendarWindow.start_date === 'string'
-      ? semesterCalendarWindow.start_date.split('T')[0]
-      : new Date(semesterCalendarWindow.start_date).toISOString().split('T')[0];
-    const endStr = typeof semesterCalendarWindow.end_date === 'string'
-      ? semesterCalendarWindow.end_date.split('T')[0]
-      : new Date(semesterCalendarWindow.end_date).toISOString().split('T')[0];
-    return sessionDate < startStr || sessionDate > endStr;
-  }, [semesterCalendarWindow, sessionDate]);
-
-  const isDateLocked = Boolean(matchedHoliday || isOutsideSemesterRange);
-
-  // Initialize student records when roster loads or sessionDate changes
+  // Populate student list when roster or existing session loads
   useEffect(() => {
     if (roster && roster.length > 0) {
+      const existingMap = new Map<string, boolean>();
+      if (existingSessionDetails?.records) {
+        existingSessionDetails.records.forEach((r: any) => {
+          existingMap.set(r.roll_number.toUpperCase(), Boolean(r.is_present));
+        });
+      }
+
       setStudentRecords(
         roster.map((r: SubjectRosterEntry) => {
           const joinDate = r.joining_date ? new Date(r.joining_date).toISOString().split('T')[0] : '';
           const isExempt = Boolean(joinDate && sessionDate < joinDate);
           const isOnOD = Boolean(r.is_on_od);
 
+          const defaultPresent = existingMap.has(r.roll_number.toUpperCase())
+            ? existingMap.get(r.roll_number.toUpperCase())!
+            : true;
+
           return {
             roll_number: r.roll_number,
             student_name: r.student_name,
             joining_date: joinDate,
-            is_present: true, // Default present
+            hour1: isExempt ? false : (isOnOD ? true : defaultPresent),
+            hour2: isExempt ? false : (isOnOD ? true : defaultPresent),
+            hour3: isExempt ? false : (isOnOD ? true : defaultPresent),
             is_exempt: isExempt,
             is_on_od: isOnOD,
             od_type: r.od_type,
@@ -209,871 +227,684 @@ export const AttendancePage: React.FC = () => {
         })
       );
     }
-  }, [roster, sessionDate]);
+  }, [roster, existingSessionDetails, sessionDate]);
 
-  // Adjust session length defaults based on Theory vs Lab
-  useEffect(() => {
-    if (selectedSubject) {
-      if (selectedSubject.subject_type === 'Lab') {
-        setNumPeriods(2);
-      } else {
-        setNumPeriods(1);
-      }
-    }
-  }, [selectedSubject]);
-
-  // Auto-apply timetable match if available
-  const matchedTimetableSlot = todaySlotsData?.slots?.find((s: TimetableEntry) => 
-    s.subject_name.toLowerCase().includes(selectedSubject?.subject_name.toLowerCase() || '') ||
-    (selectedSubject?.subject_name.toLowerCase().includes(s.subject_name.toLowerCase()) || '')
-  );
-
-  const applyTimetableSlot = (slot: TimetableEntry) => {
-    setPeriodStart(slot.period_start);
-    setNumPeriods(slot.num_periods);
-  };
-
-  const isFirstOrFourthYear = selectedSemester ? ['1-1', '1-2', '4-1', '4-2'].includes(selectedSemester) : false;
-
-  const getPeriodTimingLabel = (period: number) => {
-    if (isFirstOrFourthYear) {
-      const startTimes = ['', '09:00 AM', '09:50 AM', '11:00 AM', '01:00 PM', '01:50 PM', '03:00 PM', '03:50 PM'];
-      const endTimes = ['', '09:50 AM', '10:40 AM', '11:50 AM', '01:50 PM', '02:40 PM', '03:50 PM', '04:40 PM'];
-      return `${startTimes[period]} – ${endTimes[Math.min(7, period + numPeriods - 1)]}`;
-    } else {
-      const startTimes = ['', '09:00 AM', '09:50 AM', '11:00 AM', '11:50 AM', '01:50 PM', '02:40 PM', '03:30 PM'];
-      const endTimes = ['', '09:50 AM', '10:40 AM', '11:50 AM', '12:40 PM', '02:40 PM', '03:30 PM', '04:20 PM'];
-      return `${startTimes[period]} – ${endTimes[Math.min(7, period + numPeriods - 1)]}`;
-    }
-  };
-
-  // ── Toggle All Present / Absent (OD students remain locked as Present) ──
-  const handleToggleAll = (present: boolean) => {
-    setStudentRecords((prev) =>
-      prev.map((s) => (s.is_exempt ? s : s.is_on_od ? { ...s, is_present: true } : { ...s, is_present: present }))
+  // ── Mark All Present ──
+  const markAllPresent = () => {
+    setStudentRecords(prev =>
+      prev.map(s => (s.is_exempt ? s : { ...s, hour1: true, hour2: true, hour3: true }))
     );
   };
 
-  // ── Toggle Individual Student (Cannot uncheck if student is on approved OD) ──
-  const handleToggleStudent = (rollNumber: string) => {
-    setStudentRecords((prev) =>
-      prev.map((s) => {
-        if (s.roll_number === rollNumber) {
-          if (s.is_exempt) return s;
-          if (s.is_on_od) {
-            // Locked as Present due to approved On-Duty
-            return s;
-          }
-          return { ...s, is_present: !s.is_present };
+  // ── Mark All Absent ──
+  const markAllAbsent = () => {
+    setStudentRecords(prev =>
+      prev.map(s => (s.is_exempt ? s : s.is_on_od ? s : { ...s, hour1: false, hour2: false, hour3: false }))
+    );
+  };
+
+  // ── Toggle Individual Hour ──
+  const toggleStudentHour = (roll: string, hourNum: 1 | 2 | 3) => {
+    if (isAlreadyPosted && !editMode) return;
+    setStudentRecords(prev =>
+      prev.map(s => {
+        if (s.roll_number === roll) {
+          if (s.is_exempt || s.is_on_od) return s;
+          if (hourNum === 1) return { ...s, hour1: !s.hour1 };
+          if (hourNum === 2) return { ...s, hour2: !s.hour2 };
+          if (hourNum === 3) return { ...s, hour3: !s.hour3 };
         }
         return s;
       })
     );
   };
 
-  // ── Save Attendance Mutation ──
+  // ── Save / Update Attendance Mutation ──
   const saveMutation = useMutation({
     mutationFn: async () => {
-      if (!selectedSubject) throw new Error('No subject selected');
-      return api.saveAttendanceSession({
-        allotment_id: selectedSubject.id,
-        session_date: sessionDate,
-        num_periods: numPeriods,
-        period_start: periodStart,
-        records: studentRecords.map((r) => ({
-          roll_number: r.roll_number,
-          is_present: r.is_exempt ? false : r.is_present,
-        })),
-      });
+      if (!activeSubject) throw new Error('Please select a subject');
+
+      const activeHourCount = (enableHour1 ? 1 : 0) + (enableHour2 ? 1 : 0) + (enableHour3 ? 1 : 0);
+      const totalSpan = Math.max(1, activeHourCount);
+
+      const records = studentRecords.map(r => ({
+        roll_number: r.roll_number,
+        is_present: r.is_exempt ? false : (r.is_on_od || (enableHour1 && r.hour1) || (enableHour2 && r.hour2) || (enableHour3 && r.hour3)),
+      }));
+
+      if (isAlreadyPosted && editMode && alreadyPostedSession?.id) {
+        return api.updateAttendanceSession(alreadyPostedSession.id, records);
+      } else {
+        return api.saveAttendanceSession({
+          allotment_id: activeSubject.id,
+          session_date: sessionDate,
+          num_periods: totalSpan,
+          period_start: periodStart,
+          records,
+        });
+      }
     },
-    onSuccess: (res) => {
-      // ── Invalidate ALL attendance-related queries so every view (student,
-      //    parent, HOD, admin, faculty tracking, dashboard) updates immediately ──
+    onSuccess: (res: any) => {
+      queryClient.invalidateQueries({ queryKey: ['existingAttendanceSessions'] });
+      queryClient.invalidateQueries({ queryKey: ['existingSessionDetails'] });
+      queryClient.invalidateQueries({ queryKey: ['dailyPeriodGrid'] });
+      queryClient.invalidateQueries({ queryKey: ['notPostedAttendanceData'] });
       queryClient.invalidateQueries({ queryKey: ['studentAttendanceSummary'] });
-      queryClient.invalidateQueries({ queryKey: ['studentDaywiseAttendance'] });
-      queryClient.invalidateQueries({ queryKey: ['subjectAttendanceSummary'] });
-      queryClient.invalidateQueries({ queryKey: ['attendanceSessionsHistory'] });
-      queryClient.invalidateQueries({ queryKey: ['semesterAttendanceSummary'] });
-      queryClient.invalidateQueries({ queryKey: ['attendanceTrackingAllotments'] });
-      queryClient.invalidateQueries({ queryKey: ['myAttendanceSubjects'] });
 
-      setSaveResult({
-        message: res.message,
-        presentCount: res.presentCount,
-        totalCount: res.totalCount,
-        subjectName: selectedSubject?.subject_name || '',
-        numPeriods: numPeriods,
+      setShowAbsentModal(false);
+      setEditMode(false);
+      setFeedbackMsg({
+        type: 'success',
+        text: isAlreadyPosted && editMode ? 'Attendance updated successfully.' : 'Attendance saved successfully.',
       });
-      setCurrentStep(5);
+    },
+    onError: (err: any) => {
+      setFeedbackMsg({
+        type: 'error',
+        text: err.message || 'Failed to save attendance.',
+      });
     },
   });
 
-  const presentCount = studentRecords.filter((s) => s.is_present && !s.is_exempt).length;
-  const absentCount = studentRecords.filter((s) => !s.is_present && !s.is_exempt).length;
+  // Calculate absentees
+  const absentStudents = studentRecords.filter(
+    s => !s.is_exempt && !s.is_on_od && (!s.hour1 || (enableHour2 && !s.hour2) || (enableHour3 && !s.hour3))
+  );
 
-  const filteredStudents = studentRecords.filter((s) => {
-    if (!searchFilter) return true;
-    const q = searchFilter.toLowerCase();
-    return s.roll_number.toLowerCase().includes(q) || (s.student_name && s.student_name.toLowerCase().includes(q));
-  });
-
-  const handleReset = () => {
-    setSelectedSemester(null);
-    setSelectedSubject(null);
-    setStudentRecords([]);
-    setSaveResult(null);
-    setCurrentStep(1);
-  };
+  const presentCount = studentRecords.length - absentStudents.length;
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-12">
-      {/* Wizard Progress Header */}
-      <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-bold text-textPrimary flex items-center gap-2.5">
-              <ClipboardCheck className="w-6 h-6 text-brand-primary" />
-              Take Attendance Wizard
-            </h1>
-            <p className="text-xs text-textSecondary mt-0.5">
-              5-Step Attendance recording for assigned faculty subjects with auto timetable matching.
-            </p>
+    <div className="space-y-5">
+      {/* ── Page Header (dsattendance style) ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-surface border border-borderLine rounded-2xl p-5 shadow-sm">
+        <div>
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-brand-primary/10 text-brand-primary text-xs font-bold uppercase tracking-wider mb-1">
+            <ClipboardCheck className="w-3.5 h-3.5" />
+            Attendance Management
           </div>
-
-          <div className="flex items-center gap-2">
-            {currentStep > 1 && currentStep < 5 && (
-              <button
-                onClick={handleReset}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-textSecondary bg-surface-2 hover:bg-surface-3 border border-borderLine transition-all"
-              >
-                <RotateCcw className="w-3.5 h-3.5" /> Start Over
-              </button>
-            )}
-          </div>
+          <h1 className="text-xl font-black text-textPrimary">Mark Student Attendance</h1>
+          <p className="text-xs text-textSecondary mt-0.5">
+            Select your class, section, and subject to mark period-wise attendance.
+          </p>
         </div>
 
-        {/* Step Indicators */}
-        <div className="grid grid-cols-5 gap-2 pt-2">
-          {[
-            { num: 1, label: 'Semester' },
-            { num: 2, label: 'Subject' },
-            { num: 3, label: 'Session' },
-            { num: 4, label: 'Mark Roster' },
-            { num: 5, label: 'Done' },
-          ].map((s) => (
-            <div
-              key={s.num}
-              className={`p-2 rounded-xl text-center border transition-all ${
-                currentStep === s.num
-                  ? 'bg-brand-primary/10 border-brand-primary text-brand-primary font-bold shadow-xs'
-                  : currentStep > s.num
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 font-semibold'
-                  : 'bg-surface-2/40 border-borderLine text-textMuted'
-              }`}
-            >
-              <div className="text-[10px] uppercase tracking-wider font-semibold">Step {s.num}</div>
-              <div className="text-xs font-bold truncate mt-0.5">{s.label}</div>
-            </div>
-          ))}
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-surface-2 border border-borderLine text-textSecondary flex items-center gap-1.5">
+            <Calendar className="w-3.5 h-3.5 text-brand-primary" />
+            Today: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+          </span>
         </div>
       </div>
 
-      {/* ────────────────────────────────────────────────────────────────────────
-          STEP 1: SELECT SEMESTER
-         ──────────────────────────────────────────────────────────────────────── */}
-      {currentStep === 1 && (
-        <div className="space-y-4">
-          {/* Pending Attendance Notification Card */}
-          {Array.isArray(facultyPendingData?.pendingSlots) && facultyPendingData.pendingSlots.length > 0 && (
-            <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
-                  <h3 className="text-sm font-bold text-textPrimary">
-                    You have {facultyPendingData.pendingSlots.length} scheduled class(es) pending attendance entry today:
-                  </h3>
-                </div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300">
-                  Action Required
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-                {facultyPendingData.pendingSlots.map((slot: any, idx: number) => (
-                  <div
-                    key={idx}
-                    onClick={() => {
-                      setSelectedSemester(slot.semester_label);
-                      setPeriodStart(parseInt(slot.period_start));
-                      setNumPeriods(parseInt(slot.num_periods || 1));
-                      setSessionDate(new Date().toISOString().split('T')[0]);
-                      // Attempt to preselect subject if already loaded, else go to step 2
-                      const match = mySubjects.find(
-                        (s: SubjectAllotment) =>
-                          s.semester_label === slot.semester_label &&
-                          s.section.toUpperCase() === (slot.section || '').toUpperCase() &&
-                          s.subject_name.toLowerCase().includes((slot.subject_name || '').toLowerCase())
-                      );
-                      if (match) {
-                        setSelectedSubject(match);
-                        setCurrentStep(4);
-                      } else {
-                        setCurrentStep(2);
-                      }
-                    }}
-                    className="bg-surface border border-rose-500/20 hover:border-rose-500/60 p-3 rounded-xl transition-all cursor-pointer hover:shadow-sm group flex items-center justify-between"
-                  >
-                    <div>
-                      <div className="text-[11px] font-bold text-rose-400">
-                        Period {slot.period_start} ({slot.semester_label} - Sec {slot.section})
-                      </div>
-                      <div className="text-xs font-semibold text-textPrimary truncate max-w-[170px]">
-                        {slot.subject_name}
-                      </div>
-                    </div>
-                    <span className="text-xs text-rose-400 font-bold group-hover:translate-x-1 transition-transform">
-                      Mark →
-                    </span>
-                  </div>
-                ))}
-              </div>
+      {/* ── Pending Timetable Banner (Alert if classes missed) ── */}
+      {Array.isArray(facultyPendingData?.pendingSlots) && facultyPendingData.pendingSlots.length > 0 && !isLoaded && (
+        <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
+              <h3 className="text-sm font-bold text-textPrimary">
+                You have {facultyPendingData.pendingSlots.length} scheduled class(es) pending attendance entry today:
+              </h3>
             </div>
-          )}
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300">
+              Pending Today
+            </span>
+          </div>
 
-          <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-5">
-            <div>
-              <h2 className="text-base font-bold text-textPrimary flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-brand-primary text-white text-xs flex items-center justify-center font-black">
-                  1
-                </span>
-                Select Semester
-              </h2>
-              <p className="text-xs text-textSecondary mt-1">
-                Choose the semester of the class you are currently holding.
-              </p>
-            </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
-            {ALL_SEMESTERS.map((sem) => (
-              <button
-                key={sem.label}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+            {facultyPendingData.pendingSlots.map((slot: any, idx: number) => (
+              <div
+                key={idx}
                 onClick={() => {
-                  setSelectedSemester(sem.label);
-                  setCurrentStep(2);
+                  setSelectedSemester(slot.semester_label);
+                  setSelectedSection(slot.section || '');
+                  setPeriodStart(parseInt(slot.period_start));
+                  setNumPeriods(parseInt(slot.num_periods || 1));
+                  setSessionDate(todayStr);
+
+                  const match = mySubjects.find(
+                    (s: SubjectAllotment) =>
+                      s.semester_label === slot.semester_label &&
+                      s.section.toUpperCase() === (slot.section || '').toUpperCase() &&
+                      s.subject_name.toLowerCase().includes((slot.subject_name || '').toLowerCase())
+                  );
+                  if (match) {
+                    setSelectedSubjectId(match.id);
+                  }
+                  setIsLoaded(true);
                 }}
-                className="group p-4 rounded-2xl bg-surface-2 hover:bg-surface-3 border border-borderLine hover:border-brand-primary/60 transition-all text-left flex flex-col justify-between hover:shadow-brand hover:-translate-y-0.5"
+                className="bg-surface border border-rose-500/20 hover:border-rose-500/60 p-3 rounded-xl transition-all cursor-pointer hover:shadow-sm group flex items-center justify-between"
               >
-                <span className="text-2xl font-black text-brand-primary group-hover:scale-105 transition-transform">
-                  {sem.label}
-                </span>
-                <div className="mt-3">
-                  <p className="text-xs font-bold text-textPrimary">{sem.desc}</p>
-                  <p className="text-[11px] text-textMuted mt-0.5">Click to view subjects →</p>
+                <div>
+                  <div className="text-[11px] font-bold text-rose-400">
+                    Period {slot.period_start} ({slot.semester_label} - Sec {slot.section})
+                  </div>
+                  <div className="text-xs font-semibold text-textPrimary truncate max-w-[180px]">
+                    {slot.subject_name}
+                  </div>
                 </div>
-              </button>
+                <span className="text-xs text-rose-400 font-bold group-hover:translate-x-1 transition-transform">
+                  Load →
+                </span>
+              </div>
             ))}
           </div>
         </div>
-      </div>
       )}
 
-      {/* ────────────────────────────────────────────────────────────────────────
-          STEP 2: SELECT ALLOTTED SUBJECT
-         ──────────────────────────────────────────────────────────────────────── */}
-      {currentStep === 2 && selectedSemester && (
-        <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-base font-bold text-textPrimary flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-brand-primary text-white text-xs flex items-center justify-center font-black">
-                  2
-                </span>
-                Select Your Allotted Subject — Semester {selectedSemester}
-              </h2>
-              <p className="text-xs text-textSecondary mt-1">
-                Showing only the subjects allotted to your login ({user?.email}) for this semester.
-              </p>
-            </div>
-            <button
-              onClick={() => setCurrentStep(1)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-textSecondary bg-surface-2 hover:bg-surface-3 border border-borderLine transition-all"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" /> Back
-            </button>
+      {/* ── Feedback Message Banner ── */}
+      {feedbackMsg && (
+        <div className={`p-4 rounded-2xl border text-xs font-semibold flex items-center justify-between ${
+          feedbackMsg.type === 'success'
+            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+            : feedbackMsg.type === 'error'
+            ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+            : 'bg-blue-500/10 border-blue-500/30 text-blue-400'
+        }`}>
+          <div className="flex items-center gap-2">
+            {feedbackMsg.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
+            <span>{feedbackMsg.text}</span>
           </div>
-
-          {isLoadingSubjects ? (
-            <div className="py-12 text-center text-textMuted">
-              <div className="w-8 h-8 border-3 border-brand-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-              Loading allotted subjects...
-            </div>
-          ) : mySubjects.length === 0 ? (
-            <div className="p-8 rounded-xl bg-surface-2 border border-borderLine text-center space-y-3">
-              <AlertCircle className="w-8 h-8 text-amber-400 mx-auto" />
-              <h4 className="text-sm font-bold text-textPrimary">No Allotted Subjects Found</h4>
-              <p className="text-xs text-textSecondary max-w-md mx-auto">
-                You do not have any subjects assigned for Semester {selectedSemester}. If this is an error, please contact your HOD or Admin to upload the allotment sheet.
-              </p>
-              <button
-                onClick={() => setCurrentStep(1)}
-                className="px-4 py-2 rounded-xl bg-surface-3 text-textPrimary font-semibold text-xs border border-borderLine hover:bg-surface-2 transition-all"
-              >
-                Choose Another Semester
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {mySubjects.map((sub: SubjectAllotment) => (
-                <button
-                  key={sub.id}
-                  onClick={() => {
-                    setSelectedSubject(sub);
-                    setCurrentStep(3);
-                  }}
-                  className="group p-5 rounded-2xl bg-surface-2 hover:bg-surface-3 border border-borderLine hover:border-brand-primary/60 transition-all text-left flex flex-col justify-between hover:shadow-brand hover:-translate-y-0.5"
-                >
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span
-                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                            sub.subject_type === 'Lab'
-                              ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
-                              : 'bg-brand-soft text-brand-primary border border-brand-primary/30'
-                          }`}
-                        >
-                          {sub.subject_type}
-                        </span>
-                        {['1-1', '1-2'].includes(selectedSemester || '') && (
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-pink-500/10 text-pink-400 border border-pink-500/30 flex items-center gap-1">
-                            <Sparkles className="w-2.5 h-2.5" />
-                            1st Year Fresher
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-surface border border-borderLine text-textPrimary">
-                        Section {sub.section}
-                      </span>
-                    </div>
-                    <h4 className="text-sm font-bold text-textPrimary group-hover:text-brand-primary transition-colors">
-                      {sub.subject_name}
-                    </h4>
-                    <p className="text-xs text-textSecondary flex items-center gap-1.5">
-                      <Users className="w-3.5 h-3.5 text-textMuted" />
-                      <span>{sub.roster_count || (['1-1', '1-2'].includes(selectedSemester || '') ? 'Section Enrolled' : 0)} Students</span>
-                    </p>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs text-brand-primary font-bold mt-4 pt-3 border-t border-borderLine">
-                    <span>Start Attendance</span>
-                    <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
+          <button onClick={() => setFeedbackMsg(null)} className="opacity-70 hover:opacity-100 cursor-pointer">✕</button>
         </div>
       )}
 
-      {/* ────────────────────────────────────────────────────────────────────────
-          STEP 3: SESSION SETUP WITH TIMETABLE AUTO-DETECTION
-         ──────────────────────────────────────────────────────────────────────── */}
-      {currentStep === 3 && selectedSubject && (
-        <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-base font-bold text-textPrimary flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-brand-primary text-white text-xs flex items-center justify-center font-black">
-                  3
-                </span>
-                Session Configuration — {selectedSubject.subject_name} (Sec {selectedSubject.section})
-              </h2>
-              <p className="text-xs text-textSecondary mt-1">
-                Configure session date, starting class period, and duration/session length.
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              {attachedPdfDoc && (
-                <button
-                  type="button"
-                  onClick={() => setViewingPdfDoc({ name: attachedPdfDoc.file_name, data: attachedPdfDoc.file_data })}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-purple-300 bg-purple-500/10 border border-purple-500/30 hover:bg-purple-500/20 transition-all"
-                >
-                  <FileText className="w-3.5 h-3.5 text-purple-400" /> View Timetable PDF
-                </button>
-              )}
-              <button
-                onClick={() => setCurrentStep(2)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-textSecondary bg-surface-2 hover:bg-surface-3 border border-borderLine transition-all"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" /> Back
-              </button>
-            </div>
+      {/* ── Top Filter Bar Form (Ported 1-to-1 from dsattendance mark_attendance.php) ── */}
+      <div className="bg-surface border border-borderLine rounded-2xl p-5 shadow-sm space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+          {/* Class / Semester */}
+          <div>
+            <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5">Class / Semester</label>
+            <select
+              value={selectedSemester}
+              onChange={e => {
+                setSelectedSemester(e.target.value as SemesterLabel);
+                setSelectedSubjectId('');
+                setIsLoaded(false);
+              }}
+              className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary font-semibold focus:outline-none focus:ring-2 focus:ring-brand-primary"
+            >
+              <option value="">Select Class</option>
+              {ALL_SEMESTERS.map(sem => (
+                <option key={sem.label} value={sem.label}>
+                  {sem.label} ({sem.desc})
+                </option>
+              ))}
+            </select>
           </div>
 
-          {/* Timetable Auto-Match Card */}
-          {matchedTimetableSlot && (
-            <div className="p-4 rounded-xl bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border border-cyan-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-cyan-500/20 text-cyan-400 rounded-lg">
-                  <Zap className="w-4 h-4" />
-                </div>
-                <div>
-                  <p className="text-xs font-bold text-textPrimary">
-                    ⚡ Auto-Detected Timetable Schedule ({todaySlotsData?.dayOfWeek})
-                  </p>
-                  <p className="text-[11px] text-textSecondary mt-0.5">
-                    Period {matchedTimetableSlot.period_start} ({matchedTimetableSlot.timing_display}) • {matchedTimetableSlot.num_periods} Period(s) • {matchedTimetableSlot.subject_type}
-                  </p>
+          {/* Section */}
+          <div>
+            <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5">Section</label>
+            <select
+              value={selectedSection}
+              onChange={e => {
+                setSelectedSection(e.target.value);
+                setSelectedSubjectId('');
+                setIsLoaded(false);
+              }}
+              disabled={!selectedSemester}
+              className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary font-semibold focus:outline-none focus:ring-2 focus:ring-brand-primary disabled:opacity-50"
+            >
+              <option value="">Select Section</option>
+              {availableSections.length > 0 ? (
+                availableSections.map(sec => (
+                  <option key={sec} value={sec}>
+                    Section {sec}
+                  </option>
+                ))
+              ) : (
+                ['A', 'B', 'C', 'D', 'E', 'F'].map(sec => (
+                  <option key={sec} value={sec}>
+                    Section {sec}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+
+          {/* Subject */}
+          <div>
+            <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5">Subject</label>
+            <select
+              value={selectedSubjectId}
+              onChange={e => {
+                setSelectedSubjectId(e.target.value);
+                setIsLoaded(false);
+              }}
+              disabled={!selectedSemester}
+              className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary font-semibold focus:outline-none focus:ring-2 focus:ring-brand-primary disabled:opacity-50"
+            >
+              <option value="">Select Subject</option>
+              {filteredSubjects.map((sub: SubjectAllotment) => (
+                <option key={sub.id} value={sub.id}>
+                  {sub.subject_name} ({sub.subject_type})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Attendance Date */}
+          <div>
+            <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5">Attendance Date</label>
+            <input
+              type="date"
+              value={sessionDate}
+              onChange={e => setSessionDate(e.target.value)}
+              className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary font-semibold focus:outline-none focus:ring-2 focus:ring-brand-primary cursor-pointer"
+            />
+          </div>
+
+          {/* Load Students Button */}
+          <div className="flex items-end">
+            <button
+              onClick={() => {
+                if (!selectedSemester || !selectedSubjectId) {
+                  setFeedbackMsg({ type: 'error', text: 'Please select class and subject before loading students.' });
+                  return;
+                }
+                setIsLoaded(true);
+                setEditMode(false);
+              }}
+              disabled={!selectedSemester || !selectedSubjectId}
+              className="w-full py-2 px-4 rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white text-xs font-bold shadow-sm transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5"
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>Load Students</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Holiday Warning ── */}
+      {matchedHoliday && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-5 text-center space-y-1">
+          <CalendarOff className="w-8 h-8 text-amber-400 mx-auto" />
+          <h4 className="text-sm font-bold text-textPrimary">Attendance Not Required</h4>
+          <p className="text-xs text-textSecondary">
+            <b>{new Date(sessionDate).toLocaleDateString('en-GB')}</b> is marked as declared holiday: <b>{matchedHoliday.title}</b> ({matchedHoliday.type}).
+          </p>
+        </div>
+      )}
+
+      {/* ── Loaded Session Info Box & Student Table (Matches dsattendance layout) ── */}
+      {isLoaded && activeSubject && !matchedHoliday && (
+        <div className="space-y-4 animate-fade-in">
+          {/* Info Card Strip */}
+          <div className="bg-surface border border-borderLine rounded-2xl p-5 shadow-sm space-y-3">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-borderLine text-xs">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-semibold text-textPrimary">
+                <span><b>Class:</b> {selectedSemester}</span>
+                <span><b>Section:</b> {selectedSection || activeSubject.section || 'All'}</span>
+                <span><b>Subject:</b> <span className="text-brand-primary font-bold">{activeSubject.subject_name}</span> ({activeSubject.subject_type})</span>
+                <span><b>Date:</b> {new Date(sessionDate).toLocaleDateString('en-GB')}</span>
+              </div>
+
+              {/* Status Badge */}
+              <div>
+                {isAlreadyPosted ? (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 font-bold text-[11px] border border-emerald-500/20">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Attendance Already Posted
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-400 font-bold text-[11px] border border-blue-500/20">
+                    <Clock className="w-3.5 h-3.5" />
+                    Ready for Marking
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Timetable Period & Multi-Hour Checkboxes */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-xs font-bold text-textMuted uppercase">Timetable Period:</span>
+                <span className="text-xs font-bold text-textPrimary bg-surface-2 px-2.5 py-1 rounded-lg border border-borderLine">
+                  Period {periodStart} {numPeriods > 1 ? `to ${periodStart + numPeriods - 1}` : ''}
+                </span>
+
+                {/* Multi-Hour Enable Checkboxes (dsattendance feature) */}
+                <div className="flex items-center gap-2 pl-2 border-l border-borderLine">
+                  <label className="flex items-center gap-1.5 text-xs font-bold text-textPrimary cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={enableHour1}
+                      onChange={e => setEnableHour1(e.target.checked)}
+                      disabled={isAlreadyPosted && !editMode}
+                      className="w-4 h-4 rounded text-brand-primary cursor-pointer"
+                    />
+                    <span>Hour 1</span>
+                  </label>
+
+                  <label className="flex items-center gap-1.5 text-xs font-bold text-textPrimary cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={enableHour2}
+                      onChange={e => setEnableHour2(e.target.checked)}
+                      disabled={isAlreadyPosted && !editMode}
+                      className="w-4 h-4 rounded text-brand-primary cursor-pointer"
+                    />
+                    <span>Hour 2</span>
+                  </label>
+
+                  <label className="flex items-center gap-1.5 text-xs font-bold text-textPrimary cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={enableHour3}
+                      onChange={e => setEnableHour3(e.target.checked)}
+                      disabled={isAlreadyPosted && !editMode}
+                      className="w-4 h-4 rounded text-brand-primary cursor-pointer"
+                    />
+                    <span>Hour 3</span>
+                  </label>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => applyTimetableSlot(matchedTimetableSlot)}
-                className="px-3.5 py-1.5 rounded-lg bg-cyan-500 text-slate-950 text-xs font-bold shadow hover:bg-cyan-400 transition-all self-start sm:self-auto shrink-0"
-              >
-                Use Scheduled Slot
-              </button>
-            </div>
-          )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-            {/* Date Picker */}
-            <div className="space-y-1.5">
-              <label className="block text-[11px] font-bold text-textMuted uppercase tracking-wider flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-brand-primary" /> Session Date
-              </label>
-              <input
-                type="date"
-                value={sessionDate}
-                onChange={(e) => setSessionDate(e.target.value)}
-                className="w-full bg-surface-2 border border-borderLine rounded-xl px-3.5 py-2.5 text-xs text-textPrimary font-semibold focus:outline-none focus:border-brand-primary font-mono"
-              />
-            </div>
+              {/* Action Buttons: All Present, All Absent, Edit Attendance */}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={markAllPresent}
+                  disabled={isAlreadyPosted && !editMode}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm transition-all cursor-pointer disabled:opacity-40"
+                >
+                  All Present
+                </button>
 
-            {/* Period Start */}
-            <div className="space-y-1.5">
-              <label className="block text-[11px] font-bold text-textMuted uppercase tracking-wider flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-brand-primary" /> Starting Period Slot
-              </label>
-              <select
-                value={periodStart}
-                onChange={(e) => setPeriodStart(parseInt(e.target.value))}
-                className="w-full bg-surface-2 border border-borderLine rounded-xl px-3.5 py-2.5 text-xs text-textPrimary font-semibold focus:outline-none focus:border-brand-primary"
-              >
-                {[1, 2, 3, 4, 5, 6, 7].map((p) => (
-                  <option key={p} value={p}>
-                    Period {p} ({p <= 3 ? 'Morning' : p === 4 ? 'Mid-Day' : 'Afternoon'})
-                  </option>
-                ))}
-              </select>
-            </div>
+                <button
+                  type="button"
+                  onClick={markAllAbsent}
+                  disabled={isAlreadyPosted && !editMode}
+                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm transition-all cursor-pointer disabled:opacity-40"
+                >
+                  All Absent
+                </button>
 
-            {/* Session Length Options */}
-            <div className="space-y-1.5">
-              <label className="block text-[11px] font-bold text-textMuted uppercase tracking-wider flex items-center gap-1.5">
-                <BookOpen className="w-3.5 h-3.5 text-brand-primary" /> Session Length ({selectedSubject.subject_type})
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                {selectedSubject.subject_type === 'Theory' ? (
-                  <>
+                {/* Same-Day Edit Button (from dsattendance) */}
+                {isAlreadyPosted && !editMode && (
+                  canEditToday ? (
                     <button
                       type="button"
-                      onClick={() => setNumPeriods(1)}
-                      className={`p-2.5 rounded-xl text-xs font-bold transition-all border ${
-                        numPeriods === 1
-                          ? 'bg-brand-primary text-white border-brand-primary shadow-brand'
-                          : 'bg-surface-2 text-textSecondary border-borderLine hover:bg-surface-3'
-                      }`}
+                      onClick={() => setEditMode(true)}
+                      className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-sm transition-all cursor-pointer flex items-center gap-1"
                     >
-                      1 Session (1 Period)
+                      <Edit className="w-3.5 h-3.5" />
+                      <span>Edit Attendance</span>
                     </button>
+                  ) : (
                     <button
                       type="button"
-                      onClick={() => setNumPeriods(2)}
-                      className={`p-2.5 rounded-xl text-xs font-bold transition-all border ${
-                        numPeriods === 2
-                          ? 'bg-brand-primary text-white border-brand-primary shadow-brand'
-                          : 'bg-surface-2 text-textSecondary border-borderLine hover:bg-surface-3'
-                      }`}
+                      disabled
+                      className="px-3 py-1.5 rounded-xl bg-surface-2 border border-borderLine text-textMuted font-bold text-xs opacity-50 cursor-not-allowed flex items-center gap-1"
+                      title="Past date attendance is locked. Contact HOD/Admin for corrections."
                     >
-                      2 Sessions (Double)
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>Past Date Locked</span>
                     </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setNumPeriods(2)}
-                      className={`p-2.5 rounded-xl text-xs font-bold transition-all border ${
-                        numPeriods === 2
-                          ? 'bg-brand-primary text-white border-brand-primary shadow-brand'
-                          : 'bg-surface-2 text-textSecondary border-borderLine hover:bg-surface-3'
-                      }`}
-                    >
-                      2 Sessions (Lab)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setNumPeriods(3)}
-                      className={`p-2.5 rounded-xl text-xs font-bold transition-all border ${
-                        numPeriods === 3
-                          ? 'bg-brand-primary text-white border-brand-primary shadow-brand'
-                          : 'bg-surface-2 text-textSecondary border-borderLine hover:bg-surface-3'
-                      }`}
-                    >
-                      3 Sessions (Extended)
-                    </button>
-                  </>
+                  )
+                )}
+
+                {editMode && (
+                  <button
+                    type="button"
+                    onClick={() => setEditMode(false)}
+                    className="px-3 py-1.5 rounded-xl bg-surface-2 hover:bg-surface-3 border border-borderLine text-textPrimary font-bold text-xs transition-all cursor-pointer"
+                  >
+                    Cancel Edit
+                  </button>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Holiday / Semester Lock Banner */}
-          {matchedHoliday && (
-            <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-start gap-3">
-              <CalendarOff className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-xs font-bold text-rose-300">
-                  Attendance Locked: Declared {matchedHoliday.type || 'Holiday'} ({matchedHoliday.title})
-                </p>
-                <p className="text-[11px] text-textSecondary mt-0.5">
-                  Institutional academic activities are suspended on this date. Attendance cannot be recorded for holidays.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {!matchedHoliday && isOutsideSemesterRange && semesterCalendarWindow && (
-            <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3">
-              <Lock className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-xs font-bold text-amber-300">
-                  Attendance Locked: Date Outside Active Semester Window
-                </p>
-                <p className="text-[11px] text-textSecondary mt-0.5">
-                  Selected date ({sessionDate}) is outside configured academic calendar dates for Sem {selectedSemester} ({typeof semesterCalendarWindow.start_date === 'string' ? semesterCalendarWindow.start_date.split('T')[0] : ''} to {typeof semesterCalendarWindow.end_date === 'string' ? semesterCalendarWindow.end_date.split('T')[0] : ''}).
-                </p>
-              </div>
-            </div>
-          )}
-
-          <div className="p-4 rounded-xl bg-surface-2 border border-borderLine flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div className="text-xs">
-              <span className="font-bold text-textPrimary">Timing Window: </span>
-              <span className="text-textSecondary">
-                Date: <strong className="text-brand-primary font-mono">{sessionDate}</strong> | Periods:{' '}
-                <strong className="text-brand-primary font-mono">
-                  {periodStart} to {Math.min(7, periodStart + numPeriods - 1)}
-                </strong>{' '}
-                ({getPeriodTimingLabel(periodStart)})
-              </span>
-            </div>
-            <button
-              onClick={() => setCurrentStep(4)}
-              disabled={isDateLocked}
-              className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-brand-primary text-white text-xs font-bold hover:bg-brand-primary/90 shadow-brand transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {isDateLocked ? (
-                <>
-                  <Lock className="w-3.5 h-3.5" /> Date Locked for Attendance
-                </>
-              ) : (
-                <>
-                  Load Student Roster <ArrowRight className="w-3.5 h-3.5" />
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ────────────────────────────────────────────────────────────────────────
-          STEP 4: MARK ATTENDANCE
-         ──────────────────────────────────────────────────────────────────────── */}
-      {currentStep === 4 && selectedSubject && (
-        <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-base font-bold text-textPrimary flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-brand-primary text-white text-xs flex items-center justify-center font-black">
-                  4
-                </span>
-                Mark Roster — {selectedSubject.subject_name} (Sec {selectedSubject.section})
-              </h2>
-              <p className="text-xs text-textSecondary mt-0.5">
-                All students are marked Present by default. Uncheck absentees. Late joined students prior to their join date are exempt.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setCurrentStep(3)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-textSecondary bg-surface-2 hover:bg-surface-3 border border-borderLine transition-all"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" /> Back
-              </button>
-            </div>
-          </div>
-
-          {/* Quick Actions & Live Counters */}
-          <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl bg-surface-2 border border-borderLine">
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => handleToggleAll(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 transition-all"
-              >
-                <Check className="w-3.5 h-3.5" /> Mark All Present
-              </button>
-              <button
-                onClick={() => handleToggleAll(false)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-red-400 bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 transition-all"
-              >
-                <X className="w-3.5 h-3.5" /> Mark All Absent
-              </button>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-4 text-xs font-bold">
-              {studentRecords.some(s => s.is_on_od && !s.is_exempt) && (
-                <span className="flex items-center gap-1.5 text-blue-400 bg-blue-500/10 px-2.5 py-1 rounded-lg border border-blue-500/20">
-                  <Lock className="w-3 h-3 text-blue-400" />
-                  On-Duty (OD): {studentRecords.filter(s => s.is_on_od && !s.is_exempt).length}
-                </span>
-              )}
-              <span className="flex items-center gap-1.5 text-emerald-400">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                Present: {presentCount}
-              </span>
-              <span className="flex items-center gap-1.5 text-red-400">
-                <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
-                Absent: {absentCount}
-              </span>
-              <span className="text-textSecondary">Total Active: {studentRecords.filter(s => !s.is_exempt).length}</span>
-            </div>
-          </div>
-
-          {/* Search Roll Number */}
-          <div className="relative">
-            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-textMuted" />
-            <input
-              type="text"
-              placeholder="Search by Roll Number or Student Name..."
-              value={searchFilter}
-              onChange={(e) => setSearchFilter(e.target.value)}
-              className="w-full bg-surface-2 border border-borderLine rounded-xl pl-10 pr-4 py-2.5 text-xs text-textPrimary placeholder:text-textMuted focus:outline-none focus:border-brand-primary"
-            />
-          </div>
-
-          {/* Roster Grid / Table */}
+          {/* ── Student Roster Table ── */}
           {isLoadingRoster ? (
-            <div className="py-12 text-center text-textMuted">
-              <div className="w-8 h-8 border-3 border-brand-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-              Loading student roster...
+            <div className="bg-surface border border-borderLine rounded-2xl p-12 text-center text-xs text-textMuted flex flex-col items-center gap-2">
+              <span className="w-5 h-5 border-2 border-brand-primary border-t-transparent rounded-full animate-spin" />
+              <span>Loading student roster...</span>
             </div>
-          ) : filteredStudents.length === 0 ? (
-            <div className="p-8 rounded-xl bg-surface-2 border border-borderLine text-center text-textMuted text-xs">
-              No students found matching your search.
+          ) : studentRecords.length === 0 ? (
+            <div className="bg-surface border border-borderLine rounded-2xl p-12 text-center text-xs text-textMuted space-y-2">
+              <Users className="w-8 h-8 mx-auto text-textMuted opacity-50" />
+              <p className="font-bold text-textPrimary">No students enrolled in this subject roster.</p>
+              <p>Upload student roster in Attendance Management tab or contact your department admin.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 max-h-[50vh] overflow-y-auto pr-1">
-              {filteredStudents.map((student) => {
-                const isPresent = student.is_present;
-                const isExempt = student.is_exempt;
-                const isOnOD = student.is_on_od;
+            <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden shadow-sm space-y-0">
+              {/* Table Search & Stats Strip */}
+              <div className="p-3 bg-surface-2 border-b border-borderLine flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-3 text-xs">
+                  <span className="font-bold text-textPrimary">
+                    Enrolled Students: <span className="text-brand-primary">{studentRecords.length}</span>
+                  </span>
+                  <span className="text-emerald-400 font-bold">
+                    Present: {presentCount}
+                  </span>
+                  <span className="text-rose-400 font-bold">
+                    Absent: {absentStudents.length}
+                  </span>
+                </div>
 
-                if (isExempt) {
-                  return (
-                    <div
-                      key={student.roll_number}
-                      className="p-3 rounded-xl border border-borderLine bg-surface-2/40 opacity-60 flex items-center justify-between"
-                      title={`Student joined this subject on ${student.joining_date}, after the session date.`}
-                    >
-                      <div className="min-w-0 pr-2">
-                        <p className="font-mono font-bold text-xs text-textPrimary truncate">{student.roll_number}</p>
-                        {student.student_name && (
-                          <p className="text-[11px] text-textSecondary truncate">{student.student_name}</p>
-                        )}
-                        <span className="text-[9px] text-purple-400 font-semibold">Exempt (Joined {student.joining_date})</span>
-                      </div>
-                      <div className="px-2 py-1 bg-surface-3 text-[10px] text-textMuted font-bold rounded">
-                        EXEMPT
-                      </div>
-                    </div>
-                  );
-                }
-
-                // ── Student on Approved On-Duty (OD) — Locked Present ──
-                if (isOnOD) {
-                  return (
-                    <div
-                      key={student.roll_number}
-                      className="p-3 rounded-xl border border-blue-500/40 bg-blue-500/10 flex items-center justify-between shadow-xs select-none"
-                      title={`Approved On-Duty: ${student.od_type || 'OD'}${student.od_reason ? ` — ${student.od_reason}` : ''}. Attendance is locked as Present.`}
-                    >
-                      <div className="min-w-0 pr-2">
-                        <div className="flex items-center gap-1.5">
-                          <p className="font-mono font-bold text-xs text-textPrimary truncate">{student.roll_number}</p>
-                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-blue-600 text-white shadow-xs">
-                            <Lock className="w-2.5 h-2.5" /> OD
-                          </span>
-                        </div>
-                        {student.student_name && (
-                          <p className="text-[11px] text-textSecondary truncate">{student.student_name}</p>
-                        )}
-                        <p className="text-[9px] text-blue-400 font-semibold truncate mt-0.5">
-                          {student.od_type || 'On-Duty'} • Locked Present
-                        </p>
-                      </div>
-
-                      <div
-                        className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 bg-blue-600 text-white shadow-xs"
-                        title="Approved On-Duty (OD) — Locked Present"
-                      >
-                        P
-                      </div>
-                    </div>
-                  );
-                }
-
-                return (
-                  <div
-                    key={student.roll_number}
-                    onClick={() => handleToggleStudent(student.roll_number)}
-                    className={`p-3 rounded-xl border transition-all cursor-pointer select-none flex items-center justify-between ${
-                      isPresent
-                        ? 'bg-emerald-500/10 border-emerald-500/40 hover:bg-emerald-500/15'
-                        : 'bg-red-500/10 border-red-500/40 hover:bg-red-500/15'
-                    }`}
-                  >
-                    <div className="min-w-0 pr-2">
-                      <p className="font-mono font-bold text-xs text-textPrimary truncate">{student.roll_number}</p>
-                      {student.student_name && (
-                        <p className="text-[11px] text-textSecondary truncate">{student.student_name}</p>
-                      )}
-                      {student.joining_date && (
-                        <span className="text-[9px] text-purple-400">Joined: {student.joining_date}</span>
-                      )}
-                    </div>
-
-                    <div
-                      className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 transition-all ${
-                        isPresent ? 'bg-emerald-500 text-white shadow-xs' : 'bg-red-500 text-white shadow-xs'
-                      }`}
-                    >
-                      {isPresent ? 'P' : 'A'}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Submit Attendance */}
-          <div className="p-4 rounded-xl bg-surface-2 border border-borderLine flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="text-xs text-textSecondary">
-              Ready to commit <strong className="text-textPrimary">{presentCount}</strong> present out of{' '}
-              <strong className="text-textPrimary">{studentRecords.length}</strong> students for{' '}
-              <strong className="text-brand-primary">{numPeriods} session(s)</strong>.
-            </div>
-
-            <button
-              onClick={() => saveMutation.mutate()}
-              disabled={saveMutation.isPending || studentRecords.length === 0}
-              className="flex items-center gap-2 px-8 py-3 rounded-xl bg-brand-primary text-white text-xs font-bold hover:bg-brand-primary/90 shadow-brand transition-all disabled:opacity-50 w-full sm:w-auto justify-center"
-            >
-              {saveMutation.isPending ? (
-                <>
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Saving Attendance...
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-4 h-4" /> Save & Commit Attendance
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ────────────────────────────────────────────────────────────────────────
-          STEP 5: CONFIRMATION SUMMARY
-         ──────────────────────────────────────────────────────────────────────── */}
-      {currentStep === 5 && saveResult && (
-        <div className="p-8 rounded-2xl bg-surface border border-borderLine text-center space-y-6 shadow-brand">
-          <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center mx-auto shadow-lg">
-            <CheckCircle2 className="w-10 h-10" />
-          </div>
-
-          <div className="space-y-2">
-            <h2 className="text-2xl font-black text-textPrimary">Attendance Successfully Saved!</h2>
-            <p className="text-sm font-semibold text-emerald-400">{saveResult.message}</p>
-          </div>
-
-          {/* Summary Box */}
-          <div className="max-w-md mx-auto p-4 rounded-xl bg-surface-2 border border-borderLine grid grid-cols-3 gap-3 text-center text-xs">
-            <div>
-              <p className="text-textMuted font-medium">Session Length</p>
-              <p className="text-base font-black text-textPrimary font-mono mt-0.5">{saveResult.numPeriods} Period(s)</p>
-            </div>
-            <div>
-              <p className="text-textMuted font-medium">Present</p>
-              <p className="text-base font-black text-emerald-400 font-mono mt-0.5">{saveResult.presentCount}</p>
-            </div>
-            <div>
-              <p className="text-textMuted font-medium">Total Roster</p>
-              <p className="text-base font-black text-textPrimary font-mono mt-0.5">{saveResult.totalCount}</p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-center gap-3 pt-4">
-            <button
-              onClick={handleReset}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-brand-primary text-white text-xs font-bold hover:bg-brand-primary/90 shadow-brand transition-all"
-            >
-              <Sparkles className="w-3.5 h-3.5" /> Take Another Attendance
-            </button>
-            <button
-              onClick={() => navigate('/faculty/dashboard?tab=attendance')}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-surface-2 text-textPrimary text-xs font-semibold hover:bg-surface-3 border border-borderLine transition-all"
-            >
-              <LayoutDashboard className="w-3.5 h-3.5" /> View Attendance Records
-            </button>
-          </div>
-        </div>
-      )}
-      {/* Official Timetable Document PDF Viewer Modal */}
-      {viewingPdfDoc && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
-          <div className="bg-surface border border-borderLine rounded-2xl max-w-5xl w-full h-[88vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in-50">
-            <div className="p-4 border-b border-borderLine flex items-center justify-between bg-surface-2">
-              <div className="flex items-center gap-2.5 min-w-0 pr-4">
-                <FileText className="w-4 h-4 text-purple-400 shrink-0" />
-                <h3 className="text-sm font-bold text-textPrimary font-mono truncate">{viewingPdfDoc.name}</h3>
+                <div className="flex items-center gap-2 bg-surface px-3 py-1 rounded-xl border border-borderLine text-xs w-64">
+                  <Search className="w-3.5 h-3.5 text-textMuted shrink-0" />
+                  <input
+                    type="text"
+                    value={searchFilter}
+                    onChange={e => setSearchFilter(e.target.value)}
+                    placeholder="Search roll number or name..."
+                    className="w-full bg-transparent text-textPrimary focus:outline-none"
+                  />
+                </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <a
-                  href={viewingPdfDoc.data}
-                  download={viewingPdfDoc.name}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-3 hover:bg-surface text-textPrimary text-xs rounded-xl border border-borderLine transition-all font-semibold"
-                >
-                  <Download className="w-3.5 h-3.5" /> Download PDF
-                </a>
+
+              {/* Roster Table (Ported dsattendance green present-row styling) */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-surface-2 border-b border-borderLine text-textMuted font-bold uppercase text-[10px]">
+                    <tr>
+                      <th className="px-4 py-2.5 w-12 text-center">#</th>
+                      <th className="px-4 py-2.5">Roll Number</th>
+                      <th className="px-4 py-2.5">Student Name</th>
+                      {enableHour1 && <th className="px-4 py-2.5 text-center">Hour 1</th>}
+                      {enableHour2 && <th className="px-4 py-2.5 text-center">Hour 2</th>}
+                      {enableHour3 && <th className="px-4 py-2.5 text-center">Hour 3</th>}
+                      <th className="px-4 py-2.5 text-center">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-borderLine">
+                    {studentRecords
+                      .filter(s => {
+                        const q = searchFilter.toLowerCase();
+                        return !q || s.roll_number.toLowerCase().includes(q) || (s.student_name || '').toLowerCase().includes(q);
+                      })
+                      .map((student, idx) => {
+                        const isPresent = student.hour1 || (enableHour2 && student.hour2) || (enableHour3 && student.hour3);
+
+                        return (
+                          <tr
+                            key={student.roll_number}
+                            className={`transition-colors ${
+                              student.is_exempt
+                                ? 'opacity-40 bg-surface-2/20'
+                                : student.is_on_od
+                                ? 'bg-purple-500/10'
+                                : isPresent
+                                ? 'bg-emerald-500/5 hover:bg-emerald-500/10'
+                                : 'bg-rose-500/5 hover:bg-rose-500/10'
+                            }`}
+                          >
+                            <td className="px-4 py-2.5 text-center font-mono text-textMuted">{idx + 1}</td>
+                            <td className="px-4 py-2.5 font-mono font-bold text-textPrimary">
+                              {student.roll_number}
+                            </td>
+                            <td className="px-4 py-2.5 text-textPrimary font-semibold">
+                              {student.student_name || '—'}
+                            </td>
+
+                            {/* Hour 1 Checkbox */}
+                            {enableHour1 && (
+                              <td className="px-4 py-2.5 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={student.hour1}
+                                  onChange={() => toggleStudentHour(student.roll_number, 1)}
+                                  disabled={(isAlreadyPosted && !editMode) || student.is_exempt || student.is_on_od}
+                                  className="w-5 h-5 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer disabled:cursor-not-allowed"
+                                />
+                              </td>
+                            )}
+
+                            {/* Hour 2 Checkbox */}
+                            {enableHour2 && (
+                              <td className="px-4 py-2.5 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={student.hour2}
+                                  onChange={() => toggleStudentHour(student.roll_number, 2)}
+                                  disabled={(isAlreadyPosted && !editMode) || student.is_exempt || student.is_on_od}
+                                  className="w-5 h-5 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer disabled:cursor-not-allowed"
+                                />
+                              </td>
+                            )}
+
+                            {/* Hour 3 Checkbox */}
+                            {enableHour3 && (
+                              <td className="px-4 py-2.5 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={student.hour3}
+                                  onChange={() => toggleStudentHour(student.roll_number, 3)}
+                                  disabled={(isAlreadyPosted && !editMode) || student.is_exempt || student.is_on_od}
+                                  className="w-5 h-5 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer disabled:cursor-not-allowed"
+                                />
+                              </td>
+                            )}
+
+                            {/* Status Tag */}
+                            <td className="px-4 py-2.5 text-center">
+                              {student.is_exempt ? (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-surface-2 text-textMuted">Exempt</span>
+                              ) : student.is_on_od ? (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300">On Duty (OD)</span>
+                              ) : isPresent ? (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300">Present</span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300">Absent</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Bottom Action Footer */}
+              <div className="p-4 bg-surface-2 border-t border-borderLine flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="text-xs text-textSecondary">
+                  {absentStudents.length === 0 ? (
+                    <span className="text-emerald-400 font-bold">✓ All {studentRecords.length} students are marked Present.</span>
+                  ) : (
+                    <span className="text-rose-400 font-bold">{absentStudents.length} student(s) marked Absent.</span>
+                  )}
+                </div>
+
                 <button
-                  onClick={() => setViewingPdfDoc(null)}
-                  className="p-1.5 text-textMuted hover:text-textPrimary rounded-xl hover:bg-surface-3 transition-colors"
+                  type="button"
+                  onClick={() => setShowAbsentModal(true)}
+                  disabled={isAlreadyPosted && !editMode}
+                  className="px-6 py-2.5 rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white font-bold text-xs shadow-md transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5"
                 >
-                  ✕
+                  <Check className="w-4 h-4" />
+                  <span>{isAlreadyPosted && editMode ? 'Review & Update Attendance' : 'Review & Submit Attendance'}</span>
                 </button>
               </div>
             </div>
-            <div className="flex-1 bg-slate-950 overflow-hidden relative">
-              <iframe
-                src={viewingPdfDoc.data}
-                title={viewingPdfDoc.name}
-                className="w-full h-full border-0"
-              />
+          )}
+        </div>
+      )}
+
+      {/* ── Absentee Review Modal (Ported from dsattendance absent-modal-box) ── */}
+      {showAbsentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-fade-in">
+          <div className="bg-surface border border-borderLine rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden space-y-0 animate-scale-up">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-rose-600 to-rose-700 text-white p-5 flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold">Review Attendance Summary</h3>
+                <p className="text-xs text-rose-100 mt-0.5">
+                  {activeSubject?.subject_name} ({selectedSemester} - Sec {selectedSection || activeSubject?.section})
+                </p>
+              </div>
+              <button
+                onClick={() => setShowAbsentModal(false)}
+                className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center font-bold text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-4">
+              {/* Absent Count Card */}
+              <div className="bg-rose-500/10 border border-rose-500/20 rounded-2xl p-4 text-center">
+                <span className="text-xs font-bold text-rose-400 uppercase tracking-wider">Total Absent Count</span>
+                <div className="text-4xl font-black text-rose-500 mt-1">{absentStudents.length}</div>
+                <div className="text-xs text-textMuted mt-1">
+                  Out of {studentRecords.length} enrolled students ({presentCount} Present)
+                </div>
+              </div>
+
+              {/* List of Absentee Roll Numbers */}
+              {absentStudents.length > 0 ? (
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-textPrimary">Absent Student Roll Numbers:</label>
+                  <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto p-2 rounded-xl bg-surface-2 border border-borderLine">
+                    {absentStudents.map(s => (
+                      <span
+                        key={s.roll_number}
+                        className="px-2.5 py-1 rounded-lg bg-rose-500 text-white font-mono font-bold text-xs shadow-xs"
+                      >
+                        {s.roll_number}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-center text-emerald-400 font-bold text-xs">
+                  🎉 100% Attendance — All students marked Present!
+                </div>
+              )}
+
+              <div className="bg-surface-2 p-3 rounded-xl border border-borderLine text-xs text-textSecondary">
+                <b>Date:</b> {new Date(sessionDate).toLocaleDateString('en-GB')} | <b>Period:</b> Period {periodStart} ({numPeriods} hour session)
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-surface-2 border-t border-borderLine flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAbsentModal(false)}
+                className="px-4 py-2 rounded-xl bg-surface hover:bg-surface-3 border border-borderLine text-textSecondary hover:text-textPrimary text-xs font-bold cursor-pointer"
+              >
+                Back to Edit
+              </button>
+
+              <button
+                type="button"
+                onClick={() => saveMutation.mutate()}
+                disabled={saveMutation.isPending}
+                className="px-5 py-2 rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white text-xs font-bold shadow-sm transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {saveMutation.isPending ? (
+                  <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <Check className="w-3.5 h-3.5" />
+                )}
+                <span>{isAlreadyPosted && editMode ? 'Confirm & Update' : 'Confirm & Save Attendance'}</span>
+              </button>
             </div>
           </div>
         </div>
