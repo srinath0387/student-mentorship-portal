@@ -3162,6 +3162,12 @@ app.post('/faculty', async (req: Request, res: Response) => {
       return res.status(201).json({ message: 'Faculty registered successfully', faculty: newFaculty });
     }
 
+    // Check if email is in blocked_emails
+    const blockedCheck = await db.query('SELECT reason FROM blocked_emails WHERE LOWER(email) = $1', [cleanEmail]).catch(() => ({ rows: [] }));
+    if (blockedCheck.rows.length > 0) {
+      return res.status(403).json({ error: `This email (${cleanEmail}) has been removed and blocked by an administrator.` });
+    }
+
     // Upsert the new faculty record (on email conflict, update name/dept/role)
     const result = await db.query(
       `INSERT INTO faculty (faculty_id, name, email, department, role)
@@ -3293,6 +3299,12 @@ app.get('/faculty/by-email/:email', async (req: Request, res: Response) => {
     const email = req.params.email.toLowerCase().trim();
     if (db.isMock) {
       return res.json({ faculty_id: 'FAC001', name: 'Dr. M. V. Ramana', email, department: 'CSE', role: 'mentor' });
+    }
+
+    // Tier 0: Check if email is in blocked_emails
+    const blockedCheck = await db.query('SELECT reason FROM blocked_emails WHERE LOWER(email) = $1', [email]).catch(() => ({ rows: [] }));
+    if (blockedCheck.rows.length > 0) {
+      return res.status(403).json({ error: 'This faculty account has been removed and blocked by an administrator.', isBlocked: true });
     }
 
     // Tier 1: exact email match
@@ -3831,10 +3843,12 @@ app.delete('/faculty/:id', requireRole('admin'), async (req: Request, res: Respo
         [facultyEmail, `Deleted by admin: ${facultyName} (${facId})`]
       ).catch(() => {});
 
-      // Cognito cleanup: fire-and-forget
-      deleteCognitoUsers([facultyEmail]).catch((e: any) =>
-        console.warn(`[Cognito] Faculty Cognito cleanup failed for ${facultyEmail}:`, e.message)
-      );
+      // Cognito cleanup: await deletion from Cognito
+      try {
+        await deleteCognitoUsers([facultyEmail, facId]);
+      } catch (e: any) {
+        console.warn(`[Cognito] Faculty Cognito cleanup failed for ${facultyEmail}:`, e.message);
+      }
     }
 
     res.json({ message: `Faculty ${facultyName} deleted. Their email is now blocked from re-registration.` });

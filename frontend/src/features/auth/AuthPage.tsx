@@ -794,20 +794,21 @@ export const AuthPage: React.FC = () => {
         // Department is always taken from the student's DB record / roll number — no manual selection needed
         login(data.email, 'student', rollNo, displayName, jwtToken, studentDept);
       } else if (activeTab === 'faculty') {
-        let faculty = await api.getFacultyByEmail(data.email).catch(() => null);
-        const selectedDept = loginDept || faculty?.department || 'CSE (Data Science)';
+        let faculty = await api.getFacultyByEmail(data.email).catch((err: any) => {
+          if (err?.message && (err.message.includes('removed') || err.message.includes('blocked'))) {
+            throw err;
+          }
+          return null;
+        });
+
+        // IMPORTANT: If faculty authenticated via Cognito but is NOT in the database (or was deleted by admin),
+        // we must block login and NOT auto-recreate their profile.
         if (!faculty) {
-          const facId = `FAC_${data.email.split('@')[0].toUpperCase()}`;
-          const facName = data.email.split('@')[0].replace(/\./g, ' ').toUpperCase();
-          await api.createFaculty({
-            faculty_id: facId,
-            name: facName,
-            email: data.email,
-            department: selectedDept,
-            role: 'mentor',
-          }).catch(() => {});
-          faculty = await api.getFacultyByEmail(data.email).catch(() => null);
-        } else if (loginDept && faculty.department !== loginDept) {
+          cognitoSignOut(); // invalidate Cognito session immediately
+          throw new Error('Your faculty account has been removed by an administrator. Please contact your system administrator to be re-enrolled.');
+        }
+
+        if (loginDept && faculty.department !== loginDept) {
           // Synchronize faculty department in the database with their chosen department at login
           await api.createFaculty({
             faculty_id: faculty.faculty_id,
