@@ -2055,38 +2055,157 @@ app.put('/students/:id', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), as
   }
 });
 
-// DELETE /students — Delete ALL students
-app.delete('/students', requireRole('admin'), async (_req: Request, res: Response) => {
+// DELETE /students — Delete students (strictly department-scoped for department admins; scoped or global for super admin)
+app.delete('/students', requireRole('admin'), async (req: Request, res: Response) => {
   try {
+    const callerRole = req.auth?.role;
+    const callerDept = req.auth?.department;
+    const isSuper = req.auth?.isSuperAdmin === true || callerDept === '*' || callerDept === 'All';
+    const reqDept = req.query.department ? String(req.query.department) : undefined;
+
+    let targetDeptFilter: string | undefined;
+    if (!isSuper && callerDept && callerDept !== 'All' && callerDept !== '*') {
+      // Department admin is strictly locked to their own department
+      targetDeptFilter = callerDept;
+    } else if (reqDept && reqDept !== 'All' && reqDept !== 'undefined' && reqDept !== 'null') {
+      targetDeptFilter = reqDept;
+    }
+
     if (db.isMock) {
+      if (targetDeptFilter) {
+        let deleted = 0;
+        for (const [id, s] of db.mockStore.students.entries()) {
+          if (s.department === targetDeptFilter) {
+            db.mockStore.students.delete(id);
+            deleted++;
+          }
+        }
+        return res.json({ message: `All ${deleted} students in ${targetDeptFilter} deleted from mock store`, deleted });
+      }
       db.mockStore.students.clear();
       return res.json({ message: 'All student records cleared from mock store' });
     }
 
-    // Gather emails/rolls BEFORE truncate so we know who to clean up in Cognito
+    // If scoped to a specific department (always true for department admins, or super admin with filter)
+    if (targetDeptFilter) {
+      const d = targetDeptFilter.toLowerCase().trim();
+      let code = '';
+      if (d.includes('data science') || d.includes('(ds)') || d === 'ds' || d.includes('32')) code = '32';
+      else if (d.includes('ai') || d.includes('ml') || d.includes('33')) code = '33';
+      else if (d.includes('bs') || d.includes('business') || d.includes('34')) code = '34';
+      else if (d.includes('cyber') || d.includes('(cs)') || d.includes('37')) code = '37';
+      else if (d === 'cse' || d.includes('computer science') || d.includes('05')) code = '05';
+      else if (d.includes('ece') || d.includes('electronics') || d.includes('04')) code = '04';
+      else if (d.includes('eee') || d.includes('electrical') || d.includes('02')) code = '02';
+      else if (d.includes('mech') || d.includes('03')) code = '03';
+      else if (d.includes('civil') || d.includes('01')) code = '01';
+      else if (d === 'mba' || d.includes('business admin') || d.includes('1e') || d.includes('e00')) code = 'E00';
+      else if (d === 'mca' || d.includes('computer app') || d.includes('1f') || d.includes('f00')) code = 'F00';
+
+      let selectQuery = '';
+      let selectParams: any[] = [];
+
+      if (code === 'E00') {
+        selectQuery = `SELECT roll_number, email FROM students WHERE LOWER(REPLACE(department, ' ', '')) = LOWER(REPLACE($1, ' ', '')) OR SUBSTRING(roll_number, 5, 2) = '1E' OR roll_number ILIKE '%1E00%' OR department ILIKE '%mba%'`;
+        selectParams = [targetDeptFilter];
+      } else if (code === 'F00') {
+        selectQuery = `SELECT roll_number, email FROM students WHERE LOWER(REPLACE(department, ' ', '')) = LOWER(REPLACE($1, ' ', '')) OR SUBSTRING(roll_number, 5, 2) = '1F' OR roll_number ILIKE '%1F00%' OR department ILIKE '%mca%'`;
+        selectParams = [targetDeptFilter];
+      } else if (code) {
+        selectQuery = `SELECT roll_number, email FROM students WHERE LOWER(REPLACE(department, ' ', '')) = LOWER(REPLACE($1, ' ', '')) OR SUBSTRING(roll_number, 7, 2) = $2 OR department ILIKE $3`;
+        selectParams = [targetDeptFilter, code, `%${code === '32' ? 'data science' : code === '05' ? 'computer science' : targetDeptFilter}%`];
+      } else {
+        selectQuery = `SELECT roll_number, email FROM students WHERE LOWER(REPLACE(department, ' ', '')) = LOWER(REPLACE($1, ' ', ''))`;
+        selectParams = [targetDeptFilter];
+      }
+
+      const resStudents = await db.query(selectQuery, selectParams);
+      const targetRolls = resStudents.rows.map((r: any) => r.roll_number).filter(Boolean);
+      const targetEmails = resStudents.rows.map((r: any) => r.email).filter(Boolean);
+
+      if (targetRolls.length === 0) {
+        return res.json({ message: `No student records found in ${targetDeptFilter} to delete.`, deleted: 0 });
+      }
+
+      // Cascading clean up for this department's students ONLY
+      await Promise.allSettled([
+        db.query('DELETE FROM academics WHERE UPPER(student_id) = ANY($1)', [targetRolls]),
+        db.query('DELETE FROM coding_profiles WHERE UPPER(student_id) = ANY($1)', [targetRolls]),
+        db.query('DELETE FROM certifications WHERE UPPER(student_id) = ANY($1)', [targetRolls]),
+        db.query('DELETE FROM tech_skills WHERE UPPER(student_id) = ANY($1)', [targetRolls]),
+        db.query('DELETE FROM soft_skills WHERE UPPER(student_id) = ANY($1)', [targetRolls]),
+        db.query('DELETE FROM achievements WHERE UPPER(student_id) = ANY($1)', [targetRolls]),
+        db.query('DELETE FROM student_passwords WHERE UPPER(roll_number) = ANY($1)', [targetRolls]),
+        db.query('DELETE FROM student_permissions WHERE UPPER(roll_number) = ANY($1)', [targetRolls]),
+        db.query('DELETE FROM attendance_records WHERE UPPER(roll_number) = ANY($1)', [targetRolls]),
+        db.query('DELETE FROM mentor_assignments WHERE UPPER(roll_number) = ANY($1)', [targetRolls]),
+      ]);
+
+      const delResult = await db.query('DELETE FROM students WHERE UPPER(roll_number) = ANY($1) RETURNING roll_number', [targetRolls]);
+      deleteCognitoUsers([...targetEmails, ...targetRolls]).catch(() => {});
+
+      return res.json({
+        message: `All ${delResult.rows.length} students in ${targetDeptFilter} deleted successfully. Other departments remain untouched.`,
+        deleted: delResult.rows.length,
+      });
+    }
+
+    // Only Super Admin can perform an unscoped global deletion across all departments
+    if (!isSuper) {
+      return res.status(403).json({ error: 'Unauthorized: Department admins are only allowed to manage students in their assigned department.' });
+    }
+
+    // Gather emails/rolls BEFORE delete so we know who to clean up in Cognito
     const allStudents = await db.query('SELECT email, roll_number FROM students').catch(() => ({ rows: [] }));
     const allEmails = allStudents.rows.map((r: any) => r.email).filter(Boolean);
     const allRolls = allStudents.rows.map((r: any) => r.roll_number).filter(Boolean);
 
-    // DB truncate is the authoritative step — must succeed
-    await db.query('TRUNCATE TABLE students CASCADE');
+    await Promise.allSettled([
+      db.query('DELETE FROM academics'),
+      db.query('DELETE FROM coding_profiles'),
+      db.query('DELETE FROM certifications'),
+      db.query('DELETE FROM tech_skills'),
+      db.query('DELETE FROM soft_skills'),
+      db.query('DELETE FROM achievements'),
+      db.query('DELETE FROM student_passwords'),
+      db.query('DELETE FROM student_permissions'),
+      db.query('DELETE FROM attendance_records'),
+      db.query('DELETE FROM mentor_assignments'),
+      db.query('DELETE FROM students'),
+    ]);
 
-    // Cognito cleanup is best-effort: failure must NOT cause a 500
-    Promise.allSettled([
-      deleteCognitoUsers([...allEmails, ...allRolls]),
-      deleteAllCognitoUsers(),
-    ]).catch(() => {}); // .catch is a safety net — allSettled never rejects
+    deleteCognitoUsers([...allEmails, ...allRolls]).catch(() => {});
+    deleteAllCognitoUsers().catch(() => {});
 
-    res.json({ message: 'All existing student records deleted successfully from database. Cognito cleanup running in background.' });
+    res.json({ message: 'All student records deleted successfully from database.' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// DELETE /students/:id
+// DELETE /students/:id — Single student deletion with department ownership verification
 app.delete('/students/:id', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const studentId = req.params.id.toUpperCase();
+    const callerDept = req.auth?.department;
+    const isSuper = req.auth?.isSuperAdmin === true || callerDept === '*' || callerDept === 'All';
+
+    // Verify department ownership if caller is a department admin
+    if (!isSuper && callerDept && !db.isMock) {
+      const stuCheck = await db.query('SELECT department, roll_number FROM students WHERE UPPER(roll_number) = $1', [studentId]);
+      if (stuCheck.rows.length > 0) {
+        const s = stuCheck.rows[0];
+        const stuDept = (s.department || getDeptFromRollNumber(s.roll_number) || '').toLowerCase();
+        const callDeptClean = callerDept.toLowerCase();
+        const callCode = getDeptCodeFromName(callerDept);
+        const stuCode = getDeptCodeFromRollNumber(studentId);
+        
+        const isMatch = stuDept.includes(callDeptClean) || (callCode && stuCode === callCode);
+        if (!isMatch) {
+          return res.status(403).json({ error: `Forbidden: You are only authorized to delete students in ${callerDept}` });
+        }
+      }
+    }
 
     if (db.isMock) {
       const deleted = db.mockStore.students.delete(studentId);
@@ -2104,7 +2223,6 @@ app.delete('/students/:id', requireRole('admin'), async (req: Request, res: Resp
     // DB delete is the authoritative step
     const result = await db.query('DELETE FROM students WHERE UPPER(roll_number) = $1 RETURNING roll_number', [studentId]);
     if (result.rows.length === 0) {
-      // Not in DB — fire Cognito cleanup anyway, then return 404
       deleteCognitoUsers([studentId, studentEmail]).catch(() => {});
       return res.status(404).json({ error: 'Student not found in database' });
     }
@@ -2123,8 +2241,6 @@ app.delete('/students/:id', requireRole('admin'), async (req: Request, res: Resp
       db.query('DELETE FROM mentor_assignments WHERE UPPER(roll_number) = $1', [studentId]),
     ]);
 
-    // Cognito + session cleanup — awaited so errors appear in Lambda logs
-    // (does NOT throw — errors are caught and logged inside deleteCognitoUsers)
     await deleteCognitoUsers([studentId, studentEmail]);
 
     res.json({ message: `Student ${studentId} and all associated records deleted successfully` });
@@ -2137,7 +2253,7 @@ app.delete('/students/:id', requireRole('admin'), async (req: Request, res: Resp
 // Bulk Delete Students (Admin)
 // ============================================================================
 
-// POST /admin/students/bulk-delete — delete multiple students by roll-number array
+// POST /admin/students/bulk-delete — delete multiple students by roll-number array (department scoped)
 app.post('/admin/students/bulk-delete', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const { roll_numbers } = req.body;
@@ -2145,16 +2261,48 @@ app.post('/admin/students/bulk-delete', requireRole('admin'), async (req: Reques
       return res.status(400).json({ error: 'roll_numbers must be a non-empty array' });
     }
     const ids = roll_numbers.map((r: string) => String(r).toUpperCase());
+    const callerDept = req.auth?.department;
+    const isSuper = req.auth?.isSuperAdmin === true || callerDept === '*' || callerDept === 'All';
+
+    // If department admin, verify that roll numbers belong to caller's department
+    let authorizedIds = ids;
+    if (!isSuper && callerDept && !db.isMock) {
+      const d = callerDept.toLowerCase().trim();
+      let code = '';
+      if (d.includes('data science') || d.includes('(ds)') || d === 'ds' || d.includes('32')) code = '32';
+      else if (d.includes('ai') || d.includes('ml') || d.includes('33')) code = '33';
+      else if (d.includes('bs') || d.includes('business') || d.includes('34')) code = '34';
+      else if (d.includes('cyber') || d.includes('(cs)') || d.includes('37')) code = '37';
+      else if (d === 'cse' || d.includes('computer science') || d.includes('05')) code = '05';
+      else if (d.includes('ece') || d.includes('electronics') || d.includes('04')) code = '04';
+      else if (d.includes('eee') || d.includes('electrical') || d.includes('02')) code = '02';
+      else if (d.includes('mech') || d.includes('03')) code = '03';
+      else if (d.includes('civil') || d.includes('01')) code = '01';
+      else if (d === 'mba' || d.includes('business admin') || d.includes('1e') || d.includes('e00')) code = 'E00';
+      else if (d === 'mca' || d.includes('computer app') || d.includes('1f') || d.includes('f00')) code = 'F00';
+
+      const validStuds = await db.query(
+        `SELECT roll_number FROM students WHERE UPPER(roll_number) = ANY($1) AND (
+          LOWER(REPLACE(department, ' ', '')) = LOWER(REPLACE($2, ' ', ''))
+          ${code === 'E00' ? `OR SUBSTRING(roll_number, 5, 2) = '1E' OR roll_number ILIKE '%1E00%' OR department ILIKE '%mba%'` : code === 'F00' ? `OR SUBSTRING(roll_number, 5, 2) = '1F' OR roll_number ILIKE '%1F00%' OR department ILIKE '%mca%'` : code ? `OR SUBSTRING(roll_number, 7, 2) = '${code}' OR department ILIKE '%${code === '32' ? 'data science' : code === '05' ? 'computer science' : callerDept}%'` : ''}
+        )`,
+        [ids, callerDept]
+      );
+      authorizedIds = validStuds.rows.map((r: any) => r.roll_number.toUpperCase());
+      if (authorizedIds.length === 0) {
+        return res.status(403).json({ error: `Forbidden: None of the selected students belong to your assigned department (${callerDept})` });
+      }
+    }
 
     if (db.isMock) {
       let deleted = 0;
-      ids.forEach((id) => { if (db.mockStore.students.delete(id)) deleted++; });
+      authorizedIds.forEach((id) => { if (db.mockStore.students.delete(id)) deleted++; });
       return res.json({ deleted, message: `${deleted} student(s) deleted from mock store` });
     }
 
     // Resolve emails BEFORE delete for Cognito cleanup
     let emailsToDelete: string[] = [];
-    const existingRes = await db.query('SELECT email FROM students WHERE UPPER(roll_number) = ANY($1)', [ids]);
+    const existingRes = await db.query('SELECT email FROM students WHERE UPPER(roll_number) = ANY($1)', [authorizedIds]);
     if (existingRes.rows.length > 0) {
       emailsToDelete = existingRes.rows.map((r: any) => r.email).filter(Boolean);
     }
@@ -2162,26 +2310,25 @@ app.post('/admin/students/bulk-delete', requireRole('admin'), async (req: Reques
     // DB delete is the authoritative step
     const result = await db.query(
       'DELETE FROM students WHERE UPPER(roll_number) = ANY($1) RETURNING roll_number',
-      [ids]
+      [authorizedIds]
     );
     const deleted = result.rows.length;
 
     // Clean up all related tables in parallel
     await Promise.allSettled([
-      db.query('DELETE FROM academics WHERE UPPER(student_id) = ANY($1)', [ids]),
-      db.query('DELETE FROM coding_profiles WHERE UPPER(student_id) = ANY($1)', [ids]),
-      db.query('DELETE FROM certifications WHERE UPPER(student_id) = ANY($1)', [ids]),
-      db.query('DELETE FROM tech_skills WHERE UPPER(student_id) = ANY($1)', [ids]),
-      db.query('DELETE FROM soft_skills WHERE UPPER(student_id) = ANY($1)', [ids]),
-      db.query('DELETE FROM achievements WHERE UPPER(student_id) = ANY($1)', [ids]),
-      db.query('DELETE FROM student_passwords WHERE UPPER(roll_number) = ANY($1)', [ids]),
-      db.query('DELETE FROM student_permissions WHERE UPPER(roll_number) = ANY($1)', [ids]),
-      db.query('DELETE FROM attendance_records WHERE UPPER(roll_number) = ANY($1)', [ids]),
-      db.query('DELETE FROM mentor_assignments WHERE UPPER(roll_number) = ANY($1)', [ids]),
+      db.query('DELETE FROM academics WHERE UPPER(student_id) = ANY($1)', [authorizedIds]),
+      db.query('DELETE FROM coding_profiles WHERE UPPER(student_id) = ANY($1)', [authorizedIds]),
+      db.query('DELETE FROM certifications WHERE UPPER(student_id) = ANY($1)', [authorizedIds]),
+      db.query('DELETE FROM tech_skills WHERE UPPER(student_id) = ANY($1)', [authorizedIds]),
+      db.query('DELETE FROM soft_skills WHERE UPPER(student_id) = ANY($1)', [authorizedIds]),
+      db.query('DELETE FROM achievements WHERE UPPER(student_id) = ANY($1)', [authorizedIds]),
+      db.query('DELETE FROM student_passwords WHERE UPPER(roll_number) = ANY($1)', [authorizedIds]),
+      db.query('DELETE FROM student_permissions WHERE UPPER(roll_number) = ANY($1)', [authorizedIds]),
+      db.query('DELETE FROM attendance_records WHERE UPPER(roll_number) = ANY($1)', [authorizedIds]),
+      db.query('DELETE FROM mentor_assignments WHERE UPPER(roll_number) = ANY($1)', [authorizedIds]),
     ]);
 
-    // Cognito + session cleanup — awaited so failures show in Lambda logs
-    await deleteCognitoUsers([...ids, ...emailsToDelete]);
+    await deleteCognitoUsers([...authorizedIds, ...emailsToDelete]);
 
     res.json({ deleted, message: `${deleted} student(s) and all associated records deleted successfully` });
   } catch (err: any) {

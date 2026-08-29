@@ -212,8 +212,9 @@ export const api = {
     });
   },
 
-  deleteAllStudents: async (): Promise<{ message: string }> => {
-    return fetchWithAuth('/students', { method: 'DELETE' });
+  deleteAllStudents: async (params?: { department?: string }): Promise<{ message: string; deleted?: number }> => {
+    const query = params?.department && params.department !== 'All' ? `?department=${encodeURIComponent(params.department)}` : '';
+    return fetchWithAuth(`/students${query}`, { method: 'DELETE' });
   },
 
   getStudentByEmail: async (email: string): Promise<StudentProfile | null> => {

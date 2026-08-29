@@ -357,7 +357,10 @@ export const AdminDashboardPage: React.FC = () => {
   };
 
   // Execute delete after modal confirmation
-  const deleteRequiredText = deleteModal?.type === 'all' ? 'DELETE ALL STUDENTS' : 'DELETE';
+  const isDeptScoped = departmentFilter && departmentFilter !== 'All';
+  const deleteRequiredText = deleteModal?.type === 'all'
+    ? (isDeptScoped ? `DELETE ALL ${departmentFilter.toUpperCase()} STUDENTS` : 'DELETE ALL STUDENTS')
+    : 'DELETE';
 
   // Execute delete after modal confirmation
   const handleExecuteDelete = async () => {
@@ -365,7 +368,11 @@ export const AdminDashboardPage: React.FC = () => {
     setDeleting(true);
     try {
       if (deleteModal.type === 'all') {
-        await api.deleteAllStudents();
+        if (isDeptScoped) {
+          await api.deleteAllStudents({ department: departmentFilter });
+        } else {
+          await api.deleteAllStudents();
+        }
       } else {
         await api.bulkDeleteStudents(deleteModal.rollNos);
       }
@@ -795,13 +802,19 @@ export const AdminDashboardPage: React.FC = () => {
                   Delete Section
                 </button>
               )}
-              {/* Delete All — always visible */}
+              {/* Delete All — department scoped */}
               <button
-                onClick={() => openBulkDeleteModal('all', [], `ALL ${uniqueStudents.length} students in the database`)}
+                onClick={() => {
+                  const isScoped = departmentFilter && departmentFilter !== 'All';
+                  const label = isScoped
+                    ? `ALL ${uniqueStudents.length} students in ${departmentFilter}`
+                    : `ALL ${uniqueStudents.length} students across all departments`;
+                  openBulkDeleteModal('all', uniqueStudents.map(s => s.roll_number), label);
+                }}
                 className="px-3 py-1.5 text-xs font-bold rounded-lg border border-red-400 text-red-700 bg-red-50 hover:bg-red-600 hover:text-white transition-all flex items-center gap-1.5"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                Delete All
+                {departmentFilter && departmentFilter !== 'All' ? `Delete All (${departmentFilter})` : 'Delete All'}
               </button>
             </div>
           </div>
