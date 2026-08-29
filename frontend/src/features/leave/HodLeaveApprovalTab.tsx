@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 import {
   FacultyLeaveRecord,
   StudentPermissionRecord
@@ -30,6 +31,7 @@ import { ProofViewerModal } from './ProofViewerModal';
 export const HodLeaveApprovalTab: React.FC<{ studentsOnly?: boolean }> = ({ studentsOnly = false }) => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
 
   const [activeSubTab, setActiveSubTab] = useState<'faculty' | 'students'>(studentsOnly ? 'students' : 'faculty');
   const [filterStatus, setFilterStatus] = useState<string>('All');
@@ -63,20 +65,60 @@ export const HodLeaveApprovalTab: React.FC<{ studentsOnly?: boolean }> = ({ stud
   const updateFacultyLeaveMutation = useMutation({
     mutationFn: ({ id, status, remarks }: { id: string; status: 'Approved' | 'Rejected'; remarks?: string }) =>
       api.updateFacultyLeaveStatus(id, status, remarks),
-    onSuccess: () => {
+    onMutate: async ({ id, status }) => {
+      await queryClient.cancelQueries({ queryKey: ['hodFacultyLeaves'] });
+      const prev = queryClient.getQueryData(['hodFacultyLeaves']);
+      queryClient.setQueryData(['hodFacultyLeaves'], (old: any[]) =>
+        (old || []).map((l) => (l.id === id ? { ...l, status } : l))
+      );
+      return { prev };
+    },
+    onSuccess: (_data, { status }) => {
       queryClient.invalidateQueries({ queryKey: ['hodFacultyLeaves'] });
       setActionModal(null);
       setRemarksText('');
+      showToast(
+        status === 'Approved'
+          ? 'Faculty leave approved successfully.'
+          : 'Faculty leave rejected.',
+        status === 'Approved' ? 'success' : 'error'
+      );
+    },
+    onError: (err: any, _vars, context: any) => {
+      if (context?.prev) {
+        queryClient.setQueryData(['hodFacultyLeaves'], context.prev);
+      }
+      showToast(`Failed: ${err.message || 'Something went wrong'}`, 'error');
     },
   });
 
   const updateStudentPermissionMutation = useMutation({
-    mutationFn: ({ id, status, remarks }: { id: string; status: 'Approved' | 'Rejected'; remarks?: string }) =>
-      api.updateStudentPermissionStatus(id, status, remarks),
-    onSuccess: () => {
+    mutationFn: ({ id, status, hod_remarks }: { id: string; status: 'Approved' | 'Rejected'; hod_remarks?: string }) =>
+      api.updateStudentPermissionStatus(id, status, hod_remarks),
+    onMutate: async ({ id, status }) => {
+      await queryClient.cancelQueries({ queryKey: ['hodStudentPermissions'] });
+      const prev = queryClient.getQueryData(['hodStudentPermissions']);
+      queryClient.setQueryData(['hodStudentPermissions'], (old: any[]) =>
+        (old || []).map((p) => (p.id === id ? { ...p, status } : p))
+      );
+      return { prev };
+    },
+    onSuccess: (_data, { status }) => {
       queryClient.invalidateQueries({ queryKey: ['hodStudentPermissions'] });
       setActionModal(null);
       setRemarksText('');
+      showToast(
+        status === 'Approved'
+          ? '✅ On-Duty approved! Attendance will be credited as Present.'
+          : '❌ On-Duty permission rejected.',
+        status === 'Approved' ? 'success' : 'error'
+      );
+    },
+    onError: (err: any, _vars, context: any) => {
+      if (context?.prev) {
+        queryClient.setQueryData(['hodStudentPermissions'], context.prev);
+      }
+      showToast(`Failed: ${err.message || 'Something went wrong'}`, 'error');
     },
   });
 
@@ -115,7 +157,7 @@ export const HodLeaveApprovalTab: React.FC<{ studentsOnly?: boolean }> = ({ stud
       updateStudentPermissionMutation.mutate({
         id: actionModal.id,
         status: actionModal.action,
-        remarks: remarksText.trim(),
+        hod_remarks: remarksText.trim(),  // ← fixed: matches backend field name
       });
     }
   };

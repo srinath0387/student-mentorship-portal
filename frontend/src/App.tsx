@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, Suspense, lazy } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ToastProvider } from './context/ToastContext';
 import { AuthPage } from './features/auth/AuthPage';
 import { LandingPage } from './features/auth/LandingPage';
 import { Sidebar } from './components/layout/Sidebar';
@@ -150,6 +151,7 @@ export const App: React.FC = () => {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
+        <ToastProvider>
         {/* Clears React Query cache on every user/role change — prevents HOD data leaking into student view */}
         <CacheClearer />
         <Router>
@@ -181,6 +183,7 @@ export const App: React.FC = () => {
             <Route path="*" element={<RootRedirect />} />
           </Routes>
         </Router>
+        </ToastProvider>
       </AuthProvider>
     </QueryClientProvider>
   );
