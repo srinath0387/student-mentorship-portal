@@ -1445,8 +1445,28 @@ app.get('/students', async (req: Request, res: Response) => {
         else if (d.includes('eee') || d.includes('electrical') || d.includes('02')) code = '02';
         else if (d.includes('mech') || d.includes('03')) code = '03';
         else if (d.includes('civil') || d.includes('01')) code = '01';
+        else if (d === 'mba' || d.includes('business admin') || d.includes('1e') || d.includes('e00')) code = 'E00';
+        else if (d === 'mca' || d.includes('computer app') || d.includes('1f') || d.includes('f00')) code = 'F00';
 
-        if (code) {
+        if (code === 'E00') {
+          conditions.push(`(
+            LOWER(REPLACE(s.department, ' ', '')) = LOWER(REPLACE($${paramIndex}, ' ', ''))
+            OR SUBSTRING(s.roll_number, 5, 2) = '1E'
+            OR s.roll_number ILIKE '%1E00%'
+            OR s.department ILIKE '%mba%'
+          )`);
+          params.push(department);
+          paramIndex += 1;
+        } else if (code === 'F00') {
+          conditions.push(`(
+            LOWER(REPLACE(s.department, ' ', '')) = LOWER(REPLACE($${paramIndex}, ' ', ''))
+            OR SUBSTRING(s.roll_number, 5, 2) = '1F'
+            OR s.roll_number ILIKE '%1F00%'
+            OR s.department ILIKE '%mca%'
+          )`);
+          params.push(department);
+          paramIndex += 1;
+        } else if (code) {
           conditions.push(`(
             LOWER(REPLACE(s.department, ' ', '')) = LOWER(REPLACE($${paramIndex}, ' ', ''))
             OR SUBSTRING(s.roll_number, 7, 2) = $${paramIndex + 1}
@@ -1471,8 +1491,28 @@ app.get('/students', async (req: Request, res: Response) => {
       else if (d.includes('eee') || d.includes('electrical') || d.includes('02')) code = '02';
       else if (d.includes('mech') || d.includes('03')) code = '03';
       else if (d.includes('civil') || d.includes('01')) code = '01';
+      else if (d === 'mba' || d.includes('business admin') || d.includes('1e') || d.includes('e00')) code = 'E00';
+      else if (d === 'mca' || d.includes('computer app') || d.includes('1f') || d.includes('f00')) code = 'F00';
 
-      if (code) {
+      if (code === 'E00') {
+        conditions.push(`(
+          LOWER(REPLACE(s.department, ' ', '')) = LOWER(REPLACE($${paramIndex}, ' ', ''))
+          OR SUBSTRING(s.roll_number, 5, 2) = '1E'
+          OR s.roll_number ILIKE '%1E00%'
+          OR s.department ILIKE '%mba%'
+        )`);
+        params.push(targetDeptFilter);
+        paramIndex += 1;
+      } else if (code === 'F00') {
+        conditions.push(`(
+          LOWER(REPLACE(s.department, ' ', '')) = LOWER(REPLACE($${paramIndex}, ' ', ''))
+          OR SUBSTRING(s.roll_number, 5, 2) = '1F'
+          OR s.roll_number ILIKE '%1F00%'
+          OR s.department ILIKE '%mca%'
+        )`);
+        params.push(targetDeptFilter);
+        paramIndex += 1;
+      } else if (code) {
         conditions.push(`(
           LOWER(REPLACE(s.department, ' ', '')) = LOWER(REPLACE($${paramIndex}, ' ', ''))
           OR SUBSTRING(s.roll_number, 7, 2) = $${paramIndex + 1}
@@ -3763,6 +3803,8 @@ app.get('/faculty', requireRole('admin', 'hod', 'coordinator', 'faculty'), async
       if (d === 'eee' || d.includes('electrical')) return 'eee';
       if (d.includes('civil')) return 'civil';
       if (d.includes('mech')) return 'mech';
+      if (d === 'mca' || d.includes('masterofcomputer')) return 'mca';
+      if (d === 'mba' || d.includes('businessadmin')) return 'mba';
       return d;
     };
 

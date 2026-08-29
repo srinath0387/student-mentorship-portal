@@ -1,8 +1,10 @@
 import { z } from 'zod';
 
-// Registration Number Regex: 4 digits (e.g. 2309), entry type (1=regular, 5=lateral/FDH), 'A', department code (01-37), 2 alphanumeric chars
-// Regular: 23091A0428  |  Lateral: 23095A0428
-export const REGISTRATION_NUMBER_REGEX = /^\d{4}[15]A(01|02|03|04|05|32|33|34|37)[0-9A-Za-z]{2}$/i;
+// Registration Number Regex:
+// B.Tech (Regular: 23091A0428 | Lateral: 23095A0428)
+// MBA: Strictly Regular (25091E0001)
+// MCA: Strictly Regular (25091F0001)
+export const REGISTRATION_NUMBER_REGEX = /^(\d{4}[15]A(01|02|03|04|05|32|33|34|37)[0-9A-Za-z]{2}|\d{4}1E00[0-9A-Za-z]{2}|\d{4}1F00[0-9A-Za-z]{2})$/i;
 export const RGMCET_EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@rgmcet\.edu\.in$/i;
 
 // ── Department Code Map ─────────────────────────────────────────────────────
@@ -16,11 +18,19 @@ export const DEPARTMENT_CODE_MAP: Record<string, string> = {
   '33': 'CSE (AI & ML)',
   '34': 'CSE (BS)',
   '37': 'CSE (CS)',
+  'E00': 'MBA',
+  '1E00': 'MBA',
+  '1E': 'MBA',
+  'E0': 'MBA',
+  'F00': 'MCA',
+  '1F00': 'MCA',
+  '1F': 'MCA',
+  'F0': 'MCA',
   'MCA': 'MCA',
   'MBA': 'MBA',
 };
 
-export const VALID_DEPARTMENT_NAMES = Object.values(DEPARTMENT_CODE_MAP);
+export const VALID_DEPARTMENT_NAMES = Array.from(new Set(Object.values(DEPARTMENT_CODE_MAP)));
 
 /** Normalize department string variations to canonical VALID_DEPARTMENT_NAMES string */
 export function normalizeDepartmentName(dept?: string): string {
@@ -41,20 +51,34 @@ export function normalizeDepartmentName(dept?: string): string {
   return match || dept;
 }
 
-/** Extract the 2-character department code from a roll number (positions 6-7, 0-indexed) */
+/** Extract the department code from a roll number */
 export function getDeptCodeFromRollNumber(rollNumber: string): string {
-  return rollNumber.substring(6, 8);
+  const upper = (rollNumber || '').trim().toUpperCase();
+  if (upper.length >= 8) {
+    if (upper.substring(5, 8) === 'E00' || upper.substring(4, 6) === '1E') return 'E00';
+    if (upper.substring(5, 8) === 'F00' || upper.substring(4, 6) === '1F') return 'F00';
+    return upper.substring(6, 8);
+  }
+  return upper;
 }
 
 /** Get department name from roll number */
 export function getDeptFromRollNumber(rollNumber: string): string {
-  const code = getDeptCodeFromRollNumber(rollNumber);
+  const upper = (rollNumber || '').trim().toUpperCase();
+  if (upper.includes('1E00') || upper.substring(5, 8) === 'E00' || upper.substring(4, 6) === '1E') {
+    return 'MBA';
+  }
+  if (upper.includes('1F00') || upper.substring(5, 8) === 'F00' || upper.substring(4, 6) === '1F') {
+    return 'MCA';
+  }
+  const code = getDeptCodeFromRollNumber(upper);
   return DEPARTMENT_CODE_MAP[code] || 'Unknown';
 }
 
-/** Check if a roll number indicates lateral entry (FDH) — position 4 is '5' */
+/** Check if a roll number indicates lateral entry (FDH) — only B.Tech position 4 is '5' */
 export function isLateralEntry(rollNumber: string): boolean {
-  return rollNumber.charAt(4) === '5';
+  const upper = (rollNumber || '').trim().toUpperCase();
+  return upper.length === 10 && upper.charAt(4) === '5' && upper.charAt(5) === 'A';
 }
 
 export const studentSignUpSchema = z.object({
@@ -64,7 +88,7 @@ export const studentSignUpSchema = z.object({
   registrationNumber: z.string()
     .trim()
     .regex(REGISTRATION_NUMBER_REGEX, {
-      message: "10 characters required (e.g. 23091A3251 or 23095A3251). Must contain a valid department code.",
+      message: "10 characters required (e.g. 23091A3251, 25091E0001 for MBA, or 25091F0001 for MCA).",
     })
     .transform((val) => val.toUpperCase()),
   year: z.enum(['1st Year', '2nd Year', '3rd Year', '4th Year'], {

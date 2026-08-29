@@ -22,8 +22,9 @@ export const AcademicsTab: React.FC<AcademicsTabProps> = ({ academics, readOnly 
   const [unlockLoading, setUnlockLoading] = useState(true);
   const { user } = useAuth();
   const activeRollNo = user?.rollNumber || '';
-  const isLateral = user?.isLateralEntry || (activeRollNo.length === 10 && activeRollNo.charAt(4) === '5');
-  const semestersToDisplay = isLateral ? [3, 4, 5, 6, 7, 8] : [1, 2, 3, 4, 5, 6, 7, 8];
+  const isPgCourse = (user?.department === 'MBA' || user?.department === 'MCA' || activeRollNo.includes('1E00') || activeRollNo.includes('1F00'));
+  const isLateral = !isPgCourse && (user?.isLateralEntry || (activeRollNo.length === 10 && activeRollNo.charAt(4) === '5'));
+  const semestersToDisplay = isPgCourse ? [1, 2, 3, 4] : (isLateral ? [3, 4, 5, 6, 7, 8] : [1, 2, 3, 4, 5, 6, 7, 8]);
 
   // Fetch semester unlock settings for this student's year
   useEffect(() => {
@@ -32,11 +33,11 @@ export const AcademicsTab: React.FC<AcademicsTabProps> = ({ academics, readOnly 
     api.getSemesterUnlockSettings()
       .then((settings) => {
         const match = settings.find((s) => s.year_label === yr);
-        setMaxAllowedSemester(match !== undefined ? match.max_semester : 8);
+        setMaxAllowedSemester(match !== undefined ? match.max_semester : (isPgCourse ? 4 : 8));
       })
-      .catch(() => setMaxAllowedSemester(8))
+      .catch(() => setMaxAllowedSemester(isPgCourse ? 4 : 8))
       .finally(() => setUnlockLoading(false));
-  }, [studentYear, readOnly]);
+  }, [studentYear, readOnly, isPgCourse]);
 
 
   // Sort academics by semester number ascending
@@ -203,7 +204,7 @@ export const AcademicsTab: React.FC<AcademicsTabProps> = ({ academics, readOnly 
           <div className="p-3.5 rounded-xl bg-background border border-borderLine flex items-center justify-between">
             <div>
               <p className="text-[10px] font-bold text-textSecondary uppercase">Completed Semesters</p>
-              <p className="text-base font-extrabold text-textPrimary mt-0.5">{sortedAcademics.length} / 8</p>
+              <p className="text-base font-extrabold text-textPrimary mt-0.5">{sortedAcademics.length} / {isPgCourse ? 4 : 8}</p>
               <p className="text-[10px] text-textSecondary mt-0.5">Tracked records</p>
             </div>
             <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600">
@@ -269,15 +270,22 @@ export const AcademicsTab: React.FC<AcademicsTabProps> = ({ academics, readOnly 
 
       {/* 3. Semester Cards Grid (Sem 1 to Sem 8, or Sem 3 to Sem 8 for Lateral Entry) */}
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <h3 className="text-base font-bold text-textPrimary">
             Semester Performance Breakdown{!readOnly && ' (Click any semester to enter/edit)'}
           </h3>
-          {isLateral && (
-            <span className="px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border border-amber-300">
-              Lateral Entry (Sem 1 &amp; 2 Excluded)
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {isPgCourse && (
+              <span className="px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 border border-purple-300">
+                2-Year Program (Sem 1 to 4)
+              </span>
+            )}
+            {isLateral && (
+              <span className="px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border border-amber-300">
+                Lateral Entry (Sem 1 &amp; 2 Excluded)
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -378,7 +386,7 @@ export const AcademicsTab: React.FC<AcademicsTabProps> = ({ academics, readOnly 
               <div>
                 <label className="block text-xs font-semibold text-textPrimary mb-1">Semester Number</label>
                 {/* readOnly — pre-filled from card; prevents bypass via manual edit (BUG-02) */}
-                <input {...register('semester')} type="number" min={1} max={8} readOnly className="w-full px-3 py-2 text-sm rounded-xl border border-borderLine bg-background/50 font-bold text-textPrimary cursor-not-allowed" />
+                <input {...register('semester')} type="number" min={1} max={isPgCourse ? 4 : 8} readOnly className="w-full px-3 py-2 text-sm rounded-xl border border-borderLine bg-background/50 font-bold text-textPrimary cursor-not-allowed" />
               </div>
               <div>
                 <label className="block text-xs font-semibold text-textPrimary mb-1">Semester GPA (0.00 - 10.00) *</label>
