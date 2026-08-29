@@ -1165,8 +1165,9 @@ export const api = {
     });
   },
 
-  getFacultyLeaveCredits: async (): Promise<any[]> => {
-    return fetchWithAuth('/admin/faculty/leave-credits');
+  getFacultyLeaveCredits: async (params?: { department?: string }): Promise<any[]> => {
+    const query = params?.department && params.department !== 'All' ? `?department=${encodeURIComponent(params.department)}` : '';
+    return fetchWithAuth(`/admin/faculty/leave-credits${query}`);
   },
 
   adjustFacultyLeaveCredit: async (data: {

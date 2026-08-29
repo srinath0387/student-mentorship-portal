@@ -16,15 +16,20 @@ import {
   Plus
 } from 'lucide-react';
 import { api } from '../../../lib/api';
+import { useAuth } from '../../../context/AuthContext';
 import { FacultyLeaveCredit, FacultyLeaveCreditLog } from '../../../types';
-import { VALID_DEPARTMENT_NAMES } from '../../../lib/validation/auth';
+import { normalizeDepartmentName, VALID_DEPARTMENT_NAMES } from '../../../lib/validation/auth';
 
 export const LeaveCreditManagementTab: React.FC = () => {
   const queryClient = useQueryClient();
   const printRef = useRef<HTMLDivElement>(null);
+  const { user } = useAuth();
+
+  const isSuperAdmin = user?.role === 'admin' && (user?.isSuperAdmin || user?.department === '*' || user?.department === 'All');
+  const userDept = !isSuperAdmin && user?.department ? normalizeDepartmentName(user.department) : 'All';
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedDept, setSelectedDept] = useState('All');
+  const [selectedDept, setSelectedDept] = useState<string>(userDept);
 
   // Edit Modal State
   const [editingCredit, setEditingCredit] = useState<{
@@ -41,10 +46,13 @@ export const LeaveCreditManagementTab: React.FC = () => {
   const [viewingLogsEmail, setViewingLogsEmail] = useState<string | null>(null);
   const [showPdfReport, setShowPdfReport] = useState<boolean>(false);
 
+  // Effective department filter to send to API
+  const activeDeptFilter = isSuperAdmin ? selectedDept : userDept;
+
   // Queries
   const { data: credits = [], isLoading: isLoadingCredits } = useQuery<FacultyLeaveCredit[]>({
-    queryKey: ['adminFacultyLeaveCredits'],
-    queryFn: () => api.getFacultyLeaveCredits(),
+    queryKey: ['adminFacultyLeaveCredits', activeDeptFilter],
+    queryFn: () => api.getFacultyLeaveCredits(activeDeptFilter !== 'All' ? { department: activeDeptFilter } : undefined),
   });
 
   const { data: creditLogs = [], isLoading: isLoadingLogs } = useQuery<FacultyLeaveCreditLog[]>({
@@ -70,8 +78,9 @@ export const LeaveCreditManagementTab: React.FC = () => {
   });
 
   const filteredCredits = useMemo(() => {
+    const targetDept = isSuperAdmin ? selectedDept : userDept;
     return credits.filter((c) => {
-      const matchDept = selectedDept === 'All' || c.department === selectedDept;
+      const matchDept = targetDept === 'All' || normalizeDepartmentName(c.department) === normalizeDepartmentName(targetDept);
       const q = searchQuery.toLowerCase().trim();
       const matchSearch =
         !q ||
@@ -80,7 +89,7 @@ export const LeaveCreditManagementTab: React.FC = () => {
         c.department?.toLowerCase().includes(q);
       return matchDept && matchSearch;
     });
-  }, [credits, selectedDept, searchQuery]);
+  }, [credits, selectedDept, userDept, isSuperAdmin, searchQuery]);
 
   const handlePrint = () => {
     window.print();
@@ -125,18 +134,25 @@ export const LeaveCreditManagementTab: React.FC = () => {
             />
           </div>
 
-          <select
-            value={selectedDept}
-            onChange={(e) => setSelectedDept(e.target.value)}
-            className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface text-textPrimary font-semibold focus:outline-none focus:border-brand-primary"
-          >
-            <option value="All">All Departments</option>
-            {VALID_DEPARTMENT_NAMES.map((d) => (
-              <option key={d} value={d}>
-                {d}
-              </option>
-            ))}
-          </select>
+          {isSuperAdmin ? (
+            <select
+              value={selectedDept}
+              onChange={(e) => setSelectedDept(e.target.value)}
+              className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface text-textPrimary font-semibold focus:outline-none focus:border-brand-primary"
+            >
+              <option value="All">All Departments</option>
+              {VALID_DEPARTMENT_NAMES.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary font-bold flex items-center gap-1.5 shrink-0">
+              <Building className="w-3.5 h-3.5 text-brand-primary" />
+              <span>{userDept}</span>
+            </div>
+          )}
         </div>
 
         <div className="text-xs text-textSecondary font-semibold">

@@ -18,6 +18,7 @@ import {
   REGISTRATION_NUMBER_REGEX,
   RGMCET_EMAIL_REGEX,
   DEPARTMENT_CODE_MAP,
+  getDeptCodeFromRollNumber,
   getDeptFromRollNumber,
   isLateralEntry,
 } from '../lib/validation';
@@ -2197,7 +2198,20 @@ app.delete('/students/:id', requireRole('admin'), async (req: Request, res: Resp
         const s = stuCheck.rows[0];
         const stuDept = (s.department || getDeptFromRollNumber(s.roll_number) || '').toLowerCase();
         const callDeptClean = callerDept.toLowerCase();
-        const callCode = getDeptCodeFromName(callerDept);
+
+        let callCode = '';
+        if (callDeptClean.includes('data science') || callDeptClean.includes('(ds)') || callDeptClean === 'ds' || callDeptClean.includes('32')) callCode = '32';
+        else if (callDeptClean.includes('ai') || callDeptClean.includes('ml') || callDeptClean.includes('33')) callCode = '33';
+        else if (callDeptClean.includes('bs') || callDeptClean.includes('business') || callDeptClean.includes('34')) callCode = '34';
+        else if (callDeptClean.includes('cyber') || callDeptClean.includes('(cs)') || callDeptClean.includes('37')) callCode = '37';
+        else if (callDeptClean === 'cse' || callDeptClean.includes('computer science') || callDeptClean.includes('05')) callCode = '05';
+        else if (callDeptClean.includes('ece') || callDeptClean.includes('electronics') || callDeptClean.includes('04')) callCode = '04';
+        else if (callDeptClean.includes('eee') || callDeptClean.includes('electrical') || callDeptClean.includes('02')) callCode = '02';
+        else if (callDeptClean.includes('mech') || callDeptClean.includes('03')) callCode = '03';
+        else if (callDeptClean.includes('civil') || callDeptClean.includes('01')) callCode = '01';
+        else if (callDeptClean === 'mba' || callDeptClean.includes('business admin') || callDeptClean.includes('1e') || callDeptClean.includes('e00')) callCode = 'E00';
+        else if (callDeptClean === 'mca' || callDeptClean.includes('computer app') || callDeptClean.includes('1f') || callDeptClean.includes('f00')) callCode = 'F00';
+
         const stuCode = getDeptCodeFromRollNumber(studentId);
         
         const isMatch = stuDept.includes(callDeptClean) || (callCode && stuCode === callCode);
@@ -9114,11 +9128,12 @@ app.get('/hod/leaves/faculty', requireRole('hod', 'admin'), async (req: Request,
     await ensureLeaveAndSubjectsHandledTables();
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
+    const isSuper = req.auth?.isSuperAdmin === true || callerDept === '*' || callerDept === 'All';
 
     let query = `SELECT * FROM faculty_leaves WHERE 1=1`;
     const params: any[] = [];
 
-    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+    if (!isSuper && callerDept && callerDept !== '*') {
       params.push(callerDept);
       query += ` AND (LOWER(REPLACE(department, ' ', '')) ILIKE '%' || LOWER(REPLACE($1, ' ', '')) || '%' OR LOWER(REPLACE($1, ' ', '')) ILIKE '%' || LOWER(REPLACE(department, ' ', '')) || '%')`;
     }
@@ -9251,11 +9266,38 @@ app.put('/principal/leaves/faculty/:id/status', requireRole('admin', 'hod'), asy
 
 // ── ADMIN FACULTY LEAVE CREDIT MANAGEMENT ENDPOINTS ─────────────────────────
 
-// GET /admin/faculty/leave-credits — List all faculty leave credits & computed usage
+// GET /admin/faculty/leave-credits — List all faculty leave credits & computed usage (scoped by department)
 app.get('/admin/faculty/leave-credits', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     await ensureLeaveAndSubjectsHandledTables();
     const currentYear = new Date().getFullYear();
+    const callerDept = req.auth?.department;
+    const isSuper = req.auth?.isSuperAdmin === true || callerDept === '*' || callerDept === 'All';
+    const reqDept = req.query.department ? String(req.query.department) : undefined;
+
+    let targetDept: string | undefined;
+    if (!isSuper && callerDept && callerDept !== 'All' && callerDept !== '*') {
+      targetDept = callerDept;
+    } else if (reqDept && reqDept !== 'All' && reqDept !== 'undefined' && reqDept !== 'null') {
+      targetDept = reqDept;
+    }
+
+    const normalizeDeptKey = (dept: string): string => {
+      if (!dept) return '';
+      const d = dept.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (d.includes('datascience') || d.includes('cseds') || d === 'ds' || d.includes('data')) return 'cseds';
+      if (d.includes('aiml') || d.includes('aiandml') || d.includes('machinelearning')) return 'cseaiml';
+      if (d.includes('cyber')) return 'csecyber';
+      if (d.includes('business') || d === 'csebs' || d === 'bs') return 'csebs';
+      if (d === 'cse' || d.includes('computerscience')) return 'cse';
+      if (d === 'ece' || d.includes('electronicsandcomm')) return 'ece';
+      if (d === 'eee' || d.includes('electrical')) return 'eee';
+      if (d.includes('civil')) return 'civil';
+      if (d.includes('mech')) return 'mech';
+      if (d === 'mca' || d.includes('masterofcomputer')) return 'mca';
+      if (d === 'mba' || d.includes('businessadmin')) return 'mba';
+      return d;
+    };
 
     // Fetch all registered faculty
     const facRes = await db.query(
@@ -9269,6 +9311,12 @@ app.get('/admin/faculty/leave-credits', requireRole('admin'), async (req: Reques
        ORDER BY f.department ASC, f.name ASC`,
       [currentYear]
     );
+
+    let facRows = facRes.rows;
+    if (targetDept) {
+      const targetKey = normalizeDeptKey(targetDept);
+      facRows = facRows.filter((f: any) => normalizeDeptKey(f.department) === targetKey);
+    }
 
     // Fetch usage for all faculty in current year
     const usageRes = await db.query(
@@ -9286,7 +9334,7 @@ app.get('/admin/faculty/leave-credits', requireRole('admin'), async (req: Reques
       usageMap[u.email][u.leave_type] = parseFloat(u.total_used || '0');
     });
 
-    const enriched = facRes.rows.map((f: any) => {
+    const enriched = facRows.map((f: any) => {
       const u = usageMap[f.email.toLowerCase()] || {};
       return {
         faculty_email: f.email,
