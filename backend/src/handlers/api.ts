@@ -1425,19 +1425,65 @@ app.get('/students', async (req: Request, res: Response) => {
     const callerDept = req.auth?.department;
     const isSuper = req.auth?.isSuperAdmin || callerDept === '*';
 
+    const targetDeptFilter = (callerRole === 'hod' && callerDept && !isSuper) ? callerDept
+      : (callerRole === 'admin' && callerDept && !isSuper) ? callerDept
+      : (department && String(department) !== 'All' && String(department) !== 'undefined' && String(department) !== 'null') ? String(department)
+      : null;
+
     // Coordinator or S&H departments see ALL 1st-year students across all branches
     if (callerRole === 'coordinator' || (callerDept && FIRST_YEAR_SCOPE_DEPTS.includes(callerDept))) {
       conditions.push(`(s.year = '1st Year' OR s.year ILIKE '1%')`);
       if (department && String(department) !== 'All' && String(department) !== 'undefined' && String(department) !== 'null') {
-        conditions.push(`(LOWER(REPLACE(s.department, ' ', '')) = LOWER(REPLACE($${paramIndex++}, ' ', '')))`);
-        params.push(String(department));
+        const d = String(department).toLowerCase().trim();
+        let code = '';
+        if (d.includes('data science') || d.includes('(ds)') || d === 'ds' || d.includes('32')) code = '32';
+        else if (d.includes('ai') || d.includes('ml') || d.includes('33')) code = '33';
+        else if (d.includes('bs') || d.includes('business') || d.includes('34')) code = '34';
+        else if (d.includes('cyber') || d.includes('(cs)') || d.includes('37')) code = '37';
+        else if (d === 'cse' || d.includes('computer science') || d.includes('05')) code = '05';
+        else if (d.includes('ece') || d.includes('electronics') || d.includes('04')) code = '04';
+        else if (d.includes('eee') || d.includes('electrical') || d.includes('02')) code = '02';
+        else if (d.includes('mech') || d.includes('03')) code = '03';
+        else if (d.includes('civil') || d.includes('01')) code = '01';
+
+        if (code) {
+          conditions.push(`(
+            LOWER(REPLACE(s.department, ' ', '')) = LOWER(REPLACE($${paramIndex}, ' ', ''))
+            OR SUBSTRING(s.roll_number, 7, 2) = $${paramIndex + 1}
+            OR s.department ILIKE $${paramIndex + 2}
+          )`);
+          params.push(department, code, `%${code === '32' ? 'data science' : code === '05' ? 'computer science' : department}%`);
+          paramIndex += 3;
+        } else {
+          conditions.push(`(LOWER(REPLACE(s.department, ' ', '')) = LOWER(REPLACE($${paramIndex++}, ' ', '')))`);
+          params.push(String(department));
+        }
       }
-    } else if (!isSuper && callerDept && (callerRole === 'admin' || callerRole === 'hod' || callerRole === 'student')) {
-      conditions.push(`(LOWER(REPLACE(s.department, ' ', '')) = LOWER(REPLACE($${paramIndex++}, ' ', '')))`);
-      params.push(callerDept);
-    } else if (department && String(department) !== 'All' && String(department) !== 'undefined' && String(department) !== 'null') {
-      conditions.push(`(LOWER(REPLACE(s.department, ' ', '')) = LOWER(REPLACE($${paramIndex++}, ' ', '')))`);
-      params.push(String(department));
+    } else if (targetDeptFilter) {
+      const d = targetDeptFilter.toLowerCase().trim();
+      let code = '';
+      if (d.includes('data science') || d.includes('(ds)') || d === 'ds' || d.includes('32')) code = '32';
+      else if (d.includes('ai') || d.includes('ml') || d.includes('33')) code = '33';
+      else if (d.includes('bs') || d.includes('business') || d.includes('34')) code = '34';
+      else if (d.includes('cyber') || d.includes('(cs)') || d.includes('37')) code = '37';
+      else if (d === 'cse' || d.includes('computer science') || d.includes('05')) code = '05';
+      else if (d.includes('ece') || d.includes('electronics') || d.includes('04')) code = '04';
+      else if (d.includes('eee') || d.includes('electrical') || d.includes('02')) code = '02';
+      else if (d.includes('mech') || d.includes('03')) code = '03';
+      else if (d.includes('civil') || d.includes('01')) code = '01';
+
+      if (code) {
+        conditions.push(`(
+          LOWER(REPLACE(s.department, ' ', '')) = LOWER(REPLACE($${paramIndex}, ' ', ''))
+          OR SUBSTRING(s.roll_number, 7, 2) = $${paramIndex + 1}
+          OR s.department ILIKE $${paramIndex + 2}
+        )`);
+        params.push(targetDeptFilter, code, `%${code === '32' ? 'data science' : code === '05' ? 'computer science' : targetDeptFilter}%`);
+        paramIndex += 3;
+      } else {
+        conditions.push(`(LOWER(REPLACE(s.department, ' ', '')) = LOWER(REPLACE($${paramIndex++}, ' ', '')))`);
+        params.push(targetDeptFilter);
+      }
     }
 
     if (batch && String(batch) !== 'All' && String(batch) !== 'undefined' && String(batch) !== 'null') {
