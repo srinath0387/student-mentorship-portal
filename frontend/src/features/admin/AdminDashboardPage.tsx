@@ -357,8 +357,11 @@ export const AdminDashboardPage: React.FC = () => {
   };
 
   // Execute delete after modal confirmation
+  const deleteRequiredText = deleteModal?.type === 'all' ? 'DELETE ALL STUDENTS' : 'DELETE';
+
+  // Execute delete after modal confirmation
   const handleExecuteDelete = async () => {
-    if (!deleteModal || deleteConfirmText !== 'DELETE') return;
+    if (!deleteModal || deleteConfirmText !== deleteRequiredText) return;
     setDeleting(true);
     try {
       if (deleteModal.type === 'all') {
@@ -2191,7 +2194,14 @@ export const AdminDashboardPage: React.FC = () => {
             </div>
 
             {/* What will be deleted */}
-            <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+            <div className={`rounded-xl px-4 py-3 text-sm border ${
+              deleteModal.type === 'all'
+                ? 'bg-red-100 border-red-400 text-red-800'
+                : 'bg-red-50 border-red-200 text-red-700'
+            }`}>
+              {deleteModal.type === 'all' && (
+                <p className="text-xs font-black uppercase tracking-widest text-red-600 mb-1.5">⚠️ DANGER — Mass Delete</p>
+              )}
               <p className="font-semibold mb-0.5">You are about to delete:</p>
               <p className="font-bold">{deleteModal.label}</p>
               <p className="text-xs mt-1.5 text-red-600">
@@ -2202,13 +2212,15 @@ export const AdminDashboardPage: React.FC = () => {
             {/* Type to confirm */}
             <div>
               <label className="block text-xs font-semibold text-textPrimary mb-1.5">
-                Type <span className="font-black text-red-600 tracking-widest">DELETE</span> to confirm:
+                Type{' '}
+                <span className="font-black text-red-600 tracking-widest">{deleteRequiredText}</span>
+                {' '}to confirm:
               </label>
               <input
                 type="text"
                 value={deleteConfirmText}
                 onChange={(e) => setDeleteConfirmText(e.target.value)}
-                placeholder="Type DELETE here"
+                placeholder={`Type ${deleteRequiredText} here`}
                 className="w-full px-3.5 py-2 text-sm rounded-xl border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-red-400 font-mono tracking-widest"
                 autoFocus
               />
@@ -2224,7 +2236,7 @@ export const AdminDashboardPage: React.FC = () => {
               </button>
               <button
                 onClick={handleExecuteDelete}
-                disabled={deleteConfirmText !== 'DELETE' || deleting}
+                disabled={deleteConfirmText !== deleteRequiredText || deleting}
                 className="flex-1 py-2.5 rounded-xl bg-red-600 text-white text-sm font-bold hover:bg-red-700 transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {deleting ? (
