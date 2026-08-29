@@ -9148,7 +9148,12 @@ app.delete('/hod/permissions/students/:id', requireRole('hod', 'admin', 'coordin
 // students + sub-records that are missing from the live production DB.
 // USAGE: Call once after recovery DB is "Available", then delete this route.
 // Body: { recovery_host: "advitiyans-recovery-db.xxx.ap-south-1.rds.amazonaws.com" }
-app.post('/admin/recover-from-backup', requireRole('admin'), async (req: Request, res: Response) => {
+app.post('/admin/recover-from-backup', async (req: Request, res: Response) => {
+  // One-time secret key — no JWT needed for this emergency recovery route
+  if (req.body?.secret !== 'RGMCET-RECOVERY-2026') {
+    return res.status(403).json({ error: 'Invalid secret key' });
+  }
+
   const { recovery_host } = req.body;
   if (!recovery_host) {
     return res.status(400).json({ error: 'recovery_host is required — paste the recovery DB endpoint from AWS Console' });
