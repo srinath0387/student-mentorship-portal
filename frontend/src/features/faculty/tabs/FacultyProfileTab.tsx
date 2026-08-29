@@ -50,6 +50,7 @@ import {
 import { PillButton } from '../../../components/common/PillButton';
 import { formatExternalUrl } from '../../../lib/urlUtils';
 import { SubjectsHandledSection } from '../components/SubjectsHandledSection';
+import { VALID_DEPARTMENT_NAMES } from '../../../lib/validation/auth';
 
 const BLOOD_GROUPS: BloodGroup[] = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'];
 const DESIGNATIONS: FacultyDesignation[] = ['Assistant Professor', 'Associate Professor', 'Professor'];
@@ -86,6 +87,7 @@ export const FacultyProfileTab: React.FC = () => {
   });
 
   // Local form states
+  const [department, setDepartment] = useState('CSE');
   const [phone, setPhone] = useState('');
   const [bloodGroup, setBloodGroup] = useState<BloodGroup | ''>('');
   const [linkedinUrl, setLinkedinUrl] = useState('');
@@ -183,6 +185,7 @@ export const FacultyProfileTab: React.FC = () => {
   useEffect(() => {
     if (profileData) {
       const p = profileData.personal || {};
+      setDepartment(p.department || user?.department || 'CSE');
       setPhone(p.phone || '');
       setBloodGroup(p.blood_group || '');
       setLinkedinUrl(p.linkedin_url || '');
@@ -221,7 +224,7 @@ export const FacultyProfileTab: React.FC = () => {
         faculty_id: profileData?.personal?.faculty_id || user?.rollNumber || 'FAC001',
         name: profileData?.personal?.name || user?.name || 'Faculty Member',
         email: email,
-        department: profileData?.personal?.department || user?.department || 'CSE (Data Science)',
+        department: department || profileData?.personal?.department || user?.department || 'CSE',
         phone,
         blood_group: bloodGroup as BloodGroup,
         linkedin_url: linkedinUrl,
@@ -250,6 +253,7 @@ export const FacultyProfileTab: React.FC = () => {
     profileData,
     user,
     email,
+    department,
     phone,
     bloodGroup,
     linkedinUrl,
@@ -725,17 +729,22 @@ export const FacultyProfileTab: React.FC = () => {
 
           <div>
             <div className="flex justify-between items-center mb-1">
-              <label className="block text-xs font-semibold text-textSecondary">Branch / Department</label>
-              <span className="text-[10px] text-textMuted flex items-center gap-0.5">
-                <Lock className="w-3 h-3" /> Auto-filled
+              <label className="block text-xs font-semibold text-textSecondary">Branch / Department *</label>
+              <span className="text-[10px] text-brand-primary font-medium flex items-center gap-0.5">
+                <Building className="w-3 h-3" /> Selectable
               </span>
             </div>
-            <input
-              type="text"
-              readOnly
-              value={profileData?.personal?.department || user?.department || 'CSE (Data Science)'}
-              className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-surface-2 text-textPrimary cursor-not-allowed font-medium opacity-90"
-            />
+            <select
+              value={department}
+              onChange={(e) => setDepartment(e.target.value)}
+              className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background text-textPrimary font-semibold focus:outline-none focus:ring-2 focus:ring-brand-primary"
+            >
+              {VALID_DEPARTMENT_NAMES.map((dept) => (
+                <option key={dept} value={dept}>
+                  {dept}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 

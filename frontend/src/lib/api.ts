@@ -433,6 +433,14 @@ export const api = {
     });
   },
 
+  // Update faculty department (admin or faculty owner)
+  patchFacultyDepartment: async (facultyId: string, department: string): Promise<any> => {
+    return fetchWithAuth(`/faculty/${encodeURIComponent(facultyId)}/department`, {
+      method: 'PATCH',
+      body: JSON.stringify({ department }),
+    });
+  },
+
   // Delete a faculty record (admin) — also blocks their email
   deleteFaculty: async (facultyId: string): Promise<any> => {
     return fetchWithAuth(`/faculty/${facultyId}`, { method: 'DELETE' });

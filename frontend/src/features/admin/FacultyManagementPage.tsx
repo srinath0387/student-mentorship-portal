@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import { Search, Mail, Pencil, Link, Trash2, AlertTriangle, Users, Check, X, ShieldAlert, UserCheck, RefreshCw, UserPlus, Eye, Filter } from 'lucide-react';
+import { Search, Mail, Pencil, Link, Trash2, AlertTriangle, Users, Check, X, ShieldAlert, UserCheck, RefreshCw, UserPlus, Eye, Filter, Building } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { VALID_DEPARTMENT_NAMES, normalizeDepartmentName } from '../../lib/validation/auth';
 import { AddMenteeModal } from './components/AddMenteeModal';
@@ -74,10 +74,23 @@ export default function FacultyManagementPage() {
     enabled: showBlocked,
   });
 
+  const [changeDeptId, setChangeDeptId] = useState<string | null>(null);
+  const [changeDeptValue, setChangeDeptValue] = useState<string>('CSE');
+
   const renameMut = useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) => api.patchFacultyName(id, name),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['adminFaculty'] }); setRenameId(null); },
     onError: (e: any) => setActionError(p => ({ ...p, rename: e.message })),
+  });
+
+  const changeDeptMut = useMutation({
+    mutationFn: ({ id, department }: { id: string; department: string }) => api.patchFacultyDepartment(id, department),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['adminFaculty'] });
+      qc.invalidateQueries({ queryKey: ['adminFacultyLeaveCredits'] });
+      setChangeDeptId(null);
+    },
+    onError: (e: any) => setActionError(p => ({ ...p, changeDept: e.message })),
   });
 
   const linkEmailMut = useMutation({
@@ -408,6 +421,13 @@ export default function FacultyManagementPage() {
                         <Pencil className="w-3 h-3" /> Rename
                       </button>
                       <button
+                        onClick={() => { setChangeDeptId(f.faculty_id); setChangeDeptValue(f.department || 'CSE'); }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-purple-400/40 bg-surface text-purple-600 dark:text-purple-400 text-xs font-semibold hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors"
+                        title="Transfer / Change Department"
+                      >
+                        <Building className="w-3 h-3" /> Change Dept
+                      </button>
+                      <button
                         onClick={() => { setLinkEmailId(f.faculty_id); setLinkEmailValue(f.email || ''); }}
                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-sky-400/40 bg-surface text-sky-600 dark:text-sky-400 text-xs font-semibold hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-colors"
                       >
@@ -436,6 +456,34 @@ export default function FacultyManagementPage() {
                         </button>
                       )}
                     </div>
+
+                    {changeDeptId === f.faculty_id && (
+                      <div className="flex items-center gap-1.5 mt-2.5 p-2 rounded-xl bg-purple-50 dark:bg-purple-950/30 border border-purple-300 dark:border-purple-800" onClick={e => e.stopPropagation()}>
+                        <span className="text-[11px] font-bold text-purple-700 dark:text-purple-300">Dept:</span>
+                        <select
+                          value={changeDeptValue}
+                          onChange={e => setChangeDeptValue(e.target.value)}
+                          className="flex-1 px-2 py-1 text-xs rounded-lg border border-purple-400 bg-background text-textPrimary font-semibold focus:outline-none"
+                        >
+                          {VALID_DEPARTMENT_NAMES.map(d => (
+                            <option key={d} value={d}>{d}</option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={() => changeDeptMut.mutate({ id: f.faculty_id, department: changeDeptValue })}
+                          disabled={changeDeptMut.isPending}
+                          className="px-2.5 py-1 rounded-lg bg-purple-600 text-white text-xs font-semibold inline-flex items-center gap-1 hover:bg-purple-700 cursor-pointer disabled:opacity-50"
+                        >
+                          <Check className="w-3 h-3" /> Save
+                        </button>
+                        <button
+                          onClick={() => setChangeDeptId(null)}
+                          className="px-2 py-1 rounded-lg bg-background text-textSecondary text-xs border border-borderLine hover:bg-surface-2 cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })}

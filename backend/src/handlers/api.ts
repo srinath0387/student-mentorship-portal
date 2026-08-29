@@ -3724,7 +3724,15 @@ app.put('/faculty/full-profile/:email', async (req: Request, res: Response) => {
 
     await ensureFacultyProfileTable();
 
-    // Preserve locked fields (Name, Email, Dept) from base faculty table
+    // Sync department to base faculty table if provided
+    const newDept = data.personal?.department ? String(data.personal.department).trim() : null;
+    if (newDept) {
+      await db.query(
+        'UPDATE faculty SET department = $1, updated_at = CURRENT_TIMESTAMP WHERE LOWER(email) = $2',
+        [newDept, email]
+      ).catch(() => {});
+    }
+
     const facRes = await db.query('SELECT * FROM faculty WHERE LOWER(email) = $1', [email]);
     const fac = facRes.rows[0];
     const facultyId = fac?.faculty_id || data.personal?.faculty_id || `FAC_${email.split('@')[0].toUpperCase()}`;
@@ -4075,6 +4083,66 @@ app.patch('/faculty/:id/name', requireRole('admin'), async (req: Request, res: R
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Faculty not found' });
     res.json({ message: 'Name updated successfully', faculty: result.rows[0] });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /faculty/:id/department — Admin or Faculty owner updates a faculty member's department
+app.patch('/faculty/:id/department', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const facId = req.params.id.trim();
+    const { department } = req.body;
+    const callerRole = req.auth?.role;
+    const callerEmail = (req.auth?.email || '').toLowerCase().trim();
+
+    if (!department || typeof department !== 'string' || !department.trim()) {
+      return res.status(400).json({ error: 'department is required' });
+    }
+    const cleanDept = department.trim();
+
+    if (db.isMock) {
+      return res.json({ message: `Department updated to ${cleanDept}`, faculty_id: facId, department: cleanDept });
+    }
+
+    // Lookup existing faculty
+    const existing = await db.query(
+      'SELECT * FROM faculty WHERE UPPER(faculty_id) = $1 OR LOWER(email) = $2',
+      [facId.toUpperCase(), facId.toLowerCase()]
+    );
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Faculty record not found' });
+    }
+    const facultyRow = existing.rows[0];
+
+    const isOwner = facultyRow.email && facultyRow.email.toLowerCase() === callerEmail;
+    const isAdmin = callerRole === 'admin' || callerRole === 'hod';
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ error: 'Unauthorized: You can only update your own department or must be an admin' });
+    }
+
+    // Update in faculty table
+    const result = await db.query(
+      `UPDATE faculty SET department = $1, updated_at = CURRENT_TIMESTAMP WHERE UPPER(faculty_id) = $2 OR LOWER(email) = $3 RETURNING *`,
+      [cleanDept, facultyRow.faculty_id.toUpperCase(), (facultyRow.email || '').toLowerCase()]
+    );
+
+    // Also sync in faculty_full_profiles if exists
+    if (facultyRow.email) {
+      await db.query(
+        `UPDATE faculty_full_profiles 
+         SET personal = jsonb_set(COALESCE(personal, '{}'::jsonb), '{department}', to_jsonb($1::text), true),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE LOWER(email) = $2`,
+        [cleanDept, facultyRow.email.toLowerCase()]
+      ).catch(() => {});
+    }
+
+    res.json({
+      success: true,
+      message: `Faculty department successfully updated to ${cleanDept}`,
+      faculty: result.rows[0],
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

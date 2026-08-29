@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import React, { useState, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   X,
   User,
@@ -29,6 +29,7 @@ import {
 } from '../../../lib/facultyUtils';
 import { formatExternalUrl } from '../../../lib/urlUtils';
 import { SubjectsHandledSection } from './SubjectsHandledSection';
+import { VALID_DEPARTMENT_NAMES } from '../../../lib/validation/auth';
 
 interface Props {
   faculty: {
@@ -41,23 +42,50 @@ interface Props {
   onClose: () => void;
 }
 
-function getInitials(name: string) {
+function getInitials(name: string): string {
+  if (!name) return 'FA';
   return name
     .split(' ')
     .filter(Boolean)
-    .map((w) => w[0].toUpperCase())
     .slice(0, 2)
+    .map((n) => n[0].toUpperCase())
     .join('');
 }
 
 export const FacultyProfileInspectionModal: React.FC<Props> = ({ faculty, onClose }) => {
   const email = faculty?.email || '';
+  const queryClient = useQueryClient();
+
+  const [isEditingDept, setIsEditingDept] = useState(false);
+  const [selectedDept, setSelectedDept] = useState(faculty?.department || 'CSE');
+  const [isSavingDept, setIsSavingDept] = useState(false);
+  const [deptSaveMsg, setDeptSaveMsg] = useState('');
 
   const { data: profile, isLoading } = useQuery<FacultyFullProfile>({
     queryKey: ['facultyFullProfile', email],
     queryFn: () => (email ? api.getFacultyFullProfile(email) : Promise.resolve(null)),
     enabled: Boolean(email && !email.startsWith('pending_')),
   });
+
+  const handleSaveDepartment = async () => {
+    if (!faculty) return;
+    setIsSavingDept(true);
+    try {
+      await api.patchFacultyDepartment(faculty.faculty_id, selectedDept);
+      setDeptSaveMsg(`Updated to ${selectedDept}`);
+      setIsEditingDept(false);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['adminFaculty'] }),
+        queryClient.invalidateQueries({ queryKey: ['facultyFullProfile', email] }),
+        queryClient.invalidateQueries({ queryKey: ['adminFacultyLeaveCredits'] }),
+      ]);
+      setTimeout(() => setDeptSaveMsg(''), 3000);
+    } catch (e: any) {
+      alert(`Failed to update department: ${e.message}`);
+    } finally {
+      setIsSavingDept(false);
+    }
+  };
 
   const personal: Partial<FacultyPersonalDetails> = profile?.personal || {};
   const education: Partial<FacultyEducation> = profile?.education || {};
@@ -93,13 +121,15 @@ export const FacultyProfileInspectionModal: React.FC<Props> = ({ faculty, onClos
 
   if (!faculty) return null;
 
+  const currentDisplayDept = faculty.department || selectedDept || 'CSE';
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
       <div className="bg-surface border border-borderLine rounded-2xl p-6 max-w-4xl w-full shadow-2xl relative max-h-[90vh] overflow-y-auto space-y-6">
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 text-textSecondary hover:text-textPrimary p-2 rounded-full hover:bg-surface-2 transition-colors"
+          className="absolute top-4 right-4 text-textSecondary hover:text-textPrimary p-2 rounded-full hover:bg-surface-2 transition-colors cursor-pointer"
           title="Close modal"
         >
           <X className="w-5 h-5" />
@@ -120,20 +150,67 @@ export const FacultyProfileInspectionModal: React.FC<Props> = ({ faculty, onClos
             >
               {completion.percentage}% Profile Complete
             </span>
+            {deptSaveMsg && (
+              <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-md">
+                ✓ {deptSaveMsg}
+              </span>
+            )}
           </div>
 
           <div className="flex items-start gap-4 mt-3">
             <div className="w-14 h-14 rounded-2xl bg-[#031B33] text-brand-primary border border-brand-primary/30 flex items-center justify-center text-lg font-black shrink-0">
               {getInitials(faculty.name)}
             </div>
-            <div>
+            <div className="flex-1">
               <h2 className="text-xl font-extrabold text-textPrimary">{faculty.name}</h2>
-              <p className="text-xs text-textSecondary">
-                {faculty.department || 'CSE (Data Science)'} &bull; ID: {faculty.faculty_id} &bull;{' '}
-                <span className="font-semibold text-brand-primary">
-                  {personal.designation || (faculty.role === 'hod' ? 'Head of Department' : 'Faculty Mentor')}
-                </span>
-              </p>
+              <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                {isEditingDept ? (
+                  <div className="flex items-center gap-1.5 my-1">
+                    <select
+                      value={selectedDept}
+                      onChange={(e) => setSelectedDept(e.target.value)}
+                      className="px-2 py-1 text-xs rounded-lg border border-brand-primary bg-surface text-textPrimary font-semibold focus:outline-none"
+                    >
+                      {VALID_DEPARTMENT_NAMES.map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={handleSaveDepartment}
+                      disabled={isSavingDept}
+                      className="px-2 py-1 bg-brand-primary text-white text-xs font-bold rounded-lg hover:bg-brand-hover transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    >
+                      {isSavingDept ? 'Saving...' : 'Save Dept'}
+                    </button>
+                    <button
+                      onClick={() => setIsEditingDept(false)}
+                      className="px-2 py-1 border border-borderLine bg-surface text-textSecondary text-xs rounded-lg hover:bg-surface-2 transition-all cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-xs text-textSecondary flex items-center gap-1.5">
+                    <span className="font-semibold text-textPrimary">{currentDisplayDept}</span>
+                    <button
+                      onClick={() => {
+                        setSelectedDept(currentDisplayDept);
+                        setIsEditingDept(true);
+                      }}
+                      className="text-[10px] px-1.5 py-0.5 rounded border border-borderLine hover:border-brand-primary hover:text-brand-primary text-textMuted transition-colors cursor-pointer"
+                      title="Change / Reassign Department"
+                    >
+                      ✎ Change Dept
+                    </button>
+                    <span>&bull; ID: {faculty.faculty_id} &bull;</span>
+                    <span className="font-semibold text-brand-primary">
+                      {personal.designation || (faculty.role === 'hod' ? 'Head of Department' : 'Faculty Mentor')}
+                    </span>
+                  </p>
+                )}
+              </div>
             </div>
           </div>
         </div>
