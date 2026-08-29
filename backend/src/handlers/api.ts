@@ -9250,6 +9250,46 @@ app.post('/first-year/bulk-create', requireRole('admin', 'hod', 'coordinator'), 
       }
 
       try {
+        // Parse DOB into dbDate (YYYY-MM-DD for postgres DATE column) and passDob (DDMMYYYY for bcrypt password)
+        const cleanDigits = String(s.dob || '').replace(/[^0-9]/g, '');
+        let dbDate: string | null = null;
+        let passDob = cleanDigits;
+
+        if (cleanDigits.length === 8) {
+          // DDMMYYYY format
+          let day = cleanDigits.slice(0, 2);
+          let month = cleanDigits.slice(2, 4);
+          let year = cleanDigits.slice(4, 8);
+
+          // If passed as YYYYMMDD
+          if (parseInt(cleanDigits.slice(0, 4), 10) >= 1950 && parseInt(cleanDigits.slice(0, 4), 10) <= 2050) {
+            year = cleanDigits.slice(0, 4);
+            month = cleanDigits.slice(4, 6);
+            day = cleanDigits.slice(6, 8);
+            passDob = `${day}${month}${year}`;
+          }
+
+          const dNum = parseInt(day, 10);
+          const mNum = parseInt(month, 10);
+          const yNum = parseInt(year, 10);
+          if (dNum >= 1 && dNum <= 31 && mNum >= 1 && mNum <= 12 && yNum >= 1950 && yNum <= 2050) {
+            dbDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+          }
+        } else if (String(s.dob).includes('-') || String(s.dob).includes('/')) {
+          const parts = String(s.dob).split(/[-/]/);
+          if (parts.length === 3) {
+            if (parts[0].length === 4) {
+              // YYYY-MM-DD
+              dbDate = `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+              passDob = `${parts[2].padStart(2, '0')}${parts[1].padStart(2, '0')}${parts[0]}`;
+            } else {
+              // DD-MM-YYYY
+              dbDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+              passDob = `${parts[0].padStart(2, '0')}${parts[1].padStart(2, '0')}${parts[2]}`;
+            }
+          }
+        }
+
         // Upsert student record
         const existing = await db.query(`SELECT roll_number FROM students WHERE UPPER(roll_number) = $1`, [s.roll_number.toUpperCase()]);
         if (existing.rows.length > 0) {
@@ -9269,14 +9309,13 @@ app.post('/first-year/bulk-create', requireRole('admin', 'hod', 'coordinator'), 
             s.batch || `20${String(new Date().getFullYear()).slice(-2)}-${String(new Date().getFullYear() + 4)}`,
             s.section || 'A',
             Boolean(s.is_lateral),
-            s.dob || null,
+            dbDate,
           ]
         );
 
         // Store DOB as password (bcrypt hashed) — DOB format: DDMMYYYY
-        const dobPassword = String(s.dob).replace(/[^0-9]/g, ''); // strip slashes/dashes → DDMMYYYY
-        if (dobPassword.length >= 6) {
-          const hashed = await bcrypt.hash(dobPassword, BCRYPT_ROUNDS);
+        if (passDob && passDob.length >= 6) {
+          const hashed = await bcrypt.hash(passDob, BCRYPT_ROUNDS);
           await db.query(
             `INSERT INTO student_passwords (roll_number, password, updated_at)
              VALUES ($1, $2, NOW())
