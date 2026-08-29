@@ -8945,11 +8945,45 @@ app.put('/hod/permissions/students/:id/status', requireRole('hod', 'admin', 'coo
       return res.status(404).json({ error: 'Permission request not found' });
     }
 
-    res.json({ success: true, message: `Student permission ${status.toLowerCase()} successfully.`, permission: result.rows[0] });
+    const permission = result.rows[0];
+
+    // ── Retroactive Attendance Credit ─────────────────────────────────────────
+    // When HOD approves, find all attendance_records already saved for this
+    // student where the session_date falls within the approved date range and
+    // force is_present = true — fixing cases where faculty marked attendance
+    // BEFORE the HOD had a chance to approve.
+    let retroactiveCount = 0;
+    if (status === 'Approved') {
+      try {
+        const retroRes = await db.query(
+          `UPDATE attendance_records ar
+           SET is_present = true
+           FROM attendance_sessions s
+           WHERE ar.session_id = s.id
+             AND UPPER(ar.roll_number) = UPPER($1)
+             AND s.session_date >= $2::date
+             AND s.session_date <= $3::date
+             AND ar.is_present = false`,
+          [permission.roll_number, permission.from_date, permission.to_date]
+        );
+        retroactiveCount = retroRes.rowCount ?? 0;
+      } catch (_retroErr) {
+        // Attendance tables may not exist yet — not a critical failure, approval still succeeds
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    res.json({
+      success: true,
+      message: `Student permission ${status.toLowerCase()} successfully.${retroactiveCount > 0 ? ` ${retroactiveCount} past attendance record(s) updated to Present.` : ''}`,
+      permission,
+      retroactiveAttendanceUpdated: retroactiveCount,
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 // DELETE /hod/permissions/students/:id — HOD, Coordinator, or Admin delete/cancel a student permission
 app.delete('/hod/permissions/students/:id', requireRole('hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {

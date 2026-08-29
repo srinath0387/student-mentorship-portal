@@ -107,12 +107,17 @@ export const HodLeaveApprovalTab: React.FC<{ studentsOnly?: boolean }> = ({ stud
       queryClient.invalidateQueries({ queryKey: ['hodStudentPermissions'] });
       // Also broadcast to student's own query key so their history refreshes
       queryClient.invalidateQueries({ queryKey: ['studentPermissions'] });
+      // Also invalidate student attendance summary so percentage updates
+      queryClient.invalidateQueries({ queryKey: ['studentAttendance'] });
       setActionModal(null);
       setRemarksText('');
+      // Use server message — it includes retroactive count e.g. "2 past record(s) updated to Present"
+      const serverMsg = _data?.message;
       showToast(
-        status === 'Approved'
-          ? '✅ On-Duty approved! Attendance will be credited as Present.'
-          : '❌ On-Duty permission rejected.',
+        serverMsg ||
+        (status === 'Approved'
+          ? '✅ On-Duty approved! Attendance credited as Present.'
+          : '❌ On-Duty permission rejected.'),
         status === 'Approved' ? 'success' : 'error'
       );
     },
