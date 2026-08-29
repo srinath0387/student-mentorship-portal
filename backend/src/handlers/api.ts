@@ -3646,11 +3646,11 @@ app.get('/faculty', requireRole('admin', 'hod', 'coordinator', 'faculty'), async
   try {
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
-    const isSuper = req.auth?.isSuperAdmin || callerDept === '*' || callerRole === 'coordinator' || callerRole === 'admin' || callerRole === 'faculty';
+    const isSuper = req.auth?.isSuperAdmin === true || callerDept === '*' || callerDept === 'All' || callerRole === 'coordinator';
     const reqDept = req.query.department ? String(req.query.department) : undefined;
 
     let targetDept: string | undefined;
-    if (!isSuper && callerDept) {
+    if (!isSuper && callerDept && callerDept !== 'All' && callerDept !== '*') {
       targetDept = callerDept;
     } else if (reqDept && reqDept !== 'All' && reqDept !== 'undefined' && reqDept !== 'null') {
       targetDept = reqDept;

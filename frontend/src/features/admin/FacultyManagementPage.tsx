@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import { Search, Mail, Pencil, Link, Trash2, AlertTriangle, Users, Check, X, ShieldAlert, UserCheck, RefreshCw, UserPlus, Eye } from 'lucide-react';
+import { Search, Mail, Pencil, Link, Trash2, AlertTriangle, Users, Check, X, ShieldAlert, UserCheck, RefreshCw, UserPlus, Eye, Filter } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { VALID_DEPARTMENT_NAMES, normalizeDepartmentName } from '../../lib/validation/auth';
 import { AddMenteeModal } from './components/AddMenteeModal';
 import { FacultyProfileInspectionModal } from '../faculty/components/FacultyProfileInspectionModal';
 
@@ -35,7 +37,14 @@ interface BlockedEmail {
 }
 
 export default function FacultyManagementPage() {
+  const { user } = useAuth();
   const qc = useQueryClient();
+
+  const isSuperAdmin = user?.isSuperAdmin === true || user?.department === 'All' || user?.department === '*' || !user?.department;
+  const [selectedDept, setSelectedDept] = useState<string>(
+    isSuperAdmin ? 'All' : normalizeDepartmentName(user?.department || 'CSE')
+  );
+
   const [selectedFaculty, setSelectedFaculty] = useState<FacultyRow | null>(null);
   const [inspectingFaculty, setInspectingFaculty] = useState<FacultyRow | null>(null);
   const [showAddMenteeModal, setShowAddMenteeModal] = useState(false);
@@ -49,8 +58,8 @@ export default function FacultyManagementPage() {
   const [actionError, setActionError] = useState<Record<string, string>>({});
 
   const { data: faculty = [], isLoading: facLoading } = useQuery<FacultyRow[]>({
-    queryKey: ['adminFaculty'],
-    queryFn: () => api.getAllFaculty(),
+    queryKey: ['adminFaculty', selectedDept],
+    queryFn: () => api.getAllFaculty(selectedDept === 'All' ? undefined : selectedDept),
   });
 
   const { data: mentees = [], isLoading: menteesLoading } = useQuery<MenteeRow[]>({
@@ -112,11 +121,14 @@ export default function FacultyManagementPage() {
   // Detect unlinked faculty with mentees (possible duplicates or orphaned records)
   const unlinkedWithMentees = faculty.filter(f => f.email?.startsWith('pending_') && (f.mentee_count ?? 0) > 0);
 
-  const filtered = faculty.filter(f =>
-    (f.name || '').toLowerCase().includes(search.toLowerCase()) ||
-    (f.email || '').toLowerCase().includes(search.toLowerCase()) ||
-    (f.faculty_id || '').toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = faculty.filter(f => {
+    const matchSearch =
+      (f.name || '').toLowerCase().includes(search.toLowerCase()) ||
+      (f.email || '').toLowerCase().includes(search.toLowerCase()) ||
+      (f.faculty_id || '').toLowerCase().includes(search.toLowerCase());
+    const matchDept = selectedDept === 'All' || f.department === selectedDept;
+    return matchSearch && matchDept;
+  });
 
   return (
     <div className="flex flex-col gap-6">
@@ -130,10 +142,35 @@ export default function FacultyManagementPage() {
           </div>
           <h1 className="text-xl font-extrabold text-textPrimary">Faculty Management</h1>
           <p className="mt-0.5 text-xs text-textSecondary">
-            {faculty.length} faculty members — select a row to view assigned mentees
+            {faculty.length} faculty member{faculty.length !== 1 ? 's' : ''} {selectedDept !== 'All' ? `(${selectedDept})` : ''} — select a row to view assigned mentees
           </p>
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap items-center">
+          {/* Department Filter for Super Admin or Locked Badge for Dept Admin */}
+          {isSuperAdmin ? (
+            <div className="flex items-center gap-1.5 bg-surface-2 border border-borderLine rounded-xl px-3 py-2 text-xs">
+              <Filter className="w-3.5 h-3.5 text-textSecondary" />
+              <span className="font-bold text-textMuted uppercase text-[10px]">Dept:</span>
+              <select
+                value={selectedDept}
+                onChange={(e) => setSelectedDept(e.target.value)}
+                className="bg-transparent text-xs font-bold text-textPrimary focus:outline-none cursor-pointer"
+              >
+                <option value="All">All Departments</option>
+                {VALID_DEPARTMENT_NAMES.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 bg-brand-soft border border-brand-primary/30 rounded-xl px-3.5 py-2 text-xs font-bold text-brand-primary">
+              <Users className="w-3.5 h-3.5" />
+              <span>Dept: {user?.department || selectedDept}</span>
+            </div>
+          )}
+
           {/* Sync button: reconciles mentor_assignments ↔ students.faculty_mentor_id */}
           <button
             id="sync-mentor-assignments-btn"
