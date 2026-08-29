@@ -776,10 +776,15 @@ export const AuthPage: React.FC = () => {
 
       // Step 3: Extract DB profile info (using pre-fetched DB user if available)
       if (activeTab === 'student') {
+        const rollFromEmail = data.email.includes('@') ? data.email.split('@')[0].toUpperCase() : data.email.toUpperCase();
         let student = preFetchedDbUser;
         if (!student) {
-          student = await api.getStudentByEmail(data.email);
+          student = await api.getStudentByEmail(data.email).catch(() => null);
         }
+        if (!student && rollFromEmail) {
+          student = await api.getStudentProfile(rollFromEmail).catch(() => null);
+        }
+
         // IMPORTANT: If student authenticated via Cognito but is NOT in the database,
         // it means an admin deleted them. We must block login and NOT recreate their profile.
         if (!student) {
@@ -787,8 +792,8 @@ export const AuthPage: React.FC = () => {
           throw new Error('Your account has been removed by an administrator. Please contact the system admin to be re-enrolled.');
         }
 
-        rollNo = student.roll_number;
-        displayName = student.name;
+        rollNo = student.roll_number || rollFromEmail;
+        displayName = student.name || 'Student';
         const studentDept = student.department || (rollNo ? getDeptFromRollNumber(rollNo) : 'CSE (Data Science)');
         
         // Department is always taken from the student's DB record / roll number — no manual selection needed

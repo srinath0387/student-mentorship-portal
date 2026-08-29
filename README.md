@@ -1,4 +1,4 @@
-# Advitiyans — Student 360° & Placement Readiness Platform (AWS)
+# Advitiyans — Student 360° & Placement Readiness Platform (AWS-Cloud)
 
 **Advitiyans** is a full-stack, serverless web application built for higher education institutions (RGMCET). It enables students to track academics, technical skills, coding profiles (GitHub, LeetCode, HackerRank, Kaggle), certifications, soft skills, achievements, and real-time employability scoring.
 
