@@ -2015,11 +2015,25 @@ app.delete('/students/:id', requireRole('admin'), async (req: Request, res: Resp
       return res.status(404).json({ error: 'Student not found in database' });
     }
 
+    // Clean up all related tables across the entire platform
+    await Promise.allSettled([
+      db.query('DELETE FROM academics WHERE UPPER(student_id) = $1', [studentId]),
+      db.query('DELETE FROM coding_profiles WHERE UPPER(student_id) = $1', [studentId]),
+      db.query('DELETE FROM certifications WHERE UPPER(student_id) = $1', [studentId]),
+      db.query('DELETE FROM tech_skills WHERE UPPER(student_id) = $1', [studentId]),
+      db.query('DELETE FROM soft_skills WHERE UPPER(student_id) = $1', [studentId]),
+      db.query('DELETE FROM achievements WHERE UPPER(student_id) = $1', [studentId]),
+      db.query('DELETE FROM student_passwords WHERE UPPER(roll_number) = $1', [studentId]),
+      db.query('DELETE FROM student_permissions WHERE UPPER(roll_number) = $1', [studentId]),
+      db.query('DELETE FROM attendance_records WHERE UPPER(roll_number) = $1', [studentId]),
+      db.query('DELETE FROM mentor_assignments WHERE UPPER(roll_number) = $1', [studentId]),
+    ]);
+
     // Cognito + session cleanup — awaited so errors appear in Lambda logs
     // (does NOT throw — errors are caught and logged inside deleteCognitoUsers)
     await deleteCognitoUsers([studentId, studentEmail]);
 
-    res.json({ message: `Student ${studentId} deleted successfully` });
+    res.json({ message: `Student ${studentId} and all associated records deleted successfully` });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -2058,10 +2072,24 @@ app.post('/admin/students/bulk-delete', requireRole('admin'), async (req: Reques
     );
     const deleted = result.rows.length;
 
+    // Clean up all related tables in parallel
+    await Promise.allSettled([
+      db.query('DELETE FROM academics WHERE UPPER(student_id) = ANY($1)', [ids]),
+      db.query('DELETE FROM coding_profiles WHERE UPPER(student_id) = ANY($1)', [ids]),
+      db.query('DELETE FROM certifications WHERE UPPER(student_id) = ANY($1)', [ids]),
+      db.query('DELETE FROM tech_skills WHERE UPPER(student_id) = ANY($1)', [ids]),
+      db.query('DELETE FROM soft_skills WHERE UPPER(student_id) = ANY($1)', [ids]),
+      db.query('DELETE FROM achievements WHERE UPPER(student_id) = ANY($1)', [ids]),
+      db.query('DELETE FROM student_passwords WHERE UPPER(roll_number) = ANY($1)', [ids]),
+      db.query('DELETE FROM student_permissions WHERE UPPER(roll_number) = ANY($1)', [ids]),
+      db.query('DELETE FROM attendance_records WHERE UPPER(roll_number) = ANY($1)', [ids]),
+      db.query('DELETE FROM mentor_assignments WHERE UPPER(roll_number) = ANY($1)', [ids]),
+    ]);
+
     // Cognito + session cleanup — awaited so failures show in Lambda logs
     await deleteCognitoUsers([...ids, ...emailsToDelete]);
 
-    res.json({ deleted, message: `${deleted} student(s) deleted successfully` });
+    res.json({ deleted, message: `${deleted} student(s) and all associated records deleted successfully` });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
