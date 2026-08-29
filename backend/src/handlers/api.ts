@@ -1814,17 +1814,25 @@ app.get('/student/mentor', async (req: Request, res: Response) => {
   }
 });
 
-// GET /students/by-email/:email — Lookup Student by Email
+// GET /students/by-email/:email — Lookup Student by Email or Roll Number prefix
 app.get('/students/by-email/:email', async (req: Request, res: Response) => {
   try {
     const emailStr = String(req.params.email).toLowerCase().trim();
+    const rollFromEmail = emailStr.includes('@') ? emailStr.split('@')[0].toUpperCase() : emailStr.toUpperCase();
     if (db.isMock) {
       for (const s of db.mockStore.students.values()) {
-        if (s.email.toLowerCase() === emailStr) return res.json(s);
+        if (s.email.toLowerCase() === emailStr || s.roll_number.toUpperCase() === rollFromEmail) return res.json(s);
       }
       return res.status(404).json({ error: 'Student not found with this email' });
     }
-    const result = await db.query('SELECT * FROM students WHERE LOWER(email) = $1', [emailStr]);
+    const result = await db.query(
+      `SELECT * FROM students 
+       WHERE LOWER(email) = $1 
+          OR UPPER(roll_number) = $2 
+          OR LOWER(personal_email) = $1 
+       LIMIT 1`,
+      [emailStr, rollFromEmail]
+    );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Student not found with this email' });
     }
