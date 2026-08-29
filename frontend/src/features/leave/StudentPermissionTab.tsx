@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 import {
   StudentPermissionRecord,
   StudentPermissionType,
@@ -31,6 +32,7 @@ interface StudentPermissionTabProps {
 export const StudentPermissionTab: React.FC<StudentPermissionTabProps> = ({ rollNumber }) => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const activeRollNo = (rollNumber || user?.rollNumber || '').toUpperCase().trim();
 
   const [showApplyModal, setShowApplyModal] = useState(false);
@@ -91,10 +93,10 @@ export const StudentPermissionTab: React.FC<StudentPermissionTabProps> = ({ roll
       queryClient.invalidateQueries({ queryKey: ['studentPermissions', activeRollNo] });
       setShowApplyModal(false);
       resetForm();
-      alert(res.message || 'Permission application submitted and sent to HOD for approval!');
+      showToast(res.message || 'Permission submitted! Awaiting HOD approval.', 'success');
     },
     onError: (err: any) => {
-      alert(`Failed to submit: ${err.message}`);
+      showToast(`Failed to submit: ${err.message}`, 'error');
     },
   });
 
@@ -113,8 +115,10 @@ export const StudentPermissionTab: React.FC<StudentPermissionTabProps> = ({ roll
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-      setProofError('File size exceeds 5MB limit.');
+    // Base64 encoding inflates file size by ~33%, so a 5MB file becomes ~6.7MB.
+    // AWS Lambda has a hard 4.5MB request body limit → cap at 3MB to stay safe.
+    if (file.size > 3 * 1024 * 1024) {
+      setProofError('File size exceeds 3MB limit. Please compress the file or upload a smaller version.');
       return;
     }
 

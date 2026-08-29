@@ -8834,17 +8834,6 @@ app.delete('/hod/leaves/faculty/:id', requireRole('hod', 'admin'), async (req: R
   }
 });
 
-// DELETE /hod/permissions/students/:id — HOD or Admin delete/cancel a student permission
-app.delete('/hod/permissions/students/:id', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
-  try {
-    await ensureLeaveAndSubjectsHandledTables();
-    const { id } = req.params;
-    await db.query('DELETE FROM student_permissions WHERE id = $1', [id]);
-    res.json({ success: true, message: 'Student permission request deleted successfully.' });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 // POST /student/permissions/apply — Student apply for permission with proof file
 app.post('/student/permissions/apply', requireAuth, async (req: Request, res: Response) => {

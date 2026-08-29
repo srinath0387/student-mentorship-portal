@@ -103,8 +103,10 @@ export const HodLeaveApprovalTab: React.FC<{ studentsOnly?: boolean }> = ({ stud
       );
       return { prev };
     },
-    onSuccess: (_data, { status }) => {
+    onSuccess: (_data, { status, id }) => {
       queryClient.invalidateQueries({ queryKey: ['hodStudentPermissions'] });
+      // Also broadcast to student's own query key so their history refreshes
+      queryClient.invalidateQueries({ queryKey: ['studentPermissions'] });
       setActionModal(null);
       setRemarksText('');
       showToast(
@@ -127,10 +129,10 @@ export const HodLeaveApprovalTab: React.FC<{ studentsOnly?: boolean }> = ({ stud
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['hodFacultyLeaves'] });
       queryClient.invalidateQueries({ queryKey: ['facultyLeaveSummary'] });
-      alert(res.message || 'Leave request deleted. Leave balance credited back to faculty.');
+      showToast(res.message || 'Leave request deleted. Leave balance credited back to faculty.', 'info');
     },
     onError: (err: any) => {
-      alert(`Failed to delete leave: ${err.message}`);
+      showToast(`Failed to delete leave: ${err.message}`, 'error');
     },
   });
 
@@ -139,9 +141,10 @@ export const HodLeaveApprovalTab: React.FC<{ studentsOnly?: boolean }> = ({ stud
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['hodStudentPermissions'] });
       queryClient.invalidateQueries({ queryKey: ['studentPermissions'] });
+      showToast('Permission request deleted.', 'info');
     },
     onError: (err: any) => {
-      alert(`Failed to delete permission: ${err.message}`);
+      showToast(`Failed to delete permission: ${err.message}`, 'error');
     },
   });
 
