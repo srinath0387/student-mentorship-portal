@@ -9088,7 +9088,180 @@ app.delete('/hod/permissions/students/:id', requireRole('hod', 'admin', 'coordin
   }
 });
 
+// ── TEMPORARY: Data Recovery Route ───────────────────────────────────────────
+// POST /admin/recover-from-backup
+// Connects to a recovery RDS instance (PITR restore) and re-imports any
+// students + sub-records that are missing from the live production DB.
+// USAGE: Call once after recovery DB is "Available", then delete this route.
+// Body: { recovery_host: "advitiyans-recovery-db.xxx.ap-south-1.rds.amazonaws.com" }
+app.post('/admin/recover-from-backup', requireRole('admin'), async (req: Request, res: Response) => {
+  const { recovery_host } = req.body;
+  if (!recovery_host) {
+    return res.status(400).json({ error: 'recovery_host is required — paste the recovery DB endpoint from AWS Console' });
+  }
+
+  let recoveryPool: any = null;
+  const summary: Record<string, number> = {
+    students: 0, academics: 0, coding_profiles: 0, certifications: 0,
+    tech_skills: 0, soft_skills: 0, achievements: 0,
+    student_passwords: 0, student_permissions: 0, mentor_assignments: 0,
+  };
+
+  try {
+    // Connect to recovery DB using same credentials as live DB
+    const { Pool: PgPool } = await import('pg');
+    const { SecretsManagerClient, GetSecretValueCommand } = await import('@aws-sdk/client-secrets-manager');
+    const smClient = new SecretsManagerClient({});
+    const secretResp = await smClient.send(new GetSecretValueCommand({ SecretId: process.env.DB_SECRET_ARN! }));
+    const { password } = JSON.parse(secretResp.SecretString!);
+
+    recoveryPool = new PgPool({
+      host: recovery_host,
+      port: 5432,
+      user: process.env.DB_USER || 'postgres',
+      password,
+      database: process.env.DB_NAME || 'advitiyans',
+      ssl: { rejectUnauthorized: false },
+      max: 3,
+      connectionTimeoutMillis: 15000,
+    });
+
+    // 1. Get all students from recovery DB
+    const recStudents = await recoveryPool.query('SELECT * FROM students');
+    const liveStudents = await db.query('SELECT roll_number FROM students');
+    const liveRolls = new Set(liveStudents.rows.map((r: any) => r.roll_number.toUpperCase()));
+
+    // Find students that are in recovery but missing from live
+    const missingStudents = recStudents.rows.filter(
+      (s: any) => !liveRolls.has((s.roll_number || '').toUpperCase())
+    );
+
+    console.log(`[Recovery] Found ${missingStudents.length} missing student(s) to restore`);
+
+    for (const s of missingStudents) {
+      try {
+        // Re-insert student row
+        await db.query(
+          `INSERT INTO students (roll_number, name, email, year, phone, address, native_place,
+            department, batch, section, hostel_day_scholar, driving_license, passport,
+            relocation_willingness, family_business, financial_background, faculty_mentor_id,
+            photo_url, resume_url, linkedin_url, is_lateral_entry, created_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+           ON CONFLICT (roll_number) DO NOTHING`,
+          [s.roll_number, s.name, s.email, s.year, s.phone, s.address, s.native_place,
+           s.department, s.batch, s.section, s.hostel_day_scholar, s.driving_license, s.passport,
+           s.relocation_willingness, s.family_business, s.financial_background, s.faculty_mentor_id,
+           s.photo_url, s.resume_url, s.linkedin_url, s.is_lateral_entry, s.created_at, s.updated_at]
+        );
+        summary.students++;
+
+        const roll = s.roll_number;
+
+        // Re-insert academics
+        const acad = await recoveryPool.query('SELECT * FROM academics WHERE student_id = $1', [roll]);
+        for (const row of acad.rows) {
+          await db.query(
+            `INSERT INTO academics (student_id, semester, semester_gpa, backlogs, remarks, theory_grade)
+             VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,
+            [row.student_id, row.semester, row.semester_gpa, row.backlogs, row.remarks, row.theory_grade]
+          ).catch(() => {});
+          summary.academics++;
+        }
+
+        // Re-insert coding_profiles
+        const coding = await recoveryPool.query('SELECT * FROM coding_profiles WHERE student_id = $1', [roll]);
+        for (const row of coding.rows) {
+          await db.query(
+            `INSERT INTO coding_profiles (student_id, platform, handle, score_rating, easy_count, medium_count, hard_count, repositories_count, contributions_count)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (student_id, platform) DO NOTHING`,
+            [row.student_id, row.platform, row.handle, row.score_rating, row.easy_count, row.medium_count, row.hard_count, row.repositories_count, row.contributions_count]
+          ).catch(() => {});
+          summary.coding_profiles++;
+        }
+
+        // Re-insert certifications
+        const certs = await recoveryPool.query('SELECT * FROM certifications WHERE student_id = $1', [roll]);
+        for (const row of certs.rows) {
+          await db.query(
+            `INSERT INTO certifications (id, student_id, name, issuer, issue_date, expiry_date, credential_url, document_url)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
+            [row.id, row.student_id, row.name, row.issuer, row.issue_date, row.expiry_date, row.credential_url, row.document_url]
+          ).catch(() => {});
+          summary.certifications++;
+        }
+
+        // Re-insert tech_skills
+        const tech = await recoveryPool.query('SELECT * FROM tech_skills WHERE student_id = $1', [roll]);
+        for (const row of tech.rows) {
+          await db.query(
+            `INSERT INTO tech_skills (id, student_id, skill, level) VALUES ($1,$2,$3,$4) ON CONFLICT (id) DO NOTHING`,
+            [row.id, row.student_id, row.skill, row.level]
+          ).catch(() => {});
+          summary.tech_skills++;
+        }
+
+        // Re-insert soft_skills
+        const soft = await recoveryPool.query('SELECT * FROM soft_skills WHERE student_id = $1', [roll]);
+        for (const row of soft.rows) {
+          await db.query(
+            `INSERT INTO soft_skills (id, student_id, skill, rating) VALUES ($1,$2,$3,$4) ON CONFLICT (id) DO NOTHING`,
+            [row.id, row.student_id, row.skill, row.rating]
+          ).catch(() => {});
+          summary.soft_skills++;
+        }
+
+        // Re-insert achievements
+        const ach = await recoveryPool.query('SELECT * FROM achievements WHERE student_id = $1', [roll]);
+        for (const row of ach.rows) {
+          await db.query(
+            `INSERT INTO achievements (id, student_id, title, description, date) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO NOTHING`,
+            [row.id, row.student_id, row.title, row.description, row.date]
+          ).catch(() => {});
+          summary.achievements++;
+        }
+
+        // Re-insert student_passwords
+        const pwds = await recoveryPool.query('SELECT * FROM student_passwords WHERE roll_number = $1', [roll]).catch(() => ({ rows: [] }));
+        for (const row of pwds.rows) {
+          await db.query(
+            `INSERT INTO student_passwords (roll_number, password, updated_at) VALUES ($1,$2,$3) ON CONFLICT (roll_number) DO NOTHING`,
+            [row.roll_number, row.password, row.updated_at]
+          ).catch(() => {});
+          summary.student_passwords++;
+        }
+
+        // Re-insert mentor_assignments
+        const mentor = await recoveryPool.query('SELECT * FROM mentor_assignments WHERE roll_number = $1', [roll]).catch(() => ({ rows: [] }));
+        for (const row of mentor.rows) {
+          await db.query(
+            `INSERT INTO mentor_assignments (roll_number, faculty_id, assigned_at) VALUES ($1,$2,$3) ON CONFLICT (roll_number) DO NOTHING`,
+            [row.roll_number, row.faculty_id, row.assigned_at]
+          ).catch(() => {});
+          summary.mentor_assignments++;
+        }
+
+      } catch (rowErr: any) {
+        console.error(`[Recovery] Error restoring student ${s.roll_number}:`, rowErr.message);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Recovery complete! ${summary.students} student(s) restored with all associated data.`,
+      restored: summary,
+      missingStudentRolls: missingStudents.map((s: any) => s.roll_number),
+    });
+
+  } catch (err: any) {
+    res.status(500).json({ error: `Recovery failed: ${err.message}` });
+  } finally {
+    if (recoveryPool) await recoveryPool.end().catch(() => {});
+  }
+});
+// ── END TEMPORARY RECOVERY ROUTE ─────────────────────────────────────────────
+
 // Catch-all SPA route fallback for client-side React routes
+
 app.get('*', (_req: Request, res: Response) => {
   return sendIndexHtml(res);
 });
