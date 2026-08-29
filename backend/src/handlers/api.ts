@@ -8938,17 +8938,18 @@ app.put('/hod/permissions/students/:id/status', requireRole('hod', 'admin', 'coo
   try {
     await ensureLeaveAndSubjectsHandledTables();
     const { id } = req.params;
-    const { status, remarks } = req.body;
+    const { status, hod_remarks } = req.body;
     if (!['Approved', 'Rejected'].includes(status)) {
       return res.status(400).json({ error: 'Status must be Approved or Rejected' });
     }
 
     const result = await db.query(
       `UPDATE student_permissions 
-       SET status = $1, remarks = $2, approved_by = $3, updated_at = NOW()
+       SET status = $1, hod_remarks = $2, approved_by = $3,
+           approved_at = CASE WHEN $1 = 'Approved' THEN NOW() ELSE approved_at END
        WHERE id = $4
        RETURNING *`,
-      [status, remarks || '', req.auth?.email || 'HOD/Coordinator', id]
+      [status, hod_remarks || '', req.auth?.email || 'HOD/Coordinator', id]
     );
 
     if (result.rows.length === 0) {
