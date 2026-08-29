@@ -21,6 +21,7 @@ import {
   Sliders,
   Eye,
   X,
+  Activity,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { api } from '../../lib/api';
@@ -31,6 +32,8 @@ import { HodLeaveApprovalTab } from '../leave/HodLeaveApprovalTab';
 import { HolidayCalendarTab } from '../admin/tabs/HolidayCalendarTab';
 import { AttendanceManagementTab } from '../admin/tabs/AttendanceManagementTab';
 import { AttendanceTrackingTab } from '../attendance/AttendanceTrackingTab';
+import { PeriodAttendanceGrid } from '../attendance/PeriodAttendanceGrid';
+import { NotPostedAttendanceTab } from '../attendance/NotPostedAttendanceTab';
 import { PersonalInfoTab } from '../profile/tabs/PersonalInfoTab';
 import { CodingProfilesTab } from '../profile/tabs/CodingProfilesTab';
 import { TechSkillsTab } from '../profile/tabs/TechSkillsTab';
@@ -94,6 +97,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState<{ type: 'idle' | 'success' | 'error'; message: string }>({ type: 'idle', message: '' });
 
   // Attendance Overview State
+  const [coordAttSubTab, setCoordAttSubTab] = useState<'grid' | 'unposted' | 'summaries'>('grid');
   const [attSem, setAttSem] = useState<'1-1' | '1-2'>('1-1');
   const [attDept, setAttDept] = useState<string>('All');
   const [attSection, setAttSection] = useState<string>('All');
@@ -1048,146 +1052,200 @@ export const CoordinatorDashboardPage: React.FC = () => {
       {/* ════════════════════════════════════════════════════════════════════════ */}
       {/* TAB: ATTENDANCE OVERVIEW (1ST YEAR) */}
       {/* ════════════════════════════════════════════════════════════════════════ */}
+      {/* ════════════════════════════════════════════════════════════════════════ */}
+      {/* TAB: ATTENDANCE OVERVIEW (1ST YEAR) */}
+      {/* ════════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'attendance' && (
-        <div className="space-y-4">
-          {/* Controls */}
-          <div className="bg-surface border border-borderLine rounded-2xl p-4 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
-            <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-              <div className="flex bg-surface-2 p-1 rounded-xl border border-borderLine">
-                <button
-                  type="button"
-                  onClick={() => setAttSem('1-1')}
-                  className={`py-1.5 px-3 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                    attSem === '1-1' ? 'bg-pink-600 text-white shadow' : 'text-textSecondary hover:text-textPrimary'
-                  }`}
-                >
-                  Sem 1-1
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAttSem('1-2')}
-                  className={`py-1.5 px-3 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                    attSem === '1-2' ? 'bg-pink-600 text-white shadow' : 'text-textSecondary hover:text-textPrimary'
-                  }`}
-                >
-                  Sem 1-2
-                </button>
-              </div>
-
-              <select
-                value={attDept}
-                onChange={(e) => setAttDept(e.target.value)}
-                className="px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-background text-textPrimary focus:outline-none focus:ring-2 focus:ring-pink-500 font-semibold"
-              >
-                <option value="All">All Departments</option>
-                {VALID_DEPARTMENT_NAMES.map((d) => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
-              </select>
-
-              <select
-                value={attSection}
-                onChange={(e) => setAttSection(e.target.value)}
-                className="px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-background text-textPrimary focus:outline-none focus:ring-2 focus:ring-pink-500 font-semibold"
-              >
-                <option value="All">All Sections</option>
-                {['A', 'B', 'C', 'D', 'E', 'F'].map((s) => (
-                  <option key={s} value={s}>Section {s}</option>
-                ))}
-              </select>
-            </div>
+        <div className="space-y-6">
+          {/* Sub-tab Navigation */}
+          <div className="flex flex-wrap bg-surface-2 p-1 rounded-2xl border border-borderLine max-w-xl gap-1">
+            <button
+              onClick={() => setCoordAttSubTab('grid')}
+              className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
+                coordAttSubTab === 'grid'
+                  ? 'bg-pink-600 text-white shadow-md'
+                  : 'text-textSecondary hover:text-textPrimary'
+              }`}
+            >
+              <Activity className="w-3.5 h-3.5" />
+              <span>Live Period Grid (1st Year)</span>
+            </button>
 
             <button
-              onClick={() => refetchFresherAtt()}
-              className="p-2 rounded-xl border border-borderLine bg-surface-2 hover:bg-surface-3 text-textSecondary hover:text-textPrimary transition-all cursor-pointer"
-              title="Refresh Attendance Data"
+              onClick={() => setCoordAttSubTab('unposted')}
+              className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
+                coordAttSubTab === 'unposted'
+                  ? 'bg-pink-600 text-white shadow-md'
+                  : 'text-textSecondary hover:text-textPrimary'
+              }`}
             >
-              <RefreshCw className="w-4 h-4" />
+              <Clock className="w-3.5 h-3.5" />
+              <span>Unposted Faculty Tracker</span>
+            </button>
+
+            <button
+              onClick={() => setCoordAttSubTab('summaries')}
+              className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
+                coordAttSubTab === 'summaries'
+                  ? 'bg-pink-600 text-white shadow-md'
+                  : 'text-textSecondary hover:text-textPrimary'
+              }`}
+            >
+              <BarChart3 className="w-3.5 h-3.5" />
+              <span>Section Summaries</span>
             </button>
           </div>
 
-          {/* Summary Table */}
-          <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden shadow-sm">
-            <div className="p-4 border-b border-borderLine flex items-center justify-between bg-surface-2">
-              <div>
-                <h3 className="text-sm font-bold text-textPrimary flex items-center gap-2">
-                  <BarChart3 className="w-4 h-4 text-pink-400" />
-                  <span>1st-Year Section Attendance Intelligence — Sem {attSem}</span>
-                </h3>
-                <p className="text-[11px] text-textSecondary mt-0.5">
-                  Real-time attendance summaries posted by subject faculty across all 1st-year sections.
-                </p>
-              </div>
-              <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-pink-500/10 text-pink-400 border border-pink-500/20">
-                {fresherAttendanceData?.summaries?.length || 0} Subject Allotment(s)
-              </span>
-            </div>
+          {coordAttSubTab === 'grid' && (
+            <PeriodAttendanceGrid defaultSemester={attSem} isCoordinator={true} />
+          )}
 
-            {attLoading ? (
-              <div className="py-12 text-center text-xs text-textSecondary flex items-center justify-center gap-2">
-                <RefreshCw className="w-4 h-4 animate-spin text-pink-400" />
-                <span>Aggregating section attendance records...</span>
-              </div>
-            ) : !fresherAttendanceData?.summaries || fresherAttendanceData.summaries.length === 0 ? (
-              <div className="py-12 text-center text-textSecondary text-xs">
-                No attendance sessions recorded yet for {attDept === 'All' ? 'any department' : attDept} in Semester {attSem}.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-surface-2 text-textSecondary uppercase font-bold border-b border-borderLine text-[10px]">
-                    <tr>
-                      <th className="py-3 px-4">Department</th>
-                      <th className="py-3 px-4">Section</th>
-                      <th className="py-3 px-4">Subject</th>
-                      <th className="py-3 px-4">Faculty</th>
-                      <th className="py-3 px-4 text-center">Sessions Held</th>
-                      <th className="py-3 px-4 text-center">Enrolled</th>
-                      <th className="py-3 px-4 text-center">Avg Attendance</th>
-                      <th className="py-3 px-4 text-center">At Risk (&lt;75%)</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-borderLine font-medium text-textPrimary">
-                    {fresherAttendanceData.summaries.map((s: any) => (
-                      <tr key={s.id} className="hover:bg-surface-2/60 transition-colors">
-                        <td className="py-3 px-4 font-bold text-textPrimary">{s.department}</td>
-                        <td className="py-3 px-4 font-bold text-textSecondary">Section {s.section}</td>
-                        <td className="py-3 px-4 font-bold text-textPrimary">
-                          <div className="flex items-center gap-2">
-                            <span>{s.subject_name}</span>
-                            <span className="text-[10px] font-normal px-1.5 py-0.2 rounded bg-surface-2 text-textSecondary border border-borderLine">
-                              {s.subject_type}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="py-3 px-4 text-textSecondary">{s.faculty_name || s.faculty_email}</td>
-                        <td className="py-3 px-4 text-center font-bold text-pink-400">{s.total_sessions} ({s.total_periods_held} hrs)</td>
-                        <td className="py-3 px-4 text-center text-textSecondary">{s.enrolled_students}</td>
-                        <td className="py-3 px-4 text-center">
-                          <span className={`px-2.5 py-0.5 rounded-full font-bold text-xs ${
-                            s.avg_percentage >= 75
-                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                              : 'bg-red-500/10 text-red-400 border border-red-500/20'
-                          }`}>
-                            {s.avg_percentage}%
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-center">
-                          {s.at_risk_count > 0 ? (
-                            <span className="px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 font-bold text-[11px] border border-red-500/20">
-                              {s.at_risk_count} student(s)
-                            </span>
-                          ) : (
-                            <span className="text-emerald-400 text-xs font-semibold">✓ None</span>
-                          )}
-                        </td>
-                      </tr>
+          {coordAttSubTab === 'unposted' && (
+            <NotPostedAttendanceTab defaultSemester={attSem} />
+          )}
+
+          {coordAttSubTab === 'summaries' && (
+            <div className="space-y-4">
+              {/* Controls */}
+              <div className="bg-surface border border-borderLine rounded-2xl p-4 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                  <div className="flex bg-surface-2 p-1 rounded-xl border border-borderLine">
+                    <button
+                      type="button"
+                      onClick={() => setAttSem('1-1')}
+                      className={`py-1.5 px-3 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                        attSem === '1-1' ? 'bg-pink-600 text-white shadow' : 'text-textSecondary hover:text-textPrimary'
+                      }`}
+                    >
+                      Sem 1-1
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAttSem('1-2')}
+                      className={`py-1.5 px-3 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                        attSem === '1-2' ? 'bg-pink-600 text-white shadow' : 'text-textSecondary hover:text-textPrimary'
+                      }`}
+                    >
+                      Sem 1-2
+                    </button>
+                  </div>
+
+                  <select
+                    value={attDept}
+                    onChange={(e) => setAttDept(e.target.value)}
+                    className="px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-background text-textPrimary focus:outline-none focus:ring-2 focus:ring-pink-500 font-semibold"
+                  >
+                    <option value="All">All Departments</option>
+                    {VALID_DEPARTMENT_NAMES.map((d) => (
+                      <option key={d} value={d}>{d}</option>
                     ))}
-                  </tbody>
-                </table>
+                  </select>
+
+                  <select
+                    value={attSection}
+                    onChange={(e) => setAttSection(e.target.value)}
+                    className="px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-background text-textPrimary focus:outline-none focus:ring-2 focus:ring-pink-500 font-semibold"
+                  >
+                    <option value="All">All Sections</option>
+                    {['A', 'B', 'C', 'D', 'E', 'F'].map((s) => (
+                      <option key={s} value={s}>Section {s}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  onClick={() => refetchFresherAtt()}
+                  className="p-2 rounded-xl border border-borderLine bg-surface-2 hover:bg-surface-3 text-textSecondary hover:text-textPrimary transition-all cursor-pointer"
+                  title="Refresh Attendance Data"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </button>
               </div>
-            )}
-          </div>
+
+              {/* Summary Table */}
+              <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden shadow-sm">
+                <div className="p-4 border-b border-borderLine flex items-center justify-between bg-surface-2">
+                  <div>
+                    <h3 className="text-sm font-bold text-textPrimary flex items-center gap-2">
+                      <BarChart3 className="w-4 h-4 text-pink-400" />
+                      <span>1st-Year Section Attendance Intelligence — Sem {attSem}</span>
+                    </h3>
+                    <p className="text-[11px] text-textSecondary mt-0.5">
+                      Real-time attendance summaries posted by subject faculty across all 1st-year sections.
+                    </p>
+                  </div>
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-pink-500/10 text-pink-400 border border-pink-500/20">
+                    {fresherAttendanceData?.summaries?.length || 0} Subject Allotment(s)
+                  </span>
+                </div>
+
+                {attLoading ? (
+                  <div className="py-12 text-center text-xs text-textSecondary flex items-center justify-center gap-2">
+                    <RefreshCw className="w-4 h-4 animate-spin text-pink-400" />
+                    <span>Aggregating section attendance records...</span>
+                  </div>
+                ) : !fresherAttendanceData?.summaries || fresherAttendanceData.summaries.length === 0 ? (
+                  <div className="py-12 text-center text-textSecondary text-xs">
+                    No attendance sessions recorded yet for {attDept === 'All' ? 'any department' : attDept} in Semester {attSem}.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-surface-2 text-textSecondary uppercase font-bold border-b border-borderLine text-[10px]">
+                        <tr>
+                          <th className="py-3 px-4">Department</th>
+                          <th className="py-3 px-4">Section</th>
+                          <th className="py-3 px-4">Subject</th>
+                          <th className="py-3 px-4">Faculty</th>
+                          <th className="py-3 px-4 text-center">Sessions Held</th>
+                          <th className="py-3 px-4 text-center">Enrolled</th>
+                          <th className="py-3 px-4 text-center">Avg Attendance</th>
+                          <th className="py-3 px-4 text-center">At Risk (&lt;75%)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-borderLine font-medium text-textPrimary">
+                        {fresherAttendanceData.summaries.map((s: any) => (
+                          <tr key={s.id} className="hover:bg-surface-2/60 transition-colors">
+                            <td className="py-3 px-4 font-bold text-textPrimary">{s.department}</td>
+                            <td className="py-3 px-4 font-bold text-textSecondary">Section {s.section}</td>
+                            <td className="py-3 px-4 font-bold text-textPrimary">
+                              <div className="flex items-center gap-2">
+                                <span>{s.subject_name}</span>
+                                <span className="text-[10px] font-normal px-1.5 py-0.2 rounded bg-surface-2 text-textSecondary border border-borderLine">
+                                  {s.subject_type}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 text-textSecondary">{s.faculty_name || s.faculty_email}</td>
+                            <td className="py-3 px-4 text-center font-bold text-pink-400">{s.total_sessions} ({s.total_periods_held} hrs)</td>
+                            <td className="py-3 px-4 text-center text-textSecondary">{s.enrolled_students}</td>
+                            <td className="py-3 px-4 text-center">
+                              <span className={`px-2.5 py-0.5 rounded-full font-bold text-xs ${
+                                s.avg_percentage >= 75
+                                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                  : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                              }`}>
+                                {s.avg_percentage}%
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              {s.at_risk_count > 0 ? (
+                                <span className="px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 font-bold text-[11px] border border-red-500/20">
+                                  {s.at_risk_count} student(s)
+                                </span>
+                              ) : (
+                                <span className="text-emerald-400 text-xs font-semibold">✓ None</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

@@ -7,7 +7,7 @@ import {
   Award, ExternalLink, BookOpen, Code2, BarChart2, Building2,
   Download, Filter, ArrowUpRight, ArrowDownRight,
   CheckCircle2, Sparkles, AlertCircle, Sliders, Activity, RefreshCw, Upload,
-  Settings, KeyRound, Mail, Lock, ShieldCheck,
+  Settings, KeyRound, Mail, Lock, ShieldCheck, Clock,
 } from 'lucide-react';
 import { PlacementEligibilitySection } from './components/PlacementEligibilitySection';
 import { BulkImportModal } from '../admin/components/BulkImportModal';
@@ -40,6 +40,8 @@ import { AchievementsTab } from '../profile/tabs/AchievementsTab';
 import { PlacementPreferencesTab } from '../profile/tabs/PlacementPreferencesTab';
 import { AttendanceManagementTab } from '../admin/tabs/AttendanceManagementTab';
 import { AttendanceTrackingTab } from '../attendance/AttendanceTrackingTab';
+import { PeriodAttendanceGrid } from '../attendance/PeriodAttendanceGrid';
+import { NotPostedAttendanceTab } from '../attendance/NotPostedAttendanceTab';
 import { HodLeaveApprovalTab } from '../leave/HodLeaveApprovalTab';
 import { HolidayCalendarTab } from '../admin/tabs/HolidayCalendarTab';
 
@@ -120,6 +122,7 @@ function mapStudentToHodEntry(student: any, index: number, liveSolved?: number):
 
 export const HodDashboardPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'overview' | 'leaves' | 'holidays' | 'attendance' | 'analytics' | 'students' | 'rankings' | 'placement' | 'mentees' | 'settings'>('overview');
+  const [hodAttendanceSubTab, setHodAttendanceSubTab] = useState<'grid' | 'unposted' | 'tracking' | 'allotments'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Interactive Filter Slicers
@@ -625,10 +628,73 @@ export const HodDashboardPage: React.FC = () => {
       {/* ── TAB: Attendance Tracker & Management ── */}
       {activeTab === 'attendance' && (
         <div className="space-y-6">
-          <AttendanceTrackingTab role="hod" />
-          <div className="pt-4 border-t border-borderLine">
-            <AttendanceManagementTab />
+          {/* Sub-tab Navigation */}
+          <div className="flex flex-wrap bg-surface-2 p-1 rounded-2xl border border-borderLine max-w-3xl gap-1">
+            <button
+              onClick={() => setHodAttendanceSubTab('grid')}
+              className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
+                hodAttendanceSubTab === 'grid'
+                  ? 'bg-brand-primary text-white shadow-md'
+                  : 'text-textSecondary hover:text-textPrimary'
+              }`}
+            >
+              <Activity className="w-3.5 h-3.5" />
+              <span>Live Period Grid (Periods 1–7)</span>
+            </button>
+
+            <button
+              onClick={() => setHodAttendanceSubTab('unposted')}
+              className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
+                hodAttendanceSubTab === 'unposted'
+                  ? 'bg-brand-primary text-white shadow-md'
+                  : 'text-textSecondary hover:text-textPrimary'
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>Unposted Faculty Tracker</span>
+            </button>
+
+            <button
+              onClick={() => setHodAttendanceSubTab('tracking')}
+              className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
+                hodAttendanceSubTab === 'tracking'
+                  ? 'bg-brand-primary text-white shadow-md'
+                  : 'text-textSecondary hover:text-textPrimary'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>Student Shortages & Reports</span>
+            </button>
+
+            <button
+              onClick={() => setHodAttendanceSubTab('allotments')}
+              className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
+                hodAttendanceSubTab === 'allotments'
+                  ? 'bg-brand-primary text-white shadow-md'
+                  : 'text-textSecondary hover:text-textPrimary'
+              }`}
+            >
+              <Sliders className="w-3.5 h-3.5" />
+              <span>Allotments & Rosters</span>
+            </button>
           </div>
+
+          {/* Sub-tab Views */}
+          {hodAttendanceSubTab === 'grid' && (
+            <PeriodAttendanceGrid defaultDepartment={user?.department} />
+          )}
+
+          {hodAttendanceSubTab === 'unposted' && (
+            <NotPostedAttendanceTab defaultDepartment={user?.department} />
+          )}
+
+          {hodAttendanceSubTab === 'tracking' && (
+            <AttendanceTrackingTab role="hod" />
+          )}
+
+          {hodAttendanceSubTab === 'allotments' && (
+            <AttendanceManagementTab />
+          )}
         </div>
       )}
 

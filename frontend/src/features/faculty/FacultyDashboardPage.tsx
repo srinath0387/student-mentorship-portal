@@ -42,6 +42,7 @@ import { PlacementEligibilitySection } from '../hod/components/PlacementEligibil
 import { FacultyProfileTab } from './tabs/FacultyProfileTab';
 import { calculateFacultyProfileCompletion } from '../../lib/facultyUtils';
 import { AttendanceTrackingTab } from '../attendance/AttendanceTrackingTab';
+import { NotPostedAttendanceTab } from '../attendance/NotPostedAttendanceTab';
 import { FacultyLeaveTab } from '../leave/FacultyLeaveTab';
 
 // Helper: compute academic standing from CGPA
@@ -530,7 +531,10 @@ export const FacultyDashboardPage: React.FC = () => {
       {/* Tab: Attendance Records & Tracking */}
       {activeTab === 'attendance' && (
         <div className="space-y-6">
-          <AttendanceTrackingTab role="faculty" />
+          <NotPostedAttendanceTab facultyEmail={user?.email} isFacultyView={true} />
+          <div className="pt-4 border-t border-borderLine">
+            <AttendanceTrackingTab role="faculty" />
+          </div>
         </div>
       )}
 

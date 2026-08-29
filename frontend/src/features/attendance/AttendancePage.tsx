@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ClipboardCheck,
@@ -42,20 +42,27 @@ const ALL_SEMESTERS: { label: SemesterLabel; desc: string }[] = [
 export const AttendancePage: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
 
+  const urlSem = searchParams.get('sem') as SemesterLabel | null;
+  const urlSec = searchParams.get('sec') || '';
+  const urlSubj = searchParams.get('subj') || '';
+  const urlDate = searchParams.get('date') || '';
+  const urlPeriod = searchParams.get('period') ? parseInt(searchParams.get('period')!) : 1;
+
   // Wizard Step: 1 = Sem, 2 = Subject, 3 = Session setup, 4 = Roster mark, 5 = Confirmation
-  const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 5>(1);
+  const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 5>(urlSem ? 2 : 1);
 
   // Step 1: Semester
-  const [selectedSemester, setSelectedSemester] = useState<SemesterLabel | null>(null);
+  const [selectedSemester, setSelectedSemester] = useState<SemesterLabel | null>(urlSem || null);
 
   // Step 2: Subject
   const [selectedSubject, setSelectedSubject] = useState<SubjectAllotment | null>(null);
 
   // Step 3: Session Details
-  const [sessionDate, setSessionDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [periodStart, setPeriodStart] = useState<number>(1);
+  const [sessionDate, setSessionDate] = useState<string>(urlDate || new Date().toISOString().split('T')[0]);
+  const [periodStart, setPeriodStart] = useState<number>(urlPeriod || 1);
   const [numPeriods, setNumPeriods] = useState<number>(1);
 
   // Step 4: Roster & Marking
@@ -119,6 +126,28 @@ export const AttendancePage: React.FC = () => {
     queryFn: () => (selectedSubject?.id ? api.getRoster(selectedSubject.id, sessionDate) : Promise.resolve([])),
     enabled: Boolean(selectedSubject?.id),
   });
+
+  // ── Fetch Unposted Attendance for Logged-In Faculty Today ──
+  const { data: facultyPendingData } = useQuery({
+    queryKey: ['facultyPendingAttendanceToday', user?.email],
+    queryFn: () => api.getNotPostedAttendance({ faculty_email: user?.email }),
+    enabled: Boolean(user?.email && user?.role === 'faculty'),
+  });
+
+  // Auto-select subject and advance to step 4 when URL params match
+  useEffect(() => {
+    if (urlSubj && mySubjects.length > 0 && !selectedSubject) {
+      const match = mySubjects.find(
+        (s: SubjectAllotment) =>
+          s.subject_name.toLowerCase().includes(urlSubj.toLowerCase()) &&
+          (!urlSec || s.section.toUpperCase() === urlSec.toUpperCase())
+      );
+      if (match) {
+        setSelectedSubject(match);
+        setCurrentStep(4);
+      }
+    }
+  }, [urlSubj, urlSec, mySubjects, selectedSubject]);
 
   // ── Fetch Holidays and Academic Calendar for Date Validation ──
   const { data: holidays = [] } = useQuery<HolidayCalendarEntry[]>({
@@ -353,18 +382,76 @@ export const AttendancePage: React.FC = () => {
           STEP 1: SELECT SEMESTER
          ──────────────────────────────────────────────────────────────────────── */}
       {currentStep === 1 && (
-        <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-5">
-          <div>
-            <h2 className="text-base font-bold text-textPrimary flex items-center gap-2">
-              <span className="w-6 h-6 rounded-full bg-brand-primary text-white text-xs flex items-center justify-center font-black">
-                1
-              </span>
-              Select Semester
-            </h2>
-            <p className="text-xs text-textSecondary mt-1">
-              Choose the semester of the class you are currently holding.
-            </p>
-          </div>
+        <div className="space-y-4">
+          {/* Pending Attendance Notification Card */}
+          {Array.isArray(facultyPendingData?.pendingSlots) && facultyPendingData.pendingSlots.length > 0 && (
+            <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
+                  <h3 className="text-sm font-bold text-textPrimary">
+                    You have {facultyPendingData.pendingSlots.length} scheduled class(es) pending attendance entry today:
+                  </h3>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300">
+                  Action Required
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                {facultyPendingData.pendingSlots.map((slot: any, idx: number) => (
+                  <div
+                    key={idx}
+                    onClick={() => {
+                      setSelectedSemester(slot.semester_label);
+                      setPeriodStart(parseInt(slot.period_start));
+                      setNumPeriods(parseInt(slot.num_periods || 1));
+                      setSessionDate(new Date().toISOString().split('T')[0]);
+                      // Attempt to preselect subject if already loaded, else go to step 2
+                      const match = mySubjects.find(
+                        (s: SubjectAllotment) =>
+                          s.semester_label === slot.semester_label &&
+                          s.section.toUpperCase() === (slot.section || '').toUpperCase() &&
+                          s.subject_name.toLowerCase().includes((slot.subject_name || '').toLowerCase())
+                      );
+                      if (match) {
+                        setSelectedSubject(match);
+                        setCurrentStep(4);
+                      } else {
+                        setCurrentStep(2);
+                      }
+                    }}
+                    className="bg-surface border border-rose-500/20 hover:border-rose-500/60 p-3 rounded-xl transition-all cursor-pointer hover:shadow-sm group flex items-center justify-between"
+                  >
+                    <div>
+                      <div className="text-[11px] font-bold text-rose-400">
+                        Period {slot.period_start} ({slot.semester_label} - Sec {slot.section})
+                      </div>
+                      <div className="text-xs font-semibold text-textPrimary truncate max-w-[170px]">
+                        {slot.subject_name}
+                      </div>
+                    </div>
+                    <span className="text-xs text-rose-400 font-bold group-hover:translate-x-1 transition-transform">
+                      Mark →
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-5">
+            <div>
+              <h2 className="text-base font-bold text-textPrimary flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-brand-primary text-white text-xs flex items-center justify-center font-black">
+                  1
+                </span>
+                Select Semester
+              </h2>
+              <p className="text-xs text-textSecondary mt-1">
+                Choose the semester of the class you are currently holding.
+              </p>
+            </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
             {ALL_SEMESTERS.map((sem) => (
@@ -387,6 +474,7 @@ export const AttendancePage: React.FC = () => {
             ))}
           </div>
         </div>
+      </div>
       )}
 
       {/* ────────────────────────────────────────────────────────────────────────

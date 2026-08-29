@@ -5534,8 +5534,8 @@ app.get('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin'), asyn
   }
 });
 
-// 10. Delete Attendance Session (Faculty, HOD, Admin)
-app.delete('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+// 10. Delete Attendance Session (Faculty, HOD, Admin, Coordinator)
+app.delete('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     await db.query('DELETE FROM attendance_sessions WHERE id = $1', [id]);
@@ -5544,6 +5544,305 @@ app.delete('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin'), a
     res.status(500).json({ error: err.message });
   }
 });
+
+// 10b. Update Attendance Session — Same-Day Edit Rule (ported from dsattendance mark_attendance.php)
+// Faculty can update attendance on the same day it was recorded; past dates require HOD/Admin.
+app.put('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { records = [] } = req.body; // Array of { roll_number: string, is_present: boolean }
+
+    const sessRes = await db.query(
+      `SELECT s.*, a.faculty_email, a.department, a.semester_label
+       FROM attendance_sessions s
+       JOIN subject_allotments a ON a.id = s.allotment_id
+       WHERE s.id = $1`,
+      [id]
+    );
+
+    if (sessRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Attendance session not found' });
+    }
+
+    const session = sessRes.rows[0];
+    const today = new Date().toISOString().split('T')[0];
+    const sessionDateStr = new Date(session.session_date).toISOString().split('T')[0];
+
+    // Same-Day Edit Protection for Faculty
+    if (req.auth?.role === 'faculty') {
+      if (sessionDateStr !== today) {
+        return res.status(403).json({
+          error: 'Editing is permitted only on the same date attendance was posted. Please contact your HOD or Admin for past-date corrections.',
+        });
+      }
+      if (session.faculty_email && session.faculty_email.toLowerCase() !== req.auth.email.toLowerCase()) {
+        return res.status(403).json({ error: 'You can only edit attendance sessions you conducted.' });
+      }
+    }
+
+    // Upsert / update individual attendance records
+    for (const r of records) {
+      if (!r.roll_number) continue;
+      await db.query(
+        `INSERT INTO attendance_records (session_id, roll_number, is_present)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (session_id, roll_number)
+         DO UPDATE SET is_present = EXCLUDED.is_present`,
+        [id, r.roll_number.toUpperCase(), Boolean(r.is_present)]
+      );
+    }
+
+    res.json({
+      success: true,
+      message: `Attendance updated successfully (${records.length} records updated).`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 10c. Not Posted Attendance Tracker (ported from dsattendance not_posted_attendance.php & not_posted_faculty.php)
+// Compares scheduled timetable slots against recorded attendance sessions for any date or range.
+app.get('/attendance/not-posted', requireRole('faculty', 'hod', 'coordinator', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const dateStr = (req.query.date as string) || new Date().toISOString().split('T')[0];
+    const semester = (req.query.semester as string) || '';
+    const department = (req.query.department as string) || '';
+    const section = (req.query.section as string) || '';
+    const facultyEmail = req.auth?.role === 'faculty'
+      ? req.auth.email.toLowerCase()
+      : ((req.query.faculty_email as string) || '').toLowerCase();
+
+    const dateObj = new Date(dateStr);
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    let dayOfWeek = dayNames[dateObj.getDay()];
+
+    if (dayOfWeek === 'Sunday') {
+      return res.json({ date: dateStr, dayOfWeek, isWorkingDay: false, pendingSlots: [], message: 'Sunday is a non-working day.' });
+    }
+
+    // Check holiday or calendar substitution day
+    const calCheck = await db.query(
+      `SELECT * FROM holiday_calendar WHERE holiday_date = $1 LIMIT 1`,
+      [dateStr]
+    );
+    if (calCheck.rows.length > 0) {
+      return res.json({
+        date: dateStr,
+        dayOfWeek,
+        isWorkingDay: false,
+        holidayName: calCheck.rows[0].holiday_name,
+        pendingSlots: [],
+        message: `Date is marked as Holiday: ${calCheck.rows[0].holiday_name}`,
+      });
+    }
+
+    // Fetch timetable slots for this effective day
+    let ttQuery = `SELECT t.* FROM timetable_entries t WHERE t.day_of_week = $1`;
+    const ttParams: any[] = [dayOfWeek];
+
+    if (semester) {
+      ttParams.push(semester);
+      ttQuery += ` AND t.semester_label = $${ttParams.length}`;
+    }
+    if (department && department !== 'All') {
+      ttParams.push(department);
+      ttQuery += ` AND t.department = $${ttParams.length}`;
+    }
+    if (section && section !== 'All') {
+      ttParams.push(section.toUpperCase());
+      ttQuery += ` AND t.section = $${ttParams.length}`;
+    }
+    if (facultyEmail) {
+      ttParams.push(facultyEmail);
+      ttQuery += ` AND LOWER(t.faculty_email) = $${ttParams.length}`;
+    }
+
+    // If HOD: restrict to their department (for 2nd-4th years)
+    if (req.auth?.role === 'hod' && req.auth.department && req.auth.department !== 'All') {
+      ttParams.push(req.auth.department);
+      ttQuery += ` AND t.department = $${ttParams.length}`;
+    }
+    // If Coordinator: restrict to 1st year (1-1 & 1-2)
+    if (req.auth?.role === 'coordinator') {
+      ttQuery += ` AND t.semester_label IN ('1-1', '1-2')`;
+    }
+
+    ttQuery += ` ORDER BY t.semester_label, t.department, t.section, t.period_start`;
+
+    const timetableSlots = await db.query(ttQuery, ttParams);
+
+    // Fetch all attendance sessions recorded for this date
+    const postedSessions = await db.query(
+      `SELECT s.*, a.subject_name, a.section, a.semester_label, a.department, a.faculty_email
+       FROM attendance_sessions s
+       JOIN subject_allotments a ON a.id = s.allotment_id
+       WHERE s.session_date = $1`,
+      [dateStr]
+    );
+
+    // Helper to test if a timetable slot has a posted session
+    const isPosted = (slot: any) => {
+      return postedSessions.rows.some((sess: any) => {
+        const matchSem = sess.semester_label === slot.semester_label;
+        const matchSec = (sess.section || '').toUpperCase() === (slot.section || '').toUpperCase();
+        const matchSubj = (sess.subject_name || '').toLowerCase() === (slot.subject_name || '').toLowerCase();
+        const matchPeriod = parseInt(sess.period_start) === parseInt(slot.period_start);
+        return matchSem && matchSec && matchSubj && matchPeriod;
+      });
+    };
+
+    const pendingSlots: any[] = [];
+    const postedSlots: any[] = [];
+
+    for (const slot of timetableSlots.rows) {
+      if (isPosted(slot)) {
+        postedSlots.push(slot);
+      } else {
+        pendingSlots.push(slot);
+      }
+    }
+
+    res.json({
+      date: dateStr,
+      dayOfWeek,
+      isWorkingDay: true,
+      totalScheduled: timetableSlots.rows.length,
+      postedCount: postedSlots.length,
+      pendingCount: pendingSlots.length,
+      pendingSlots,
+      postedSlots,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 10d. Live Daily Period-by-Period Monitoring Grid (ported from dsattendance hod_dashboard.php)
+// Returns status for Periods 1 to 7 across all sections of a department or 1st year
+app.get('/attendance/daily-period-grid', requireRole('faculty', 'hod', 'coordinator', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const dateStr = (req.query.date as string) || new Date().toISOString().split('T')[0];
+    const semester = (req.query.semester as string) || '';
+    const department = (req.query.department as string) || (req.auth?.role === 'hod' ? req.auth.department : '');
+
+    const dateObj = new Date(dateStr);
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dayOfWeek = dayNames[dateObj.getDay()];
+
+    if (dayOfWeek === 'Sunday') {
+      return res.json({ date: dateStr, dayOfWeek, isWorkingDay: false, message: 'Sunday is a holiday', grid: [] });
+    }
+
+    // Check holiday
+    const calCheck = await db.query(`SELECT * FROM holiday_calendar WHERE holiday_date = $1 LIMIT 1`, [dateStr]);
+    if (calCheck.rows.length > 0) {
+      return res.json({
+        date: dateStr,
+        dayOfWeek,
+        isWorkingDay: false,
+        holidayName: calCheck.rows[0].holiday_name,
+        message: `Date is Holiday: ${calCheck.rows[0].holiday_name}`,
+        grid: [],
+      });
+    }
+
+    let ttQuery = `SELECT * FROM timetable_entries WHERE day_of_week = $1`;
+    const ttParams: any[] = [dayOfWeek];
+
+    if (semester) {
+      ttParams.push(semester);
+      ttQuery += ` AND semester_label = $${ttParams.length}`;
+    }
+    if (department && department !== 'All') {
+      ttParams.push(department);
+      ttQuery += ` AND department = $${ttParams.length}`;
+    }
+    if (req.auth?.role === 'coordinator') {
+      ttQuery += ` AND semester_label IN ('1-1', '1-2')`;
+    }
+
+    ttQuery += ` ORDER BY semester_label, department, section, period_start`;
+
+    const ttRes = await db.query(ttQuery, ttParams);
+
+    // Fetch posted sessions for this date
+    const postedRes = await db.query(
+      `SELECT s.*, a.subject_name, a.section, a.semester_label, a.department, a.faculty_name, a.faculty_email
+       FROM attendance_sessions s
+       JOIN subject_allotments a ON a.id = s.allotment_id
+       WHERE s.session_date = $1`,
+      [dateStr]
+    );
+
+    // Group slots by Section Key: `${semester_label}_${department}_${section}`
+    const sectionMap = new Map<string, any>();
+
+    ttRes.rows.forEach((slot: any) => {
+      const secKey = `${slot.semester_label} | ${slot.department} - Sec ${slot.section}`;
+      if (!sectionMap.has(secKey)) {
+        sectionMap.set(secKey, {
+          semester_label: slot.semester_label,
+          department: slot.department,
+          section: slot.section,
+          sectionKey: secKey,
+          periods: Array.from({ length: 7 }, (_, i) => ({
+            period: i + 1,
+            has_class: false,
+            subject_name: '',
+            subject_type: '',
+            faculty_name: '',
+            faculty_email: '',
+            status: 'Free',
+            session_id: null,
+          })),
+        });
+      }
+
+      const secData = sectionMap.get(secKey);
+      const pStart = parseInt(slot.period_start);
+      const span = parseInt(slot.num_periods || 1);
+
+      for (let p = pStart; p < pStart + span && p <= 7; p++) {
+        const periodObj = secData.periods[p - 1];
+        periodObj.has_class = true;
+        periodObj.subject_name = slot.subject_name;
+        periodObj.subject_type = slot.subject_type;
+        periodObj.faculty_name = slot.faculty_name;
+        periodObj.faculty_email = slot.faculty_email;
+        periodObj.room_no = slot.room_no;
+
+        // Check if posted
+        const matched = postedRes.rows.find((s: any) =>
+          s.semester_label === slot.semester_label &&
+          (s.section || '').toUpperCase() === (slot.section || '').toUpperCase() &&
+          (s.subject_name || '').toLowerCase() === (slot.subject_name || '').toLowerCase() &&
+          parseInt(s.period_start) === pStart
+        );
+
+        if (matched) {
+          periodObj.status = 'Posted';
+          periodObj.session_id = matched.id;
+        } else {
+          periodObj.status = 'Pending';
+        }
+      }
+    });
+
+    const grid = Array.from(sectionMap.values());
+
+    res.json({
+      date: dateStr,
+      dayOfWeek,
+      isWorkingDay: true,
+      totalSections: grid.length,
+      grid,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 // 11. Student / Parent / General: Get Student Attendance Summary (Per-Subject % & Overall %)
 // Correctly accounts for student's joining_date for each subject!

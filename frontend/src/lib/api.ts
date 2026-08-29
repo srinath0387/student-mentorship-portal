@@ -731,6 +731,33 @@ export const api = {
     });
   },
 
+  updateAttendanceSession: async (sessionId: string, records: { roll_number: string; is_present: boolean }[]) => {
+    return fetchWithAuth(`/attendance/sessions/${sessionId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ records }),
+    });
+  },
+
+  getNotPostedAttendance: async (params?: { date?: string; semester?: string; department?: string; section?: string; faculty_email?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.date) qs.append('date', params.date);
+    if (params?.semester) qs.append('semester', params.semester);
+    if (params?.department) qs.append('department', params.department);
+    if (params?.section) qs.append('section', params.section);
+    if (params?.faculty_email) qs.append('faculty_email', params.faculty_email);
+    const query = qs.toString() ? `?${qs.toString()}` : '';
+    return fetchWithAuth(`/attendance/not-posted${query}`);
+  },
+
+  getDailyPeriodGrid: async (params?: { date?: string; semester?: string; department?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.date) qs.append('date', params.date);
+    if (params?.semester) qs.append('semester', params.semester);
+    if (params?.department) qs.append('department', params.department);
+    const query = qs.toString() ? `?${qs.toString()}` : '';
+    return fetchWithAuth(`/attendance/daily-period-grid${query}`);
+  },
+
   getStudentAttendance: async (rollNumber: string) => {
     return fetchWithAuth(`/attendance/student/${encodeURIComponent(rollNumber)}`);
   },
