@@ -332,6 +332,9 @@ export interface SubjectRosterEntry {
   student_name?: string;
   student_department?: string;
   student_section?: string;
+  is_on_od?: boolean;
+  od_type?: string;
+  od_reason?: string;
 }
 
 export interface AttendanceSession {

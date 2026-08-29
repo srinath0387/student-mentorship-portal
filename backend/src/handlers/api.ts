@@ -5059,6 +5059,7 @@ app.delete('/attendance/rosters/:rosterId', requireRole('admin', 'hod', 'coordin
 app.get('/attendance/rosters/:allotmentId', requireRole('admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
   try {
     const { allotmentId } = req.params;
+    const sessionDate = (req.query.date as string || req.query.session_date as string || '').trim();
 
     // Fetch allotment details
     const allot = await db.query('SELECT * FROM subject_allotments WHERE id = $1', [allotmentId]);
@@ -5071,6 +5072,32 @@ app.get('/attendance/rosters/:allotmentId', requireRole('admin', 'hod', 'faculty
     if (req.auth?.role === 'faculty') {
       if (allotmentRow.faculty_email.toLowerCase() !== req.auth.email.toLowerCase()) {
         return res.status(403).json({ error: 'Access denied. You can only view rosters for your allotted subjects.' });
+      }
+    }
+
+    // Query active approved student permissions (OD) on sessionDate if provided
+    const approvedODMap = new Map<string, { permission_type: string; reason: string }>();
+    if (sessionDate) {
+      try {
+        await ensureLeaveAndSubjectsHandledTables();
+        const odRes = await db.query(
+          `SELECT UPPER(TRIM(roll_number)) as roll_number, permission_type, reason
+           FROM student_permissions
+           WHERE LOWER(status) = 'approved'
+             AND $1::date >= from_date::date
+             AND $1::date <= to_date::date`,
+          [sessionDate]
+        );
+        for (const r of odRes.rows) {
+          if (r.roll_number) {
+            approvedODMap.set(r.roll_number, {
+              permission_type: r.permission_type,
+              reason: r.reason,
+            });
+          }
+        }
+      } catch (err: any) {
+        console.warn('[Roster OD Check] Error querying student permissions:', err.message);
       }
     }
 
@@ -5097,19 +5124,37 @@ app.get('/attendance/rosters/:allotmentId', requireRole('admin', 'hod', 'faculty
          ORDER BY name ASC, roll_number ASC`,
         [dept, sec]
       );
-      return res.json(fresherRes.rows.map(f => ({
-        id: `fresher_${f.roll_number}`,
-        allotment_id: allotmentId,
-        roll_number: f.roll_number,
-        student_name: f.student_name,
-        student_email: f.student_email,
-        student_department: f.student_department,
-        student_section: f.student_section,
-        joining_date: f.joining_date,
-      })));
+      return res.json(fresherRes.rows.map(f => {
+        const rollUpper = (f.roll_number || '').trim().toUpperCase();
+        const odInfo = approvedODMap.get(rollUpper);
+        return {
+          id: `fresher_${f.roll_number}`,
+          allotment_id: allotmentId,
+          roll_number: f.roll_number,
+          student_name: f.student_name,
+          student_email: f.student_email,
+          student_department: f.student_department,
+          student_section: f.student_section,
+          joining_date: f.joining_date,
+          is_on_od: Boolean(odInfo),
+          od_type: odInfo?.permission_type || null,
+          od_reason: odInfo?.reason || null,
+        };
+      }));
     }
 
-    res.json(result.rows);
+    const rowsWithOD = result.rows.map((r: any) => {
+      const rollUpper = (r.roll_number || '').trim().toUpperCase();
+      const odInfo = approvedODMap.get(rollUpper);
+      return {
+        ...r,
+        is_on_od: Boolean(odInfo),
+        od_type: odInfo?.permission_type || null,
+        od_reason: odInfo?.reason || null,
+      };
+    });
+
+    res.json(rowsWithOD);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -5225,14 +5270,15 @@ app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin'), async (
     // Check for approved student permissions (On-Duty / Leaves) active on session_date
     let approvedODRolls = new Set<string>();
     try {
+      await ensureLeaveAndSubjectsHandledTables();
       const odRes = await db.query(
-        `SELECT roll_number FROM student_permissions 
-         WHERE status = 'Approved' 
-           AND $1::date >= from_date 
-           AND $1::date <= to_date`,
+        `SELECT UPPER(TRIM(roll_number)) as roll_number FROM student_permissions 
+         WHERE LOWER(status) = 'approved' 
+           AND $1::date >= from_date::date 
+           AND $1::date <= to_date::date`,
         [session_date]
       );
-      approvedODRolls = new Set(odRes.rows.map((r: any) => r.roll_number?.trim().toUpperCase()));
+      approvedODRolls = new Set(odRes.rows.map((r: any) => r.roll_number).filter(Boolean));
     } catch (_) { /* ignore if table not created yet */ }
 
     // Insert or update individual student records
@@ -5243,7 +5289,7 @@ app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin'), async (
 
       // If student has an approved permission on this date, auto-lock as present (On-Duty)
       const hasApprovedPermission = approvedODRolls.has(rollNumber);
-      const isPresent = hasApprovedPermission || Boolean(rec.is_present);
+      const isPresent = hasApprovedPermission ? true : Boolean(rec.is_present);
       if (isPresent) presentCount++;
 
       await db.query(
@@ -8945,7 +8991,29 @@ app.put('/hod/permissions/students/:id/status', requireRole('hod', 'admin', 'coo
       return res.status(404).json({ error: 'Permission request not found' });
     }
 
-    res.json({ success: true, message: `Student permission ${status.toLowerCase()} successfully.`, permission: result.rows[0] });
+    const perm = result.rows[0];
+
+    // When permission is Approved, retroactively lock attendance as Present for all sessions on those dates
+    if (status === 'Approved' && perm.roll_number && perm.from_date && perm.to_date) {
+      try {
+        const rollUpper = String(perm.roll_number).trim().toUpperCase();
+        await db.query(
+          `UPDATE attendance_records ar
+           SET is_present = true
+           FROM attendance_sessions s
+           WHERE ar.session_id = s.id
+             AND UPPER(TRIM(ar.roll_number)) = $1
+             AND s.session_date::date >= $2::date
+             AND s.session_date::date <= $3::date`,
+          [rollUpper, perm.from_date, perm.to_date]
+        );
+        console.log(`[Attendance OD Retroactive] Marked present for ${rollUpper} from ${perm.from_date} to ${perm.to_date}`);
+      } catch (retroErr: any) {
+        console.warn('[Attendance OD Retroactive] Failed to update past sessions:', retroErr.message);
+      }
+    }
+
+    res.json({ success: true, message: `Student permission ${status.toLowerCase()} successfully.`, permission: perm });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
