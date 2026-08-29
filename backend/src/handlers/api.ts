@@ -9182,20 +9182,27 @@ app.post('/admin/recover-from-backup', async (req: Request, res: Response) => {
       database: process.env.DB_NAME || 'advitiyans',
       ssl: { rejectUnauthorized: false },
       max: 3,
-      connectionTimeoutMillis: 15000,
+      connectionTimeoutMillis: 8000,  // fail fast if security group blocks connection
     });
 
     // 1. Get all students from recovery DB
-    const recStudents = await recoveryPool.query('SELECT * FROM students');
+    const recStudents = await recoveryPool.query('SELECT * FROM students ORDER BY roll_number');
     const liveStudents = await db.query('SELECT roll_number FROM students');
     const liveRolls = new Set(liveStudents.rows.map((r: any) => r.roll_number.toUpperCase()));
 
     // Find students that are in recovery but missing from live
-    const missingStudents = recStudents.rows.filter(
+    const allMissing = recStudents.rows.filter(
       (s: any) => !liveRolls.has((s.roll_number || '').toUpperCase())
     );
 
-    console.log(`[Recovery] Found ${missingStudents.length} missing student(s) to restore`);
+    // Process in batches of 5 to stay within Lambda 29s timeout
+    const BATCH = 5;
+    const offset = parseInt(req.body.offset || '0', 10);
+    const missingStudents = allMissing.slice(offset, offset + BATCH);
+    const totalMissing = allMissing.length;
+    const remaining = Math.max(0, totalMissing - offset - missingStudents.length);
+
+    console.log(`[Recovery] Total missing: ${totalMissing}, processing offset ${offset}–${offset + missingStudents.length - 1}`);
 
     for (const s of missingStudents) {
       try {
@@ -9306,9 +9313,15 @@ app.post('/admin/recover-from-backup', async (req: Request, res: Response) => {
 
     res.json({
       success: true,
-      message: `Recovery complete! ${summary.students} student(s) restored with all associated data.`,
+      message: remaining > 0
+        ? `Batch done! ${summary.students} student(s) restored. ${remaining} more remaining — call again with offset: ${offset + BATCH}`
+        : `All done! ${summary.students} student(s) restored. No more students remaining.`,
       restored: summary,
-      missingStudentRolls: missingStudents.map((s: any) => s.roll_number),
+      totalMissing,
+      processedThisBatch: missingStudents.length,
+      remaining,
+      nextOffset: remaining > 0 ? offset + BATCH : null,
+      restoredRolls: missingStudents.map((s: any) => s.roll_number),
     });
 
   } catch (err: any) {
