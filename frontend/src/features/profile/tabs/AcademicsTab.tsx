@@ -47,11 +47,9 @@ export const AcademicsTab: React.FC<AcademicsTabProps> = ({ academics, readOnly 
   const { register, handleSubmit, reset, setValue } = useForm<AcademicRecord>({
     defaultValues: {
       semester: (sortedAcademics.length || 0) + 1,
-      semester_gpa: 9.0,
-      programming_grade: 'O',
+      semester_gpa: 8.5,
+      backlogs: 0,
       attendance_pct: 95.0,
-      theory_grade: 'A+',
-      remarks: 'Good progress',
     },
   });
 
@@ -66,7 +64,8 @@ export const AcademicsTab: React.FC<AcademicsTabProps> = ({ academics, readOnly 
       semester: a.semester,
       gpa: currGpa,
       delta,
-      attendance: Number(a.attendance_pct),
+      attendance: Number(a.attendance_pct || 95),
+      backlogs: Number(a.backlogs || 0),
     };
   });
 
@@ -93,7 +92,8 @@ export const AcademicsTab: React.FC<AcademicsTabProps> = ({ academics, readOnly 
         ...data,
         semester: Number(data.semester),
         semester_gpa: Number(data.semester_gpa),
-        attendance_pct: Number(data.attendance_pct),
+        backlogs: Number(data.backlogs || 0),
+        attendance_pct: Number(data.attendance_pct || 95),
       });
       setShowAddModal(false);
       setEditingSemester(null);
@@ -110,10 +110,7 @@ export const AcademicsTab: React.FC<AcademicsTabProps> = ({ academics, readOnly 
     setEditingSemester(record);
     setValue('semester', record.semester);
     setValue('semester_gpa', record.semester_gpa);
-    setValue('programming_grade', record.programming_grade);
-    setValue('attendance_pct', record.attendance_pct);
-    setValue('theory_grade', record.theory_grade);
-    setValue('remarks', record.remarks);
+    setValue('backlogs', record.backlogs ?? 0);
     setShowAddModal(true);
   };
 
@@ -149,11 +146,8 @@ export const AcademicsTab: React.FC<AcademicsTabProps> = ({ academics, readOnly 
                       : (sortedAcademics.length || 0) + 1;
                     reset({
                       semester: nextSemNumber,
-                      semester_gpa: 9.0,
-                      programming_grade: 'O',
-                      attendance_pct: 95.0,
-                      theory_grade: 'A+',
-                      remarks: 'Good progress',
+                      semester_gpa: 8.5,
+                      backlogs: 0,
                     });
                     setShowAddModal(true);
                   }}
@@ -321,15 +315,12 @@ export const AcademicsTab: React.FC<AcademicsTabProps> = ({ academics, readOnly 
                         setEditingSemester(null);
                         reset({
                           semester: semNum,
-                          semester_gpa: 9.0,
-                          programming_grade: 'O',
-                          attendance_pct: 95.0,
-                          theory_grade: 'A+',
-                          remarks: '',
+                          semester_gpa: 8.5,
+                          backlogs: 0,
                         });
                         setShowAddModal(true);
                       }}
-                      className="w-full py-2 rounded-xl bg-[#5B4FE9]/10 text-[#5B4FE9] text-xs font-bold hover:bg-[#5B4FE9] hover:text-white transition-all flex items-center justify-center gap-1"
+                      className="w-full py-2 rounded-xl bg-[#5B4FE9]/10 text-[#5B4FE9] text-xs font-bold hover:bg-[#5B4FE9] hover:text-white transition-all flex items-center justify-center gap-1 cursor-pointer"
                     >
                       <Plus className="w-3.5 h-3.5" /> Enter Sem {semNum} GPA
                     </button>
@@ -344,29 +335,35 @@ export const AcademicsTab: React.FC<AcademicsTabProps> = ({ academics, readOnly 
                   <span className="text-xs font-bold text-textPrimary">Semester {semNum}</span>
                   <div className="flex items-center gap-1">
                     {delta !== null && (
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${delta >= 0 ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500'}`}>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${delta >= 0 ? 'bg-green-50 text-green-600 dark:bg-green-950/40 dark:text-green-400' : 'bg-red-50 text-red-500 dark:bg-red-950/40 dark:text-red-400'}`}>
                         {delta >= 0 ? `+${delta}` : delta}
                       </span>
                     )}
-                    <button onClick={() => openEdit(record)} className="p-1 text-textSecondary hover:text-brand-primary">
+                    <button onClick={() => openEdit(record)} className="p-1 text-textSecondary hover:text-brand-primary cursor-pointer" title="Edit Semester GPA & Backlogs">
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
 
                 <div>
-                  <p className="text-2xl font-black text-brand-primary">{record.semester_gpa}</p>
+                  <p className="text-2xl font-black text-brand-primary">{Number(record.semester_gpa).toFixed(2)}</p>
                   <p className="text-[10px] text-textSecondary">GPA out of 10.0</p>
                 </div>
 
-                <div className="pt-2 border-t border-borderLine grid grid-cols-2 gap-2 text-[11px]">
+                <div className="pt-2 border-t border-borderLine flex items-center justify-between text-[11px]">
                   <div>
-                    <span className="text-textSecondary block text-[10px]">Prog. Grade</span>
-                    <span className="font-bold text-textPrimary">{record.programming_grade || 'O'}</span>
+                    <span className="text-textSecondary block text-[10px]">Backlogs</span>
+                    <span className={`font-bold inline-flex items-center gap-1 ${
+                      (record.backlogs || 0) === 0 ? 'text-green-600 dark:text-green-400' : 'text-alert'
+                    }`}>
+                      {(record.backlogs || 0) === 0 ? '0 (All Cleared)' : `${record.backlogs} Active`}
+                    </span>
                   </div>
-                  <div>
-                    <span className="text-textSecondary block text-[10px]">Attendance</span>
-                    <span className="font-bold text-green-600">{record.attendance_pct}%</span>
+                  <div className="text-right">
+                    <span className="text-textSecondary block text-[10px]">Result</span>
+                    <span className="font-semibold text-textPrimary">
+                      {Number(record.semester_gpa) >= 7.75 ? 'Distinction' : Number(record.semester_gpa) >= 6.75 ? 'First Class' : 'Pass'}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -378,9 +375,9 @@ export const AcademicsTab: React.FC<AcademicsTabProps> = ({ academics, readOnly 
       {/* Add / Edit Semester Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
-          <div className="bg-surface border border-borderLine rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+          <div className="bg-surface border border-borderLine rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4 animate-fadeIn">
             <h3 className="text-lg font-bold text-textPrimary">
-              {editingSemester ? `Edit Semester ${editingSemester.semester} GPA` : 'Enter Semester Academic Record'}
+              {editingSemester ? `Edit Semester ${editingSemester.semester} GPA & Backlogs` : 'Enter Semester Academic Record'}
             </h3>
             <form onSubmit={handleSubmit(onSaveSemester)} className="space-y-4">
               <div>
@@ -390,26 +387,17 @@ export const AcademicsTab: React.FC<AcademicsTabProps> = ({ academics, readOnly 
               </div>
               <div>
                 <label className="block text-xs font-semibold text-textPrimary mb-1">Semester GPA (0.00 - 10.00) *</label>
-                <input {...register('semester_gpa')} type="number" step="0.01" min={0} max={10} placeholder="e.g. 9.15" className="w-full px-3 py-2 text-sm font-black text-brand-primary rounded-xl border border-borderLine bg-background" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-textPrimary mb-1">Programming Grade</label>
-                  <input {...register('programming_grade')} placeholder="O / A+ / A" className="w-full px-3 py-2 text-sm rounded-xl border border-borderLine bg-background" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-textPrimary mb-1">Attendance %</label>
-                  <input {...register('attendance_pct')} type="number" step="0.1" min={0} max={100} className="w-full px-3 py-2 text-sm rounded-xl border border-borderLine bg-background" />
-                </div>
+                <input {...register('semester_gpa')} type="number" step="0.01" min={0} max={10} placeholder="e.g. 8.56" required className="w-full px-3 py-2 text-sm font-black text-brand-primary rounded-xl border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary" />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-textPrimary mb-1">Faculty Remarks</label>
-                <input {...register('remarks')} placeholder="Comments on semester progress" className="w-full px-3 py-2 text-sm rounded-xl border border-borderLine bg-background" />
+                <label className="block text-xs font-semibold text-textPrimary mb-1">Backlogs in this Semester (0 = All Cleared) *</label>
+                <input {...register('backlogs')} type="number" min={0} max={20} defaultValue={0} placeholder="0" className="w-full px-3 py-2 text-sm font-bold text-textPrimary rounded-xl border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary" />
+                <p className="text-[11px] text-textMuted mt-1">Enter 0 if all subjects in this semester were cleared on first attempt.</p>
               </div>
               <div className="flex justify-end gap-2 pt-4 border-t border-borderLine">
                 <PillButton variant="outline" size="sm" type="button" onClick={() => setShowAddModal(false)}>Cancel</PillButton>
                 <PillButton variant="primary" size="sm" type="submit" disabled={saving}>
-                  {saving ? 'Saving...' : 'Save Semester GPA'}
+                  {saving ? 'Saving...' : 'Save Semester Record'}
                 </PillButton>
               </div>
             </form>

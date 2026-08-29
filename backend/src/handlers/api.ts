@@ -2385,18 +2385,23 @@ app.post('/students/:id/academics', requireOwnerOrRole('id', 'faculty', 'hod', '
       return res.json({ message: 'Academic record saved', academics: updated });
     }
 
+    await db.query(`
+      ALTER TABLE academics ADD COLUMN IF NOT EXISTS backlogs INT DEFAULT 0;
+    `).catch(() => {});
+
     await db.query(
-      `INSERT INTO academics (student_id, semester, semester_gpa, programming_grade, attendance_pct, theory_grade, remarks)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO academics (student_id, semester, semester_gpa, backlogs, programming_grade, attendance_pct, theory_grade, remarks)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (student_id, semester) DO UPDATE SET
          semester_gpa = EXCLUDED.semester_gpa,
+         backlogs = EXCLUDED.backlogs,
          programming_grade = EXCLUDED.programming_grade,
          attendance_pct = EXCLUDED.attendance_pct,
          theory_grade = EXCLUDED.theory_grade,
          remarks = EXCLUDED.remarks,
          updated_at = CURRENT_TIMESTAMP`,
-      [studentId, validated.semester, validated.semester_gpa, validated.programming_grade || null,
-       validated.attendance_pct, validated.theory_grade || null, validated.remarks || null]
+      [studentId, validated.semester, validated.semester_gpa, validated.backlogs ?? 0, validated.programming_grade || null,
+       validated.attendance_pct ?? 95, validated.theory_grade || null, validated.remarks || null]
     );
 
     const result = await db.query(

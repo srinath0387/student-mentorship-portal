@@ -114,8 +114,9 @@ export interface AcademicRecord {
   id?: string;
   semester: number;
   semester_gpa: number;
+  backlogs?: number;
   programming_grade?: string;
-  attendance_pct: number;
+  attendance_pct?: number;
   theory_grade?: string;
   remarks?: string;
 }

@@ -153,9 +153,10 @@ export const studentProfileSchema = z.object({
 
 export const academicSchema = z.object({
   semester: z.number().int().min(1).max(8),
-  semester_gpa: z.number().min(0).max(10),
+  semester_gpa: z.union([z.number(), z.string().transform((v) => parseFloat(v) || 0)]).pipe(z.number().min(0).max(10)),
+  backlogs: z.union([z.number(), z.string().transform((v) => parseInt(v) || 0)]).optional().default(0),
   programming_grade: z.string().optional().nullable(),
-  attendance_pct: z.number().min(0).max(100),
+  attendance_pct: z.union([z.number(), z.string().transform((v) => parseFloat(v) || 95)]).optional().default(95),
   theory_grade: z.string().optional().nullable(),
   remarks: z.string().optional().nullable(),
 });
