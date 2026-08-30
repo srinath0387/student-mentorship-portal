@@ -3,7 +3,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as XLSX from 'xlsx';
 import { BookOpen, Users, Clock, Trash2, Plus, Upload, Search, Edit2, Check, X } from 'lucide-react';
 import { api } from '../../../lib/api';
+import { VALID_DEPARTMENT_NAMES } from '../../../lib/validation/auth';
 
+const DEPARTMENTS = VALID_DEPARTMENT_NAMES;
 const SEMESTERS = ['1-1','1-2','2-1','2-2','3-1','3-2','4-1','4-2'];
 const SECTIONS = ['A','B','C','D','E'];
 const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -31,7 +33,8 @@ export const AttendanceSetupPage: React.FC = () => {
   // ── TAB 1: SUBJECT MASTER ──────────────────────────────────────────────────
   const [subSearch, setSubSearch] = useState('');
   const [subSemFilter, setSubSemFilter] = useState('');
-  const [subForm, setSubForm] = useState({ semester_label:'', department:'', subject_code:'', subject_name:'', short_name:'', subject_type:'Theory' as 'Theory'|'Lab', regulation:'R22' });
+  const [subDeptFilter, setSubDeptFilter] = useState('');
+  const [subForm, setSubForm] = useState({ semester_label:'', department:'CSE', subject_code:'', subject_name:'', short_name:'', subject_type:'Theory' as 'Theory'|'Lab', regulation:'R22' });
   const [subStatus, setSubStatus] = useState<{type:string;message:string}|null>(null);
   const [editingSubId, setEditingSubId] = useState<string|null>(null);
 
@@ -42,6 +45,7 @@ export const AttendanceSetupPage: React.FC = () => {
   const masterSubjects = Array.isArray(rawMasterSubjects) ? rawMasterSubjects : [];
   const filteredSubjects = masterSubjects.filter((s: any) =>
     (!subSemFilter || s.semester_label === subSemFilter) &&
+    (!subDeptFilter || s.department === subDeptFilter) &&
     (!subSearch || s.subject_name?.toLowerCase().includes(subSearch.toLowerCase()) || s.subject_code?.toLowerCase().includes(subSearch.toLowerCase()))
   );
 
@@ -202,20 +206,23 @@ export const AttendanceSetupPage: React.FC = () => {
           <form onSubmit={handleAddSubject} className="bg-surface border border-borderLine rounded-2xl p-4 space-y-3">
             <h3 className="text-sm font-bold text-textPrimary">{editingSubId?'Edit Subject':'Add Subject to Master Catalog'}</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <select value={subForm.semester_label} onChange={e=>setSubForm(f=>({...f,semester_label:e.target.value}))} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none" required>
+              <select value={subForm.semester_label} onChange={e=>setSubForm(f=>({...f,semester_label:e.target.value}))} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold" required>
                 <option value="">Class *</option>{SEMESTERS.map(s=><option key={s}>{s}</option>)}
               </select>
-              <input value={subForm.department} onChange={e=>setSubForm(f=>({...f,department:e.target.value}))} placeholder="Department *" className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none" required/>
+              <select value={subForm.department} onChange={e=>setSubForm(f=>({...f,department:e.target.value}))} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold" required>
+                <option value="">Department *</option>
+                {DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
+              </select>
               <input value={subForm.subject_code} onChange={e=>setSubForm(f=>({...f,subject_code:e.target.value}))} placeholder="Subject Code *" className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none" required/>
               <input value={subForm.subject_name} onChange={e=>setSubForm(f=>({...f,subject_name:e.target.value}))} placeholder="Subject Title *" className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none" required/>
               <input value={subForm.short_name} onChange={e=>setSubForm(f=>({...f,short_name:e.target.value}))} placeholder="Short Name" className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none"/>
-              <select value={subForm.subject_type} onChange={e=>setSubForm(f=>({...f,subject_type:e.target.value as any}))} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
+              <select value={subForm.subject_type} onChange={e=>setSubForm(f=>({...f,subject_type:e.target.value as any}))} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
                 <option>Theory</option><option>Lab</option>
               </select>
               <input value={subForm.regulation} onChange={e=>setSubForm(f=>({...f,regulation:e.target.value}))} placeholder="Regulation (e.g. R22)" className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none"/>
               <div className="flex gap-2">
                 <button type="submit" className="flex-1 px-4 py-2 bg-brand-primary hover:opacity-90 text-white font-bold text-xs rounded-xl">{editingSubId?'Update':'Add Subject'}</button>
-                {editingSubId&&<button type="button" onClick={()=>{setEditingSubId(null);setSubForm({semester_label:'',department:'',subject_code:'',subject_name:'',short_name:'',subject_type:'Theory',regulation:'R22'});}} className="px-3 py-2 text-xs font-bold text-textSecondary border border-borderLine rounded-xl hover:bg-surface-2">Cancel</button>}
+                {editingSubId&&<button type="button" onClick={()=>{setEditingSubId(null);setSubForm({semester_label:'',department:'CSE',subject_code:'',subject_name:'',short_name:'',subject_type:'Theory',regulation:'R22'});}} className="px-3 py-2 text-xs font-bold text-textSecondary border border-borderLine rounded-xl hover:bg-surface-2">Cancel</button>}
               </div>
             </div>
             <StatusMsg msg={subStatus}/>
@@ -223,10 +230,13 @@ export const AttendanceSetupPage: React.FC = () => {
 
           {/* Filter + Table */}
           <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden">
-            <div className="p-3 border-b border-borderLine flex gap-2 flex-wrap">
+            <div className="p-3 border-b border-borderLine flex gap-2 flex-wrap items-center">
               <div className="relative"><Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-textMuted"/><input value={subSearch} onChange={e=>setSubSearch(e.target.value)} placeholder="Search subjects..." className="pl-8 pr-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none w-48"/></div>
-              <select value={subSemFilter} onChange={e=>setSubSemFilter(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
+              <select value={subSemFilter} onChange={e=>setSubSemFilter(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
                 <option value="">All Classes</option>{SEMESTERS.map(s=><option key={s}>{s}</option>)}
+              </select>
+              <select value={subDeptFilter} onChange={e=>setSubDeptFilter(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
+                <option value="">All Departments</option>{DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
               </select>
               <span className="ml-auto text-xs text-textMuted self-center">{filteredSubjects.length} subjects</span>
             </div>
@@ -269,7 +279,9 @@ export const AttendanceSetupPage: React.FC = () => {
               <select value={allotSem} onChange={e=>setAllotSem(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
                 <option value="">All Classes</option>{SEMESTERS.map(s=><option key={s}>{s}</option>)}
               </select>
-              <input value={allotDept} onChange={e=>setAllotDept(e.target.value)} placeholder="Dept (e.g. CSE)" className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none"/>
+              <select value={allotDept} onChange={e=>setAllotDept(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
+                {DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
+              </select>
               <select value={allotSection} onChange={e=>setAllotSection(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
                 {SECTIONS.map(s=><option key={s}>{s}</option>)}
               </select>
@@ -377,7 +389,9 @@ export const AttendanceSetupPage: React.FC = () => {
               <select value={ttSem} onChange={e=>setTtSem(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
                 <option value="">Class</option>{SEMESTERS.map(s=><option key={s}>{s}</option>)}
               </select>
-              <input value={ttDept} onChange={e=>setTtDept(e.target.value)} placeholder="Dept" className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none"/>
+              <select value={ttDept} onChange={e=>setTtDept(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
+                {DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
+              </select>
               <select value={ttSection} onChange={e=>setTtSection(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
                 {SECTIONS.map(s=><option key={s}>{s}</option>)}
               </select>
@@ -397,10 +411,13 @@ export const AttendanceSetupPage: React.FC = () => {
           {/* Timetable Grid */}
           <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden">
             <div className="p-3 border-b border-borderLine flex gap-3 flex-wrap">
-              <select value={ttSem} onChange={e=>setTtSem(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
+              <select value={ttSem} onChange={e=>setTtSem(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
                 <option value="">All Classes</option>{SEMESTERS.map(s=><option key={s}>{s}</option>)}
               </select>
-              <select value={ttSection} onChange={e=>setTtSection(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
+              <select value={ttDept} onChange={e=>setTtDept(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
+                {DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
+              </select>
+              <select value={ttSection} onChange={e=>setTtSection(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
                 {SECTIONS.map(s=><option key={s}>{s}</option>)}
               </select>
             </div>
