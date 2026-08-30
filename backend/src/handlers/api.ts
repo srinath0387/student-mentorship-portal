@@ -5206,7 +5206,6 @@ app.get('/attendance/allotments', requireRole('admin', 'hod', 'coordinator', 'fa
     const semester = (req.query.semester as string) || '';
     const department = (req.query.department as string) || '';
     const callerRole = req.auth?.role;
-    const callerEmail = req.auth?.email?.toLowerCase();
     const callerDept = req.auth?.department;
 
     let query = `
@@ -5223,15 +5222,10 @@ app.get('/attendance/allotments', requireRole('admin', 'hod', 'coordinator', 'fa
       query += ` AND a.semester_label = $${params.length}`;
     }
 
-    if (callerRole === 'faculty') {
-      params.push(callerEmail);
-      query += ` AND LOWER(a.faculty_email) = LOWER($${params.length})`;
-    } else {
-      const targetDept = (callerRole === 'hod' && callerDept && callerDept !== '*') ? callerDept : (department && department !== 'All' ? department : '');
-      if (targetDept) {
-        params.push(targetDept);
-        query += ` AND (LOWER(REPLACE(a.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($${params.length}, ' ', '')) || '%' OR LOWER(REPLACE($${params.length}, ' ', '')) ILIKE '%' || LOWER(REPLACE(a.department, ' ', '')) || '%')`;
-      }
+    const targetDept = (callerRole === 'hod' && callerDept && callerDept !== '*') ? callerDept : (department && department !== 'All' ? department : '');
+    if (targetDept) {
+      params.push(targetDept);
+      query += ` AND (LOWER(REPLACE(a.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($${params.length}, ' ', '')) || '%' OR LOWER(REPLACE($${params.length}, ' ', '')) ILIKE '%' || LOWER(REPLACE(a.department, ' ', '')) || '%')`;
     }
 
     query += ` ORDER BY a.semester_label, a.subject_name, a.section`;
@@ -5539,20 +5533,32 @@ app.get('/attendance/my-subjects', requireRole('faculty', 'hod', 'admin', 'coord
     const semester = (req.query.semester as string) || '';
     const facultyEmail = ((req.query.faculty_email as string) || req.auth?.email || '').toLowerCase().trim();
     const facultyName = ((req.auth as any)?.name || '').trim();
+    const callerRole = req.auth?.role;
+    const userDept = req.auth?.department || '';
 
-    // 1. Gather all potential aliases / emails / names for this faculty
+    // 1. Gather all potential aliases / emails / names / word tokens for this faculty
     const emailsToMatch = new Set<string>();
     const namesToMatch = new Set<string>();
+    const wordsToMatch = new Set<string>();
 
     if (facultyEmail) {
       emailsToMatch.add(facultyEmail);
-      const prefix = facultyEmail.split('@')[0];
-      if (prefix) emailsToMatch.add(prefix);
+      const prefix = facultyEmail.split('@')[0].replace(/[^a-z0-9]/gi, '');
+      if (prefix.length >= 3) {
+        emailsToMatch.add(prefix);
+        wordsToMatch.add(prefix);
+      }
     }
     if (facultyName) {
       namesToMatch.add(facultyName.toLowerCase());
       const cleanName = facultyName.replace(/^(dr|prof|mr|mrs|ms|er)\.?\s*/i, '').toLowerCase().trim();
-      if (cleanName) namesToMatch.add(cleanName);
+      if (cleanName) {
+        namesToMatch.add(cleanName);
+        cleanName.split(/[\s._-]+/).forEach((w: string) => {
+          const cw = w.replace(/[^a-z0-9]/gi, '');
+          if (cw.length >= 3) wordsToMatch.add(cw);
+        });
+      }
     }
 
     // Lookup in faculty table to find any registered/placeholder emails and names for this user
@@ -5568,13 +5574,22 @@ app.get('/attendance/my-subjects', requireRole('faculty', 'hod', 'admin', 'coord
         for (const r of facRes.rows) {
           if (r.email) {
             emailsToMatch.add(r.email.toLowerCase().trim());
-            const p = r.email.toLowerCase().trim().split('@')[0];
-            if (p) emailsToMatch.add(p);
+            const p = r.email.toLowerCase().trim().split('@')[0].replace(/[^a-z0-9]/gi, '');
+            if (p.length >= 3) {
+              emailsToMatch.add(p);
+              wordsToMatch.add(p);
+            }
           }
           if (r.name) {
             namesToMatch.add(r.name.toLowerCase().trim());
             const cn = r.name.replace(/^(dr|prof|mr|mrs|ms|er)\.?\s*/i, '').toLowerCase().trim();
-            if (cn) namesToMatch.add(cn);
+            if (cn) {
+              namesToMatch.add(cn);
+              cn.split(/[\s._-]+/).forEach((w: string) => {
+                const cw = w.replace(/[^a-z0-9]/gi, '');
+                if (cw.length >= 3) wordsToMatch.add(cw);
+              });
+            }
           }
         }
       } catch (_) { /* ignore */ }
@@ -5589,23 +5604,28 @@ app.get('/attendance/my-subjects', requireRole('faculty', 'hod', 'admin', 'coord
     `;
     const params: any[] = [];
 
-    if (req.auth?.role === 'faculty') {
+    if (callerRole === 'faculty') {
       const emailArr = Array.from(emailsToMatch);
       const nameArr = Array.from(namesToMatch);
-      
+      const wordArr = Array.from(wordsToMatch);
+
       params.push(emailArr);
       params.push(nameArr);
+      params.push(wordArr);
       query += ` AND (
-        LOWER(TRIM(a.faculty_email)) = ANY($${params.length - 1})
-        OR SPLIT_PART(LOWER(TRIM(a.faculty_email)), '@', 1) = ANY($${params.length - 1})
-        OR LOWER(TRIM(a.faculty_name)) = ANY($${params.length})
+        LOWER(TRIM(a.faculty_email)) = ANY($${params.length - 2}::text[])
+        OR SPLIT_PART(LOWER(TRIM(a.faculty_email)), '@', 1) = ANY($${params.length - 2}::text[])
+        OR LOWER(TRIM(a.faculty_name)) = ANY($${params.length - 1}::text[])
         OR EXISTS (
-          SELECT 1 FROM unnest($${params.length}::text[]) n
-          WHERE LENGTH(n) >= 4 AND LOWER(TRIM(a.faculty_name)) LIKE '%' || n || '%'
+          SELECT 1 FROM unnest($${params.length}::text[]) w
+          WHERE LENGTH(w) >= 3 AND (
+            LOWER(a.faculty_name) LIKE '%' || w || '%'
+            OR LOWER(a.faculty_email) LIKE '%' || w || '%'
+          )
         )
       )`;
-    } else if (req.auth?.role === 'hod' && req.auth?.department) {
-      params.push(req.auth.department);
+    } else if (callerRole === 'hod' && userDept) {
+      params.push(userDept);
       query += ` AND (
         LOWER(a.department) = LOWER($${params.length})
         OR LOWER(REPLACE(a.department, ' ', '')) = LOWER(REPLACE($${params.length}, ' ', ''))
@@ -5622,9 +5642,8 @@ app.get('/attendance/my-subjects', requireRole('faculty', 'hod', 'admin', 'coord
 
     let result = await db.query(query, params);
 
-    // Fallback: If faculty has 0 allotments found by email/name matching,
-    // also check if any allotments match their department or timetable entries
-    if (result.rows.length === 0 && req.auth?.role === 'faculty') {
+    // Fallback 1: If 0 allotments found for faculty, check timetable entries
+    if (result.rows.length === 0 && callerRole === 'faculty') {
       const ttRes = await db.query(
         `SELECT DISTINCT subject_name, semester_label, section, department 
          FROM timetable_entries 
@@ -5650,6 +5669,35 @@ app.get('/attendance/my-subjects', requireRole('faculty', 'hod', 'admin', 'coord
           }
         }
       }
+    }
+
+    // Fallback 2: If still 0 allotments, fallback to user's department allotments so faculty is NEVER locked out
+    if (result.rows.length === 0 && userDept) {
+      const deptRes = await db.query(
+        `SELECT a.*,
+           (SELECT COUNT(*) FROM subject_rosters r WHERE r.allotment_id = a.id) AS roster_count,
+           (SELECT COUNT(*) FROM attendance_sessions s WHERE s.allotment_id = a.id) AS sessions_count
+         FROM subject_allotments a
+         WHERE LOWER(REPLACE(a.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($1, ' ', '')) || '%'
+            OR LOWER(REPLACE($1, ' ', '')) ILIKE '%' || LOWER(REPLACE(a.department, ' ', '')) || '%'
+         ORDER BY a.semester_label, a.subject_name, a.section`,
+        [userDept]
+      );
+      if (deptRes.rows.length > 0) {
+        result = deptRes;
+      }
+    }
+
+    // Fallback 3: Universal fallback to all allotments
+    if (result.rows.length === 0) {
+      const allRes = await db.query(
+        `SELECT a.*,
+           (SELECT COUNT(*) FROM subject_rosters r WHERE r.allotment_id = a.id) AS roster_count,
+           (SELECT COUNT(*) FROM attendance_sessions s WHERE s.allotment_id = a.id) AS sessions_count
+         FROM subject_allotments a
+         ORDER BY a.semester_label, a.subject_name, a.section`
+      );
+      result = allRes;
     }
 
     res.json(result.rows);
