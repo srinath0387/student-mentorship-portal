@@ -20,6 +20,8 @@ import {
   DEPARTMENT_CODE_MAP,
   getDeptCodeFromRollNumber,
   getDeptFromRollNumber,
+  getDeptCodeFromRollNumber,
+  getDeptCodeFromName,
   isLateralEntry,
 } from '../lib/validation';
 import { extractAuth, requireAuth, requireRole, requireOwnerOrRole } from '../lib/authMiddleware';
@@ -10041,5 +10043,114 @@ app.get('/first-year/students', requireRole('admin', 'hod', 'coordinator'), asyn
   }
 });
 
+// ── MODULE: Master Subjects CRUD (admin/subjects.php equivalent) ────────────
+app.get('/subjects/master', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS master_subjects (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        semester_label VARCHAR(10) NOT NULL,
+        subject_code VARCHAR(50) NOT NULL,
+        subject_name VARCHAR(255) NOT NULL,
+        short_name VARCHAR(50) DEFAULT '',
+        subject_type VARCHAR(20) DEFAULT 'Theory',
+        department VARCHAR(50) DEFAULT '',
+        regulation VARCHAR(50) DEFAULT '',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )
+    `).catch(() => {});
+
+    const { semester, department } = req.query;
+    let query = `SELECT * FROM master_subjects WHERE 1=1`;
+    const params: any[] = [];
+
+    if (semester && semester !== 'All') {
+      params.push(semester);
+      query += ` AND semester_label = $${params.length}`;
+    }
+    if (department && department !== 'All') {
+      params.push(department);
+      query += ` AND (department = $${params.length} OR department = '' OR department IS NULL)`;
+    }
+
+    query += ` ORDER BY semester_label, subject_code, subject_name`;
+    const result = await db.query(query, params);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/subjects/master', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
+  try {
+    const { semester_label, subject_code, subject_name, short_name, subject_type, department, regulation } = req.body;
+    if (!semester_label || !subject_code || !subject_name) {
+      return res.status(400).json({ error: 'Class (semester_label), subject_code, and subject_name are required' });
+    }
+
+    const result = await db.query(
+      `INSERT INTO master_subjects 
+        (semester_label, subject_code, subject_name, short_name, subject_type, department, regulation)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [
+        semester_label,
+        subject_code.trim(),
+        subject_name.trim(),
+        short_name ? short_name.trim() : '',
+        subject_type || 'Theory',
+        department ? department.trim() : '',
+        regulation ? regulation.trim() : '',
+      ]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/subjects/master/:id', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { semester_label, subject_code, subject_name, short_name, subject_type, department, regulation } = req.body;
+
+    const result = await db.query(
+      `UPDATE master_subjects
+       SET semester_label = COALESCE($1, semester_label),
+           subject_code = COALESCE($2, subject_code),
+           subject_name = COALESCE($3, subject_name),
+           short_name = COALESCE($4, short_name),
+           subject_type = COALESCE($5, subject_type),
+           department = COALESCE($6, department),
+           regulation = COALESCE($7, regulation),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $8
+       RETURNING *`,
+      [semester_label, subject_code, subject_name, short_name, subject_type, department, regulation, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Subject not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/subjects/master/:id', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    await db.query(`DELETE FROM master_subjects WHERE id = $1`, [id]);
+    res.json({ success: true, message: 'Subject deleted successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export const handler = serverless(app);
 export default app;
+

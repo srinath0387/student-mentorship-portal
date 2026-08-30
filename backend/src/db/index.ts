@@ -545,7 +545,21 @@ async function ensureSchema(p: Pool) {
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(semester_label, department, section)
     );`,
-    `CREATE INDEX IF NOT EXISTS idx_class_incharges_faculty ON class_incharges(faculty_email);`
+    `CREATE INDEX IF NOT EXISTS idx_class_incharges_faculty ON class_incharges(faculty_email);`,
+    `CREATE TABLE IF NOT EXISTS master_subjects (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      semester_label VARCHAR(10) NOT NULL,
+      subject_code VARCHAR(50) NOT NULL,
+      subject_name VARCHAR(255) NOT NULL,
+      short_name VARCHAR(50) DEFAULT '',
+      subject_type VARCHAR(20) DEFAULT 'Theory',
+      department VARCHAR(50) DEFAULT '',
+      regulation VARCHAR(50) DEFAULT '',
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );`,
+    `CREATE INDEX IF NOT EXISTS idx_master_subjects_sem ON master_subjects(semester_label);`,
+    `CREATE INDEX IF NOT EXISTS idx_master_subjects_dept ON master_subjects(department);`
   ];
 
   try {

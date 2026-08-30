@@ -1253,4 +1253,46 @@ export const api = {
     const qs = params.toString() ? `?${params.toString()}` : '';
     return fetchWithAuth(`/first-year/students${qs}`);
   },
+
+  // ── MODULE: Subject Master List (admin/subjects.php equivalent) ────────────
+  getMasterSubjects: async (): Promise<any[]> => {
+    return fetchWithAuth('/subjects/master');
+  },
+
+  createMasterSubject: async (data: {
+    semester_label: string;
+    subject_code: string;
+    subject_name: string;
+    short_name?: string;
+    subject_type?: string;
+    department?: string;
+    regulation?: string;
+  }): Promise<any> => {
+    return fetchWithAuth('/subjects/master', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  updateMasterSubject: async (id: string, data: {
+    semester_label?: string;
+    subject_code?: string;
+    subject_name?: string;
+    short_name?: string;
+    subject_type?: string;
+    department?: string;
+    regulation?: string;
+  }): Promise<any> => {
+    return fetchWithAuth(`/subjects/master/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  deleteMasterSubject: async (id: string): Promise<{ success: boolean; message: string }> => {
+    return fetchWithAuth(`/subjects/master/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  },
 };
+

@@ -43,7 +43,7 @@ export const AttendanceManagementTab: React.FC = () => {
       ? normalizeDepartmentName(user.department)
       : 'All';
 
-  const [activeSubTab, setActiveSubTab] = useState<'allotments' | 'rosters' | 'timetable'>('allotments');
+  const [activeSubTab, setActiveSubTab] = useState<'subjects' | 'allotments' | 'rosters' | 'timetable'>('subjects');
   const [selectedSemester, setSelectedSemester] = useState<SemesterLabel>('2-1');
   const [selectedDepartment, setSelectedDepartment] = useState<string>(defaultFilterDept);
   const [selectedSection, setSelectedSection] = useState<string>('A');
@@ -124,10 +124,32 @@ export const AttendanceManagementTab: React.FC = () => {
   const [editingJoiningDateRosterId, setEditingJoiningDateRosterId] = useState<string | null>(null);
   const [newJoiningDate, setNewJoiningDate] = useState<string>('');
 
-  // ── Fetch Registered Faculty List for autocomplete ──
+  // ── Subject Master List State (admin/subjects.php equivalent) ──
+  const [subjectForm, setSubjectForm] = useState({
+    id: '',
+    semester_label: '' as SemesterLabel | '',
+    subject_code: '',
+    subject_name: '',
+    short_name: '',
+    subject_type: 'Theory' as 'Theory' | 'Lab',
+    department: '',
+    regulation: '',
+  });
+  const [subjectSearchQuery, setSubjectSearchQuery] = useState('');
+  const [subjectFilterSem, setSubjectFilterSem] = useState<SemesterLabel | 'All'>('All');
+  const [isSubmittingSubject, setIsSubmittingSubject] = useState(false);
+  const [subjectFormStatus, setSubjectFormStatus] = useState<{ type: 'success' | 'error' | 'idle'; message: string }>({ type: 'idle', message: '' });
+  const [deletingSubjectId, setDeletingSubjectId] = useState<string | null>(null);
+
+
   const { data: facultyList = [] } = useQuery({
     queryKey: ['allFacultyForAllocation'],
     queryFn: () => api.getAllFaculty().catch(() => []),
+  });
+
+  const { data: masterSubjectsList = [] } = useQuery({
+    queryKey: ['masterSubjectList'],
+    queryFn: () => api.getMasterSubjects(),
   });
 
   // ── Fetch Timetable ──
@@ -608,10 +630,20 @@ export const AttendanceManagementTab: React.FC = () => {
             Download Attendance Sheet (PDF)
           </button>
 
-          <div className="flex items-center gap-1 bg-surface-2 p-1 rounded-xl border border-borderLine">
+          <div className="flex items-center gap-1 bg-surface-2 p-1 rounded-xl border border-borderLine overflow-x-auto">
+            <button
+              onClick={() => setActiveSubTab('subjects')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
+                activeSubTab === 'subjects'
+                  ? 'bg-brand-primary text-white shadow-brand'
+                  : 'text-textSecondary hover:text-textPrimary'
+              }`}
+            >
+              0. Subject Master List
+            </button>
             <button
               onClick={() => setActiveSubTab('allotments')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
                 activeSubTab === 'allotments'
                   ? 'bg-brand-primary text-white shadow-brand'
                   : 'text-textSecondary hover:text-textPrimary'
@@ -621,7 +653,7 @@ export const AttendanceManagementTab: React.FC = () => {
             </button>
             <button
               onClick={() => setActiveSubTab('rosters')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
                 activeSubTab === 'rosters'
                   ? 'bg-brand-primary text-white shadow-brand'
                   : 'text-textSecondary hover:text-textPrimary'
@@ -631,7 +663,7 @@ export const AttendanceManagementTab: React.FC = () => {
             </button>
             <button
               onClick={() => setActiveSubTab('timetable')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
                 activeSubTab === 'timetable'
                   ? 'bg-brand-primary text-white shadow-brand'
                   : 'text-textSecondary hover:text-textPrimary'
@@ -642,6 +674,27 @@ export const AttendanceManagementTab: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {/* SUB-TAB 0: SUBJECT MASTER LIST (admin/subjects.php equivalent) */}
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {activeSubTab === 'subjects' && (
+        <SubjectMasterTab
+          subjectForm={subjectForm}
+          setSubjectForm={setSubjectForm}
+          subjectSearchQuery={subjectSearchQuery}
+          setSubjectSearchQuery={setSubjectSearchQuery}
+          subjectFilterSem={subjectFilterSem}
+          setSubjectFilterSem={setSubjectFilterSem}
+          isSubmittingSubject={isSubmittingSubject}
+          setIsSubmittingSubject={setIsSubmittingSubject}
+          subjectFormStatus={subjectFormStatus}
+          setSubjectFormStatus={setSubjectFormStatus}
+          deletingSubjectId={deletingSubjectId}
+          setDeletingSubjectId={setDeletingSubjectId}
+          queryClient={queryClient}
+        />
+      )}
 
       {/* ────────────────────────────────────────────────────────────────────────── */}
       {/* SUB-TAB 1: TIMETABLE SCHEDULE & UPLOAD */}
@@ -1319,19 +1372,45 @@ export const AttendanceManagementTab: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Subject Name */}
+                    {/* Subject Selection / Autocomplete from Master List */}
                     <div className="sm:col-span-2">
-                      <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5">
-                        5. Subject Name *
+                      <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5 flex items-center justify-between">
+                        <span>5. Subject Name *</span>
+                        {masterSubjectsList.length > 0 && (
+                          <span className="text-[10px] text-brand-primary font-normal">Pick from Master List or type custom</span>
+                        )}
                       </label>
-                      <input
-                        type="text"
-                        placeholder="e.g. Data Structures & Algorithms"
-                        value={singleAllotSubjectName}
-                        onChange={(e) => setSingleAllotSubjectName(e.target.value)}
-                        className="w-full bg-surface border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary"
-                        required
-                      />
+                      <div className="space-y-1.5">
+                        {masterSubjectsList.length > 0 && (
+                          <select
+                            onChange={(e) => {
+                              const found = masterSubjectsList.find((s: any) => s.id === e.target.value);
+                              if (found) {
+                                setSingleAllotSubjectName(found.subject_name);
+                                setSingleAllotSubjectType(found.subject_type === 'Lab' ? 'Lab' : 'Theory');
+                              }
+                            }}
+                            className="w-full bg-surface-2 border border-borderLine text-textSecondary text-xs rounded-xl px-3 py-1.5 focus:outline-none focus:border-brand-primary"
+                          >
+                            <option value="">-- Pick from Master Subject List ({masterSubjectsList.filter((s: any) => s.semester_label === singleAllotSemester).length} available for {singleAllotSemester}) --</option>
+                            {masterSubjectsList
+                              .filter((s: any) => !singleAllotSemester || s.semester_label === singleAllotSemester)
+                              .map((s: any) => (
+                                <option key={s.id} value={s.id}>
+                                  {s.semester_label} | {s.subject_code} - {s.subject_name} ({s.subject_type})
+                                </option>
+                              ))}
+                          </select>
+                        )}
+                        <input
+                          type="text"
+                          placeholder="e.g. Data Structures & Algorithms"
+                          value={singleAllotSubjectName}
+                          onChange={(e) => setSingleAllotSubjectName(e.target.value)}
+                          className="w-full bg-surface border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary font-semibold"
+                          required
+                        />
+                      </div>
                     </div>
 
                     {/* Faculty Selection / Autocomplete */}
@@ -2268,6 +2347,355 @@ export const AttendanceManagementTab: React.FC = () => {
         defaultDepartment={selectedDepartment === 'All' ? '' : selectedDepartment}
         defaultSection={selectedSection}
       />
+    </div>
+  );
+};
+
+// ── SubjectMasterTab Component (Ported from dsattendance admin/subjects.php) ──────────────────
+const SubjectMasterTab: React.FC<{
+  subjectForm: any;
+  setSubjectForm: (f: any) => void;
+  subjectSearchQuery: string;
+  setSubjectSearchQuery: (q: string) => void;
+  subjectFilterSem: string;
+  setSubjectFilterSem: (s: any) => void;
+  isSubmittingSubject: boolean;
+  setIsSubmittingSubject: (v: boolean) => void;
+  subjectFormStatus: { type: 'success' | 'error' | 'idle'; message: string };
+  setSubjectFormStatus: (s: any) => void;
+  deletingSubjectId: string | null;
+  setDeletingSubjectId: (id: string | null) => void;
+  queryClient: any;
+}> = ({
+  subjectForm,
+  setSubjectForm,
+  subjectSearchQuery,
+  setSubjectSearchQuery,
+  subjectFilterSem,
+  setSubjectFilterSem,
+  isSubmittingSubject,
+  setIsSubmittingSubject,
+  subjectFormStatus,
+  setSubjectFormStatus,
+  deletingSubjectId,
+  setDeletingSubjectId,
+  queryClient,
+}) => {
+  const { user } = useAuth();
+  const { data: allSubjects = [], isLoading } = useQuery({
+    queryKey: ['masterSubjectList'],
+    queryFn: () => api.getMasterSubjects(),
+  });
+
+  const ALL_SEMS: (SemesterLabel | 'All')[] = ['All', '1-1', '1-2', '2-1', '2-2', '3-1', '3-2', '4-1', '4-2'];
+
+  const filtered = (allSubjects as any[]).filter((s: any) => {
+    const q = subjectSearchQuery.toLowerCase();
+    const semMatch = subjectFilterSem === 'All' || s.semester_label === subjectFilterSem;
+    const textMatch = !q || s.subject_name?.toLowerCase().includes(q) || s.subject_code?.toLowerCase().includes(q) || s.department?.toLowerCase().includes(q);
+    return semMatch && textMatch;
+  });
+
+  const handleSave = async () => {
+    if (!subjectForm.semester_label || !subjectForm.subject_code || !subjectForm.subject_name) {
+      setSubjectFormStatus({ type: 'error', message: 'Class, Subject Code and Subject Name are required.' });
+      return;
+    }
+    setIsSubmittingSubject(true);
+    try {
+      if (subjectForm.id) {
+        await api.updateMasterSubject(subjectForm.id, subjectForm);
+        setSubjectFormStatus({ type: 'success', message: 'Subject updated successfully.' });
+      } else {
+        await api.createMasterSubject(subjectForm);
+        setSubjectFormStatus({ type: 'success', message: 'Subject added successfully.' });
+      }
+      queryClient.invalidateQueries({ queryKey: ['masterSubjectList'] });
+      setSubjectForm({ id: '', semester_label: '' as SemesterLabel | '', subject_code: '', subject_name: '', short_name: '', subject_type: 'Theory', department: '', regulation: '' });
+    } catch (err: any) {
+      setSubjectFormStatus({ type: 'error', message: err.message || 'Failed to save subject.' });
+    } finally {
+      setIsSubmittingSubject(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await api.deleteMasterSubject(id);
+      queryClient.invalidateQueries({ queryKey: ['masterSubjectList'] });
+      setDeletingSubjectId(null);
+    } catch (err: any) {
+      setSubjectFormStatus({ type: 'error', message: err.message || 'Failed to delete subject.' });
+      setDeletingSubjectId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex items-center gap-3 p-4 bg-surface border border-borderLine rounded-2xl shadow-sm">
+        <div className="p-2.5 bg-brand-primary/10 text-brand-primary rounded-xl">
+          <BookOpen className="w-5 h-5" />
+        </div>
+        <div>
+          <h3 className="text-sm font-bold text-textPrimary">Subject Master List</h3>
+          <p className="text-xs text-textSecondary">Add, edit and delete subjects before allotting them to faculty. Matches <b>admin/subjects.php</b> from dsattendance.</p>
+        </div>
+      </div>
+
+      {/* Add / Edit Form (matches dsattendance row form) */}
+      <div className="bg-surface border border-borderLine rounded-2xl p-5 shadow-sm space-y-3">
+        <h4 className="text-xs font-bold text-textPrimary uppercase tracking-wide">
+          {subjectForm.id ? '✏️ Edit Subject' : '➕ Add New Subject'}
+        </h4>
+
+        {subjectFormStatus.type !== 'idle' && (
+          <div className={`p-3 rounded-xl text-xs font-semibold flex items-center justify-between ${
+            subjectFormStatus.type === 'success'
+              ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+              : 'bg-rose-500/10 border border-rose-500/20 text-rose-400'
+          }`}>
+            <span>{subjectFormStatus.message}</span>
+            <button onClick={() => setSubjectFormStatus({ type: 'idle', message: '' })} className="cursor-pointer opacity-70 hover:opacity-100">✕</button>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+          {/* Class / Semester */}
+          <div className="lg:col-span-1">
+            <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Class</label>
+            <select
+              value={subjectForm.semester_label}
+              onChange={e => setSubjectForm({ ...subjectForm, semester_label: e.target.value })}
+              className="w-full px-2 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary"
+            >
+              <option value="">Select</option>
+              {['1-1', '1-2', '2-1', '2-2', '3-1', '3-2', '4-1', '4-2'].map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Subject Code */}
+          <div className="lg:col-span-1">
+            <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Subject Code</label>
+            <input
+              type="text"
+              placeholder="e.g. CS401"
+              value={subjectForm.subject_code}
+              onChange={e => setSubjectForm({ ...subjectForm, subject_code: e.target.value })}
+              className="w-full px-2 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary"
+            />
+          </div>
+
+          {/* Subject Name / Title */}
+          <div className="lg:col-span-2">
+            <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Subject Title</label>
+            <input
+              type="text"
+              placeholder="e.g. Data Structures"
+              value={subjectForm.subject_name}
+              onChange={e => setSubjectForm({ ...subjectForm, subject_name: e.target.value })}
+              className="w-full px-2 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary"
+            />
+          </div>
+
+          {/* Short Name */}
+          <div className="lg:col-span-1">
+            <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Short Name</label>
+            <input
+              type="text"
+              placeholder="e.g. DS"
+              value={subjectForm.short_name}
+              onChange={e => setSubjectForm({ ...subjectForm, short_name: e.target.value })}
+              className="w-full px-2 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary"
+            />
+          </div>
+
+          {/* Type Theory / Lab */}
+          <div className="lg:col-span-1">
+            <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Type</label>
+            <select
+              value={subjectForm.subject_type}
+              onChange={e => setSubjectForm({ ...subjectForm, subject_type: e.target.value })}
+              className="w-full px-2 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary"
+            >
+              <option value="Theory">Theory</option>
+              <option value="Lab">Lab</option>
+            </select>
+          </div>
+
+          {/* Department */}
+          <div className="lg:col-span-1">
+            <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Department</label>
+            <select
+              value={subjectForm.department}
+              onChange={e => setSubjectForm({ ...subjectForm, department: e.target.value })}
+              className="w-full px-2 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary"
+            >
+              <option value="">Select Dept</option>
+              {VALID_DEPARTMENT_NAMES.map(d => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+              <option value="S&H">S&H (1st Year)</option>
+            </select>
+          </div>
+
+          {/* Regulation + Save */}
+          <div className="lg:col-span-1 flex gap-2 items-end">
+            <div className="flex-1">
+              <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Regulation</label>
+              <input
+                type="text"
+                placeholder="R22"
+                value={subjectForm.regulation}
+                onChange={e => setSubjectForm({ ...subjectForm, regulation: e.target.value })}
+                className="w-full px-2 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary"
+              />
+            </div>
+            <button
+              onClick={handleSave}
+              disabled={isSubmittingSubject}
+              className="px-3 py-2 rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white font-bold text-xs shadow-sm transition-all cursor-pointer disabled:opacity-50 whitespace-nowrap flex items-center gap-1"
+            >
+              {isSubmittingSubject ? (
+                <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+              ) : (
+                <Check className="w-3.5 h-3.5" />
+              )}
+              {subjectForm.id ? 'Update' : 'Save'}
+            </button>
+            {subjectForm.id && (
+              <button
+                onClick={() => setSubjectForm({ id: '', semester_label: '' as SemesterLabel | '', subject_code: '', subject_name: '', short_name: '', subject_type: 'Theory', department: '', regulation: '' })}
+                className="px-3 py-2 rounded-xl bg-surface hover:bg-surface-3 border border-borderLine text-textMuted text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Filter + Table (matches dsattendance striped table layout) */}
+      <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden shadow-sm">
+        {/* Table Header / Filters */}
+        <div className="p-3 bg-surface-2 border-b border-borderLine flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-xs font-bold text-textPrimary">
+            <BookOpen className="w-3.5 h-3.5 text-brand-primary" />
+            <span>All Subjects ({filtered.length})</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={subjectFilterSem}
+              onChange={e => setSubjectFilterSem(e.target.value as any)}
+              className="px-2 py-1.5 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none"
+            >
+              {ALL_SEMS.map(s => (
+                <option key={s} value={s}>{s === 'All' ? 'All Classes' : `Class ${s}`}</option>
+              ))}
+            </select>
+            <div className="flex items-center gap-2 bg-surface px-3 py-1.5 rounded-xl border border-borderLine w-52">
+              <Search className="w-3.5 h-3.5 text-textMuted shrink-0" />
+              <input
+                type="text"
+                value={subjectSearchQuery}
+                onChange={e => setSubjectSearchQuery(e.target.value)}
+                placeholder="Search subject or code..."
+                className="w-full bg-transparent text-xs text-textPrimary focus:outline-none"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Table */}
+        {isLoading ? (
+          <div className="p-12 text-center text-xs text-textMuted">Loading subjects...</div>
+        ) : filtered.length === 0 ? (
+          <div className="p-12 text-center text-xs text-textMuted space-y-2">
+            <BookOpen className="w-8 h-8 mx-auto opacity-30" />
+            <p className="font-bold text-textPrimary">No subjects found.</p>
+            <p>Use the form above to add subjects for each class/semester.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-surface-2 border-b border-borderLine text-textMuted font-bold uppercase text-[10px]">
+                <tr>
+                  <th className="px-4 py-2.5 w-10 text-center">#</th>
+                  <th className="px-4 py-2.5">Class</th>
+                  <th className="px-4 py-2.5">Department</th>
+                  <th className="px-4 py-2.5">Subject Code</th>
+                  <th className="px-4 py-2.5">Title</th>
+                  <th className="px-4 py-2.5">Short Name</th>
+                  <th className="px-4 py-2.5">Type</th>
+                  <th className="px-4 py-2.5">Regulation</th>
+                  <th className="px-4 py-2.5 text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-borderLine">
+                {filtered.map((s: any, idx: number) => (
+                  <tr
+                    key={s.id}
+                    className={`hover:bg-surface-2/50 transition-colors ${
+                      deletingSubjectId === s.id ? 'opacity-40' : ''
+                    }`}
+                  >
+                    <td className="px-4 py-2.5 text-center text-textMuted">{idx + 1}</td>
+                    <td className="px-4 py-2.5 font-bold text-textPrimary">{s.semester_label}</td>
+                    <td className="px-4 py-2.5 text-textSecondary">{s.department || '—'}</td>
+                    <td className="px-4 py-2.5 font-mono font-bold text-brand-primary">{s.subject_code}</td>
+                    <td className="px-4 py-2.5 font-semibold text-textPrimary max-w-[200px] truncate">{s.subject_name}</td>
+                    <td className="px-4 py-2.5 font-bold text-textPrimary">{s.short_name || '—'}</td>
+                    <td className="px-4 py-2.5">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        s.subject_type === 'Lab'
+                          ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+                          : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                      }`}>
+                        {s.subject_type || 'Theory'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-textMuted">{s.regulation || '—'}</td>
+                    <td className="px-4 py-2.5 text-center">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          onClick={() => setSubjectForm({
+                            id: s.id,
+                            semester_label: s.semester_label,
+                            subject_code: s.subject_code,
+                            subject_name: s.subject_name,
+                            short_name: s.short_name || '',
+                            subject_type: s.subject_type || 'Theory',
+                            department: s.department || '',
+                            regulation: s.regulation || '',
+                          })}
+                          className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 font-bold text-[10px] border border-amber-500/20 cursor-pointer transition-all flex items-center gap-1"
+                        >
+                          <Edit2 className="w-3 h-3" />
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`Delete "${s.subject_name}"?`)) {
+                              handleDelete(s.id);
+                              setDeletingSubjectId(s.id);
+                            }
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 font-bold text-[10px] border border-rose-500/20 cursor-pointer transition-all flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
