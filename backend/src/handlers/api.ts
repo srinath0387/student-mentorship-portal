@@ -6378,6 +6378,7 @@ app.get('/attendance/timetable', requireAuth, async (req: Request, res: Response
     const section = (req.query.section as string) || '';
     const department = (req.query.department as string) || '';
     const dayOfWeek = (req.query.day as string) || '';
+    const facultyEmail = (req.query.faculty_email as string) || '';
 
     let query = `SELECT * FROM timetable_entries WHERE 1=1`;
     const params: any[] = [];
@@ -6397,6 +6398,10 @@ app.get('/attendance/timetable', requireAuth, async (req: Request, res: Response
     if (dayOfWeek && dayOfWeek !== 'All') {
       params.push(dayOfWeek);
       query += ` AND day_of_week = $${params.length}`;
+    }
+    if (facultyEmail) {
+      params.push(facultyEmail.toLowerCase().trim());
+      query += ` AND LOWER(faculty_email) = $${params.length}`;
     }
 
     query += ` ORDER BY 

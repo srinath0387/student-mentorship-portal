@@ -797,14 +797,19 @@ export const api = {
     });
   },
 
-  getTimetable: async (params: { semester?: string; section?: string; department?: string; day?: string }) => {
+  getTimetable: async (params: { semester?: string; section?: string; department?: string; day?: string; faculty_email?: string }) => {
     const query = new URLSearchParams();
     if (params.semester) query.append('semester', params.semester);
     if (params.section) query.append('section', params.section);
     if (params.department) query.append('department', params.department);
     if (params.day) query.append('day', params.day);
+    if (params.faculty_email) query.append('faculty_email', params.faculty_email);
     const queryString = query.toString() ? `?${query.toString()}` : '';
     return fetchWithAuth(`/attendance/timetable${queryString}`);
+  },
+
+  getSubjectSummary: async (allotmentId: string) => {
+    return fetchWithAuth(`/attendance/subject/${encodeURIComponent(allotmentId)}/summary`);
   },
 
   deleteTimetableEntry: async (id: string) => {

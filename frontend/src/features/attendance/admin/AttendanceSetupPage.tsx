@@ -424,24 +424,35 @@ export const AttendanceSetupPage: React.FC = () => {
           <form onSubmit={handleSaveSlot} className="bg-surface border border-borderLine rounded-2xl p-4 space-y-3">
             <h3 className="text-sm font-bold text-textPrimary">Add Timetable Slot</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
-              <select value={ttSem} onChange={e=>setTtSem(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
-                <option value="">Class</option>{SEMESTERS.map(s=><option key={s}>{s}</option>)}
+              <select value={ttSem} onChange={e=>setTtSem(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
+                <option value="">Class *</option>{SEMESTERS.map(s=><option key={s} value={s}>{s}</option>)}
               </select>
               <select value={ttDept} onChange={e=>setTtDept(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
                 {DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
               </select>
-              <select value={ttSection} onChange={e=>setTtSection(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
-                {SECTIONS.map(s=><option key={s}>{s}</option>)}
+              <select value={ttSection} onChange={e=>setTtSection(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
+                {SECTIONS.map(s=><option key={s} value={s}>Section {s}</option>)}
               </select>
-              <select value={ttDay} onChange={e=>setTtDay(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
-                {DAYS.map(d=><option key={d}>{d}</option>)}
+              <select value={ttDay} onChange={e=>setTtDay(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
+                {DAYS.map(d=><option key={d} value={d}>{d}</option>)}
               </select>
-              <select value={ttPeriod} onChange={e=>setTtPeriod(Number(e.target.value))} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
+              <select value={ttPeriod} onChange={e=>setTtPeriod(Number(e.target.value))} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
                 {PERIODS.map(p=><option key={p} value={p}>Period {p}</option>)}
               </select>
-              <input value={ttSubject} onChange={e=>setTtSubject(e.target.value)} placeholder="Subject *" className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none" required/>
-              <input value={ttFacEmail} onChange={e=>setTtFacEmail(e.target.value)} placeholder="Faculty Email *" className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none" required/>
-              <button type="submit" className="px-4 py-2 bg-brand-primary text-white font-bold text-xs rounded-xl hover:opacity-90">Save Slot</button>
+              <select value={ttNumPeriods} onChange={e=>setTtNumPeriods(Number(e.target.value))} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
+                <option value={1}>1 Hour (Single)</option>
+                <option value={2}>2 Hours (Double)</option>
+                <option value={3}>3 Hours (Lab)</option>
+              </select>
+              <input value={ttSubject} onChange={e=>setTtSubject(e.target.value)} placeholder="Subject Title *" className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold" required list="ttSubjectSuggestions"/>
+              <datalist id="ttSubjectSuggestions">
+                {masterSubjects.map((s:any)=><option key={s.id} value={s.subject_name}>{s.subject_code} - {s.subject_name}</option>)}
+              </datalist>
+              <input value={ttFacEmail} onChange={e=>setTtFacEmail(e.target.value)} placeholder="Faculty Email *" className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold" required list="ttFacSuggestions"/>
+              <datalist id="ttFacSuggestions">
+                {facultyList.map((f:any)=><option key={f.email} value={f.email}>{f.name} ({f.department})</option>)}
+              </datalist>
+              <button type="submit" className="col-span-2 md:col-span-4 lg:col-span-8 px-4 py-2.5 bg-brand-primary text-white font-bold text-xs rounded-xl hover:opacity-90 transition-opacity">Save Timetable Slot</button>
             </div>
             <StatusMsg msg={ttStatus}/>
           </form>

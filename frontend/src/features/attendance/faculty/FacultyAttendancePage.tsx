@@ -40,8 +40,6 @@ export const FacultyAttendancePage: React.FC = () => {
   const {data:rawSubjects=[]} = useQuery({ queryKey:['mySubjectsAll'], queryFn:()=>api.getMyAttendanceSubjects().catch(()=>[]) });
   const mySubjects: SubjectAllotment[] = Array.isArray(rawSubjects)?rawSubjects:[];
 
-  const todayDay = useMemo(()=>DAYS[new Date().getDay()]||'Monday',[]);
-
   // Sections for selected semester
   const sections = useMemo(()=>{
     const s = new Set<string>();
@@ -71,12 +69,58 @@ export const FacultyAttendancePage: React.FC = () => {
     queryKey:['sessionDetails',existingSession?.id], queryFn:()=>existingSession?.id?api.getSessionDetails(existingSession.id).catch(()=>null):Promise.resolve(null), enabled:Boolean(existingSession?.id)
   });
 
-  // Today timetable
-  const {data:rawTT=[]} = useQuery({ queryKey:['myTimetable',user?.email,todayDay], queryFn:()=>api.getTimetable({day:todayDay}).catch(()=>[]) });
-  const todaySlots = useMemo(()=>{
-    if(!Array.isArray(rawTT)) return [];
-    return rawTT.filter((t:TimetableEntry)=>t.faculty_email?.toLowerCase()===user?.email?.toLowerCase());
-  },[rawTT,user?.email]);
+  // Timetable
+  const { data: rawTT = [] } = useQuery({
+    queryKey: ['myWeeklyTimetable', user?.email],
+    queryFn: () => api.getTimetable({ faculty_email: user?.email }).catch(() => [])
+  });
+  const myTimetable = Array.isArray(rawTT) ? rawTT : [];
+
+  const selectedDay = useMemo(() => {
+    if (!date) return 'Monday';
+    const d = new Date(date + 'T12:00:00');
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    return dayNames[d.getDay()] || 'Monday';
+  }, [date]);
+
+  const todayDay = useMemo(() => {
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    return dayNames[new Date().getDay()] || 'Monday';
+  }, []);
+
+  const todaySlots = useMemo(() => {
+    return myTimetable.filter((t: TimetableEntry) => t.day_of_week === todayDay);
+  }, [myTimetable, todayDay]);
+
+  // Find matching scheduled timetable entry for the active subject on the selected date
+  const matchedSlot = useMemo(() => {
+    if (!activeSubject) return null;
+    return myTimetable.find((t: any) =>
+      t.day_of_week === selectedDay &&
+      (!t.semester_label || t.semester_label === activeSubject.semester_label) &&
+      (!t.section || t.section === activeSubject.section) &&
+      (
+        t.subject_name?.toLowerCase().trim() === activeSubject.subject_name?.toLowerCase().trim() ||
+        (t.faculty_email && t.faculty_email.toLowerCase().trim() === user?.email?.toLowerCase().trim())
+      )
+    );
+  }, [myTimetable, activeSubject, selectedDay, user?.email]);
+
+  // Dynamically set Hour checkboxes based on timetable scheduled duration (e.g. Mon: 1 hr, Wed: 2 hrs)
+  useEffect(() => {
+    if (matchedSlot) {
+      const dur = matchedSlot.num_periods || 1;
+      if (dur === 1) {
+        setHour1(true); setHour2(false); setHour3(false);
+      } else if (dur === 2) {
+        setHour1(true); setHour2(true); setHour3(false);
+      } else if (dur >= 3) {
+        setHour1(true); setHour2(true); setHour3(true);
+      }
+    } else {
+      setHour1(true); setHour2(false); setHour3(false);
+    }
+  }, [matchedSlot]);
 
   // Not posted
   const {data:rawNotPosted=[]} = useQuery({ queryKey:['notPosted',user?.email], queryFn:()=>api.getNotPostedAttendance({faculty_email:user?.email}).catch(()=>[]) });
@@ -94,18 +138,57 @@ export const FacultyAttendancePage: React.FC = () => {
     }
   },[roster,isPosted,sessionDetails,isLoaded]);
 
+  const totalActiveHours = (hour1?1:0) + (hour2?1:0) + (hour3?1:0) || 1;
+
   const saveMutation = useMutation({
     mutationFn:async()=>{
       if(!subjectId) throw new Error('No subject selected');
-      const payload = { allotment_id:subjectId, session_date:date, num_periods:(hour1?1:0)+(hour2?1:0)+(hour3?1:0)||1, period_start:1, records:records.map(r=>({roll_number:r.roll_number,is_present:r.h1})) };
+      const payload = {
+        allotment_id: subjectId,
+        session_date: date,
+        num_periods: totalActiveHours,
+        period_start: matchedSlot?.period_start || 1,
+        records: records.map(r => ({
+          roll_number: r.roll_number,
+          is_present: hour1 ? (hour2 ? (hour3 ? (r.h1 && r.h2 && r.h3) : (r.h1 && r.h2)) : r.h1) : r.h1
+        }))
+      };
       return isPosted&&existingSession?.id ? api.updateAttendanceSession(existingSession.id,payload.records) : api.saveAttendanceSession(payload);
     },
     onSuccess:()=>{ qc.invalidateQueries({queryKey:['sessions']}); qc.invalidateQueries({queryKey:['notPosted']}); setShowAbsentModal(false); setFeedback({type:'success',text:'Attendance saved successfully!'}); setTimeout(()=>setFeedback(null),4000); },
     onError:(err:any)=>setFeedback({type:'error',text:err.message||'Failed to save.'})
   });
 
-  const absentList = records.filter(r=>!r.h1);
-  const presentCount = records.filter(r=>r.h1).length;
+  const absentList = records.filter(r=>!r.h1 || (hour2 && !r.h2) || (hour3 && !r.h3));
+  const presentCount = records.length - absentList.length;
+
+  // Reports state & handler
+  const [reportData, setReportData] = useState<any>(null);
+  const [isReportSearching, setIsReportSearching] = useState(false);
+  const [reportSearchError, setReportSearchError] = useState<string|null>(null);
+
+  const handleSearchReport = async () => {
+    let targetId = reportSubId;
+    if (!targetId || targetId === 'All') {
+      if (mySubjects.length > 0) {
+        targetId = mySubjects[0].id;
+        setReportSubId(targetId);
+      } else {
+        setReportSearchError('No subjects allotted.');
+        return;
+      }
+    }
+    setIsReportSearching(true);
+    setReportSearchError(null);
+    try {
+      const data = await api.getSubjectSummary(targetId);
+      setReportData(data);
+    } catch (err: any) {
+      setReportSearchError(err.message || 'Failed to fetch report.');
+    } finally {
+      setIsReportSearching(false);
+    }
+  };
 
   const NAV_ITEMS: {id:NavId;label:string;icon:React.ReactNode}[] = [
     {id:'dashboard',label:'Faculty Dashboard',icon:<LayoutDashboard className="w-4 h-4"/>},
@@ -285,13 +368,26 @@ export const FacultyAttendancePage: React.FC = () => {
                 <div className="space-y-3">
                   {/* Info Strip */}
                   <div className="bg-cyan-50 dark:bg-cyan-950/40 border border-cyan-200 dark:border-cyan-800 text-cyan-800 dark:text-cyan-200 p-4 rounded-2xl space-y-2">
-                    <div className="text-xs font-bold flex flex-wrap gap-x-4 gap-y-1">
+                    <div className="text-xs font-bold flex flex-wrap gap-x-4 gap-y-1 items-center">
                       <span><b>Class:</b> {activeSubject.semester_label}</span><span>|</span>
                       <span><b>Section:</b> {activeSubject.section}</span><span>|</span>
                       <span><b>Subject:</b> {activeSubject.subject_name}</span><span>|</span>
-                      <span><b>Date:</b> {date}</span>
+                      <span><b>Date:</b> {date} ({selectedDay})</span>
                     </div>
-                    {isPosted&&<div className="text-[11px] font-bold text-amber-600 bg-amber-100 dark:bg-amber-950/40 px-3 py-1.5 rounded-lg border border-amber-200 w-fit">Already Posted — You can update attendance</div>}
+
+                    <div className="flex flex-wrap gap-2 items-center pt-1">
+                      {matchedSlot ? (
+                        <div className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-950/60 px-3 py-1 rounded-lg border border-indigo-300 flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5"/> Timetable: {matchedSlot.num_periods} Hour(s) on {selectedDay} (Period {matchedSlot.period_start})
+                        </div>
+                      ) : (
+                        <div className="text-[11px] font-bold text-slate-600 dark:text-slate-300 bg-slate-200 dark:bg-slate-800 px-3 py-1 rounded-lg border border-slate-300 flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5"/> Unscheduled slot ({totalActiveHours} Hour(s))
+                        </div>
+                      )}
+                      {isPosted&&<div className="text-[11px] font-bold text-amber-700 bg-amber-100 dark:bg-amber-950/40 px-3 py-1 rounded-lg border border-amber-300">Already Posted — You can edit attendance</div>}
+                    </div>
+
                     <div className="flex gap-2 pt-1">
                       <button onClick={()=>setRecords(p=>p.map(r=>({...r,h1:true,h2:true,h3:true})))} className="px-3 py-1.5 bg-[#28a745] text-white font-bold text-xs rounded-lg hover:bg-green-600">All Present</button>
                       <button onClick={()=>setRecords(p=>p.map(r=>({...r,h1:false,h2:false,h3:false})))} className="px-3 py-1.5 bg-[#dc3545] text-white font-bold text-xs rounded-lg hover:bg-red-600">All Absent</button>
@@ -308,42 +404,56 @@ export const FacultyAttendancePage: React.FC = () => {
                             <th className="px-4 py-3 w-36">Roll No</th>
                             <th className="px-4 py-3">Name of the Student</th>
                             <th className="px-4 py-3 text-center w-24">
-                              <label className="flex items-center justify-center gap-1 cursor-pointer">
-                                <input type="checkbox" checked={hour1} onChange={e=>setHour1(e.target.checked)} className="rounded"/>
+                              <label className="flex items-center justify-center gap-1 cursor-pointer select-none">
+                                <input type="checkbox" checked={hour1} onChange={e=>setHour1(e.target.checked)} className="rounded cursor-pointer"/>
                                 Hour-1
                               </label>
                             </th>
-                            <th className="px-4 py-3 text-center w-24">
-                              <label className="flex items-center justify-center gap-1 cursor-pointer">
-                                <input type="checkbox" checked={hour2} onChange={e=>setHour2(e.target.checked)} className="rounded"/>
-                                Hour-2
-                              </label>
-                            </th>
-                            <th className="px-4 py-3 text-center w-24">
-                              <label className="flex items-center justify-center gap-1 cursor-pointer">
-                                <input type="checkbox" checked={hour3} onChange={e=>setHour3(e.target.checked)} className="rounded"/>
-                                Hour-3
-                              </label>
-                            </th>
+                            {(hour2 || (matchedSlot?.num_periods || 0) >= 2) && (
+                              <th className="px-4 py-3 text-center w-24">
+                                <label className="flex items-center justify-center gap-1 cursor-pointer select-none">
+                                  <input type="checkbox" checked={hour2} onChange={e=>setHour2(e.target.checked)} className="rounded cursor-pointer"/>
+                                  Hour-2
+                                </label>
+                              </th>
+                            )}
+                            {(hour3 || (matchedSlot?.num_periods || 0) >= 3) && (
+                              <th className="px-4 py-3 text-center w-24">
+                                <label className="flex items-center justify-center gap-1 cursor-pointer select-none">
+                                  <input type="checkbox" checked={hour3} onChange={e=>setHour3(e.target.checked)} className="rounded cursor-pointer"/>
+                                  Hour-3
+                                </label>
+                              </th>
+                            )}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-borderLine">
                           {rosterLoading?<tr><td colSpan={6} className="p-8 text-center text-textMuted">Loading students...</td></tr>:records.length===0?<tr><td colSpan={6} className="p-8 text-center text-textMuted">No students enrolled for this subject.</td></tr>:records.map((r,idx)=>(
-                            <tr key={r.roll_number} className={`hover:bg-surface-2 transition-colors ${!r.h1?'bg-rose-50/60 dark:bg-rose-950/20':''}`}>
+                            <tr key={r.roll_number} className={`hover:bg-surface-2 transition-colors ${(!r.h1 || (hour2 && !r.h2) || (hour3 && !r.h3))?'bg-rose-50/60 dark:bg-rose-950/20':''}`}>
                               <td className="px-4 py-3 text-center text-textMuted font-bold">{idx+1}</td>
                               <td className="px-4 py-3 font-mono font-black text-textPrimary">{r.roll_number}</td>
                               <td className="px-4 py-3 font-bold uppercase">{r.student_name||'—'}</td>
-                              <td className="px-4 py-3 text-center"><input type="checkbox" checked={r.h1} onChange={e=>setRecords(p=>p.map(s=>s.roll_number===r.roll_number?{...s,h1:e.target.checked}:s))} className="w-4 h-4 rounded cursor-pointer"/></td>
-                              <td className="px-4 py-3 text-center"><input type="checkbox" checked={r.h2} onChange={e=>setRecords(p=>p.map(s=>s.roll_number===r.roll_number?{...s,h2:e.target.checked}:s))} className="w-4 h-4 rounded cursor-pointer"/></td>
-                              <td className="px-4 py-3 text-center"><input type="checkbox" checked={r.h3} onChange={e=>setRecords(p=>p.map(s=>s.roll_number===r.roll_number?{...s,h3:e.target.checked}:s))} className="w-4 h-4 rounded cursor-pointer"/></td>
+                              <td className="px-4 py-3 text-center">
+                                <input type="checkbox" checked={r.h1} onChange={e=>setRecords(p=>p.map(s=>s.roll_number===r.roll_number?{...s,h1:e.target.checked}:s))} className="w-4 h-4 rounded cursor-pointer"/>
+                              </td>
+                              {(hour2 || (matchedSlot?.num_periods || 0) >= 2) && (
+                                <td className="px-4 py-3 text-center">
+                                  <input type="checkbox" checked={r.h2} onChange={e=>setRecords(p=>p.map(s=>s.roll_number===r.roll_number?{...s,h2:e.target.checked}:s))} className="w-4 h-4 rounded cursor-pointer"/>
+                                </td>
+                              )}
+                              {(hour3 || (matchedSlot?.num_periods || 0) >= 3) && (
+                                <td className="px-4 py-3 text-center">
+                                  <input type="checkbox" checked={r.h3} onChange={e=>setRecords(p=>p.map(s=>s.roll_number===r.roll_number?{...s,h3:e.target.checked}:s))} className="w-4 h-4 rounded cursor-pointer"/>
+                                </td>
+                              )}
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
                     <div className="p-4 bg-surface-2 border-t border-borderLine flex items-center justify-between">
-                      <span className="text-xs font-bold text-textSecondary">Total: {records.length} | Present: {presentCount} | Absent: {absentList.length}</span>
-                      <button onClick={()=>setShowAbsentModal(true)} className="px-5 py-2.5 bg-[#007bff] hover:bg-blue-600 text-white font-bold text-xs rounded-xl shadow-sm">Review & Submit Attendance</button>
+                      <span className="text-xs font-bold text-textSecondary">Total: {records.length} | Full Present: {presentCount} | Absentees: {absentList.length}</span>
+                      <button onClick={()=>setShowAbsentModal(true)} className="px-5 py-2.5 bg-[#007bff] hover:bg-blue-600 text-white font-bold text-xs rounded-xl shadow-sm">Review & Submit Attendance ({totalActiveHours} Hr{totalActiveHours>1?'s':''})</button>
                     </div>
                   </div>
                 </div>
@@ -386,39 +496,98 @@ export const FacultyAttendancePage: React.FC = () => {
           {nav==='reports' && (
             <div className="space-y-4">
               <h2 className="text-base font-black text-textPrimary">My Attendance Reports</h2>
-              <div className="bg-surface border border-borderLine rounded-2xl p-4">
+              <div className="bg-surface border border-borderLine rounded-2xl p-4 space-y-3">
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                  <select value={reportSubId} onChange={e=>setReportSubId(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
+                  <select value={reportSubId} onChange={e=>setReportSubId(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
                     <option value="All">All My Allotted Subjects</option>
-                    {mySubjects.map(s=><option key={s.id} value={s.id}>{s.subject_name}</option>)}
+                    {mySubjects.map(s=><option key={s.id} value={s.id}>{s.subject_name} ({s.semester_label} - Sec {s.section})</option>)}
                   </select>
-                  <select value={reportSection} onChange={e=>setReportSection(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
+                  <select value={reportSection} onChange={e=>setReportSection(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
                     <option value="All">All Sections</option>
                     {['A','B','C','D'].map(s=><option key={s} value={s}>Section {s}</option>)}
                   </select>
-                  <select className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
-                    <option>Total Attendance</option><option>Daywise Attendance</option>
+                  <select className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
+                    <option>Total Attendance</option>
                   </select>
-                  <button className="px-4 py-2 bg-[#007bff] text-white font-bold text-xs rounded-xl hover:bg-blue-600">Search</button>
+                  <button onClick={handleSearchReport} disabled={isReportSearching} className="px-4 py-2 bg-[#007bff] text-white font-bold text-xs rounded-xl hover:bg-blue-600 disabled:opacity-50 flex items-center justify-center gap-1.5">
+                    {isReportSearching ? 'Loading…' : 'Search Records'}
+                  </button>
                   <button onClick={()=>window.print()} className="flex items-center justify-center gap-1.5 px-4 py-2 bg-[#6c757d] text-white font-bold text-xs rounded-xl hover:bg-slate-600">
-                    <Printer className="w-3.5 h-3.5"/>Print
+                    <Printer className="w-3.5 h-3.5"/>Print Report
                   </button>
                 </div>
+                {reportSearchError && <p className="text-xs font-bold text-rose-500">{reportSearchError}</p>}
               </div>
-              <div className="bg-cyan-50 dark:bg-cyan-950/40 border border-cyan-200 dark:border-cyan-800 text-cyan-800 dark:text-cyan-200 px-4 py-3 rounded-xl text-xs font-bold flex items-center justify-between">
-                <span><b>Class:</b> All Classes</span><span><b>Subject:</b> All My Allotted Subjects</span><span><b>Section:</b> All Sections</span>
-              </div>
-              <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden">
-                <div className="p-3 border-b border-borderLine font-bold text-xs">Total Attendance Summary</div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs text-left">
-                    <thead className="bg-[#343a40] text-white font-bold">
-                      <tr><th className="px-4 py-3 text-center w-12">S.No</th><th className="px-4 py-3">Roll No</th><th className="px-4 py-3">Name</th><th className="px-4 py-3">Section</th><th className="px-4 py-3 text-center">Total Hrs</th><th className="px-4 py-3 text-center">Present Hrs</th><th className="px-4 py-3 text-center">Percentage</th></tr>
-                    </thead>
-                    <tbody><tr><td colSpan={7} className="p-8 text-center text-textMuted">Select subject and click Search to load report.</td></tr></tbody>
-                  </table>
+
+              {reportData && (
+                <div className="space-y-4">
+                  {/* Subject Overview Bar */}
+                  <div className="bg-cyan-50 dark:bg-cyan-950/40 border border-cyan-200 dark:border-cyan-800 text-cyan-800 dark:text-cyan-200 p-4 rounded-2xl flex flex-wrap gap-4 text-xs font-bold items-center justify-between">
+                    <div>
+                      <span><b>Subject:</b> {reportData.allotment?.subject_name}</span> · <span><b>Class:</b> {reportData.allotment?.semester_label}</span> · <span><b>Section:</b> {reportData.allotment?.section}</span>
+                    </div>
+                    <div className="flex gap-4">
+                      <span>Total Sessions: <strong>{reportData.sessions_count || 0}</strong></span>
+                      <span>Total Periods Held: <strong>{reportData.total_periods_held || 0}</strong></span>
+                      <span>Students: <strong>{reportData.total_students || 0}</strong></span>
+                    </div>
+                  </div>
+
+                  {/* Students Attendance Table */}
+                  <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden shadow-sm">
+                    <div className="p-3 border-b border-borderLine font-bold text-xs flex items-center justify-between">
+                      <span>Total Attendance Summary</span>
+                      <span className="text-[11px] text-textMuted font-normal">{(reportData.students || []).length} students enrolled</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs text-left">
+                        <thead className="bg-[#343a40] text-white font-bold">
+                          <tr>
+                            <th className="px-4 py-3 text-center w-12">S.No</th>
+                            <th className="px-4 py-3">Roll No</th>
+                            <th className="px-4 py-3">Student Name</th>
+                            <th className="px-4 py-3 text-center">Section</th>
+                            <th className="px-4 py-3 text-center">Total Periods</th>
+                            <th className="px-4 py-3 text-center">Present</th>
+                            <th className="px-4 py-3 text-center">Percentage</th>
+                            <th className="px-4 py-3 text-center">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-borderLine">
+                          {(reportData.students || [])
+                            .filter((s:any) => reportSection === 'All' || s.section === reportSection)
+                            .map((s:any, idx:number)=>(
+                            <tr key={s.roll_number} className="hover:bg-surface-2 transition-colors">
+                              <td className="px-4 py-3 text-center text-textMuted font-bold">{idx+1}</td>
+                              <td className="px-4 py-3 font-mono font-black">{s.roll_number}</td>
+                              <td className="px-4 py-3 font-bold uppercase">{s.student_name}</td>
+                              <td className="px-4 py-3 text-center">{s.section}</td>
+                              <td className="px-4 py-3 text-center font-semibold">{s.periods_held}</td>
+                              <td className="px-4 py-3 text-center font-bold text-emerald-600">{s.periods_attended}</td>
+                              <td className="px-4 py-3 text-center">
+                                <span className={`font-black ${s.percentage >= 75 ? 'text-emerald-600' : s.percentage >= 65 ? 'text-amber-500' : 'text-rose-600'}`}>
+                                  {s.percentage}%
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${s.percentage >= 75 ? 'bg-emerald-100 text-emerald-700' : s.percentage >= 65 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>
+                                  {s.percentage >= 75 ? 'Eligible' : s.percentage >= 65 ? 'Condonation' : 'Shortage'}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {!reportData && !isReportSearching && (
+                <div className="p-12 text-center text-textMuted bg-surface border border-borderLine rounded-2xl">
+                  Select a subject and click <strong>"Search Records"</strong> to view the detailed attendance report.
+                </div>
+              )}
             </div>
           )}
 
