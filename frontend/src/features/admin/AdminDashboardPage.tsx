@@ -48,8 +48,7 @@ import { PlacementPreferencesTab } from '../profile/tabs/PlacementPreferencesTab
 import { BulkImportModal } from './components/BulkImportModal';
 import { FacultyRecordsTable } from './components/FacultyRecordsTable';
 import { PlacementEligibilitySection } from '../hod/components/PlacementEligibilitySection';
-import { AttendanceManagementTab } from './tabs/AttendanceManagementTab';
-import { AttendanceTrackingTab } from '../attendance/AttendanceTrackingTab';
+import { AttendanceSetupPage } from '../attendance/admin/AttendanceSetupPage';
 import { HodLeaveApprovalTab } from '../leave/HodLeaveApprovalTab';
 import { HolidayCalendarTab } from './tabs/HolidayCalendarTab';
 import { LeaveCreditManagementTab } from './tabs/LeaveCreditManagementTab';
@@ -618,13 +617,10 @@ export const AdminDashboardPage: React.FC = () => {
       {/* ── TAB: Holiday Calendar ── */}
       {activeTab === 'holidays' && <HolidayCalendarTab />}
 
-      {/* ── TAB: Attendance Management & Tracking ── */}
+      {/* ── TAB: Attendance Setup & Management ── */}
       {activeTab === 'attendance' && (
         <div className="space-y-6">
-          <AttendanceManagementTab />
-          <div className="pt-4 border-t border-borderLine">
-            <AttendanceTrackingTab role="admin" />
-          </div>
+          <AttendanceSetupPage />
         </div>
       )}
 

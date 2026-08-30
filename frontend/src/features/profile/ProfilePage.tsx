@@ -23,7 +23,7 @@ import { CertificationsTab } from './tabs/CertificationsTab';
 import { SoftSkillsTab } from './tabs/SoftSkillsTab';
 import { AchievementsTab } from './tabs/AchievementsTab';
 import { PlacementPreferencesTab } from './tabs/PlacementPreferencesTab';
-import { AttendanceTrackingTab } from '../attendance/AttendanceTrackingTab';
+import { StudentAttendanceView } from '../attendance/student/StudentAttendanceView';
 import { StudentPermissionTab } from '../leave/StudentPermissionTab';
 
 export const ProfilePage: React.FC = () => {
@@ -233,7 +233,7 @@ export const ProfilePage: React.FC = () => {
         </div>
         <div className="p-6">
           {currentTab === 'personal-info' && <PersonalInfoTab student={student} academics={academics} onRefresh={handleRefreshAll} readOnly={isReadOnly} />}
-          {currentTab === 'attendance' && <AttendanceTrackingTab role={user?.role || 'student'} targetRollNumber={activeRollNo} />}
+          {currentTab === 'attendance' && <StudentAttendanceView rollNumber={activeRollNo} />}
           {currentTab === 'permissions' && <StudentPermissionTab rollNumber={activeRollNo} />}
           {currentTab === 'academics' && <AcademicsTab academics={academics} studentYear={student?.year} onRefresh={handleRefreshAll} readOnly={isReadOnly} />}
           {currentTab === 'tech-skills' && <TechSkillsTab skills={techSkills} onRefresh={handleRefreshAll} readOnly={isReadOnly} />}

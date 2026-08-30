@@ -137,7 +137,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
         { label: 'Coordinator Hub', path: '/coordinator/dashboard', icon: LayoutDashboard },
         { label: 'Fresher Directory', path: '/coordinator/dashboard', icon: Users },
         { label: 'Class Incharges', path: '/coordinator/dashboard', icon: Award },
-        { label: 'Attendance Mgmt', path: '/admin/dashboard?tab=attendance', icon: CalendarCheck },
+        { label: 'Attendance Mgmt', path: '/coordinator/dashboard?tab=attendance', icon: CalendarCheck },
         { label: 'Faculty Directory', path: '/admin/faculty', icon: ShieldCheck },
       ],
     },
