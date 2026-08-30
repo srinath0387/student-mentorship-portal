@@ -195,7 +195,7 @@ export const HodAttendancePage: React.FC = () => {
                 </select>
                 <select className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
                   <option value="">All Sections</option>
-                  {uniqueSections.map(s => <option key={s}>Section {s}</option>)}
+                  {uniqueSections.map(s => <option key={s} value={s}>Section {s}</option>)}
                 </select>
               </div>
               <div className="flex gap-2">
@@ -220,7 +220,7 @@ export const HodAttendancePage: React.FC = () => {
                 </select>
                 <select className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
                   <option value="">All Sections</option>
-                  {uniqueSections.map(s => <option key={s}>Section {s}</option>)}
+                  {uniqueSections.map(s => <option key={s} value={s}>Section {s}</option>)}
                 </select>
               </div>
               <button onClick={() => window.print()} className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 bg-rose-500 text-white font-bold text-xs rounded-xl hover:bg-rose-600">

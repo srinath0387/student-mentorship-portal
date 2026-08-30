@@ -220,17 +220,64 @@ export const FacultyAttendancePage: React.FC = () => {
               {/* Filter Bar */}
               <div className="bg-surface border border-borderLine rounded-2xl p-4">
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                  <select value={sem} onChange={e=>{setSem(e.target.value as any);setIsLoaded(false);}} className="px-3 py-2 text-xs rounded-xl border border-blue-300 dark:border-slate-600 bg-background focus:outline-none font-semibold">
-                    <option value="">Select Class</option>{ALL_SEMESTERS.map(s=><option key={s}>{s}</option>)}
+                  <select 
+                    value={sem} 
+                    onChange={e => {
+                      const newSem = e.target.value as any;
+                      setSem(newSem);
+                      setIsLoaded(false);
+                      if (subjectId) {
+                        const cur = mySubjects.find(s => s.id === subjectId);
+                        if (cur && newSem && cur.semester_label !== newSem) setSubjectId('');
+                      }
+                    }} 
+                    className="px-3 py-2 text-xs rounded-xl border border-blue-300 dark:border-slate-600 bg-background focus:outline-none font-semibold"
+                  >
+                    <option value="">Select Class (All)</option>
+                    {ALL_SEMESTERS.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
-                  <select value={section} onChange={e=>{setSection(e.target.value);setIsLoaded(false);}} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
-                    <option value="">Select Section</option>{sections.map(s=><option key={s}>Section {s}</option>)}
+
+                  <select 
+                    value={section} 
+                    onChange={e => {
+                      const newSec = e.target.value;
+                      setSection(newSec);
+                      setIsLoaded(false);
+                      if (subjectId) {
+                        const cur = mySubjects.find(s => s.id === subjectId);
+                        if (cur && newSec && cur.section !== newSec) setSubjectId('');
+                      }
+                    }} 
+                    className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold"
+                  >
+                    <option value="">Select Section (All)</option>
+                    {sections.map(s => <option key={s} value={s}>Section {s}</option>)}
                   </select>
-                  <select value={subjectId} onChange={e=>{setSubjectId(e.target.value);setIsLoaded(false);}} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
-                    <option value="">Select Subject</option>{filteredSubjects.map(s=><option key={s.id} value={s.id}>{s.subject_name}</option>)}
+
+                  <select 
+                    value={subjectId} 
+                    onChange={e => {
+                      const chosenId = e.target.value;
+                      setSubjectId(chosenId);
+                      setIsLoaded(false);
+                      const chosen = mySubjects.find(s => s.id === chosenId);
+                      if (chosen) {
+                        if (chosen.semester_label) setSem(chosen.semester_label as any);
+                        if (chosen.section) setSection(chosen.section);
+                      }
+                    }} 
+                    className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold"
+                  >
+                    <option value="">Select Subject</option>
+                    {filteredSubjects.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.subject_name} ({s.semester_label} - Sec {s.section})
+                      </option>
+                    ))}
                   </select>
+
                   <input type="date" value={date} onChange={e=>setDate(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold"/>
-                  <button onClick={()=>{if(!subjectId){setFeedback({type:'error',text:'Select class, section and subject first.'});return;}setIsLoaded(true);}} className="px-4 py-2 bg-[#007bff] hover:bg-blue-600 text-white font-bold text-xs rounded-xl">Load Students</button>
+                  <button onClick={()=>{if(!subjectId){setFeedback({type:'error',text:'Select a subject first.'});return;}setIsLoaded(true);}} className="px-4 py-2 bg-[#007bff] hover:bg-blue-600 text-white font-bold text-xs rounded-xl">Load Students</button>
                 </div>
               </div>
 
@@ -347,7 +394,7 @@ export const FacultyAttendancePage: React.FC = () => {
                   </select>
                   <select value={reportSection} onChange={e=>setReportSection(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
                     <option value="All">All Sections</option>
-                    {['A','B','C','D'].map(s=><option key={s}>Section {s}</option>)}
+                    {['A','B','C','D'].map(s=><option key={s} value={s}>Section {s}</option>)}
                   </select>
                   <select className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
                     <option>Total Attendance</option><option>Daywise Attendance</option>

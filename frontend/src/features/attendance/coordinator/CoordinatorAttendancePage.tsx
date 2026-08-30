@@ -77,7 +77,7 @@ export const CoordinatorAttendancePage: React.FC = () => {
         <select value={section} onChange={e => setSection(e.target.value)}
           className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
           <option value="">All Sections</option>
-          {uniqueSections.map(s => <option key={s}>Section {s}</option>)}
+          {uniqueSections.map(s => <option key={s} value={s}>Section {s}</option>)}
         </select>
         <span className="text-xs text-textMuted">{filteredAllotments.length} allotments | {sectionGroups.length} sections</span>
       </div>
@@ -247,7 +247,7 @@ export const CoordinatorAttendancePage: React.FC = () => {
               <div className="space-y-2">
                 <select className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
                   <option value="">All Sections</option>
-                  {uniqueSections.map(s => <option key={s}>Section {s}</option>)}
+                  {uniqueSections.map(s => <option key={s} value={s}>Section {s}</option>)}
                 </select>
                 <select className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
                   <option>Full Semester</option><option>Current Month</option>
