@@ -79,17 +79,48 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
       const email = (explicitCallerEmail || payload.email || '').toLowerCase();
       const derivedRegNo = (payload['custom:reg_no'] || (email.includes('@') ? email.split('@')[0] : '')).toUpperCase();
       const role = (payload['custom:role'] || 'student').toLowerCase();
-      // Derive department from roll number for students, or from DB for faculty
+      // Derive department from roll number for students, or from DB for faculty/hod
       let department: string | undefined;
+      let facName: string | undefined;
       if (role === 'student' && derivedRegNo.length === 10) {
         department = getDeptFromRollNumber(derivedRegNo);
+      } else if ((role === 'faculty' || role === 'hod') && email && !db.isMock) {
+        // Lookup faculty name + department from DB so attendance subject matching works
+        try {
+          const facCheck = await db.query(
+            'SELECT department, name FROM faculty WHERE LOWER(email) = $1 LIMIT 1', [email]
+          );
+          if (facCheck.rows.length > 0) {
+            department = facCheck.rows[0].department || undefined;
+            facName = facCheck.rows[0].name || undefined;
+          }
+          // Also try users table for name
+          if (!facName) {
+            const userCheck = await db.query(
+              'SELECT name FROM users WHERE LOWER(email) = $1 LIMIT 1', [email]
+            );
+            if (userCheck.rows.length > 0) {
+              facName = userCheck.rows[0].name || undefined;
+            }
+          }
+          // Fallback: try hod_credentials for department
+          if (!department && role === 'hod') {
+            const hodCheck = await db.query(
+              'SELECT department FROM hod_credentials WHERE LOWER(email) = $1 LIMIT 1', [email]
+            );
+            if (hodCheck.rows.length > 0) {
+              department = hodCheck.rows[0].department || undefined;
+            }
+          }
+        } catch { /* degrade gracefully */ }
       }
       req.auth = {
         email,
         role,
         regNo: derivedRegNo,
         department,
-      };
+        ...(facName ? { name: facName } : {}),
+      } as any;
       return next();
     }
 
