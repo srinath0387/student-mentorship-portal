@@ -83,12 +83,31 @@ export const FacultyAttendancePage: React.FC = () => {
     queryKey:['sessionDetails',existingSession?.id], queryFn:()=>existingSession?.id?api.getSessionDetails(existingSession.id).catch(()=>null):Promise.resolve(null), enabled:Boolean(existingSession?.id)
   });
 
-  // Timetable
+  // Timetable — by faculty email
   const { data: rawTT = [] } = useQuery({
     queryKey: ['myWeeklyTimetable', user?.email],
     queryFn: () => api.getTimetable({ faculty_email: user?.email }).catch(() => [])
   });
-  const myTimetable = Array.isArray(rawTT) ? rawTT : [];
+
+  // Timetable — by subject section/semester (fallback when faculty email differs in timetable)
+  const { data: rawSubjectTT = [] } = useQuery({
+    queryKey: ['subjectWeeklyTimetable', activeSubject?.semester_label, activeSubject?.section],
+    queryFn: () => activeSubject
+      ? api.getTimetable({ semester: activeSubject.semester_label, section: activeSubject.section }).catch(() => [])
+      : Promise.resolve([]),
+    enabled: Boolean(activeSubject),
+  });
+
+  // Combined timetable: email-matched + subject/section-matched (dedup by id)
+  const myTimetable = useMemo(() => {
+    const emailMatched = Array.isArray(rawTT) ? rawTT : [];
+    const subjectMatched = Array.isArray(rawSubjectTT) ? rawSubjectTT : [];
+    const combined = [...emailMatched];
+    for (const t of subjectMatched) {
+      if (!combined.find((m: any) => m.id === t.id)) combined.push(t);
+    }
+    return combined;
+  }, [rawTT, rawSubjectTT]);
 
   // Academic Holidays
   const { data: rawHolidays = [] } = useQuery({
@@ -126,11 +145,15 @@ export const FacultyAttendancePage: React.FC = () => {
     if (!activeSubject) return null;
     return myTimetable.find((t: any) =>
       t.day_of_week === selectedDay &&
-      (!t.semester_label || t.semester_label === activeSubject.semester_label) &&
-      (!t.section || t.section === activeSubject.section) &&
       (
-        t.subject_name?.toLowerCase().trim() === activeSubject.subject_name?.toLowerCase().trim() ||
-        (t.faculty_email && t.faculty_email.toLowerCase().trim() === user?.email?.toLowerCase().trim())
+        // Match by faculty email
+        (t.faculty_email && t.faculty_email.toLowerCase().trim() === user?.email?.toLowerCase().trim()) ||
+        // Match by subject name + section + semester (handles email mismatch)
+        (
+          t.subject_name?.toLowerCase().trim() === activeSubject.subject_name?.toLowerCase().trim() &&
+          (!t.section || t.section.toUpperCase() === activeSubject.section?.toUpperCase()) &&
+          (!t.semester_label || t.semester_label === activeSubject.semester_label)
+        )
       )
     );
   }, [myTimetable, activeSubject, selectedDay, user?.email]);
@@ -141,10 +164,14 @@ export const FacultyAttendancePage: React.FC = () => {
     return Array.from(new Set(
       myTimetable
         .filter((t: any) =>
-          (!t.semester_label || t.semester_label === activeSubject.semester_label) &&
-          (!t.section || t.section === activeSubject.section) &&
-          (t.subject_name?.toLowerCase().trim() === activeSubject.subject_name?.toLowerCase().trim() ||
-           (t.faculty_email && t.faculty_email.toLowerCase().trim() === user?.email?.toLowerCase().trim()))
+          (
+            (t.faculty_email && t.faculty_email.toLowerCase().trim() === user?.email?.toLowerCase().trim()) ||
+            (
+              t.subject_name?.toLowerCase().trim() === activeSubject.subject_name?.toLowerCase().trim() &&
+              (!t.section || t.section.toUpperCase() === activeSubject.section?.toUpperCase()) &&
+              (!t.semester_label || t.semester_label === activeSubject.semester_label)
+            )
+          )
         )
         .map((t: any) => t.day_of_week)
     ));
@@ -239,16 +266,23 @@ export const FacultyAttendancePage: React.FC = () => {
   const [reportSearchError, setReportSearchError] = useState<string|null>(null);
 
   const handleSearchReport = async () => {
-    let targetId = reportSubId;
-    if (!targetId || targetId === 'All') {
-      if (mySubjects.length > 0) {
-        targetId = mySubjects[0].id;
-        setReportSubId(targetId);
-      } else {
-        setReportSearchError('No subjects allotted.');
-        return;
-      }
+    let subjectsToFetch = mySubjects;
+    if (reportSubId && reportSubId !== 'All') {
+      subjectsToFetch = mySubjects.filter(s => s.id === reportSubId);
     }
+    if (reportSection && reportSection !== 'All') {
+      const sectionFiltered = subjectsToFetch.filter(s => s.section === reportSection);
+      if (sectionFiltered.length > 0) subjectsToFetch = sectionFiltered;
+    }
+    if (subjectsToFetch.length === 0 && mySubjects.length > 0) {
+      subjectsToFetch = mySubjects;
+    }
+    if (subjectsToFetch.length === 0) {
+      setReportSearchError('No subjects available. Please check allotments.');
+      return;
+    }
+    const targetId = subjectsToFetch[0].id;
+    setReportSubId(targetId);
     setIsReportSearching(true);
     setReportSearchError(null);
     try {
@@ -264,6 +298,14 @@ export const FacultyAttendancePage: React.FC = () => {
       setIsReportSearching(false);
     }
   };
+
+  // Auto-load report when entering reports tab
+  useEffect(() => {
+    if (nav === 'reports' && mySubjects.length > 0 && !reportData && !isReportSearching) {
+      handleSearchReport();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nav, mySubjects.length]);
 
   const NAV_ITEMS: {id:NavId;label:string;icon:React.ReactNode}[] = [
     {id:'dashboard',label:'Faculty Dashboard',icon:<LayoutDashboard className="w-4 h-4"/>},

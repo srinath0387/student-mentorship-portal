@@ -19,7 +19,9 @@ export const HodAttendancePage: React.FC = () => {
   // Allotments for HOD department
   const { data: rawAllotments = [], refetch: refetchAllotments, isLoading: isAllotLoading } = useQuery({
     queryKey: ['attendanceAllotments', filterSem, user?.department],
-    queryFn: () => api.getAllotments(filterSem || undefined, user?.department || undefined).catch(() => [])
+    queryFn: () => api.getAllotments(filterSem || undefined, user?.department || undefined).catch(() => []),
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
   const allotments = Array.isArray(rawAllotments) ? rawAllotments : [];
 
@@ -27,7 +29,9 @@ export const HodAttendancePage: React.FC = () => {
   const { data: subjectSummary, isLoading: isSummaryLoading, refetch: refetchSummary } = useQuery({
     queryKey: ['subjectSummary', filterSubject],
     queryFn: () => filterSubject ? api.getSubjectSummary(filterSubject).catch(() => null) : Promise.resolve(null),
-    enabled: Boolean(filterSubject)
+    enabled: Boolean(filterSubject),
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
 
   // Daily Period Grid
