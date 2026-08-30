@@ -812,6 +812,10 @@ export const api = {
     return fetchWithAuth(`/attendance/subject/${encodeURIComponent(allotmentId)}/summary`);
   },
 
+  getSubjectDaywiseAttendance: async (allotmentId: string) => {
+    return fetchWithAuth(`/attendance/subject/${encodeURIComponent(allotmentId)}/daywise`);
+  },
+
   deleteTimetableEntry: async (id: string) => {
     return fetchWithAuth(`/attendance/timetable/${id}`, {
       method: 'DELETE',

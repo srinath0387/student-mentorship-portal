@@ -6260,7 +6260,7 @@ app.get('/attendance/subject/:allotmentId/summary', requireRole('faculty', 'hod'
         r.roll_number,
         r.joining_date,
         COALESCE(st.name, r.roll_number) AS student_name,
-        COALESCE(st.section, allotment.section) AS section,
+        allotment.section AS section,
         COALESCE(SUM(CASE WHEN s.session_date >= COALESCE(r.joining_date, '1970-01-01'::date) THEN s.num_periods ELSE 0 END), 0) AS student_periods_held,
         COALESCE(SUM(CASE WHEN s.session_date >= COALESCE(r.joining_date, '1970-01-01'::date) AND ar.is_present = true THEN s.num_periods ELSE 0 END), 0) AS periods_attended
        FROM subject_rosters r
@@ -6269,7 +6269,7 @@ app.get('/attendance/subject/:allotmentId/summary', requireRole('faculty', 'hod'
        LEFT JOIN attendance_sessions s ON s.allotment_id = $1
        LEFT JOIN attendance_records ar ON ar.session_id = s.id AND ar.roll_number = r.roll_number
        WHERE r.allotment_id = $1
-       GROUP BY r.id, r.roll_number, r.joining_date, st.name, st.section, allotment.section
+       GROUP BY r.id, r.roll_number, r.joining_date, st.name, allotment.section
        ORDER BY r.roll_number`,
       [allotmentId, allotment.section]
     );
@@ -6295,6 +6295,103 @@ app.get('/attendance/subject/:allotmentId/summary', requireRole('faculty', 'hod'
       total_periods_held: totalHeldOverall,
       sessions_count: sessionsCount,
       total_students: students.length,
+      students,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 13b. Attendance: Get Daywise Attendance Matrix for a Subject Allotment
+app.get('/attendance/subject/:allotmentId/daywise', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const { allotmentId } = req.params;
+    const allotRes = await db.query('SELECT * FROM subject_allotments WHERE id = $1', [allotmentId]);
+    if (allotRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Subject allotment not found' });
+    }
+    const allotment = allotRes.rows[0];
+
+    // Fetch all recorded sessions for this subject
+    const sessionsRes = await db.query(
+      `SELECT id, session_date::text as session_date, period_start, num_periods, recorded_by, created_at
+       FROM attendance_sessions
+       WHERE allotment_id = $1
+       ORDER BY session_date ASC, period_start ASC`,
+      [allotmentId]
+    );
+    const sessions = sessionsRes.rows;
+
+    // Fetch enrolled students
+    const rosterRes = await db.query(
+      `SELECT r.id as roster_id, r.roll_number, r.joining_date, COALESCE(st.name, r.roll_number) as student_name, allotment.section
+       FROM subject_rosters r
+       CROSS JOIN (SELECT $2::text as section) allotment
+       LEFT JOIN students st ON st.roll_number = r.roll_number
+       WHERE r.allotment_id = $1
+       ORDER BY r.roll_number ASC`,
+      [allotmentId, allotment.section]
+    );
+
+    const sessionIds = sessions.map(s => s.id);
+    let recordsRes: any = { rows: [] };
+    if (sessionIds.length > 0) {
+      recordsRes = await db.query(
+        `SELECT ar.session_id, ar.roll_number, ar.is_present, s.session_date::text as session_date,
+                EXISTS (
+                  SELECT 1 FROM student_permissions sp
+                  WHERE UPPER(TRIM(sp.roll_number)) = UPPER(TRIM(ar.roll_number))
+                    AND LOWER(sp.status) = 'approved'
+                    AND s.session_date >= sp.from_date::date
+                    AND s.session_date <= sp.to_date::date
+                ) as is_on_od
+         FROM attendance_records ar
+         JOIN attendance_sessions s ON s.id = ar.session_id
+         WHERE ar.session_id = ANY($1)`,
+        [sessionIds]
+      );
+    }
+
+    const recordsMap: Record<string, Record<string, { is_present: boolean; is_on_od: boolean }>> = {};
+    for (const rec of recordsRes.rows) {
+      const roll = (rec.roll_number || '').trim().toUpperCase();
+      if (!recordsMap[roll]) recordsMap[roll] = {};
+      recordsMap[roll][rec.session_id] = {
+        is_present: Boolean(rec.is_present),
+        is_on_od: Boolean(rec.is_on_od),
+      };
+    }
+
+    const students = rosterRes.rows.map((st: any) => {
+      const roll = (st.roll_number || '').trim().toUpperCase();
+      const studentRecs = recordsMap[roll] || {};
+      let attendedPeriods = 0;
+      let heldPeriods = 0;
+
+      sessions.forEach((sess: any) => {
+        const pCount = sess.num_periods || 1;
+        heldPeriods += pCount;
+        const rec = studentRecs[sess.id];
+        if (rec && rec.is_present) {
+          attendedPeriods += pCount;
+        }
+      });
+
+      const pct = heldPeriods > 0 ? Math.round((attendedPeriods / heldPeriods) * 1000) / 10 : 100;
+      return {
+        roll_number: st.roll_number,
+        student_name: st.student_name,
+        section: st.section,
+        total_held: heldPeriods,
+        total_attended: attendedPeriods,
+        percentage: pct,
+        session_records: studentRecs,
+      };
+    });
+
+    res.json({
+      allotment,
+      sessions,
       students,
     });
   } catch (err: any) {
