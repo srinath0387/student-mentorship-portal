@@ -18,7 +18,6 @@ import {
   REGISTRATION_NUMBER_REGEX,
   RGMCET_EMAIL_REGEX,
   DEPARTMENT_CODE_MAP,
-  getDeptCodeFromRollNumber,
   getDeptFromRollNumber,
   getDeptCodeFromRollNumber,
   getDeptCodeFromName,
