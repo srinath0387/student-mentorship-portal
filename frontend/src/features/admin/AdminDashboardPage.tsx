@@ -300,7 +300,10 @@ export const AdminDashboardPage: React.FC = () => {
     ? students.reduce((sum, s) => sum + Number((s as any).cgpa ?? 0), 0) / students.length
     : 0;
   const avgCgpaDisplay = avgCgpaRaw > 0 ? `${avgCgpaRaw.toFixed(2)} / 10` : '—';
-  const leetcodeCount = students.filter(s => (s as any).leetcode_username).length;
+  const leetcodeCount = students.filter(s => {
+    const h = (s as any).leetcode_handle || (s as any).leetcode || (s as any).leetcode_username;
+    return h && h !== 'Not Linked' && String(h).trim() !== '';
+  }).length;
 
   // Student CRUD handlers
   const openAddModal = () => {
