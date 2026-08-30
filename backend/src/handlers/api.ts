@@ -5534,10 +5534,51 @@ app.get('/attendance/rosters/:allotmentId', requireRole('admin', 'hod', 'faculty
 });
 
 // 6. Faculty: Get My Allotted Subjects for a Semester
-app.get('/attendance/my-subjects', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+app.get('/attendance/my-subjects', requireRole('faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const semester = (req.query.semester as string) || '';
-    const facultyEmail = req.auth?.email?.toLowerCase();
+    const facultyEmail = ((req.query.faculty_email as string) || req.auth?.email || '').toLowerCase().trim();
+    const facultyName = ((req.auth as any)?.name || '').trim();
+
+    // 1. Gather all potential aliases / emails / names for this faculty
+    const emailsToMatch = new Set<string>();
+    const namesToMatch = new Set<string>();
+
+    if (facultyEmail) {
+      emailsToMatch.add(facultyEmail);
+      const prefix = facultyEmail.split('@')[0];
+      if (prefix) emailsToMatch.add(prefix);
+    }
+    if (facultyName) {
+      namesToMatch.add(facultyName.toLowerCase());
+      const cleanName = facultyName.replace(/^(dr|prof|mr|mrs|ms|er)\.?\s*/i, '').toLowerCase().trim();
+      if (cleanName) namesToMatch.add(cleanName);
+    }
+
+    // Lookup in faculty table to find any registered/placeholder emails and names for this user
+    if (facultyEmail || facultyName) {
+      try {
+        const facRes = await db.query(
+          `SELECT email, name FROM faculty 
+           WHERE (email IS NOT NULL AND LOWER(TRIM(email)) = $1)
+              OR (name IS NOT NULL AND LOWER(TRIM(name)) = $2)
+              OR (name IS NOT NULL AND LOWER(TRIM(name)) ILIKE '%' || $2 || '%')`,
+          [facultyEmail, facultyName.toLowerCase()]
+        );
+        for (const r of facRes.rows) {
+          if (r.email) {
+            emailsToMatch.add(r.email.toLowerCase().trim());
+            const p = r.email.toLowerCase().trim().split('@')[0];
+            if (p) emailsToMatch.add(p);
+          }
+          if (r.name) {
+            namesToMatch.add(r.name.toLowerCase().trim());
+            const cn = r.name.replace(/^(dr|prof|mr|mrs|ms|er)\.?\s*/i, '').toLowerCase().trim();
+            if (cn) namesToMatch.add(cn);
+          }
+        }
+      } catch (_) { /* ignore */ }
+    }
 
     let query = `
       SELECT a.*,
@@ -5549,8 +5590,27 @@ app.get('/attendance/my-subjects', requireRole('faculty', 'hod', 'admin'), async
     const params: any[] = [];
 
     if (req.auth?.role === 'faculty') {
-      params.push(facultyEmail);
-      query += ` AND LOWER(a.faculty_email) = LOWER($${params.length})`;
+      const emailArr = Array.from(emailsToMatch);
+      const nameArr = Array.from(namesToMatch);
+      
+      params.push(emailArr);
+      params.push(nameArr);
+      query += ` AND (
+        LOWER(TRIM(a.faculty_email)) = ANY($${params.length - 1})
+        OR SPLIT_PART(LOWER(TRIM(a.faculty_email)), '@', 1) = ANY($${params.length - 1})
+        OR LOWER(TRIM(a.faculty_name)) = ANY($${params.length})
+        OR EXISTS (
+          SELECT 1 FROM unnest($${params.length}::text[]) n
+          WHERE LENGTH(n) >= 4 AND LOWER(TRIM(a.faculty_name)) LIKE '%' || n || '%'
+        )
+      )`;
+    } else if (req.auth?.role === 'hod' && req.auth?.department) {
+      params.push(req.auth.department);
+      query += ` AND (
+        LOWER(a.department) = LOWER($${params.length})
+        OR LOWER(REPLACE(a.department, ' ', '')) = LOWER(REPLACE($${params.length}, ' ', ''))
+        OR $${params.length} = 'General'
+      )`;
     }
 
     if (semester) {
@@ -5560,7 +5620,38 @@ app.get('/attendance/my-subjects', requireRole('faculty', 'hod', 'admin'), async
 
     query += ` ORDER BY a.semester_label, a.subject_name, a.section`;
 
-    const result = await db.query(query, params);
+    let result = await db.query(query, params);
+
+    // Fallback: If faculty has 0 allotments found by email/name matching,
+    // also check if any allotments match their department or timetable entries
+    if (result.rows.length === 0 && req.auth?.role === 'faculty') {
+      const ttRes = await db.query(
+        `SELECT DISTINCT subject_name, semester_label, section, department 
+         FROM timetable_entries 
+         WHERE (faculty_email IS NOT NULL AND LOWER(TRIM(faculty_email)) = $1)
+            OR (faculty_name IS NOT NULL AND LOWER(TRIM(faculty_name)) = $2)
+            OR (faculty_name IS NOT NULL AND LOWER(TRIM(faculty_name)) ILIKE '%' || $2 || '%')`,
+        [facultyEmail, facultyName.toLowerCase()]
+      );
+      if (ttRes.rows.length > 0) {
+        const subNames = ttRes.rows.map((t: any) => t.subject_name).filter(Boolean);
+        if (subNames.length > 0) {
+          const fbRes = await db.query(
+            `SELECT a.*,
+               (SELECT COUNT(*) FROM subject_rosters r WHERE r.allotment_id = a.id) AS roster_count,
+               (SELECT COUNT(*) FROM attendance_sessions s WHERE s.allotment_id = a.id) AS sessions_count
+             FROM subject_allotments a
+             WHERE a.subject_name = ANY($1)
+             ORDER BY a.semester_label, a.subject_name, a.section`,
+            [subNames]
+          );
+          if (fbRes.rows.length > 0) {
+            result = fbRes;
+          }
+        }
+      }
+    }
+
     res.json(result.rows);
   } catch (err: any) {
     res.status(500).json({ error: err.message });

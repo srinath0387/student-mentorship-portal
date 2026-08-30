@@ -46,8 +46,13 @@ export const FacultyAttendancePage: React.FC = () => {
   const [reportSection, setReportSection] = useState('All');
 
   // Fetch allotted subjects
-  const {data:rawSubjects=[]} = useQuery({ queryKey:['mySubjectsAll'], queryFn:()=>api.getMyAttendanceSubjects().catch(()=>[]) });
-  const mySubjects: SubjectAllotment[] = Array.isArray(rawSubjects)?rawSubjects:[];
+  const { data: rawSubjects = [], refetch: refetchSubjects } = useQuery({
+    queryKey: ['mySubjectsAll', user?.email, user?.department],
+    queryFn: () => api.getMyAttendanceSubjects().catch(() => []),
+    staleTime: 0,
+    refetchOnMount: 'always',
+  });
+  const mySubjects: SubjectAllotment[] = Array.isArray(rawSubjects) ? rawSubjects : [];
 
   // Sections for selected semester
   const sections = useMemo(()=>{
