@@ -40,12 +40,17 @@ export const AttendanceSetupPage: React.FC = () => {
 
   const [masterFetchTs, setMasterFetchTs] = useState(0);
 
-  const { data: rawMasterSubjects = [], refetch: refetchMaster, isLoading: isMasterLoading } = useQuery({
+  const { data: rawMasterSubjects = [], refetch: refetchMaster, isLoading: isMasterLoading, error: masterError } = useQuery({
     queryKey: ['masterSubjects', masterFetchTs],
-    queryFn: () => api.getMasterSubjects(),
+    queryFn: async () => {
+      const result = await api.getMasterSubjects();
+      console.log('[AttendanceSetup] getMasterSubjects raw result:', result, 'type:', typeof result, 'isArray:', Array.isArray(result));
+      return result;
+    },
     staleTime: 0,
     refetchOnMount: 'always',
   });
+  console.log('[AttendanceSetup] rawMasterSubjects:', rawMasterSubjects, 'masterError:', masterError);
   const masterSubjects = Array.isArray(rawMasterSubjects) ? rawMasterSubjects : [];
   const filteredSubjects = masterSubjects.filter((s: any) =>
     (!subSemFilter || s.semester_label === subSemFilter) &&
@@ -248,7 +253,11 @@ export const AttendanceSetupPage: React.FC = () => {
               <select value={subDeptFilter} onChange={e=>setSubDeptFilter(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
                 <option value="">All Departments</option>{DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
               </select>
-              <span className="ml-auto text-xs text-textMuted self-center">{filteredSubjects.length} subjects</span>
+              <div className="ml-auto flex items-center gap-3 text-xs">
+                {isMasterLoading && <span className="text-blue-500 font-bold animate-pulse">Loading…</span>}
+                {masterError && <span className="text-red-500 font-bold">Error: {String(masterError)}</span>}
+                <span className="text-textMuted">DB: <strong>{masterSubjects.length}</strong> total · Shown: <strong>{filteredSubjects.length}</strong></span>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-left">
