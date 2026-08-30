@@ -10083,6 +10083,21 @@ app.get('/subjects/master', requireAuth, async (req: Request, res: Response) => 
 
 app.post('/subjects/master', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
   try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS master_subjects (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        semester_label VARCHAR(10) NOT NULL,
+        subject_code VARCHAR(50) NOT NULL,
+        subject_name VARCHAR(255) NOT NULL,
+        short_name VARCHAR(50) DEFAULT '',
+        subject_type VARCHAR(20) DEFAULT 'Theory',
+        department VARCHAR(50) DEFAULT '',
+        regulation VARCHAR(50) DEFAULT '',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )
+    `).catch(() => {});
+
     const { semester_label, subject_code, subject_name, short_name, subject_type, department, regulation } = req.body;
     if (!semester_label || !subject_code || !subject_name) {
       return res.status(400).json({ error: 'Class (semester_label), subject_code, and subject_name are required' });
@@ -10106,6 +10121,7 @@ app.post('/subjects/master', requireRole('admin', 'hod', 'coordinator'), async (
 
     res.status(201).json(result.rows[0]);
   } catch (err: any) {
+    console.error('Error in POST /subjects/master:', err);
     res.status(500).json({ error: err.message });
   }
 });

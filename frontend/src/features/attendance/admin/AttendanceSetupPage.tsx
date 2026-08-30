@@ -35,21 +35,33 @@ export const AttendanceSetupPage: React.FC = () => {
   const [subStatus, setSubStatus] = useState<{type:string;message:string}|null>(null);
   const [editingSubId, setEditingSubId] = useState<string|null>(null);
 
-  const {data:rawMasterSubjects=[]} = useQuery({ queryKey:['masterSubjects'], queryFn:()=>api.getMasterSubjects().catch(()=>[]) });
-  const masterSubjects = Array.isArray(rawMasterSubjects)?rawMasterSubjects:[];
-  const filteredSubjects = masterSubjects.filter((s:any) =>
-    (!subSemFilter || s.semester_label===subSemFilter) &&
+  const { data: rawMasterSubjects = [], refetch: refetchMaster, isLoading: isMasterLoading } = useQuery({
+    queryKey: ['masterSubjects'],
+    queryFn: () => api.getMasterSubjects(),
+  });
+  const masterSubjects = Array.isArray(rawMasterSubjects) ? rawMasterSubjects : [];
+  const filteredSubjects = masterSubjects.filter((s: any) =>
+    (!subSemFilter || s.semester_label === subSemFilter) &&
     (!subSearch || s.subject_name?.toLowerCase().includes(subSearch.toLowerCase()) || s.subject_code?.toLowerCase().includes(subSearch.toLowerCase()))
   );
 
-  const handleAddSubject = async (e:React.FormEvent) => {
+  const handleAddSubject = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      if(editingSubId) { await api.updateMasterSubject(editingSubId, subForm); setSubStatus({type:'success',message:'Subject updated.'}); setEditingSubId(null); }
-      else { await api.createMasterSubject(subForm); setSubStatus({type:'success',message:'Subject added to master catalog.'}); }
-      qc.invalidateQueries({queryKey:['masterSubjects']});
-      setSubForm({semester_label:'',department:'',subject_code:'',subject_name:'',short_name:'',subject_type:'Theory',regulation:'R22'});
-    } catch(err:any) { setSubStatus({type:'error',message:err.message||'Failed to save subject.'}); }
+      if (editingSubId) {
+        await api.updateMasterSubject(editingSubId, subForm);
+        setSubStatus({ type: 'success', message: 'Subject updated in master catalog.' });
+        setEditingSubId(null);
+      } else {
+        await api.createMasterSubject(subForm);
+        setSubStatus({ type: 'success', message: 'Subject added to master catalog.' });
+      }
+      await qc.invalidateQueries({ queryKey: ['masterSubjects'] });
+      await refetchMaster();
+      setSubForm({ semester_label: '', department: '', subject_code: '', subject_name: '', short_name: '', subject_type: 'Theory', regulation: 'R22' });
+    } catch (err: any) {
+      setSubStatus({ type: 'error', message: err.message || 'Failed to save subject.' });
+    }
   };
 
   // ── TAB 2: FACULTY ALLOTMENT ───────────────────────────────────────────────
