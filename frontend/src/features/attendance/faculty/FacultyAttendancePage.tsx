@@ -229,6 +229,7 @@ export const FacultyAttendancePage: React.FC = () => {
   const [reportData, setReportData] = useState<any>(null);
   const [reportDaywiseData, setReportDaywiseData] = useState<any>(null);
   const [reportMode, setReportMode] = useState<'total'|'daywise'>('total');
+  const [matrixFormat, setMatrixFormat] = useState<'progressive'|'symbols'|'pa'>('progressive');
   const [isReportSearching, setIsReportSearching] = useState(false);
   const [reportSearchError, setReportSearchError] = useState<string|null>(null);
 
@@ -732,12 +733,46 @@ export const FacultyAttendancePage: React.FC = () => {
                   </div>
 
                   <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden shadow-sm">
-                    <div className="p-3 border-b border-borderLine font-bold text-xs flex items-center justify-between">
-                      <span>Daywise Session Attendance Matrix</span>
-                      <div className="flex gap-3 text-[10px]">
-                        <span className="text-emerald-600 font-bold">✓ Present</span>
-                        <span className="text-rose-600 font-bold">✗ Absent</span>
-                        <span className="text-indigo-600 font-bold">🔵 On Duty (OD)</span>
+                    <div className="p-3 border-b border-borderLine font-bold text-xs flex flex-wrap items-center justify-between gap-3 bg-surface-2">
+                      <span className="text-textPrimary font-black">Daywise Session Attendance Matrix</span>
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-1 bg-surface border border-borderLine rounded-lg p-0.5 text-[11px]">
+                          <button
+                            onClick={() => setMatrixFormat('progressive')}
+                            className={`px-2.5 py-1 rounded-md font-bold transition-all ${
+                              matrixFormat === 'progressive'
+                                ? 'bg-brand-primary text-white shadow-xs'
+                                : 'text-textSecondary hover:text-textPrimary'
+                            }`}
+                          >
+                            1, 2, 3... (Progressive)
+                          </button>
+                          <button
+                            onClick={() => setMatrixFormat('symbols')}
+                            className={`px-2.5 py-1 rounded-md font-bold transition-all ${
+                              matrixFormat === 'symbols'
+                                ? 'bg-brand-primary text-white shadow-xs'
+                                : 'text-textSecondary hover:text-textPrimary'
+                            }`}
+                          >
+                            ✓ / ✗ / OD (Symbols)
+                          </button>
+                          <button
+                            onClick={() => setMatrixFormat('pa')}
+                            className={`px-2.5 py-1 rounded-md font-bold transition-all ${
+                              matrixFormat === 'pa'
+                                ? 'bg-brand-primary text-white shadow-xs'
+                                : 'text-textSecondary hover:text-textPrimary'
+                            }`}
+                          >
+                            P / A / OD
+                          </button>
+                        </div>
+                        <div className="flex gap-2 text-[10px] items-center">
+                          <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">1, 2, 3 / P: Present</span>
+                          <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-800 font-bold">A / ✗: Absent</span>
+                          <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 font-bold">OD: On Duty</span>
+                        </div>
                       </div>
                     </div>
                     <div className="overflow-x-auto max-h-[70vh]">
@@ -747,10 +782,11 @@ export const FacultyAttendancePage: React.FC = () => {
                             <th className="px-3 py-3 w-10 text-center border-r border-slate-600">#</th>
                             <th className="px-3 py-3 w-32 border-r border-slate-600">Roll No</th>
                             <th className="px-3 py-3 min-w-[140px] border-r border-slate-600">Name</th>
-                            {(reportDaywiseData.sessions || []).map((sess: any) => (
-                              <th key={sess.id} className="px-2 py-3 text-center border-r border-slate-600 min-w-[70px]">
-                                <div>{sess.session_date}</div>
-                                <div className="text-[9px] font-normal opacity-70">P{sess.period_start} ({sess.num_periods || 1}h)</div>
+                            {(reportDaywiseData.sessions || []).map((sess: any, sIdx: number) => (
+                              <th key={sess.id} className="px-2.5 py-3 text-center border-r border-slate-600 min-w-[75px]">
+                                <div className="text-[10px] font-black text-amber-300">Class #{sIdx + 1}</div>
+                                <div className="text-[10px]">{sess.session_date}</div>
+                                <div className="text-[9px] font-normal opacity-80">P{sess.period_start} ({sess.num_periods || 1}h)</div>
                               </th>
                             ))}
                             <th className="px-3 py-3 text-center border-r border-slate-600">Held</th>
@@ -758,39 +794,71 @@ export const FacultyAttendancePage: React.FC = () => {
                             <th className="px-3 py-3 text-center">Percentage</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-borderLine">
-                          {(reportDaywiseData.students || []).map((st: any, idx: number) => (
-                            <tr key={st.roll_number} className="hover:bg-surface-2 transition-colors">
-                              <td className="px-3 py-2.5 text-center text-textMuted font-bold border-r border-borderLine">{idx + 1}</td>
-                              <td className="px-3 py-2.5 font-mono font-black border-r border-borderLine">{st.roll_number}</td>
-                              <td className="px-3 py-2.5 font-bold uppercase truncate max-w-[150px] border-r border-borderLine">{st.student_name}</td>
-                              {(reportDaywiseData.sessions || []).map((sess: any) => {
-                                const rec = st.session_records ? st.session_records[sess.id] : null;
-                                return (
-                                  <td key={sess.id} className="px-2 py-2.5 text-center border-r border-borderLine">
-                                    {rec ? (
-                                      rec.is_on_od ? (
-                                        <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-indigo-100 text-indigo-700">OD</span>
-                                      ) : rec.is_present ? (
-                                        <span className="text-emerald-600 font-black">✓</span>
-                                      ) : (
-                                        <span className="text-rose-500 font-black">✗</span>
-                                      )
-                                    ) : (
-                                      <span className="text-textMuted opacity-30">—</span>
-                                    )}
-                                  </td>
-                                );
-                              })}
-                              <td className="px-3 py-2.5 text-center font-semibold border-r border-borderLine">{st.total_held}</td>
-                              <td className="px-3 py-2.5 text-center font-bold text-emerald-600 border-r border-borderLine">{st.total_attended}</td>
-                              <td className="px-3 py-2.5 text-center font-black">
-                                <span className={st.percentage >= 75 ? 'text-emerald-600' : st.percentage >= 65 ? 'text-amber-500' : 'text-rose-600'}>
-                                  {st.percentage}%
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
+                        <tbody className="divide-y divide-borderLine font-mono">
+                          {(reportDaywiseData.students || []).map((st: any, idx: number) => {
+                            let runningAttended = 0;
+                            return (
+                              <tr key={st.roll_number} className="hover:bg-surface-2 transition-colors">
+                                <td className="px-3 py-2.5 text-center text-textMuted font-bold border-r border-borderLine">{idx + 1}</td>
+                                <td className="px-3 py-2.5 font-mono font-black border-r border-borderLine text-textPrimary">{st.roll_number}</td>
+                                <td className="px-3 py-2.5 font-sans font-bold uppercase truncate max-w-[150px] border-r border-borderLine">{st.student_name}</td>
+                                {(reportDaywiseData.sessions || []).map((sess: any) => {
+                                  const rec = st.session_records ? st.session_records[sess.id] : null;
+                                  const pCount = sess.num_periods || 1;
+                                  let cell = null;
+
+                                  if (rec) {
+                                    if (rec.is_on_od) {
+                                      runningAttended += pCount;
+                                      cell = (
+                                        <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-300">
+                                          OD
+                                        </span>
+                                      );
+                                    } else if (rec.is_present) {
+                                      runningAttended += pCount;
+                                      if (matrixFormat === 'progressive') {
+                                        cell = (
+                                          <span className="px-2 py-0.5 rounded font-black text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/60">
+                                            {runningAttended}
+                                          </span>
+                                        );
+                                      } else if (matrixFormat === 'symbols') {
+                                        cell = <span className="text-emerald-600 font-black text-sm">✓</span>;
+                                      } else {
+                                        cell = <span className="text-emerald-600 font-black text-sm">P</span>;
+                                      }
+                                    } else {
+                                      if (matrixFormat === 'symbols') {
+                                        cell = <span className="text-rose-500 font-black text-sm">✗</span>;
+                                      } else {
+                                        cell = (
+                                          <span className="px-2 py-0.5 rounded font-black text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-950/60">
+                                            A
+                                          </span>
+                                        );
+                                      }
+                                    }
+                                  } else {
+                                    cell = <span className="text-textMuted opacity-30">—</span>;
+                                  }
+
+                                  return (
+                                    <td key={sess.id} className="px-2 py-2.5 text-center border-r border-borderLine">
+                                      {cell}
+                                    </td>
+                                  );
+                                })}
+                                <td className="px-3 py-2.5 text-center font-semibold border-r border-borderLine">{st.total_held}</td>
+                                <td className="px-3 py-2.5 text-center font-bold text-emerald-600 border-r border-borderLine">{st.total_attended}</td>
+                                <td className="px-3 py-2.5 text-center font-black font-sans">
+                                  <span className={st.percentage >= 75 ? 'text-emerald-600' : st.percentage >= 65 ? 'text-amber-500' : 'text-rose-600'}>
+                                    {st.percentage}%
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
