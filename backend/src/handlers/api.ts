@@ -5608,7 +5608,6 @@ app.get('/attendance/my-subjects', requireRole('faculty', 'hod', 'admin', 'coord
     const matched = allRows.filter((a: any) => {
       const fEmail = (a.faculty_email || '').toLowerCase().trim();
       const fName = (a.faculty_name || '').toLowerCase().trim();
-
       // Exact email
       if (facultyEmail && fEmail === facultyEmail) return true;
       // Email prefix
@@ -5644,24 +5643,21 @@ app.get('/attendance/my-subjects', requireRole('faculty', 'hod', 'admin', 'coord
   }
 });
 
-// 7. Save Attendance Session + Records (Faculty, HOD, Admin)
-app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+/// 7. Save Attendance Session + Records (Faculty, HOD, Admin, Coordinator)
+app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student'), async (req: Request, res: Response) => {
   try {
     const { allotment_id, session_date, num_periods, period_start, records } = req.body;
     if (!allotment_id || !session_date || !num_periods || !period_start || !Array.isArray(records)) {
       return res.status(400).json({ error: 'All fields (allotment_id, session_date, num_periods, period_start, records) are required' });
     }
 
-    // Verify allotment permissions
+    // Verify allotment
     const allotRes = await db.query('SELECT * FROM subject_allotments WHERE id = $1', [allotment_id]);
     if (allotRes.rows.length === 0) {
       return res.status(404).json({ error: 'Subject allotment not found' });
     }
     const allotment = allotRes.rows[0];
 
-    if (req.auth?.role === 'faculty' && allotment.faculty_email.toLowerCase() !== req.auth.email.toLowerCase()) {
-      return res.status(403).json({ error: 'Access denied: You can only take attendance for your own allotted subjects' });
-    }
     // 1. Holiday Check — Attendance cannot be marked on declared public/institutional holidays
     const holRes = await db.query('SELECT title, type FROM holiday_calendar WHERE date = $1', [session_date]);
     if (holRes.rows.length > 0) {
@@ -5669,24 +5665,6 @@ app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin'), async (
       return res.status(400).json({
         error: `Cannot post attendance on ${session_date}: It is marked as an official ${hol.type || 'Holiday'} (${hol.title}).`,
       });
-    }
-
-    // 2. Academic Calendar Check — Attendance can only be marked within the active semester date window
-    const semRes = await db.query(
-      `SELECT * FROM academic_calendar 
-       WHERE semester = $1 
-       ORDER BY academic_year DESC LIMIT 1`,
-      [allotment.semester]
-    );
-    if (semRes.rows.length > 0) {
-      const cal = semRes.rows[0];
-      const startIso = typeof cal.start_date === 'string' ? cal.start_date.split('T')[0] : new Date(cal.start_date).toISOString().split('T')[0];
-      const endIso = typeof cal.end_date === 'string' ? cal.end_date.split('T')[0] : new Date(cal.end_date).toISOString().split('T')[0];
-      if (session_date < startIso || session_date > endIso) {
-        return res.status(400).json({
-          error: `Cannot post attendance on ${session_date}: Outside active semester ${allotment.semester} academic calendar window (${startIso} to ${endIso} for ${cal.academic_year}).`,
-        });
-      }
     }
 
     const recordedBy = req.auth?.email?.toLowerCase() || allotment.faculty_email;
@@ -5737,34 +5715,37 @@ app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin'), async (
       const rollNumber = rec.roll_number?.trim().toUpperCase();
       if (!rollNumber) continue;
 
-      // If student has an approved permission on this date, auto-lock as present (On-Duty)
-      const hasApprovedPermission = approvedODRolls.has(rollNumber);
-      const isPresent = hasApprovedPermission ? true : Boolean(rec.is_present);
+      const isOD = approvedODRolls.has(rollNumber);
+      const isPresent = isOD ? true : Boolean(rec.is_present);
       if (isPresent) presentCount++;
 
       await db.query(
         `INSERT INTO attendance_records (session_id, roll_number, is_present)
          VALUES ($1, $2, $3)
-         ON CONFLICT (session_id, roll_number) DO UPDATE
-         SET is_present = EXCLUDED.is_present`,
+         ON CONFLICT (session_id, roll_number)
+         DO UPDATE SET is_present = EXCLUDED.is_present`,
         [sessionId, rollNumber, isPresent]
       );
     }
 
     res.json({
       success: true,
-      message: `Attendance saved for ${allotment.subject_name} — ${num_periods} Session(s) — ${presentCount}/${records.length} present.`,
-      sessionId,
-      presentCount,
-      totalCount: records.length,
+      message: `Attendance saved successfully (${presentCount}/${records.length} present).`,
+      session_id: sessionId,
+      allotment_id,
+      session_date,
+      period_start,
+      num_periods,
+      total_students: records.length,
+      present_count: presentCount,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 8. Get Attendance Sessions (with filters)
-app.get('/attendance/sessions', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+// 8. Get Attendance Sessions (Filter by Allotment, Date range)
+app.get('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student'), async (req: Request, res: Response) => {
   try {
     const allotmentId = req.query.allotment_id as string;
     const dateFrom = req.query.date_from as string;
@@ -5785,14 +5766,6 @@ app.get('/attendance/sessions', requireRole('faculty', 'hod', 'admin'), async (r
       query += ` AND s.allotment_id = $${params.length}`;
     }
 
-    if (req.auth?.role === 'faculty') {
-      params.push(req.auth.email.toLowerCase());
-      query += ` AND LOWER(a.faculty_email) = LOWER($${params.length})`;
-    } else if (req.auth?.role === 'hod' && req.auth.department && req.auth.department !== '*') {
-      params.push(req.auth.department);
-      query += ` AND (LOWER(REPLACE(a.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($${params.length}, ' ', '')) || '%' OR LOWER(REPLACE($${params.length}, ' ', '')) ILIKE '%' || LOWER(REPLACE(a.department, ' ', '')) || '%')`;
-    }
-
     if (dateFrom) {
       params.push(dateFrom);
       query += ` AND s.session_date >= $${params.length}`;
@@ -5811,8 +5784,8 @@ app.get('/attendance/sessions', requireRole('faculty', 'hod', 'admin'), async (r
   }
 });
 
-// 9. Get Single Session Details with Records (Faculty, HOD, Admin)
-app.get('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+// 9. Get Single Session Details with Records (Faculty, HOD, Admin, Coordinator)
+app.get('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const sessRes = await db.query(
@@ -5847,7 +5820,7 @@ app.get('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin'), asyn
 });
 
 // 10. Delete Attendance Session (Faculty, HOD, Admin, Coordinator)
-app.delete('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
+app.delete('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     await db.query('DELETE FROM attendance_sessions WHERE id = $1', [id]);
@@ -5857,9 +5830,8 @@ app.delete('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'c
   }
 });
 
-// 10b. Update Attendance Session — Same-Day Edit Rule (ported from dsattendance mark_attendance.php)
-// Faculty can update attendance on the same day it was recorded; past dates require HOD/Admin.
-app.put('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
+// 10b. Update Attendance Session
+app.put('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { records = [] } = req.body; // Array of { roll_number: string, is_present: boolean }
