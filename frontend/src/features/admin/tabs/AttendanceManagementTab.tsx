@@ -1,33 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Upload,
-  Download,
-  BookOpen,
-  Users,
-  CheckCircle2,
-  AlertCircle,
-  Trash2,
-  Search,
-  FileSpreadsheet,
-  RefreshCw,
-  Layers,
-  Calendar,
-  Clock,
-  Printer,
-  CalendarDays,
-  Check,
-  Edit2,
-  FileText,
-  Eye,
-  UserPlus
+  BookOpen, Users, Clock, Plus, Trash2, Edit2, Search, Download,
+  Upload, CheckCircle2, AlertCircle, Check, X, Filter, Calendar
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { api } from '../../../lib/api';
-import { SemesterLabel, SubjectAllotment, SubjectType, TimetableEntry } from '../../../types';
+import { SemesterLabel, SubjectAllotment, SubjectRosterEntry, TimetableEntry } from '../../../types';
 import { useAuth } from '../../../context/AuthContext';
 import { VALID_DEPARTMENT_NAMES, normalizeDepartmentName } from '../../../lib/validation/auth';
-import { AttendancePdfModal } from '../../attendance/AttendancePdfModal';
 
 const ALL_SEMESTERS: SemesterLabel[] = ['1-1', '1-2', '2-1', '2-2', '3-1', '3-2', '4-1', '4-2'];
 const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -37,94 +18,20 @@ export const AttendanceManagementTab: React.FC = () => {
   const queryClient = useQueryClient();
 
   const validUserDept = normalizeDepartmentName(user?.department);
-
   const defaultFilterDept =
     user?.department && user.department !== 'All' && user.department !== '*'
       ? normalizeDepartmentName(user.department)
       : 'All';
 
-  const [activeSubTab, setActiveSubTab] = useState<'allotments' | 'subjects' | 'rosters' | 'timetable'>('allotments');
+  // 4 Core Sub-tabs matching dsattendance
+  const [activeTab, setActiveTab] = useState<'subjects' | 'allotments' | 'rosters' | 'timetable'>('subjects');
+
+  // Shared Filters
   const [selectedSemester, setSelectedSemester] = useState<SemesterLabel>('2-1');
   const [selectedDepartment, setSelectedDepartment] = useState<string>(defaultFilterDept);
   const [selectedSection, setSelectedSection] = useState<string>('A');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [showPdfModal, setShowPdfModal] = useState(false);
 
-  // ── Allotment Mode & Single Entry State ──
-  const [allotmentMode, setAllotmentMode] = useState<'upload' | 'single'>('upload');
-  const [singleAllotSemester, setSingleAllotSemester] = useState<SemesterLabel>('2-1');
-  const [singleAllotDept, setSingleAllotDept] = useState<string>(validUserDept);
-  const [singleAllotSection, setSingleAllotSection] = useState<string>('A');
-  const [singleAllotSubjectName, setSingleAllotSubjectName] = useState<string>('');
-  const [singleAllotSubjectType, setSingleAllotSubjectType] = useState<'Theory' | 'Lab'>('Theory');
-  const [singleAllotFacultyEmail, setSingleAllotFacultyEmail] = useState<string>('');
-  const [singleAllotFacultyName, setSingleAllotFacultyName] = useState<string>('');
-  const [isSubmittingSingleAllot, setIsSubmittingSingleAllot] = useState<boolean>(false);
-  const [singleAllotStatus, setSingleAllotStatus] = useState<{
-    type: 'success' | 'error' | 'idle';
-    message: string;
-  }>({ type: 'idle', message: '' });
-  const [deletingAllotment, setDeletingAllotment] = useState<SubjectAllotment | null>(null);
-
-  // ── Roster Mode & Single Entry State ──
-  const [rosterMode, setRosterMode] = useState<'upload' | 'single'>('upload');
-  const [singleRosterRollNo, setSingleRosterRollNo] = useState<string>('');
-  const [singleRosterStudentName, setSingleRosterStudentName] = useState<string>('');
-  const [singleRosterJoiningDate, setSingleRosterJoiningDate] = useState<string>('');
-  const [isSubmittingSingleRoster, setIsSubmittingSingleRoster] = useState<boolean>(false);
-  const [singleRosterStatus, setSingleRosterStatus] = useState<{
-    type: 'success' | 'error' | 'idle';
-    message: string;
-  }>({ type: 'idle', message: '' });
-  const [deletingRosterStudent, setDeletingRosterStudent] = useState<{ id: string; roll_number: string; student_name?: string } | null>(null);
-
-  // ── Timetable Upload State ──
-  const [timetableDepartment, setTimetableDepartment] = useState<string>(validUserDept);
-  const [timetableSemester, setTimetableSemester] = useState<SemesterLabel>('2-1');
-  const [timetableSection, setTimetableSection] = useState<string>('A');
-  const [timetableFile, setTimetableFile] = useState<File | null>(null);
-  const [parsedTimetable, setParsedTimetable] = useState<any[]>([]);
-  const [timetableUploadStatus, setTimetableUploadStatus] = useState<{
-    type: 'success' | 'error' | 'idle';
-    message: string;
-    details?: any[];
-  }>({ type: 'idle', message: '' });
-  const [isUploadingTimetable, setIsUploadingTimetable] = useState(false);
-  const [viewingPdfDoc, setViewingPdfDoc] = useState<{ name: string; data: string } | null>(null);
-
-  // ── Allotment Upload State ──
-  const [allotmentDepartment, setAllotmentDepartment] = useState<string>(defaultFilterDept);
-  const [allotmentSection, setAllotmentSection] = useState<string>('A');
-  const [allotmentSectionFilter, setAllotmentSectionFilter] = useState<string>('All');
-  const [allotmentFile, setAllotmentFile] = useState<File | null>(null);
-  const [parsedAllotments, setParsedAllotments] = useState<any[]>([]);
-  const [allotmentUploadStatus, setAllotmentUploadStatus] = useState<{
-    type: 'success' | 'error' | 'idle';
-    message: string;
-    details?: any[];
-  }>({ type: 'idle', message: '' });
-  const [isUploadingAllotments, setIsUploadingAllotments] = useState(false);
-
-  // ── Roster Upload State ──
-  const [rosterDepartment, setRosterDepartment] = useState<string>(user?.department && user.department !== 'All' ? user.department : 'All');
-  const [rosterSemester, setRosterSemester] = useState<SemesterLabel>('2-1');
-  const [rosterSection, setRosterSection] = useState<string>('All');
-  const [selectedAllotmentId, setSelectedAllotmentId] = useState<string>('');
-  const [rosterFile, setRosterFile] = useState<File | null>(null);
-  const [parsedRoster, setParsedRoster] = useState<any[]>([]);
-  const [rosterUploadStatus, setRosterUploadStatus] = useState<{
-    type: 'success' | 'error' | 'idle';
-    message: string;
-    details?: any[];
-  }>({ type: 'idle', message: '' });
-  const [isUploadingRoster, setIsUploadingRoster] = useState(false);
-
-  // ── Inspect Roster & Late Joining Edit State ──
-  const [inspectAllotment, setInspectAllotment] = useState<SubjectAllotment | null>(null);
-  const [editingJoiningDateRosterId, setEditingJoiningDateRosterId] = useState<string | null>(null);
-  const [newJoiningDate, setNewJoiningDate] = useState<string>('');
-
-  // ── Subject Master List State (admin/subjects.php equivalent) ──
+  // ─── TAB 1: SUBJECT MASTER STATE (admin/subjects.php) ──────────────────────
   const [subjectForm, setSubjectForm] = useState({
     id: '',
     semester_label: '' as SemesterLabel | '',
@@ -132,1488 +39,819 @@ export const AttendanceManagementTab: React.FC = () => {
     subject_name: '',
     short_name: '',
     subject_type: 'Theory' as 'Theory' | 'Lab',
-    department: '',
-    regulation: '',
+    department: defaultFilterDept === 'All' ? 'CSE' : defaultFilterDept,
+    regulation: 'R20',
   });
-  const [subjectSearchQuery, setSubjectSearchQuery] = useState('');
+  const [subjectSearch, setSubjectSearch] = useState('');
   const [subjectFilterSem, setSubjectFilterSem] = useState<SemesterLabel | 'All'>('All');
-  const [isSubmittingSubject, setIsSubmittingSubject] = useState(false);
-  const [subjectFormStatus, setSubjectFormStatus] = useState<{ type: 'success' | 'error' | 'idle'; message: string }>({ type: 'idle', message: '' });
-  const [deletingSubjectId, setDeletingSubjectId] = useState<string | null>(null);
+  const [subjectStatus, setSubjectStatus] = useState<{ type: 'success' | 'error' | 'idle'; message: string }>({ type: 'idle', message: '' });
 
+  // ─── TAB 2: FACULTY ALLOTMENT STATE (admin/allot_subjects.php) ─────────────
+  const [allotMode, setAllotMode] = useState<'single' | 'upload'>('single');
+  const [singleAllotSubjectId, setSingleAllotSubjectId] = useState<string>('');
+  const [singleAllotSubjectName, setSingleAllotSubjectName] = useState<string>('');
+  const [singleAllotSubjectType, setSingleAllotSubjectType] = useState<'Theory' | 'Lab'>('Theory');
+  const [singleAllotFacultyEmail, setSingleAllotFacultyEmail] = useState<string>('');
+  const [singleAllotFacultyName, setSingleAllotFacultyName] = useState<string>('');
+  const [allotStatus, setAllotStatus] = useState<{ type: 'success' | 'error' | 'idle'; message: string }>({ type: 'idle', message: '' });
 
-  const { data: facultyList = [] } = useQuery({
-    queryKey: ['allFacultyForAllocation'],
-    queryFn: () => api.getAllFaculty().catch(() => []),
-  });
+  // ─── TAB 3: STUDENT ROSTER STATE (admin/allot_students.php) ────────────────
+  const [selectedAllotmentId, setSelectedAllotmentId] = useState<string>('');
+  const [rosterMode, setRosterMode] = useState<'single' | 'upload'>('single');
+  const [singleRollNo, setSingleRollNo] = useState<string>('');
+  const [singleStudentName, setSingleStudentName] = useState<string>('');
+  const [singleJoiningDate, setSingleJoiningDate] = useState<string>('');
+  const [rosterStatus, setRosterStatus] = useState<{ type: 'success' | 'error' | 'idle'; message: string }>({ type: 'idle', message: '' });
 
-  const { data: rawMasterSubjects = [] } = useQuery({
+  // ─── TAB 4: TIMETABLE STATE (admin/timetable.php) ──────────────────────────
+  const [ttDay, setTtDay] = useState<string>('Monday');
+  const [ttPeriod, setTtPeriod] = useState<number>(1);
+  const [ttNumPeriods, setTtNumPeriods] = useState<number>(1);
+  const [ttSubjectName, setTtSubjectName] = useState<string>('');
+  const [ttSubjectType, setTtSubjectType] = useState<'Theory' | 'Lab'>('Theory');
+  const [ttFacultyEmail, setTtFacultyEmail] = useState<string>('');
+  const [ttRoom, setTtRoom] = useState<string>('');
+  const [ttStatus, setTtStatus] = useState<{ type: 'success' | 'error' | 'idle'; message: string }>({ type: 'idle', message: '' });
+
+  // ── QUERIES ───────────────────────────────────────────────────────────────
+  const { data: rawMasterSubjects = [], isLoading: isLoadingSubjects } = useQuery({
     queryKey: ['masterSubjectList'],
     queryFn: () => api.getMasterSubjects().catch(() => []),
   });
-  const masterSubjectsList = Array.isArray(rawMasterSubjects) ? rawMasterSubjects : [];
+  const masterSubjects = Array.isArray(rawMasterSubjects) ? rawMasterSubjects : [];
 
-  // ── Fetch Timetable ──
-  const { data: timetableEntries = [], isLoading: isLoadingTimetable } = useQuery({
-    queryKey: ['attendanceTimetable', timetableSemester, timetableSection, timetableDepartment],
+  const { data: rawFaculty = [] } = useQuery({
+    queryKey: ['allFacultyForAllocation'],
+    queryFn: () => api.getAllFaculty().catch(() => []),
+  });
+  const facultyList = Array.isArray(rawFaculty) ? rawFaculty : [];
+
+  const { data: rawAllotments = [], isLoading: isLoadingAllotments } = useQuery({
+    queryKey: ['attendanceAllotments', selectedSemester, selectedDepartment],
+    queryFn: () => api.getAllotments(selectedSemester, selectedDepartment === 'All' ? '' : selectedDepartment).catch(() => []),
+  });
+  const allotments = Array.isArray(rawAllotments) ? rawAllotments : [];
+
+  const { data: rawRoster = [], isLoading: isLoadingRoster } = useQuery({
+    queryKey: ['attendanceRoster', selectedAllotmentId],
+    queryFn: () => (selectedAllotmentId ? api.getRoster(selectedAllotmentId).catch(() => []) : Promise.resolve([])),
+    enabled: Boolean(selectedAllotmentId),
+  });
+  const currentRoster = Array.isArray(rawRoster) ? rawRoster : [];
+
+  const { data: rawTimetable = [], isLoading: isLoadingTimetable } = useQuery({
+    queryKey: ['attendanceTimetable', selectedSemester, selectedSection, selectedDepartment],
     queryFn: () => api.getTimetable({
-      semester: timetableSemester,
-      section: timetableSection,
-      department: timetableDepartment,
-    }),
+      semester: selectedSemester,
+      section: selectedSection,
+      department: selectedDepartment,
+    }).catch(() => []),
   });
+  const timetableEntries = Array.isArray(rawTimetable) ? rawTimetable : [];
 
-  // ── Fetch Uploaded Official PDF Timetable Document ──
-  const { data: timetableDocRes, isLoading: isLoadingTimetableDoc } = useQuery({
-    queryKey: ['timetableDocument', timetableSemester, timetableSection, timetableDepartment],
-    queryFn: () => api.getTimetableDocument({
-      semester: timetableSemester,
-      section: timetableSection,
-      department: timetableDepartment,
-    }),
-  });
-  const attachedPdfDoc = timetableDocRes?.document;
-
-  // ── Fetch Allotments ──
-  const { data: allotments = [], isLoading: isLoadingAllotments } = useQuery({
-    queryKey: ['attendanceAllotments', selectedSemester, allotmentDepartment],
-    queryFn: () => api.getAllotments(selectedSemester, allotmentDepartment === 'All' ? '' : allotmentDepartment),
-  });
-
-  // ── Fetch Allotments for Roster dropdown ──
-  const { data: rosterAllotments = [] } = useQuery({
-    queryKey: ['attendanceAllotmentsForRoster', rosterSemester, rosterDepartment],
-    queryFn: () => api.getAllotments(rosterSemester, rosterDepartment === 'All' ? '' : rosterDepartment),
-  });
-
-  // ── Fetch Roster for Inspect Modal ──
-  const { data: currentRoster = [], isLoading: isLoadingRoster } = useQuery({
-    queryKey: ['attendanceRoster', inspectAllotment?.id],
-    queryFn: () => (inspectAllotment?.id ? api.getRoster(inspectAllotment.id) : Promise.resolve([])),
-    enabled: Boolean(inspectAllotment?.id),
-  });
-
-  // ── Delete Allotment Mutation ──
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.deleteAllotment(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['attendanceAllotments'] });
-      setDeletingAllotment(null);
-    },
-  });
-
-  // ── Delete / Unassign Student from Roster Mutation ──
-  const deleteRosterStudentMutation = useMutation({
-    mutationFn: (rosterId: string) => api.deleteRosterStudent(rosterId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['attendanceRoster'] });
-      queryClient.invalidateQueries({ queryKey: ['attendanceAllotments'] });
-      setDeletingRosterStudent(null);
-    },
-  });
-
-  // ── Delete Timetable Slot Mutation ──
-  const deleteTimetableSlotMutation = useMutation({
-    mutationFn: (id: string) => api.deleteTimetableEntry(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['attendanceTimetable'] });
-    },
-  });
-
-  // ── Update Joining Date Mutation ──
-  const updateJoiningDateMutation = useMutation({
-    mutationFn: ({ rosterId, date }: { rosterId: string; date: string }) => api.updateStudentJoiningDate(rosterId, date),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['attendanceRoster'] });
-      queryClient.invalidateQueries({ queryKey: ['attendanceAllotments'] });
-      setEditingJoiningDateRosterId(null);
-    },
-  });
-
-  // ── Period Timing Guide Info ──
-  const isFirstOrFourthYear = ['1-1', '1-2', '4-1', '4-2'].includes(timetableSemester);
-
-  const getPeriodDisplayTiming = (period: number, is1or4: boolean) => {
-    if (is1or4) {
-      const timings = [
-        '',
-        'P1: 09:00 - 09:50 AM',
-        'P2: 09:50 - 10:40 AM',
-        'P3: 11:00 - 11:50 AM',
-        'P4: 01:00 - 01:50 PM',
-        'P5: 01:50 - 02:40 PM',
-        'P6: 03:00 - 03:50 PM',
-        'P7: 03:50 - 04:40 PM',
-      ];
-      return timings[period] || `P${period}`;
-    } else {
-      const timings = [
-        '',
-        'P1: 09:00 - 09:50 AM',
-        'P2: 09:50 - 10:40 AM',
-        'P3: 11:00 - 11:50 AM',
-        'P4: 11:50 - 12:40 PM',
-        'P5: 01:50 - 02:40 PM',
-        'P6: 02:40 - 03:30 PM',
-        'P7: 03:30 - 04:20 PM',
-      ];
-      return timings[period] || `P${period}`;
-    }
-  };
-
-  // ── Download Timetable Template ──
-  const handleDownloadTimetableTemplate = () => {
-    const wsData = [
-      ['Day of Week', 'Period Start (1-7)', 'Number of Periods (1-3)', 'Subject Name', 'Subject Type (Theory/Lab)', 'Faculty Email', 'Faculty Name', 'Room No', 'Section'],
-      ['Monday', 1, 2, 'Data Structures & Algorithms', 'Theory', 'facultyds@rgmcet.edu.in', 'Dr. Ramesh Kumar', 'Room-302', timetableSection],
-      ['Monday', 3, 1, 'Computer Organization', 'Theory', 'facultyco@rgmcet.edu.in', 'Prof. Sunitha Rao', 'Room-302', timetableSection],
-      ['Monday', 5, 3, 'Data Structures Lab', 'Lab', 'facultyds@rgmcet.edu.in', 'Dr. Ramesh Kumar', 'Lab-3', timetableSection],
-      ['Tuesday', 1, 1, 'Discrete Mathematics', 'Theory', 'facultymath@rgmcet.edu.in', 'Dr. S. Reddy', 'Room-302', timetableSection],
-      ['Tuesday', 2, 1, 'Operating Systems', 'Theory', 'facultyos@rgmcet.edu.in', 'Prof. V. Sharma', 'Room-302', timetableSection],
-      ['Tuesday', 3, 2, 'Database Management Systems', 'Theory', 'facultydbms@rgmcet.edu.in', 'Dr. Subbaiah', 'Room-302', timetableSection],
-      ['Wednesday', 1, 2, 'Web Development Lab', 'Lab', 'facultyweb@rgmcet.edu.in', 'Prof. Anitha', 'Lab-1', timetableSection],
-    ];
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Timetable');
-    XLSX.writeFile(wb, `Timetable_Template_${timetableDepartment}_${timetableSemester}_Sec_${timetableSection}.xlsx`);
-  };
-
-  // ── Download Allotment Template ──
-  const handleDownloadAllotmentTemplate = () => {
-    const defaultDept = allotmentDepartment === 'All' ? 'CSE' : allotmentDepartment;
-    const wsData = [
-      ['Faculty Name', 'Faculty Email', 'Subject Allotted', 'Department', 'Section', 'Subject Type (Theory/Lab)'],
-      ['Dr. K. V. Subbaiah', 'kvsubbaiah@rgmcet.edu.in', 'Database Management Systems', defaultDept, 'A', 'Theory'],
-      ['Dr. K. V. Subbaiah', 'kvsubbaiah@rgmcet.edu.in', 'Database Management Systems', defaultDept, 'B', 'Theory'],
-      ['Dr. K. V. Subbaiah', 'kvsubbaiah@rgmcet.edu.in', 'Database Management Systems', 'ECE', 'A', 'Theory'],
-      ['Dr. K. V. Subbaiah', 'kvsubbaiah@rgmcet.edu.in', 'DBMS Lab', defaultDept, 'A', 'Lab'],
-      ['Prof. M. Ramesh', 'mramesh@rgmcet.edu.in', 'Operating Systems', defaultDept, 'A', 'Theory'],
-      ['Prof. M. Ramesh', 'mramesh@rgmcet.edu.in', 'Operating Systems', defaultDept, 'B', 'Theory'],
-    ];
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Allotments');
-    XLSX.writeFile(wb, `Faculty_Subject_Allotment_Template_${selectedSemester}_${defaultDept}.xlsx`);
-  };
-
-  // ── Download Roster Template ──
-  const handleDownloadRosterTemplate = () => {
-    const wsData = [
-      ['Roll Number', 'Student Email', 'Date of Joining (Optional YYYY-MM-DD)'],
-      ['22091A3201', '22091a3201@rgmcet.edu.in', '2025-08-01'],
-      ['22091A3202', '22091a3202@rgmcet.edu.in', '2025-08-01'],
-      ['22091A3203', '22091a3203@rgmcet.edu.in', '2025-08-20'],
-    ];
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Roster');
-    XLSX.writeFile(wb, `Student_Roster_Template_With_JoiningDate.xlsx`);
-  };
-
-  // ── Handle Single Allotment Submit ──
-  const handleSingleAllotmentSubmit = async (e: React.FormEvent) => {
+  // ── TAB 1 ACTIONS: SUBJECT MASTER ──────────────────────────────────────────
+  const handleSaveSubject = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!singleAllotSubjectName.trim() || !singleAllotFacultyEmail.trim()) {
-      setSingleAllotStatus({ type: 'error', message: 'Subject Name and Faculty Email are required.' });
+    if (!subjectForm.semester_label || !subjectForm.subject_code || !subjectForm.subject_name) {
+      setSubjectStatus({ type: 'error', message: 'Class, Subject Code, and Subject Title are required.' });
       return;
     }
-    setIsSubmittingSingleAllot(true);
-    setSingleAllotStatus({ type: 'idle', message: '' });
     try {
-      const res = await api.createSingleAllotment({
-        semester: singleAllotSemester,
-        department: singleAllotDept,
-        section: singleAllotSection.trim().toUpperCase() || 'A',
-        subject_name: singleAllotSubjectName.trim(),
+      if (subjectForm.id) {
+        await api.updateMasterSubject(subjectForm.id, subjectForm);
+        setSubjectStatus({ type: 'success', message: 'Subject updated successfully.' });
+      } else {
+        await api.createMasterSubject(subjectForm);
+        setSubjectStatus({ type: 'success', message: 'Subject created successfully.' });
+      }
+      queryClient.invalidateQueries({ queryKey: ['masterSubjectList'] });
+      setSubjectForm({
+        id: '',
+        semester_label: '',
+        subject_code: '',
+        subject_name: '',
+        short_name: '',
+        subject_type: 'Theory',
+        department: defaultFilterDept === 'All' ? 'CSE' : defaultFilterDept,
+        regulation: 'R20',
+      });
+    } catch (err: any) {
+      setSubjectStatus({ type: 'error', message: err.message || 'Failed to save subject.' });
+    }
+  };
+
+  const handleDeleteSubject = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this subject?')) return;
+    try {
+      await api.deleteMasterSubject(id);
+      queryClient.invalidateQueries({ queryKey: ['masterSubjectList'] });
+      setSubjectStatus({ type: 'success', message: 'Subject deleted successfully.' });
+    } catch (err: any) {
+      setSubjectStatus({ type: 'error', message: err.message || 'Failed to delete subject.' });
+    }
+  };
+
+  // ── TAB 2 ACTIONS: FACULTY ALLOTMENT ───────────────────────────────────────
+  const handleSingleAllotment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!singleAllotSubjectName || !singleAllotFacultyEmail) {
+      setAllotStatus({ type: 'error', message: 'Please select a subject and faculty.' });
+      return;
+    }
+    try {
+      await api.createSingleAllotment({
+        semester: selectedSemester,
+        department: selectedDepartment === 'All' ? 'CSE' : selectedDepartment,
+        section: selectedSection,
+        subject_name: singleAllotSubjectName,
         subject_type: singleAllotSubjectType,
-        faculty_name: singleAllotFacultyName.trim() || singleAllotFacultyEmail.split('@')[0],
-        faculty_email: singleAllotFacultyEmail.trim().toLowerCase(),
+        faculty_name: singleAllotFacultyName || singleAllotFacultyEmail.split('@')[0],
+        faculty_email: singleAllotFacultyEmail,
       });
-      setSingleAllotStatus({ type: 'success', message: res.message || 'Allotment created successfully!' });
+      queryClient.invalidateQueries({ queryKey: ['attendanceAllotments'] });
+      setAllotStatus({ type: 'success', message: 'Subject allotted to faculty successfully.' });
       setSingleAllotSubjectName('');
-      queryClient.invalidateQueries({ queryKey: ['attendanceAllotments'] });
-      queryClient.invalidateQueries({ queryKey: ['attendanceAllotmentsForRoster'] });
+      setSingleAllotSubjectId('');
+      setSingleAllotFacultyEmail('');
+      setSingleAllotFacultyName('');
     } catch (err: any) {
-      setSingleAllotStatus({ type: 'error', message: err.message || 'Failed to create allotment.' });
-    } finally {
-      setIsSubmittingSingleAllot(false);
+      setAllotStatus({ type: 'error', message: err.message || 'Failed to allot subject.' });
     }
   };
 
-  // ── Handle Single Student Roster Submit ──
-  const handleSingleRosterSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedAllotmentId) {
-      setSingleRosterStatus({ type: 'error', message: 'Please select a Subject Allotment first.' });
-      return;
-    }
-    if (!singleRosterRollNo.trim()) {
-      setSingleRosterStatus({ type: 'error', message: 'Student Roll Number is required.' });
-      return;
-    }
-    setIsSubmittingSingleRoster(true);
-    setSingleRosterStatus({ type: 'idle', message: '' });
+  const handleDeleteAllotment = async (id: string) => {
+    if (!window.confirm('Delete this faculty allotment?')) return;
     try {
-      const res = await api.createSingleRosterStudent({
-        allotment_id: selectedAllotmentId,
-        roll_number: singleRosterRollNo.trim().toUpperCase(),
-        student_name: singleRosterStudentName.trim() || undefined,
-        joining_date: singleRosterJoiningDate || undefined,
-      });
-      setSingleRosterStatus({ type: 'success', message: res.message || 'Student enrolled successfully!' });
-      setSingleRosterRollNo('');
-      setSingleRosterStudentName('');
-      queryClient.invalidateQueries({ queryKey: ['attendanceRoster'] });
+      await api.deleteAllotment(id);
       queryClient.invalidateQueries({ queryKey: ['attendanceAllotments'] });
+      setAllotStatus({ type: 'success', message: 'Allotment removed successfully.' });
     } catch (err: any) {
-      setSingleRosterStatus({ type: 'error', message: err.message || 'Failed to enroll student.' });
-    } finally {
-      setIsSubmittingSingleRoster(false);
+      setAllotStatus({ type: 'error', message: err.message || 'Failed to delete allotment.' });
     }
   };
 
-  // ── Parse Timetable Excel or Upload PDF ──
-  const handleTimetableFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleBulkAllotmentUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setTimetableFile(file);
-    setTimetableUploadStatus({ type: 'idle', message: '' });
-
-    // Handle PDF Upload directly
-    if (file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf') {
-      if (file.size > 5 * 1024 * 1024) {
-        setTimetableUploadStatus({
-          type: 'error',
-          message: `PDF file size (${(file.size / (1024 * 1024)).toFixed(2)} MB) exceeds the 5 MB limit. Please upload a compressed PDF under 5 MB.`,
-        });
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = async (evt) => {
-        try {
-          const base64Data = evt.target?.result as string;
-          setIsUploadingTimetable(true);
-          const res = await api.uploadTimetableDocument({
-            semester: timetableSemester,
-            section: timetableSection,
-            department: timetableDepartment,
-            file_name: file.name,
-            file_data: base64Data,
-            file_size: file.size,
-          });
-          setTimetableUploadStatus({
-            type: 'success',
-            message: res.message || `Official Timetable PDF "${file.name}" uploaded successfully for ${timetableDepartment} - Sem ${timetableSemester} (Sec ${timetableSection})!`,
-          });
-          queryClient.invalidateQueries({ queryKey: ['timetableDocument'] });
-        } catch (err: any) {
-          setTimetableUploadStatus({
-            type: 'error',
-            message: `Failed to upload PDF timetable: ${err.message}`,
-          });
-        } finally {
-          setIsUploadingTimetable(false);
-          setTimetableFile(null);
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const wb = XLSX.read(evt.target?.result, { type: 'binary' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows: any[] = XLSX.utils.sheet_to_json(ws);
+        if (rows.length === 0) {
+          setAllotStatus({ type: 'error', message: 'Uploaded Excel file is empty.' });
+          return;
         }
-      };
-      reader.readAsDataURL(file);
+        await api.uploadAllotments(
+          selectedSemester,
+          rows.map(r => ({
+            subject_name: r['Subject Name'] || r['subject_name'] || r['Subject'] || '',
+            subject_type: (r['Subject Type'] || r['subject_type'] || 'Theory').toLowerCase().includes('lab') ? 'Lab' : 'Theory',
+            faculty_email: r['Faculty Email'] || r['faculty_email'] || '',
+            faculty_name: r['Faculty Name'] || r['faculty_name'] || '',
+            section: r['Section'] || r['section'] || selectedSection,
+            department: selectedDepartment === 'All' ? 'CSE' : selectedDepartment,
+          }))
+        );
+        queryClient.invalidateQueries({ queryKey: ['attendanceAllotments'] });
+        setAllotStatus({ type: 'success', message: `Successfully imported ${rows.length} allotments.` });
+      } catch (err: any) {
+        setAllotStatus({ type: 'error', message: err.message || 'Failed to parse Excel file.' });
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  // ── TAB 3 ACTIONS: STUDENT ROSTER ──────────────────────────────────────────
+  const handleSingleRoster = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedAllotmentId || !singleRollNo) {
+      setRosterStatus({ type: 'error', message: 'Subject and Roll Number are required.' });
       return;
     }
-
-    // Handle Excel Timetable (.xlsx, .xls, .csv)
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const bstr = evt.target?.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
-        const wsName = wb.SheetNames[0];
-        const ws = wb.Sheets[wsName];
-        const data = XLSX.utils.sheet_to_json(ws);
-        setParsedTimetable(data);
-      } catch (err: any) {
-        setTimetableUploadStatus({
-          type: 'error',
-          message: `Failed to parse Excel file: ${err.message}`,
-        });
-      }
-    };
-    reader.readAsBinaryString(file);
-  };
-
-  // ── Submit Timetable ──
-  const handleUploadTimetable = async () => {
-    if (parsedTimetable.length === 0) return;
-    setIsUploadingTimetable(true);
-    setTimetableUploadStatus({ type: 'idle', message: '' });
-
     try {
-      const res = await api.uploadTimetable(
-        timetableSemester,
-        timetableSection,
-        timetableDepartment,
-        parsedTimetable
-      );
-      setTimetableUploadStatus({
-        type: res.errorsCount > 0 ? 'error' : 'success',
-        message: res.message,
-        details: res.errors,
+      await api.createSingleRosterStudent({
+        allotment_id: selectedAllotmentId,
+        roll_number: singleRollNo.trim().toUpperCase(),
+        student_name: singleStudentName.trim(),
+        joining_date: singleJoiningDate || undefined,
       });
-      setTimetableFile(null);
-      setParsedTimetable([]);
-      queryClient.invalidateQueries({ queryKey: ['attendanceTimetable'] });
-    } catch (err: any) {
-      setTimetableUploadStatus({
-        type: 'error',
-        message: err.message || 'Failed to upload timetable',
-      });
-    } finally {
-      setIsUploadingTimetable(false);
-    }
-  };
-
-  // ── Parse Allotment Excel ──
-  const handleAllotmentFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setAllotmentFile(file);
-    setAllotmentUploadStatus({ type: 'idle', message: '' });
-
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const bstr = evt.target?.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
-        const wsName = wb.SheetNames[0];
-        const ws = wb.Sheets[wsName];
-        const data = XLSX.utils.sheet_to_json(ws);
-        setParsedAllotments(data);
-      } catch (err: any) {
-        setAllotmentUploadStatus({
-          type: 'error',
-          message: `Failed to parse Excel file: ${err.message}`,
-        });
-      }
-    };
-    reader.readAsBinaryString(file);
-  };
-
-  // ── Submit Allotments ──
-  const handleUploadAllotments = async () => {
-    if (parsedAllotments.length === 0) return;
-    setIsUploadingAllotments(true);
-    setAllotmentUploadStatus({ type: 'idle', message: '' });
-
-    try {
-      const enrichedAllotments = parsedAllotments.map((row: any) => ({
-        ...row,
-        department: (row.department || row['Department'] || row['DEPT'] || row['Dept'] || (allotmentDepartment === 'All' ? 'CSE' : allotmentDepartment)).trim(),
-        section: (row.section || row['Section'] || row['SEC'] || row['Sec'] || allotmentSection || 'A').trim().toUpperCase(),
-      }));
-      const res = await api.uploadAllotments(selectedSemester, enrichedAllotments);
-      setAllotmentUploadStatus({
-        type: res.errorsCount > 0 ? 'error' : 'success',
-        message: res.message,
-        details: res.errors,
-      });
-      setAllotmentFile(null);
-      setParsedAllotments([]);
-      queryClient.invalidateQueries({ queryKey: ['attendanceAllotments'] });
-    } catch (err: any) {
-      setAllotmentUploadStatus({
-        type: 'error',
-        message: err.message || 'Failed to upload allotments',
-      });
-    } finally {
-      setIsUploadingAllotments(false);
-    }
-  };
-
-  // ── Parse Roster Excel ──
-  const handleRosterFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setRosterFile(file);
-    setRosterUploadStatus({ type: 'idle', message: '' });
-
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const bstr = evt.target?.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
-        const wsName = wb.SheetNames[0];
-        const ws = wb.Sheets[wsName];
-        const data = XLSX.utils.sheet_to_json(ws);
-        setParsedRoster(data);
-      } catch (err: any) {
-        setRosterUploadStatus({
-          type: 'error',
-          message: `Failed to parse Excel file: ${err.message}`,
-        });
-      }
-    };
-    reader.readAsBinaryString(file);
-  };
-
-  // ── Submit Roster ──
-  const handleUploadRoster = async () => {
-    if (!selectedAllotmentId) {
-      setRosterUploadStatus({
-        type: 'error',
-        message: 'Please select a Subject Allotment before uploading the roster.',
-      });
-      return;
-    }
-    if (parsedRoster.length === 0) return;
-
-    setIsUploadingRoster(true);
-    setRosterUploadStatus({ type: 'idle', message: '' });
-
-    try {
-      const res = await api.uploadRoster(selectedAllotmentId, parsedRoster);
-      setRosterUploadStatus({
-        type: res.errorsCount > 0 ? 'error' : 'success',
-        message: res.message,
-        details: res.errors,
-      });
-      setRosterFile(null);
-      setParsedRoster([]);
-      queryClient.invalidateQueries({ queryKey: ['attendanceAllotments'] });
       queryClient.invalidateQueries({ queryKey: ['attendanceRoster'] });
+      setRosterStatus({ type: 'success', message: `Student ${singleRollNo} enrolled in roster.` });
+      setSingleRollNo('');
+      setSingleStudentName('');
+      setSingleJoiningDate('');
     } catch (err: any) {
-      setRosterUploadStatus({
-        type: 'error',
-        message: err.message || 'Failed to upload roster',
-      });
-    } finally {
-      setIsUploadingRoster(false);
+      setRosterStatus({ type: 'error', message: err.message || 'Failed to enroll student.' });
     }
   };
 
-  const filteredAllotments = allotments.filter((a: SubjectAllotment) => {
-    if (allotmentDepartment !== 'All' && a.department && !a.department.toLowerCase().includes(allotmentDepartment.toLowerCase()) && !allotmentDepartment.toLowerCase().includes(a.department.toLowerCase())) {
-      return false;
+  const handleDeleteRosterStudent = async (rosterId: string) => {
+    if (!window.confirm('Remove this student from the subject roster?')) return;
+    try {
+      await api.deleteRosterStudent(rosterId);
+      queryClient.invalidateQueries({ queryKey: ['attendanceRoster'] });
+      setRosterStatus({ type: 'success', message: 'Student removed from roster.' });
+    } catch (err: any) {
+      setRosterStatus({ type: 'error', message: err.message || 'Failed to remove student.' });
     }
-    if (allotmentSectionFilter !== 'All' && a.section !== allotmentSectionFilter) {
-      return false;
+  };
+
+  const handleBulkRosterUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedAllotmentId) return;
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const wb = XLSX.read(evt.target?.result, { type: 'binary' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows: any[] = XLSX.utils.sheet_to_json(ws);
+        if (rows.length === 0) {
+          setRosterStatus({ type: 'error', message: 'Uploaded Excel file is empty.' });
+          return;
+        }
+        await api.uploadRoster(
+          selectedAllotmentId,
+          rows.map(r => ({
+            roll_number: String(r['Roll Number'] || r['roll_number'] || r['Roll No'] || '').trim().toUpperCase(),
+            student_name: r['Student Name'] || r['student_name'] || r['Name'] || '',
+            joining_date: r['Joining Date'] || r['joining_date'] || undefined,
+          }))
+        );
+        queryClient.invalidateQueries({ queryKey: ['attendanceRoster'] });
+        setRosterStatus({ type: 'success', message: `Successfully enrolled ${rows.length} students in roster.` });
+      } catch (err: any) {
+        setRosterStatus({ type: 'error', message: err.message || 'Failed to upload roster.' });
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  // ── TAB 4 ACTIONS: TIMETABLE ───────────────────────────────────────────────
+  const handleSaveTimetableSlot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ttSubjectName || !ttFacultyEmail) {
+      setTtStatus({ type: 'error', message: 'Subject and Faculty are required.' });
+      return;
     }
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      a.subject_name.toLowerCase().includes(q) ||
-      a.faculty_name.toLowerCase().includes(q) ||
-      a.faculty_email.toLowerCase().includes(q) ||
-      a.section.toLowerCase().includes(q) ||
-      a.department.toLowerCase().includes(q)
-    );
-  });
+    try {
+      await api.uploadTimetable(
+        selectedSemester,
+        selectedSection,
+        selectedDepartment === 'All' ? 'CSE' : selectedDepartment,
+        [{
+          day_of_week: ttDay,
+          period_start: ttPeriod,
+          num_periods: ttNumPeriods,
+          subject_name: ttSubjectName,
+          subject_type: ttSubjectType,
+          faculty_email: ttFacultyEmail,
+          room_no: ttRoom,
+        }]
+      );
+      queryClient.invalidateQueries({ queryKey: ['attendanceTimetable'] });
+      setTtStatus({ type: 'success', message: `Timetable slot saved for ${ttDay} Period ${ttPeriod}.` });
+      setTtSubjectName('');
+      setTtFacultyEmail('');
+    } catch (err: any) {
+      setTtStatus({ type: 'error', message: err.message || 'Failed to save timetable slot.' });
+    }
+  };
+
+  const handleDeleteTimetableSlot = async (id: string) => {
+    if (!window.confirm('Delete this timetable slot?')) return;
+    try {
+      await api.deleteTimetableEntry(id);
+      queryClient.invalidateQueries({ queryKey: ['attendanceTimetable'] });
+      setTtStatus({ type: 'success', message: 'Slot deleted.' });
+    } catch (err: any) {
+      setTtStatus({ type: 'error', message: err.message || 'Failed to delete slot.' });
+    }
+  };
+
+  // Filtered Master Subjects
+  const filteredSubjects = useMemo(() => {
+    return masterSubjects.filter((s: any) => {
+      const q = subjectSearch.toLowerCase();
+      const semMatch = subjectFilterSem === 'All' || s.semester_label === subjectFilterSem;
+      const textMatch = !q || s.subject_name?.toLowerCase().includes(q) || s.subject_code?.toLowerCase().includes(q);
+      return semMatch && textMatch;
+    });
+  }, [masterSubjects, subjectFilterSem, subjectSearch]);
 
   return (
     <div className="space-y-6">
-      {/* Header & Sub-tab switcher */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-5 rounded-2xl bg-surface border border-borderLine">
-        <div>
-          <h2 className="text-xl font-bold text-textPrimary flex items-center gap-2.5">
-            <Layers className="w-5 h-5 text-brand-primary" />
-            Attendance System Management & Allotments
-          </h2>
-          <p className="text-xs text-textSecondary mt-1">
-            Configure section timetables, assign faculty allotments, and enroll student rosters with late-joining adjustments.
-          </p>
-        </div>
+      {/* ── Page Header & Top Nav Tabs (Ported from dsattendance includes/admin_sidebar) ── */}
+      <div className="bg-surface border border-borderLine rounded-2xl p-5 shadow-sm space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-brand-primary/10 text-brand-primary text-xs font-bold uppercase tracking-wider mb-1">
+              <BookOpen className="w-3.5 h-3.5" />
+              Attendance Administration
+            </div>
+            <h2 className="text-xl font-black text-textPrimary">Attendance & Academic Management</h2>
+            <p className="text-xs text-textSecondary mt-0.5">
+              Manage subject master catalogs, faculty allocations, student rosters, and section timetables.
+            </p>
+          </div>
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setShowPdfModal(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 shadow-md transition-all"
-          >
-            <Printer className="w-4 h-4" />
-            Download Attendance Sheet (PDF)
-          </button>
+          {/* Sub-Tabs (Clean dsattendance structure) */}
+          <div className="flex items-center gap-1 bg-surface-2 p-1.5 rounded-xl border border-borderLine overflow-x-auto">
+            <button
+              onClick={() => setActiveTab('subjects')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                activeTab === 'subjects' ? 'bg-brand-primary text-white shadow-sm' : 'text-textSecondary hover:text-textPrimary'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              1. Subjects Master
+            </button>
 
-          <div className="flex items-center gap-1 bg-surface-2 p-1 rounded-xl border border-borderLine overflow-x-auto">
             <button
-              onClick={() => setActiveSubTab('subjects')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
-                activeSubTab === 'subjects'
-                  ? 'bg-brand-primary text-white shadow-brand'
-                  : 'text-textSecondary hover:text-textPrimary'
+              onClick={() => setActiveTab('allotments')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                activeTab === 'allotments' ? 'bg-brand-primary text-white shadow-sm' : 'text-textSecondary hover:text-textPrimary'
               }`}
             >
-              0. Subject Master List
+              <Users className="w-3.5 h-3.5" />
+              2. Faculty Allotment
             </button>
+
             <button
-              onClick={() => setActiveSubTab('allotments')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
-                activeSubTab === 'allotments'
-                  ? 'bg-brand-primary text-white shadow-brand'
-                  : 'text-textSecondary hover:text-textPrimary'
+              onClick={() => setActiveTab('rosters')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                activeTab === 'rosters' ? 'bg-brand-primary text-white shadow-sm' : 'text-textSecondary hover:text-textPrimary'
               }`}
             >
-              1. Faculty Subject Allocation
+              <Users className="w-3.5 h-3.5" />
+              3. Student Rosters
             </button>
+
             <button
-              onClick={() => setActiveSubTab('rosters')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
-                activeSubTab === 'rosters'
-                  ? 'bg-brand-primary text-white shadow-brand'
-                  : 'text-textSecondary hover:text-textPrimary'
+              onClick={() => setActiveTab('timetable')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                activeTab === 'timetable' ? 'bg-brand-primary text-white shadow-sm' : 'text-textSecondary hover:text-textPrimary'
               }`}
             >
-              2. Student Roster
-            </button>
-            <button
-              onClick={() => setActiveSubTab('timetable')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
-                activeSubTab === 'timetable'
-                  ? 'bg-brand-primary text-white shadow-brand'
-                  : 'text-textSecondary hover:text-textPrimary'
-              }`}
-            >
-              3. Timetable Matrix
+              <Clock className="w-3.5 h-3.5" />
+              4. Timetable Matrix
             </button>
           </div>
         </div>
+
+        {/* Global Scope Filter Bar (For Tabs 2, 3, 4) */}
+        {activeTab !== 'subjects' && (
+          <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-borderLine text-xs">
+            <span className="font-bold text-textMuted uppercase flex items-center gap-1">
+              <Filter className="w-3.5 h-3.5" /> Scope:
+            </span>
+
+            {/* Semester */}
+            <div className="flex items-center gap-1 bg-surface-2 px-2.5 py-1 rounded-xl border border-borderLine">
+              <span className="text-textMuted">Class:</span>
+              <select
+                value={selectedSemester}
+                onChange={(e) => setSelectedSemester(e.target.value as SemesterLabel)}
+                className="bg-transparent font-bold text-textPrimary focus:outline-none"
+              >
+                {ALL_SEMESTERS.map(s => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Department */}
+            <div className="flex items-center gap-1 bg-surface-2 px-2.5 py-1 rounded-xl border border-borderLine">
+              <span className="text-textMuted">Dept:</span>
+              <select
+                value={selectedDepartment}
+                onChange={(e) => setSelectedDepartment(e.target.value)}
+                className="bg-transparent font-bold text-textPrimary focus:outline-none"
+              >
+                <option value="All">All Departments</option>
+                {VALID_DEPARTMENT_NAMES.map(d => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+                <option value="S&H">S&H (1st Year)</option>
+              </select>
+            </div>
+
+            {/* Section */}
+            <div className="flex items-center gap-1 bg-surface-2 px-2.5 py-1 rounded-xl border border-borderLine">
+              <span className="text-textMuted">Section:</span>
+              <select
+                value={selectedSection}
+                onChange={(e) => setSelectedSection(e.target.value)}
+                className="bg-transparent font-bold text-textPrimary focus:outline-none"
+              >
+                {['A', 'B', 'C', 'D', 'E', 'F'].map(sec => (
+                  <option key={sec} value={sec}>Section {sec}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ────────────────────────────────────────────────────────────────────────── */}
-      {/* SUB-TAB 0: SUBJECT MASTER LIST (admin/subjects.php equivalent) */}
+      {/* 1. SUBJECTS MASTER (admin/subjects.php) */}
       {/* ────────────────────────────────────────────────────────────────────────── */}
-      {activeSubTab === 'subjects' && (
-        <SubjectMasterTab
-          subjectForm={subjectForm}
-          setSubjectForm={setSubjectForm}
-          subjectSearchQuery={subjectSearchQuery}
-          setSubjectSearchQuery={setSubjectSearchQuery}
-          subjectFilterSem={subjectFilterSem}
-          setSubjectFilterSem={setSubjectFilterSem}
-          isSubmittingSubject={isSubmittingSubject}
-          setIsSubmittingSubject={setIsSubmittingSubject}
-          subjectFormStatus={subjectFormStatus}
-          setSubjectFormStatus={setSubjectFormStatus}
-          deletingSubjectId={deletingSubjectId}
-          setDeletingSubjectId={setDeletingSubjectId}
-          queryClient={queryClient}
-        />
-      )}
-
-      {/* ────────────────────────────────────────────────────────────────────────── */}
-      {/* SUB-TAB 1: TIMETABLE SCHEDULE & UPLOAD */}
-      {/* ────────────────────────────────────────────────────────────────────────── */}
-      {activeSubTab === 'timetable' && (
-        <div className="space-y-6">
-          
-          {/* Timetable Timing Structure Banner */}
-          <div className="p-4 rounded-2xl bg-surface-2 border border-borderLine flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-brand-primary/10 text-brand-primary rounded-xl">
-                <Clock className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-xs font-bold text-textPrimary">
-                  {isFirstOrFourthYear ? '1st & 4th Year Period Structure' : '2nd & 3rd Year Period Structure'}
-                </p>
-                <p className="text-[11px] text-textSecondary mt-0.5">
-                  {isFirstOrFourthYear
-                    ? 'P1-P2 (09:00–10:40) • Break (10:40–11:00) • P3 (11:00–11:50) • Lunch (11:50–01:00) • P4-P5 (01:00–02:40) • Break (02:40–03:00) • P6-P7 (03:00–04:40)'
-                    : 'P1-P2 (09:00–10:40) • Break (10:40–11:00) • P3-P4 (11:00–12:40) • Lunch (12:40–01:50) • P5-P7 (01:50–04:20)'}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleDownloadTimetableTemplate}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-textSecondary bg-surface hover:bg-surface-3 border border-borderLine transition-all"
-              >
-                <Download className="w-3.5 h-3.5" />
-                Download Timetable Template
-              </button>
-            </div>
-          </div>
-
-          {/* Timetable Excel Upload Card */}
-          <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h3 className="text-base font-bold text-textPrimary flex items-center gap-2">
-                  <Upload className="w-4 h-4 text-brand-primary" />
-                  Upload Section Timetable (Auto-Generates Daily Session Slots)
-                </h3>
-                <p className="text-xs text-textSecondary mt-0.5">
-                  Maps subjects to specific day/time slots with 1, 2, or 3 period spans. Breaks and lunch are excluded automatically.
-                </p>
-              </div>
-            </div>
-
-            {/* Department, Semester & Section Selectors */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
-                  Department
-                </label>
-                <select
-                  value={timetableDepartment}
-                  onChange={(e) => setTimetableDepartment(e.target.value)}
-                  className="w-full bg-surface-2 border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary font-medium"
+      {activeTab === 'subjects' && (
+        <div className="space-y-5">
+          {/* Add / Edit Subject Card Form */}
+          <form onSubmit={handleSaveSubject} className="bg-surface border border-borderLine rounded-2xl p-5 shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-textPrimary flex items-center gap-2">
+                <BookOpen className="w-4 h-4 text-brand-primary" />
+                {subjectForm.id ? 'Edit Subject' : 'Add New Subject'}
+              </h3>
+              {subjectForm.id && (
+                <button
+                  type="button"
+                  onClick={() => setSubjectForm({
+                    id: '', semester_label: '', subject_code: '', subject_name: '', short_name: '', subject_type: 'Theory', department: 'CSE', regulation: 'R20'
+                  })}
+                  className="text-xs text-textMuted hover:text-textPrimary"
                 >
-                  {VALID_DEPARTMENT_NAMES.map((dept) => (
-                    <option key={dept} value={dept}>
-                      {dept}
-                    </option>
-                  ))}
+                  Cancel Edit
+                </button>
+              )}
+            </div>
+
+            {subjectStatus.type !== 'idle' && (
+              <div className={`p-3 rounded-xl text-xs font-semibold flex items-center justify-between ${
+                subjectStatus.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+              }`}>
+                <span>{subjectStatus.message}</span>
+                <button type="button" onClick={() => setSubjectStatus({ type: 'idle', message: '' })}>✕</button>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+              <div>
+                <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Class *</label>
+                <select
+                  value={subjectForm.semester_label}
+                  onChange={(e) => setSubjectForm({ ...subjectForm, semester_label: e.target.value as any })}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                  required
+                >
+                  <option value="">Select Class</option>
+                  {ALL_SEMESTERS.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
-                  Select Semester
-                </label>
-                <div className="grid grid-cols-4 gap-1.5 bg-surface-2 p-1.5 rounded-xl border border-borderLine">
-                  {ALL_SEMESTERS.map((sem) => (
-                    <button
-                      key={sem}
-                      onClick={() => setTimetableSemester(sem)}
-                      className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
-                        timetableSemester === sem
-                          ? 'bg-brand-primary text-white shadow-brand'
-                          : 'text-textSecondary hover:text-textPrimary hover:bg-surface-3'
-                      }`}
-                    >
-                      {sem}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
-                  Section
-                </label>
+                <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Department</label>
                 <select
-                  value={timetableSection}
-                  onChange={(e) => setTimetableSection(e.target.value)}
-                  className="w-full bg-surface-2 border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary font-medium"
+                  value={subjectForm.department}
+                  onChange={(e) => setSubjectForm({ ...subjectForm, department: e.target.value })}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary"
                 >
-                  {['A', 'B', 'C', 'D', 'DS', 'AIML'].map((sec) => (
-                    <option key={sec} value={sec}>
-                      Section {sec}
-                    </option>
-                  ))}
+                  {VALID_DEPARTMENT_NAMES.map(d => <option key={d} value={d}>{d}</option>)}
+                  <option value="S&H">S&H (1st Year)</option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
-                  Upload Timetable (.xlsx or .pdf)
-                </label>
+                <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Subject Code *</label>
                 <input
-                  type="file"
-                  accept=".xlsx,.xls,.csv,.pdf"
-                  onChange={handleTimetableFileChange}
-                  className="w-full text-xs text-textSecondary file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-brand-primary file:text-white hover:file:bg-brand-primary/90 cursor-pointer bg-surface-2 p-1 rounded-xl border border-borderLine"
+                  type="text"
+                  placeholder="e.g. CS401"
+                  value={subjectForm.subject_code}
+                  onChange={(e) => setSubjectForm({ ...subjectForm, subject_code: e.target.value })}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary font-mono font-bold"
+                  required
                 />
               </div>
-            </div>
 
-            {/* Uploaded Official PDF Timetable Banner */}
-            {attachedPdfDoc && (
-              <div className="p-4 rounded-xl bg-gradient-to-r from-purple-500/10 to-brand-primary/10 border border-purple-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 bg-purple-500/20 text-purple-400 rounded-xl">
-                    <FileText className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-textPrimary flex items-center gap-2">
-                      Official Timetable Document (PDF)
-                      <span className="text-[10px] font-mono text-textMuted bg-surface px-2 py-0.5 rounded border border-borderLine">
-                        {(attachedPdfDoc.file_size / 1024).toFixed(1)} KB
-                      </span>
-                      <span className="text-[10px] font-semibold text-purple-300 bg-purple-500/20 px-2 py-0.5 rounded border border-purple-500/30">
-                        {attachedPdfDoc.department || timetableDepartment}
-                      </span>
-                    </p>
-                    <p className="text-[11px] text-textSecondary mt-0.5 font-mono">
-                      {attachedPdfDoc.file_name} • Uploaded by {attachedPdfDoc.uploaded_by} on {new Date(attachedPdfDoc.created_at).toLocaleDateString('en-GB')}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
-                  <button
-                    onClick={() => setViewingPdfDoc({ name: attachedPdfDoc.file_name, data: attachedPdfDoc.file_data })}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-primary text-white text-xs font-bold shadow hover:bg-brand-primary/90 transition-all"
-                  >
-                    <Eye className="w-3.5 h-3.5" /> View PDF
-                  </button>
-                  <a
-                    href={attachedPdfDoc.file_data}
-                    download={attachedPdfDoc.file_name}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-2 text-textPrimary hover:bg-surface-3 border border-borderLine text-xs font-bold transition-all"
-                  >
-                    <Download className="w-3.5 h-3.5" /> Download
-                  </a>
-                  <button
-                    onClick={async () => {
-                      if (confirm(`Remove official PDF "${attachedPdfDoc.file_name}" for ${timetableDepartment} Sem ${timetableSemester} Sec ${timetableSection}?`)) {
-                        await api.deleteTimetableDocument(attachedPdfDoc.id);
-                        queryClient.invalidateQueries({ queryKey: ['timetableDocument'] });
-                      }
-                    }}
-                    className="p-1.5 text-textMuted hover:text-alert rounded-lg hover:bg-surface-3 transition-colors"
-                    title="Delete PDF document"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+              <div className="lg:col-span-2">
+                <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Subject Title *</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Data Structures & Algorithms"
+                  value={subjectForm.subject_name}
+                  onChange={(e) => setSubjectForm({ ...subjectForm, subject_name: e.target.value })}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary font-semibold"
+                  required
+                />
               </div>
-            )}
 
-            {parsedTimetable.length > 0 && (
-              <div className="p-4 rounded-xl bg-surface-2 border border-borderLine space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-bold text-textPrimary flex items-center gap-2">
-                    <FileSpreadsheet className="w-4 h-4 text-brand-primary" />
-                    Parsed {parsedTimetable.length} Timetable Slot(s) for {timetableDepartment} — Sem {timetableSemester} (Sec {timetableSection})
-                  </p>
-                  <button
-                    onClick={handleUploadTimetable}
-                    disabled={isUploadingTimetable}
-                    className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold text-white bg-brand-primary hover:bg-brand-primary/90 shadow-brand transition-all disabled:opacity-50"
-                  >
-                    {isUploadingTimetable ? (
-                      <>
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        Uploading Timetable...
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        Confirm & Save Timetable
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {timetableUploadStatus.type !== 'idle' && (
-              <div
-                className={`p-4 rounded-xl border ${
-                  timetableUploadStatus.type === 'success'
-                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                    : 'bg-alert-soft border-alert/30 text-alert'
-                }`}
-              >
-                <div className="flex items-start gap-2.5">
-                  {timetableUploadStatus.type === 'success' ? (
-                    <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
-                  ) : (
-                    <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-                  )}
-                  <div className="text-xs space-y-1">
-                    <p className="font-bold">{timetableUploadStatus.message}</p>
-                    {timetableUploadStatus.details && timetableUploadStatus.details.length > 0 && (
-                      <div className="mt-2 space-y-1 max-h-32 overflow-y-auto text-[11px] opacity-90">
-                        {timetableUploadStatus.details.map((err, idx) => (
-                          <p key={idx}>
-                            • Row {err.row}: {err.reason}
-                          </p>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Visual Timetable Grid View */}
-          <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <h3 className="text-base font-bold text-textPrimary flex items-center gap-2">
-                  <CalendarDays className="w-4 h-4 text-cyan-400" />
-                  Weekly Timetable Matrix — {timetableDepartment} • Semester {timetableSemester} (Section {timetableSection})
-                </h3>
-                <p className="text-xs text-textSecondary mt-0.5">
-                  7 Class periods per day. Multi-period sessions occupy continuous blocks.
-                </p>
-              </div>
-            </div>
-
-            {isLoadingTimetable ? (
-              <div className="py-12 text-center text-textMuted">
-                <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-brand-primary" />
-                Loading {timetableDepartment} section timetable...
-              </div>
-            ) : timetableEntries.length === 0 ? (
-              <div className="py-10 px-6 text-center text-textMuted bg-surface-2/60 rounded-xl border border-dashed border-borderLine space-y-2">
-                <Calendar className="w-8 h-8 mx-auto text-textMuted/60" />
-                <p className="text-sm font-bold text-textPrimary">
-                  No period-by-period slot entries saved for {timetableDepartment} — Sem {timetableSemester} (Section {timetableSection}).
-                </p>
-                {attachedPdfDoc ? (
-                  <p className="text-xs text-emerald-400 font-semibold flex items-center justify-center gap-1.5">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    Official PDF Timetable is uploaded and available above. To generate automated period slots for daily attendance marking, upload the matching Excel (.xlsx) schedule.
-                  </p>
-                ) : (
-                  <p className="text-xs text-textSecondary">
-                    Upload an Excel timetable schedule (.xlsx) or official PDF document using the form above.
-                  </p>
-                )}
-              </div>
-            ) : (
-              <div className="overflow-x-auto rounded-xl border border-borderLine">
-                <table className="w-full text-xs text-left border-collapse">
-                  <thead className="bg-surface-2 text-textMuted font-bold uppercase tracking-wider border-b border-borderLine">
-                    <tr>
-                      <th className="py-3 px-3 text-center w-24 border-r border-borderLine">Day</th>
-                      {[1, 2, 3, 4, 5, 6, 7].map((p) => (
-                        <th key={p} className="py-2.5 px-2 text-center border-r border-borderLine min-w-[130px]">
-                          <div>P{p}</div>
-                          <div className="text-[10px] font-normal text-textSecondary lowercase">
-                            {getPeriodDisplayTiming(p, isFirstOrFourthYear).split(': ')[1]}
-                          </div>
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-borderLine">
-                    {DAYS_OF_WEEK.map((day) => {
-                      const daySlots = timetableEntries.filter((e: TimetableEntry) => e.day_of_week.toLowerCase() === day.toLowerCase());
-                      
-                      // Map 7 periods
-                      const periodMap: (TimetableEntry | null)[] = [null, null, null, null, null, null, null];
-                      daySlots.forEach((e: TimetableEntry) => {
-                        const start = Math.max(0, Math.min(6, e.period_start - 1));
-                        const span = Math.min(e.num_periods || 1, 7 - start);
-                        for (let i = 0; i < span; i++) {
-                          periodMap[start + i] = e;
-                        }
-                      });
-
-                      return (
-                        <tr key={day} className="hover:bg-surface-2/30">
-                          <td className="py-3 px-3 text-center font-bold text-textPrimary bg-surface-2/40 border-r border-borderLine">
-                            {day}
-                          </td>
-                          {[0, 1, 2, 3, 4, 5, 6].map((idx) => {
-                            const entry = periodMap[idx];
-                            if (!entry) {
-                              return (
-                                <td key={idx} className="py-2 px-2 text-center text-textMuted/40 border-r border-borderLine">
-                                  —
-                                </td>
-                              );
-                            }
-
-                            // Show only if this is the start period of the slot, or render cell
-                            const isStart = (entry.period_start - 1) === idx;
-                            return (
-                              <td
-                                key={idx}
-                                className={`py-2 px-2 text-center border-r border-borderLine ${
-                                  entry.subject_type === 'Lab'
-                                    ? 'bg-purple-500/10 text-purple-300'
-                                    : 'bg-cyan-500/10 text-cyan-300'
-                                }`}
-                              >
-                                <div className="font-bold truncate max-w-[120px] mx-auto" title={entry.subject_name}>
-                                  {entry.subject_name}
-                                </div>
-                                <div className="text-[10px] opacity-80 mt-0.5">
-                                  {entry.subject_type} {entry.num_periods > 1 ? `(${entry.num_periods}P)` : ''}
-                                </div>
-                                {entry.room_no && (
-                                  <div className="text-[9px] opacity-60">{entry.room_no}</div>
-                                )}
-                                {entry.id && (
-                                  <button
-                                    onClick={() => entry.id && deleteTimetableSlotMutation.mutate(entry.id)}
-                                    className="text-alert/60 hover:text-alert text-[10px] mt-1 inline-block"
-                                    title="Delete slot"
-                                  >
-                                    ✕
-                                  </button>
-                                )}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-        </div>
-      )}
-
-      {/* ────────────────────────────────────────────────────────────────────────── */}
-      {/* SUB-TAB 1: FACULTY SUBJECT ALLOCATION */}
-      {/* ────────────────────────────────────────────────────────────────────────── */}
-      {activeSubTab === 'allotments' && (
-        <div className="space-y-6">
-          {/* Top Configuration & Entry Form Card */}
-          <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h3 className="text-base font-bold text-textPrimary flex items-center gap-2">
-                  <BookOpen className="w-4 h-4 text-brand-primary" />
-                  Faculty Subject Allocation Management
-                </h3>
-                <p className="text-xs text-textSecondary mt-0.5">
-                  Flow: Semester → Department → Section → Allocation. Add allocations via bulk Excel upload or single manual entry.
-                </p>
-              </div>
-
-              {/* Mode Toggle: Bulk Upload vs Single Manual Entry */}
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1 bg-surface-2 p-1 rounded-xl border border-borderLine">
-                  <button
-                    onClick={() => setAllotmentMode('upload')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                      allotmentMode === 'upload'
-                        ? 'bg-brand-primary text-white shadow-brand'
-                        : 'text-textSecondary hover:text-textPrimary'
-                    }`}
-                  >
-                    Bulk Upload (Excel)
-                  </button>
-                  <button
-                    onClick={() => setAllotmentMode('single')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                      allotmentMode === 'single'
-                        ? 'bg-brand-primary text-white shadow-brand'
-                        : 'text-textSecondary hover:text-textPrimary'
-                    }`}
-                  >
-                    + Single Manual Entry
-                  </button>
-                </div>
-
-                {allotmentMode === 'upload' && (
-                  <button
-                    onClick={handleDownloadAllotmentTemplate}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-textSecondary bg-surface-2 hover:bg-surface-3 border border-borderLine transition-all shrink-0"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    Template
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* ── MODE 1: BULK EXCEL UPLOAD ── */}
-            {allotmentMode === 'upload' && (
-              <div className="space-y-4 pt-2">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {/* Step 1: Semester */}
-                  <div>
-                    <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
-                      1. Select Semester *
-                    </label>
-                    <div className="grid grid-cols-4 gap-1.5 bg-surface-2 p-1.5 rounded-xl border border-borderLine">
-                      {ALL_SEMESTERS.map((sem) => (
-                        <button
-                          key={sem}
-                          onClick={() => setSelectedSemester(sem)}
-                          className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
-                            selectedSemester === sem
-                              ? 'bg-brand-primary text-white shadow-brand'
-                              : 'text-textSecondary hover:text-textPrimary hover:bg-surface-3'
-                          }`}
-                        >
-                          {sem}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Step 2: Department */}
-                  <div>
-                    <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
-                      2. Department *
-                    </label>
-                    <select
-                      value={allotmentDepartment}
-                      onChange={(e) => setAllotmentDepartment(e.target.value)}
-                      className="w-full bg-surface-2 border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary font-medium"
-                    >
-                      <option value="All">All Departments</option>
-                      {VALID_DEPARTMENT_NAMES.map((dept) => (
-                        <option key={dept} value={dept}>
-                          {dept}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Step 3: Section */}
-                  <div>
-                    <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
-                      3. Section *
-                    </label>
-                    <div className="grid grid-cols-6 gap-1 bg-surface-2 p-1.5 rounded-xl border border-borderLine">
-                      {['A', 'B', 'C', 'D', 'E', 'F'].map((sec) => (
-                        <button
-                          key={sec}
-                          type="button"
-                          onClick={() => setAllotmentSection(sec)}
-                          className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
-                            allotmentSection === sec
-                              ? 'bg-brand-primary text-white shadow-brand'
-                              : 'text-textSecondary hover:text-textPrimary hover:bg-surface-3'
-                          }`}
-                        >
-                          {sec}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Step 4: File Upload */}
-                  <div>
-                    <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
-                      4. Upload File (.xlsx) *
-                    </label>
-                    <input
-                      type="file"
-                      accept=".xlsx,.xls,.csv"
-                      onChange={handleAllotmentFileChange}
-                      className="w-full text-xs text-textSecondary file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-brand-primary file:text-white hover:file:bg-brand-primary/90 cursor-pointer bg-surface-2 p-1 rounded-xl border border-borderLine"
-                    />
-                  </div>
-                </div>
-
-                {parsedAllotments.length > 0 && (
-                  <div className="p-4 rounded-xl bg-surface-2 border border-borderLine space-y-3">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <p className="text-xs font-bold text-textPrimary flex items-center gap-2">
-                        <FileSpreadsheet className="w-4 h-4 text-brand-primary" />
-                        Parsed {parsedAllotments.length} Allotment Row(s) for Semester {selectedSemester} (Dept: {allotmentDepartment}, Sec: {allotmentSection})
-                      </p>
-                      <button
-                        onClick={handleUploadAllotments}
-                        disabled={isUploadingAllotments}
-                        className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold text-white bg-brand-primary hover:bg-brand-primary/90 shadow-brand transition-all disabled:opacity-50"
-                      >
-                        {isUploadingAllotments ? (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            Uploading Allotments...
-                          </>
-                        ) : (
-                          <>
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            Confirm & Save Allotments
-                          </>
-                        )}
-                      </button>
-                    </div>
-
-                    {/* Preview Table */}
-                    <div className="max-h-48 overflow-y-auto rounded-lg border border-borderLine bg-surface text-[11px]">
-                      <table className="w-full text-left">
-                        <thead className="bg-surface-3 text-textMuted font-bold uppercase sticky top-0">
-                          <tr>
-                            <th className="py-2 px-3">Subject</th>
-                            <th className="py-2 px-3">Type</th>
-                            <th className="py-2 px-3">Dept</th>
-                            <th className="py-2 px-3">Sec</th>
-                            <th className="py-2 px-3">Faculty Name</th>
-                            <th className="py-2 px-3">Faculty Email</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-borderLine">
-                          {parsedAllotments.slice(0, 10).map((row: any, idx: number) => (
-                            <tr key={idx}>
-                              <td className="py-1.5 px-3 font-semibold">{row.subject_name || row['Subject Allotted'] || row['Subject Name']}</td>
-                              <td className="py-1.5 px-3">{row.subject_type || row['Subject Type'] || 'Theory'}</td>
-                              <td className="py-1.5 px-3">{row.department || row['Department'] || (allotmentDepartment === 'All' ? 'CSE' : allotmentDepartment)}</td>
-                              <td className="py-1.5 px-3 font-bold">{row.section || row['Section'] || allotmentSection}</td>
-                              <td className="py-1.5 px-3">{row.faculty_name || row['Faculty Name']}</td>
-                              <td className="py-1.5 px-3 font-mono">{row.faculty_email || row['Faculty Email']}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-
-                {allotmentUploadStatus.type !== 'idle' && (
-                  <div
-                    className={`p-4 rounded-xl border ${
-                      allotmentUploadStatus.type === 'success'
-                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                        : 'bg-alert-soft border-alert/30 text-alert'
-                    }`}
-                  >
-                    <div className="flex items-start gap-2.5">
-                      {allotmentUploadStatus.type === 'success' ? (
-                        <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
-                      ) : (
-                        <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-                      )}
-                      <div className="text-xs space-y-1">
-                        <p className="font-bold">{allotmentUploadStatus.message}</p>
-                        {allotmentUploadStatus.details && allotmentUploadStatus.details.length > 0 && (
-                          <div className="mt-2 space-y-1 max-h-32 overflow-y-auto text-[11px] opacity-90">
-                            {allotmentUploadStatus.details.map((err, idx) => (
-                              <p key={idx}>
-                                • Row {err.row}: {err.reason}
-                              </p>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── MODE 2: SINGLE MANUAL ENTRY FORM ── */}
-            {allotmentMode === 'single' && (
-              <form onSubmit={handleSingleAllotmentSubmit} className="space-y-4 pt-2">
-                <div className="p-4 rounded-xl bg-surface-2 border border-borderLine space-y-4">
-                  <h4 className="text-xs font-bold text-textPrimary uppercase tracking-wider flex items-center gap-2">
-                    <Edit2 className="w-3.5 h-3.5 text-brand-primary" />
-                    Add Single Faculty–Subject Allocation
-                  </h4>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {/* Semester */}
-                    <div>
-                      <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5">
-                        1. Semester *
-                      </label>
-                      <select
-                        value={singleAllotSemester}
-                        onChange={(e) => setSingleAllotSemester(e.target.value as SemesterLabel)}
-                        className="w-full bg-surface border border-borderLine text-textPrimary text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-brand-primary font-medium"
-                      >
-                        {ALL_SEMESTERS.map((s) => (
-                          <option key={s} value={s}>
-                            Semester {s}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Department */}
-                    <div>
-                      <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5">
-                        2. Department *
-                      </label>
-                      <select
-                        value={singleAllotDept}
-                        onChange={(e) => setSingleAllotDept(e.target.value)}
-                        className="w-full bg-surface border border-borderLine text-textPrimary text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-brand-primary font-medium"
-                      >
-                        {VALID_DEPARTMENT_NAMES.map((d) => (
-                          <option key={d} value={d}>
-                            {d}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Section */}
-                    <div>
-                      <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5">
-                        3. Section *
-                      </label>
-                      <select
-                        value={singleAllotSection}
-                        onChange={(e) => setSingleAllotSection(e.target.value)}
-                        className="w-full bg-surface border border-borderLine text-textPrimary text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-brand-primary font-medium"
-                      >
-                        {['A', 'B', 'C', 'D', 'E', 'F'].map((sec) => (
-                          <option key={sec} value={sec}>
-                            Section {sec}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Subject Type */}
-                    <div>
-                      <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5">
-                        4. Subject Type *
-                      </label>
-                      <div className="grid grid-cols-2 gap-1.5 bg-surface p-1 rounded-xl border border-borderLine">
-                        <button
-                          type="button"
-                          onClick={() => setSingleAllotSubjectType('Theory')}
-                          className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
-                            singleAllotSubjectType === 'Theory'
-                              ? 'bg-brand-primary text-white shadow-xs'
-                              : 'text-textSecondary hover:text-textPrimary'
-                          }`}
-                        >
-                          Theory
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSingleAllotSubjectType('Lab')}
-                          className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
-                            singleAllotSubjectType === 'Lab'
-                              ? 'bg-purple-600 text-white shadow-xs'
-                              : 'text-textSecondary hover:text-textPrimary'
-                          }`}
-                        >
-                          Lab
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Subject Selection / Autocomplete from Master List */}
-                    <div className="sm:col-span-2">
-                      <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5 flex items-center justify-between">
-                        <span>5. Subject Name *</span>
-                        {masterSubjectsList.length > 0 && (
-                          <span className="text-[10px] text-brand-primary font-normal">Pick from Master List or type custom</span>
-                        )}
-                      </label>
-                      <div className="space-y-1.5">
-                        {masterSubjectsList.length > 0 && (
-                          <select
-                            onChange={(e) => {
-                              const found = masterSubjectsList.find((s: any) => s.id === e.target.value);
-                              if (found) {
-                                setSingleAllotSubjectName(found.subject_name);
-                                setSingleAllotSubjectType(found.subject_type === 'Lab' ? 'Lab' : 'Theory');
-                              }
-                            }}
-                            className="w-full bg-surface-2 border border-borderLine text-textSecondary text-xs rounded-xl px-3 py-1.5 focus:outline-none focus:border-brand-primary"
-                          >
-                            <option value="">-- Pick from Master Subject List ({masterSubjectsList.filter((s: any) => s.semester_label === singleAllotSemester).length} available for {singleAllotSemester}) --</option>
-                            {masterSubjectsList
-                              .filter((s: any) => !singleAllotSemester || s.semester_label === singleAllotSemester)
-                              .map((s: any) => (
-                                <option key={s.id} value={s.id}>
-                                  {s.semester_label} | {s.subject_code} - {s.subject_name} ({s.subject_type})
-                                </option>
-                              ))}
-                          </select>
-                        )}
-                        <input
-                          type="text"
-                          placeholder="e.g. Data Structures & Algorithms"
-                          value={singleAllotSubjectName}
-                          onChange={(e) => setSingleAllotSubjectName(e.target.value)}
-                          className="w-full bg-surface border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary font-semibold"
-                          required
-                        />
-                      </div>
-                    </div>
-
-                    {/* Faculty Selection / Autocomplete */}
-                    <div className="sm:col-span-2">
-                      <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5">
-                        6. Select Registered Faculty or Enter Custom Email *
-                      </label>
-                      <select
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          if (!val) return;
-                          const found = facultyList.find((f: any) => f.email === val);
-                          if (found) {
-                            setSingleAllotFacultyEmail(found.email);
-                            setSingleAllotFacultyName(found.name);
-                          }
-                        }}
-                        className="w-full bg-surface border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2 focus:outline-none focus:border-brand-primary mb-2"
-                      >
-                        <option value="">-- Quick Pick from Registered Faculty --</option>
-                        {facultyList.map((fac: any) => (
-                          <option key={fac.email} value={fac.email}>
-                            {fac.name} ({fac.department || 'General'}) — {fac.email}
-                          </option>
-                        ))}
-                      </select>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <input
-                          type="email"
-                          placeholder="Faculty Email (@rgmcet.edu.in) *"
-                          value={singleAllotFacultyEmail}
-                          onChange={(e) => setSingleAllotFacultyEmail(e.target.value)}
-                          className="w-full bg-surface border border-borderLine text-textPrimary text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-brand-primary font-mono"
-                          required
-                        />
-                        <input
-                          type="text"
-                          placeholder="Faculty Name (e.g. Dr. Ramesh)"
-                          value={singleAllotFacultyName}
-                          onChange={(e) => setSingleAllotFacultyName(e.target.value)}
-                          className="w-full bg-surface border border-borderLine text-textPrimary text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-brand-primary"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-borderLine">
-                    <div className="text-xs">
-                      {singleAllotStatus.type === 'error' && (
-                        <p className="text-alert font-bold flex items-center gap-1.5">
-                          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                          {singleAllotStatus.message}
-                        </p>
-                      )}
-                      {singleAllotStatus.type === 'success' && (
-                        <p className="text-emerald-400 font-bold flex items-center gap-1.5">
-                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                          {singleAllotStatus.message}
-                        </p>
-                      )}
-                    </div>
-
-                    <button
-                      type="submit"
-                      disabled={isSubmittingSingleAllot}
-                      className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold text-white bg-brand-primary hover:bg-brand-primary/90 shadow-brand transition-all disabled:opacity-50 shrink-0"
-                    >
-                      {isSubmittingSingleAllot ? (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          Saving Allocation...
-                        </>
-                      ) : (
-                        <>
-                          <Check className="w-3.5 h-3.5" />
-                          Save Allocation Record
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              </form>
-            )}
-          </div>
-
-          {/* Allotments Directory */}
-          <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h3 className="text-base font-bold text-textPrimary flex items-center gap-2">
-                  <BookOpen className="w-4 h-4 text-brand-primary" />
-                  Allotted Subjects Directory — Semester {selectedSemester}
-                </h3>
-                <p className="text-xs text-textSecondary mt-0.5">
-                  Showing {filteredAllotments.length} allocated subjects for this semester across sections and departments.
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-3">
-                {/* Section Filter Pills */}
-                <div className="flex items-center gap-1 bg-surface-2 p-1 rounded-xl border border-borderLine text-xs">
-                  <button
-                    onClick={() => setAllotmentSectionFilter('All')}
-                    className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
-                      allotmentSectionFilter === 'All'
-                        ? 'bg-brand-primary text-white shadow-xs'
-                        : 'text-textSecondary hover:text-textPrimary'
-                    }`}
-                  >
-                    All Sec
-                  </button>
-                  {['A', 'B', 'C', 'D', 'E', 'F'].map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => setAllotmentSectionFilter(s)}
-                      className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
-                        allotmentSectionFilter === s
-                          ? 'bg-brand-primary text-white shadow-xs'
-                          : 'text-textSecondary hover:text-textPrimary'
-                      }`}
-                    >
-                      Sec {s}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-textMuted" />
+                <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Short Name / Type</label>
+                <div className="flex gap-1.5">
                   <input
                     type="text"
-                    placeholder="Search subject or faculty..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-8 pr-3 py-1.5 text-xs bg-surface-2 border border-borderLine rounded-xl text-textPrimary placeholder:text-textMuted focus:outline-none focus:border-brand-primary w-48 sm:w-56"
+                    placeholder="DS"
+                    value={subjectForm.short_name}
+                    onChange={(e) => setSubjectForm({ ...subjectForm, short_name: e.target.value })}
+                    className="w-1/2 px-2 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary uppercase"
+                  />
+                  <select
+                    value={subjectForm.subject_type}
+                    onChange={(e) => setSubjectForm({ ...subjectForm, subject_type: e.target.value as any })}
+                    className="w-1/2 px-2 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                  >
+                    <option value="Theory">Theory</option>
+                    <option value="Lab">Lab</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-end">
+                <button
+                  type="submit"
+                  className="w-full py-2 px-4 rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white font-bold text-xs shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>{subjectForm.id ? 'Update' : 'Save Subject'}</span>
+                </button>
+              </div>
+            </div>
+          </form>
+
+          {/* Subjects Table */}
+          <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden shadow-sm">
+            <div className="p-3.5 bg-surface-2 border-b border-borderLine flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="text-xs font-bold text-textPrimary">
+                Master Subjects Catalog ({filteredSubjects.length})
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={subjectFilterSem}
+                  onChange={(e) => setSubjectFilterSem(e.target.value as any)}
+                  className="px-2.5 py-1.5 text-xs rounded-xl border border-borderLine bg-surface text-textPrimary font-semibold focus:outline-none"
+                >
+                  <option value="All">All Classes</option>
+                  {ALL_SEMESTERS.map(s => <option key={s} value={s}>Class {s}</option>)}
+                </select>
+
+                <div className="flex items-center gap-2 bg-surface px-3 py-1.5 rounded-xl border border-borderLine w-48 text-xs">
+                  <Search className="w-3.5 h-3.5 text-textMuted shrink-0" />
+                  <input
+                    type="text"
+                    value={subjectSearch}
+                    onChange={(e) => setSubjectSearch(e.target.value)}
+                    placeholder="Search subject..."
+                    className="w-full bg-transparent text-textPrimary focus:outline-none"
                   />
                 </div>
               </div>
             </div>
 
-            {isLoadingAllotments ? (
-              <div className="py-12 text-center text-textMuted">
-                <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-brand-primary" />
-                Loading allotments...
-              </div>
-            ) : filteredAllotments.length === 0 ? (
-              <div className="py-12 text-center text-textMuted bg-surface-2 rounded-xl border border-dashed border-borderLine">
-                <BookOpen className="w-8 h-8 mx-auto mb-2 text-textMuted/60" />
-                <p className="text-sm font-semibold">No subject allotments found for {selectedSemester}.</p>
-                <p className="text-xs text-textSecondary mt-1">Upload an allotment sheet or add a single entry above.</p>
-              </div>
+            {isLoadingSubjects ? (
+              <div className="p-8 text-center text-xs text-textMuted">Loading subjects...</div>
+            ) : filteredSubjects.length === 0 ? (
+              <div className="p-8 text-center text-xs text-textMuted">No subjects found. Add a subject using the form above.</div>
             ) : (
-              <div className="overflow-x-auto rounded-xl border border-borderLine">
+              <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-surface-2 text-textMuted font-bold uppercase tracking-wider border-b border-borderLine">
+                  <thead className="bg-surface-2 text-textMuted font-bold uppercase text-[10px] border-b border-borderLine">
                     <tr>
-                      <th className="py-3 px-4">Subject Name</th>
-                      <th className="py-3 px-4">Type</th>
-                      <th className="py-3 px-4">Dept</th>
-                      <th className="py-3 px-4">Sec</th>
-                      <th className="py-3 px-4">Faculty Name</th>
-                      <th className="py-3 px-4">Faculty Email</th>
-                      <th className="py-3 px-4 text-center">Enrolled Roster</th>
-                      <th className="py-3 px-4 text-center">Sessions Held</th>
-                      <th className="py-3 px-4 text-right">Actions</th>
+                      <th className="px-4 py-2.5 w-12 text-center">#</th>
+                      <th className="px-4 py-2.5">Class</th>
+                      <th className="px-4 py-2.5">Dept</th>
+                      <th className="px-4 py-2.5">Subject Code</th>
+                      <th className="px-4 py-2.5">Title</th>
+                      <th className="px-4 py-2.5">Short Name</th>
+                      <th className="px-4 py-2.5">Type</th>
+                      <th className="px-4 py-2.5">Reg</th>
+                      <th className="px-4 py-2.5 text-center">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-borderLine">
-                    {filteredAllotments.map((a: SubjectAllotment) => (
+                    {filteredSubjects.map((s: any, idx: number) => (
+                      <tr key={s.id} className="hover:bg-surface-2/40 transition-colors">
+                        <td className="px-4 py-2.5 text-center text-textMuted">{idx + 1}</td>
+                        <td className="px-4 py-2.5 font-bold text-textPrimary">{s.semester_label}</td>
+                        <td className="px-4 py-2.5 text-textSecondary">{s.department || '—'}</td>
+                        <td className="px-4 py-2.5 font-mono font-bold text-brand-primary">{s.subject_code}</td>
+                        <td className="px-4 py-2.5 font-semibold text-textPrimary">{s.subject_name}</td>
+                        <td className="px-4 py-2.5 font-bold text-textPrimary">{s.short_name || '—'}</td>
+                        <td className="px-4 py-2.5">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            s.subject_type === 'Lab' ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                          }`}>
+                            {s.subject_type || 'Theory'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-textMuted">{s.regulation || '—'}</td>
+                        <td className="px-4 py-2.5 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              onClick={() => setSubjectForm({
+                                id: s.id,
+                                semester_label: s.semester_label,
+                                subject_code: s.subject_code,
+                                subject_name: s.subject_name,
+                                short_name: s.short_name || '',
+                                subject_type: s.subject_type || 'Theory',
+                                department: s.department || 'CSE',
+                                regulation: s.regulation || 'R20',
+                              })}
+                              className="p-1 rounded-lg hover:bg-amber-500/10 text-amber-400 transition-colors"
+                              title="Edit"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteSubject(s.id)}
+                              className="p-1 rounded-lg hover:bg-rose-500/10 text-rose-400 transition-colors"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {/* 2. FACULTY ALLOTMENT (admin/allot_subjects.php) */}
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {activeTab === 'allotments' && (
+        <div className="space-y-5">
+          {/* Top Form: Single Allotment or Bulk Upload */}
+          <div className="bg-surface border border-borderLine rounded-2xl p-5 shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-textPrimary flex items-center gap-2">
+                <Users className="w-4 h-4 text-brand-primary" />
+                Allot Subjects to Faculty
+              </h3>
+
+              {/* Mode Toggle */}
+              <div className="flex items-center gap-1 bg-surface-2 p-1 rounded-xl border border-borderLine text-xs">
+                <button
+                  onClick={() => setAllotMode('single')}
+                  className={`px-3 py-1 rounded-lg font-bold transition-all ${allotMode === 'single' ? 'bg-brand-primary text-white' : 'text-textMuted'}`}
+                >
+                  Single Allotment
+                </button>
+                <button
+                  onClick={() => setAllotMode('upload')}
+                  className={`px-3 py-1 rounded-lg font-bold transition-all ${allotMode === 'upload' ? 'bg-brand-primary text-white' : 'text-textMuted'}`}
+                >
+                  Bulk Excel Upload
+                </button>
+              </div>
+            </div>
+
+            {allotStatus.type !== 'idle' && (
+              <div className={`p-3 rounded-xl text-xs font-semibold flex items-center justify-between ${
+                allotStatus.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+              }`}>
+                <span>{allotStatus.message}</span>
+                <button type="button" onClick={() => setAllotStatus({ type: 'idle', message: '' })}>✕</button>
+              </div>
+            )}
+
+            {allotMode === 'single' ? (
+              <form onSubmit={handleSingleAllotment} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
+                {/* Select Subject from Master List */}
+                <div>
+                  <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Subject (Master Catalog) *</label>
+                  <select
+                    value={singleAllotSubjectId}
+                    onChange={(e) => {
+                      setSingleAllotSubjectId(e.target.value);
+                      const found = masterSubjects.find((s: any) => s.id === e.target.value);
+                      if (found) {
+                        setSingleAllotSubjectName(found.subject_name);
+                        setSingleAllotSubjectType(found.subject_type === 'Lab' ? 'Lab' : 'Theory');
+                      }
+                    }}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                    required
+                  >
+                    <option value="">Select Subject</option>
+                    {masterSubjects
+                      .filter((s: any) => !selectedSemester || s.semester_label === selectedSemester)
+                      .map((s: any) => (
+                        <option key={s.id} value={s.id}>
+                          {s.subject_code} - {s.subject_name} ({s.subject_type})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                {/* Faculty Selection */}
+                <div>
+                  <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Faculty Member *</label>
+                  <select
+                    value={singleAllotFacultyEmail}
+                    onChange={(e) => {
+                      setSingleAllotFacultyEmail(e.target.value);
+                      const found = facultyList.find((f: any) => f.email === e.target.value);
+                      if (found) setSingleAllotFacultyName(found.name);
+                    }}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                    required
+                  >
+                    <option value="">Select Faculty</option>
+                    {facultyList.map((f: any) => (
+                      <option key={f.email} value={f.email}>
+                        {f.name} ({f.department || 'Faculty'}) - {f.email}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Subject Type */}
+                <div>
+                  <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Type</label>
+                  <select
+                    value={singleAllotSubjectType}
+                    onChange={(e) => setSingleAllotSubjectType(e.target.value as any)}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none"
+                  >
+                    <option value="Theory">Theory</option>
+                    <option value="Lab">Lab</option>
+                  </select>
+                </div>
+
+                {/* Submit */}
+                <div className="flex items-end">
+                  <button
+                    type="submit"
+                    className="w-full py-2 px-4 rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white font-bold text-xs shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Allot to Faculty</span>
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="p-4 rounded-xl bg-surface-2 border border-borderLine flex flex-col sm:flex-row items-center justify-between gap-3">
+                <div className="text-xs">
+                  <p className="font-bold text-textPrimary">Upload Subject Allotments Excel</p>
+                  <p className="text-textSecondary">Columns: <code>Subject Name</code>, <code>Subject Type</code>, <code>Faculty Email</code>, <code>Section</code></p>
+                </div>
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  onChange={handleBulkAllotmentUpload}
+                  className="text-xs text-textSecondary file:mr-3 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-brand-primary file:text-white cursor-pointer"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Allotments Table */}
+          <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden shadow-sm">
+            <div className="p-3.5 bg-surface-2 border-b border-borderLine flex items-center justify-between">
+              <span className="text-xs font-bold text-textPrimary">
+                Current Allotments for {selectedSemester} ({selectedDepartment === 'All' ? 'All Depts' : selectedDepartment} - Sec {selectedSection})
+              </span>
+              <span className="text-xs text-textMuted font-bold">{allotments.length} Allotments</span>
+            </div>
+
+            {isLoadingAllotments ? (
+              <div className="p-8 text-center text-xs text-textMuted">Loading allotments...</div>
+            ) : allotments.length === 0 ? (
+              <div className="p-8 text-center text-xs text-textMuted">No faculty allotments for this scope. Allot a subject using the form above.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-surface-2 text-textMuted font-bold uppercase text-[10px] border-b border-borderLine">
+                    <tr>
+                      <th className="px-4 py-2.5 w-12 text-center">#</th>
+                      <th className="px-4 py-2.5">Class</th>
+                      <th className="px-4 py-2.5">Sec</th>
+                      <th className="px-4 py-2.5">Subject Name</th>
+                      <th className="px-4 py-2.5">Type</th>
+                      <th className="px-4 py-2.5">Faculty Name</th>
+                      <th className="px-4 py-2.5">Faculty Email</th>
+                      <th className="px-4 py-2.5 text-center">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-borderLine">
+                    {allotments.map((a: SubjectAllotment, idx: number) => (
                       <tr key={a.id} className="hover:bg-surface-2/40 transition-colors">
-                        <td className="py-3 px-4 font-bold text-textPrimary">{a.subject_name}</td>
-                        <td className="py-3 px-4">
-                          <span
-                            className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${
-                              a.subject_type === 'Lab'
-                                ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
-                                : 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
-                            }`}
-                          >
+                        <td className="px-4 py-2.5 text-center text-textMuted">{idx + 1}</td>
+                        <td className="px-4 py-2.5 font-bold text-textPrimary">{a.semester_label}</td>
+                        <td className="px-4 py-2.5 font-bold text-textPrimary">{a.section}</td>
+                        <td className="px-4 py-2.5 font-bold text-brand-primary">{a.subject_name}</td>
+                        <td className="px-4 py-2.5">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            a.subject_type === 'Lab' ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                          }`}>
                             {a.subject_type}
                           </span>
                         </td>
-                        <td className="py-3 px-4 font-medium text-textSecondary">{a.department || 'General'}</td>
-                        <td className="py-3 px-4 font-bold text-textSecondary">{a.section || 'A'}</td>
-                        <td className="py-3 px-4 font-medium text-textPrimary">{a.faculty_name}</td>
-                        <td className="py-3 px-4 font-mono text-textSecondary text-[11px]">{a.faculty_email}</td>
-                        <td className="py-3 px-4 text-center">
+                        <td className="px-4 py-2.5 font-semibold text-textPrimary">{a.faculty_name}</td>
+                        <td className="px-4 py-2.5 font-mono text-textSecondary">{a.faculty_email}</td>
+                        <td className="px-4 py-2.5 text-center">
                           <button
-                            onClick={() => setInspectAllotment(a)}
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-surface-2 hover:bg-surface-3 border border-borderLine text-textPrimary font-semibold transition-all"
-                          >
-                            <Users className="w-3 h-3 text-brand-primary" />
-                            {a.roster_count || 0} Students
-                          </button>
-                        </td>
-                        <td className="py-3 px-4 text-center font-bold text-brand-primary">
-                          {a.sessions_count || 0}
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          <button
-                            onClick={() => setDeletingAllotment(a)}
-                            className="p-1.5 text-textMuted hover:text-alert rounded-lg hover:bg-surface-3 transition-colors"
+                            onClick={() => handleDeleteAllotment(a.id)}
+                            className="p-1 rounded-lg hover:bg-rose-500/10 text-rose-400 transition-colors"
                             title="Delete Allotment"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -1630,1075 +868,322 @@ export const AttendanceManagementTab: React.FC = () => {
       )}
 
       {/* ────────────────────────────────────────────────────────────────────────── */}
-      {/* SUB-TAB 2: STUDENT ROSTER MANAGEMENT */}
+      {/* 3. STUDENT ROSTERS (admin/allot_students.php) */}
       {/* ────────────────────────────────────────────────────────────────────────── */}
-      {activeSubTab === 'rosters' && (
-        <div className="space-y-6">
-          {/* Top Configuration & Entry Form Card */}
-          <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      {activeTab === 'rosters' && (
+        <div className="space-y-5">
+          {/* Pick Allotment & Enroll Students */}
+          <div className="bg-surface border border-borderLine rounded-2xl p-5 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <h3 className="text-base font-bold text-textPrimary flex items-center gap-2">
+                <h3 className="text-sm font-bold text-textPrimary flex items-center gap-2">
                   <Users className="w-4 h-4 text-brand-primary" />
-                  Student Roster Enrollment Management
+                  Allot Students to Subject Roster
                 </h3>
-                <p className="text-xs text-textSecondary mt-0.5">
-                  Flow: Semester → Department → Section → Select Target Subject Allotment → Document Upload or Single Entry.
-                </p>
+                <p className="text-xs text-textSecondary mt-0.5">Select an allotted subject to enroll or manage students.</p>
               </div>
 
-              {/* Mode Toggle: Bulk Upload vs Single Manual Entry */}
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1 bg-surface-2 p-1 rounded-xl border border-borderLine">
-                  <button
-                    onClick={() => setRosterMode('upload')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                      rosterMode === 'upload'
-                        ? 'bg-brand-primary text-white shadow-brand'
-                        : 'text-textSecondary hover:text-textPrimary'
-                    }`}
-                  >
-                    Bulk Upload (Excel)
-                  </button>
-                  <button
-                    onClick={() => setRosterMode('single')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                      rosterMode === 'single'
-                        ? 'bg-brand-primary text-white shadow-brand'
-                        : 'text-textSecondary hover:text-textPrimary'
-                    }`}
-                  >
-                    + Single Manual Entry
-                  </button>
-                </div>
-
-                {rosterMode === 'upload' && (
-                  <button
-                    onClick={handleDownloadRosterTemplate}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-textSecondary bg-surface-2 hover:bg-surface-3 border border-borderLine transition-all shrink-0"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    Template
-                  </button>
-                )}
+              {/* Allotment Selector */}
+              <div className="w-full sm:w-72">
+                <select
+                  value={selectedAllotmentId}
+                  onChange={(e) => setSelectedAllotmentId(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary font-bold focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                >
+                  <option value="">-- Choose Subject Allotment --</option>
+                  {allotments.map(a => (
+                    <option key={a.id} value={a.id}>
+                      {a.semester_label} (Sec {a.section}) - {a.subject_name} ({a.faculty_name})
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
-            {/* Target Selectors: Semester, Department, Section, and Target Allotment Dropdown */}
-            <div className="p-4 rounded-xl bg-surface-2 border border-borderLine space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* 1. Semester */}
-                <div>
-                  <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
-                    1. Select Semester *
-                  </label>
-                  <div className="grid grid-cols-4 gap-1.5 bg-surface p-1.5 rounded-xl border border-borderLine">
-                    {ALL_SEMESTERS.map((sem) => (
-                      <button
-                        key={sem}
-                        onClick={() => {
-                          setRosterSemester(sem);
-                          setSelectedAllotmentId('');
-                        }}
-                        className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
-                          rosterSemester === sem
-                            ? 'bg-brand-primary text-white shadow-brand'
-                            : 'text-textSecondary hover:text-textPrimary hover:bg-surface-2'
-                        }`}
-                      >
-                        {sem}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* 2. Department */}
-                <div>
-                  <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
-                    2. Department *
-                  </label>
-                  <select
-                    value={rosterDepartment}
-                    onChange={(e) => {
-                      setRosterDepartment(e.target.value);
-                      setSelectedAllotmentId('');
-                    }}
-                    className="w-full bg-surface border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary font-medium"
-                  >
-                    <option value="All">All Departments</option>
-                    {VALID_DEPARTMENT_NAMES.map((dept) => (
-                      <option key={dept} value={dept}>
-                        {dept}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* 3. Section Filter */}
-                <div>
-                  <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
-                    3. Section *
-                  </label>
-                  <div className="grid grid-cols-7 gap-1 bg-surface p-1.5 rounded-xl border border-borderLine">
-                    {['All', 'A', 'B', 'C', 'D', 'E', 'F'].map((sec) => (
-                      <button
-                        key={sec}
-                        type="button"
-                        onClick={() => {
-                          setRosterSection(sec);
-                          setSelectedAllotmentId('');
-                        }}
-                        className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
-                          rosterSection === sec
-                            ? 'bg-brand-primary text-white shadow-brand'
-                            : 'text-textSecondary hover:text-textPrimary hover:bg-surface-2'
-                        }`}
-                      >
-                        {sec}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* 4. Target Subject Allotment Dropdown */}
-                <div>
-                  <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
-                    4. Target Subject Allotment *
-                  </label>
-                  <select
-                    value={selectedAllotmentId}
-                    onChange={(e) => setSelectedAllotmentId(e.target.value)}
-                    className="w-full bg-surface border border-brand-primary/50 text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary font-bold shadow-xs"
-                  >
-                    <option value="">-- Choose Subject Allocation --</option>
-                    {rosterAllotments
-                      .filter((a: SubjectAllotment) => {
-                        if (rosterSection !== 'All' && a.section !== rosterSection) return false;
-                        return true;
-                      })
-                      .map((a: SubjectAllotment) => (
-                        <option key={a.id} value={a.id}>
-                          [{a.department}] {a.subject_name} (Sec {a.section}) — {a.faculty_name} [{a.subject_type}]
-                        </option>
-                      ))}
-                  </select>
-                </div>
-              </div>
-
-              {selectedAllotmentId ? (
-                <div className="p-3 rounded-lg bg-brand-primary/10 border border-brand-primary/20 flex items-center justify-between text-xs">
-                  <span className="font-semibold text-brand-primary">
-                    Selected Subject Allotment: <strong>
-                      {rosterAllotments.find((a: SubjectAllotment) => a.id === selectedAllotmentId)?.subject_name} (Sec {rosterAllotments.find((a: SubjectAllotment) => a.id === selectedAllotmentId)?.section})
-                    </strong> — {rosterAllotments.find((a: SubjectAllotment) => a.id === selectedAllotmentId)?.faculty_name} ({rosterAllotments.find((a: SubjectAllotment) => a.id === selectedAllotmentId)?.department})
-                  </span>
-                  <span className="text-textSecondary font-mono">
-                    Current Roster: <strong>{rosterAllotments.find((a: SubjectAllotment) => a.id === selectedAllotmentId)?.roster_count || 0}</strong> students
-                  </span>
-                </div>
-              ) : (
-                <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-semibold flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  Please select a Target Subject Allotment above to upload an Excel roster or add single students.
-                </div>
-              )}
-            </div>
-
-            {/* ── MODE 1: BULK EXCEL UPLOAD ── */}
-            {rosterMode === 'upload' && (
-              <div className="space-y-4 pt-2">
-                <div>
-                  <label className="block text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">
-                    Upload Student Roster Sheet (.xlsx)
-                  </label>
-                  <input
-                    type="file"
-                    accept=".xlsx,.xls,.csv"
-                    onChange={handleRosterFileChange}
-                    className="w-full text-xs text-textSecondary file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-brand-primary file:text-white hover:file:bg-brand-primary/90 cursor-pointer bg-surface-2 p-1 rounded-xl border border-borderLine"
-                  />
-                </div>
-
-                {parsedRoster.length > 0 && (
-                  <div className="p-4 rounded-xl bg-surface-2 border border-borderLine space-y-3">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <p className="text-xs font-bold text-textPrimary flex items-center gap-2">
-                        <FileSpreadsheet className="w-4 h-4 text-brand-primary" />
-                        Parsed {parsedRoster.length} Student Roster Row(s)
-                      </p>
-                      <button
-                        onClick={handleUploadRoster}
-                        disabled={isUploadingRoster || !selectedAllotmentId}
-                        className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold text-white bg-brand-primary hover:bg-brand-primary/90 shadow-brand transition-all disabled:opacity-50"
-                      >
-                        {isUploadingRoster ? (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            Enrolling Students...
-                          </>
-                        ) : (
-                          <>
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            Confirm & Save Student Roster
-                          </>
-                        )}
-                      </button>
-                    </div>
-
-                    {/* Preview Table */}
-                    <div className="max-h-48 overflow-y-auto rounded-lg border border-borderLine bg-surface text-[11px]">
-                      <table className="w-full text-left">
-                        <thead className="bg-surface-3 text-textMuted font-bold uppercase sticky top-0">
-                          <tr>
-                            <th className="py-2 px-3">#</th>
-                            <th className="py-2 px-3">Roll Number</th>
-                            <th className="py-2 px-3">Student Name</th>
-                            <th className="py-2 px-3">Date of Joining</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-borderLine">
-                          {parsedRoster.slice(0, 10).map((row: any, idx: number) => (
-                            <tr key={idx}>
-                              <td className="py-1.5 px-3 font-mono text-textMuted">{idx + 1}</td>
-                              <td className="py-1.5 px-3 font-bold font-mono text-brand-primary">{row.roll_number || row['Roll Number'] || row['Roll No']}</td>
-                              <td className="py-1.5 px-3 font-medium">{row.student_name || row['Student Name'] || row['Name'] || '—'}</td>
-                              <td className="py-1.5 px-3 font-mono text-textSecondary">{row.joining_date || row['Date of Joining'] || 'Default (Start)'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-
-                {rosterUploadStatus.type !== 'idle' && (
-                  <div
-                    className={`p-4 rounded-xl border ${
-                      rosterUploadStatus.type === 'success'
-                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                        : 'bg-alert-soft border-alert/30 text-alert'
-                    }`}
-                  >
-                    <div className="flex items-start gap-2.5">
-                      {rosterUploadStatus.type === 'success' ? (
-                        <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
-                      ) : (
-                        <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-                      )}
-                      <div className="text-xs space-y-1">
-                        <p className="font-bold">{rosterUploadStatus.message}</p>
-                        {rosterUploadStatus.details && rosterUploadStatus.details.length > 0 && (
-                          <div className="mt-2 space-y-1 max-h-32 overflow-y-auto text-[11px] opacity-90">
-                            {rosterUploadStatus.details.map((err, idx) => (
-                              <p key={idx}>
-                                • Row {err.row}: {err.reason}
-                              </p>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
+            {rosterStatus.type !== 'idle' && (
+              <div className={`p-3 rounded-xl text-xs font-semibold flex items-center justify-between ${
+                rosterStatus.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+              }`}>
+                <span>{rosterStatus.message}</span>
+                <button type="button" onClick={() => setRosterStatus({ type: 'idle', message: '' })}>✕</button>
               </div>
             )}
 
-            {/* ── MODE 2: SINGLE MANUAL STUDENT ENTRY FORM ── */}
-            {rosterMode === 'single' && (
-              <form onSubmit={handleSingleRosterSubmit} className="space-y-4 pt-2">
-                <div className="p-4 rounded-xl bg-surface-2 border border-borderLine space-y-4">
-                  <h4 className="text-xs font-bold text-textPrimary uppercase tracking-wider flex items-center gap-2">
-                    <UserPlus className="w-3.5 h-3.5 text-brand-primary" />
-                    Enroll Single Student to Subject Roster
-                  </h4>
+            {selectedAllotmentId && (
+              <div className="pt-2 space-y-3">
+                {/* Mode Selector */}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRosterMode('single')}
+                    className={`px-3 py-1 text-xs font-bold rounded-lg ${rosterMode === 'single' ? 'bg-brand-primary text-white' : 'bg-surface-2 text-textSecondary'}`}
+                  >
+                    + Add Single Student
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRosterMode('upload')}
+                    className={`px-3 py-1 text-xs font-bold rounded-lg ${rosterMode === 'upload' ? 'bg-brand-primary text-white' : 'bg-surface-2 text-textSecondary'}`}
+                  >
+                    Bulk Excel Roster Upload
+                  </button>
+                </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {rosterMode === 'single' ? (
+                  <form onSubmit={handleSingleRoster} className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                     <div>
-                      <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5">
-                        Student Roll Number *
-                      </label>
+                      <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Roll Number *</label>
                       <input
                         type="text"
-                        placeholder="e.g. 22091A3201"
-                        value={singleRosterRollNo}
-                        onChange={(e) => setSingleRosterRollNo(e.target.value)}
-                        className="w-full bg-surface border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary font-mono"
+                        placeholder="e.g. 23091A3201"
+                        value={singleRollNo}
+                        onChange={(e) => setSingleRollNo(e.target.value)}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary uppercase font-mono font-bold"
                         required
                       />
                     </div>
-
                     <div>
-                      <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5">
-                        Student Name (Optional)
-                      </label>
+                      <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Student Name</label>
                       <input
                         type="text"
-                        placeholder="e.g. K. Srinath Reddy"
-                        value={singleRosterStudentName}
-                        onChange={(e) => setSingleRosterStudentName(e.target.value)}
-                        className="w-full bg-surface border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary"
+                        placeholder="Student Name"
+                        value={singleStudentName}
+                        onChange={(e) => setSingleStudentName(e.target.value)}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary font-semibold"
                       />
                     </div>
-
                     <div>
-                      <label className="block text-[11px] font-bold text-textMuted uppercase mb-1.5">
-                        Date of Joining (Optional for late joiner)
-                      </label>
+                      <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Joining Date (Optional)</label>
                       <input
                         type="date"
-                        value={singleRosterJoiningDate}
-                        onChange={(e) => setSingleRosterJoiningDate(e.target.value)}
-                        className="w-full bg-surface border border-borderLine text-textPrimary text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-brand-primary"
+                        value={singleJoiningDate}
+                        onChange={(e) => setSingleJoiningDate(e.target.value)}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary"
                       />
                     </div>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-borderLine">
-                    <div className="text-xs">
-                      {singleRosterStatus.type === 'error' && (
-                        <p className="text-alert font-bold flex items-center gap-1.5">
-                          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                          {singleRosterStatus.message}
-                        </p>
-                      )}
-                      {singleRosterStatus.type === 'success' && (
-                        <p className="text-emerald-400 font-bold flex items-center gap-1.5">
-                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                          {singleRosterStatus.message}
-                        </p>
-                      )}
+                    <div className="flex items-end">
+                      <button
+                        type="submit"
+                        className="w-full py-2 px-4 rounded-xl bg-brand-primary text-white font-bold text-xs shadow-sm hover:bg-brand-primary/90 transition-all cursor-pointer"
+                      >
+                        Enroll Student
+                      </button>
                     </div>
-
-                    <button
-                      type="submit"
-                      disabled={isSubmittingSingleRoster || !selectedAllotmentId}
-                      className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold text-white bg-brand-primary hover:bg-brand-primary/90 shadow-brand transition-all disabled:opacity-50 shrink-0"
-                    >
-                      {isSubmittingSingleRoster ? (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          Enrolling Student...
-                        </>
-                      ) : (
-                        <>
-                          <UserPlus className="w-3.5 h-3.5" />
-                          Enroll Student to Subject
-                        </>
-                      )}
-                    </button>
+                  </form>
+                ) : (
+                  <div className="p-4 rounded-xl bg-surface-2 border border-borderLine flex flex-col sm:flex-row items-center justify-between gap-3">
+                    <div className="text-xs">
+                      <p className="font-bold text-textPrimary">Upload Student Roll Numbers Excel</p>
+                      <p className="text-textSecondary">Columns: <code>Roll Number</code>, <code>Student Name</code></p>
+                    </div>
+                    <input
+                      type="file"
+                      accept=".xlsx,.xls,.csv"
+                      onChange={handleBulkRosterUpload}
+                      className="text-xs text-textSecondary file:mr-3 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-brand-primary file:text-white cursor-pointer"
+                    />
                   </div>
-                </div>
-              </form>
+                )}
+              </div>
             )}
           </div>
 
-          {/* Roster Directory Table */}
-          <div className="p-6 rounded-2xl bg-surface border border-borderLine space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          {/* Roster Table */}
+          {selectedAllotmentId && (
+            <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden shadow-sm">
+              <div className="p-3.5 bg-surface-2 border-b border-borderLine flex items-center justify-between">
+                <span className="text-xs font-bold text-textPrimary">Enrolled Students ({currentRoster.length})</span>
+              </div>
+
+              {isLoadingRoster ? (
+                <div className="p-8 text-center text-xs text-textMuted">Loading student roster...</div>
+              ) : currentRoster.length === 0 ? (
+                <div className="p-8 text-center text-xs text-textMuted">No students enrolled in this roster yet.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-surface-2 text-textMuted font-bold uppercase text-[10px] border-b border-borderLine">
+                      <tr>
+                        <th className="px-4 py-2.5 w-12 text-center">#</th>
+                        <th className="px-4 py-2.5">Roll Number</th>
+                        <th className="px-4 py-2.5">Student Name</th>
+                        <th className="px-4 py-2.5">Joining Date</th>
+                        <th className="px-4 py-2.5 text-center">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-borderLine">
+                      {currentRoster.map((r: SubjectRosterEntry, idx: number) => (
+                        <tr key={r.id} className="hover:bg-surface-2/40 transition-colors">
+                          <td className="px-4 py-2.5 text-center text-textMuted">{idx + 1}</td>
+                          <td className="px-4 py-2.5 font-mono font-bold text-brand-primary">{r.roll_number}</td>
+                          <td className="px-4 py-2.5 font-semibold text-textPrimary">{r.student_name || '—'}</td>
+                          <td className="px-4 py-2.5 text-textSecondary">{r.joining_date ? new Date(r.joining_date).toLocaleDateString('en-GB') : 'Regular'}</td>
+                          <td className="px-4 py-2.5 text-center">
+                            <button
+                              onClick={() => handleDeleteRosterStudent(r.id)}
+                              className="p-1 rounded-lg hover:bg-rose-500/10 text-rose-400 transition-colors"
+                              title="Remove Student"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {/* 4. TIMETABLE MATRIX (admin/timetable.php) */}
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {activeTab === 'timetable' && (
+        <div className="space-y-5">
+          {/* Add Slot Form */}
+          <form onSubmit={handleSaveTimetableSlot} className="bg-surface border border-borderLine rounded-2xl p-5 shadow-sm space-y-4">
+            <h3 className="text-sm font-bold text-textPrimary flex items-center gap-2">
+              <Clock className="w-4 h-4 text-brand-primary" />
+              Schedule Timetable Period ({selectedSemester} - Sec {selectedSection})
+            </h3>
+
+            {ttStatus.type !== 'idle' && (
+              <div className={`p-3 rounded-xl text-xs font-semibold flex items-center justify-between ${
+                ttStatus.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+              }`}>
+                <span>{ttStatus.message}</span>
+                <button type="button" onClick={() => setTtStatus({ type: 'idle', message: '' })}>✕</button>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-3">
               <div>
-                <h3 className="text-base font-bold text-textPrimary flex items-center gap-2">
-                  <Users className="w-4 h-4 text-brand-primary" />
-                  Subject Roster Directory — Semester {rosterSemester}
-                </h3>
-                <p className="text-xs text-textSecondary mt-0.5">
-                  Click on "Inspect & Manage Students" on any subject to view enrolled students, unassign wrongly added students, or edit joining dates.
-                </p>
+                <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Day of Week *</label>
+                <select
+                  value={ttDay}
+                  onChange={(e) => setTtDay(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none"
+                >
+                  {DAYS_OF_WEEK.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Period (1–7) *</label>
+                <select
+                  value={ttPeriod}
+                  onChange={(e) => setTtPeriod(parseInt(e.target.value))}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none font-bold"
+                >
+                  {[1, 2, 3, 4, 5, 6, 7].map(p => <option key={p} value={p}>Period {p}</option>)}
+                </select>
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Subject Name *</label>
+                <select
+                  value={ttSubjectName}
+                  onChange={(e) => {
+                    setTtSubjectName(e.target.value);
+                    const matchedAllot = allotments.find(a => a.subject_name === e.target.value);
+                    if (matchedAllot) {
+                      setTtFacultyEmail(matchedAllot.faculty_email);
+                      setTtSubjectType(matchedAllot.subject_type);
+                    }
+                  }}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none"
+                  required
+                >
+                  <option value="">Select Allotted Subject</option>
+                  {allotments.map(a => (
+                    <option key={a.id} value={a.subject_name}>
+                      {a.subject_name} ({a.faculty_name})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Faculty Email *</label>
+                <input
+                  type="email"
+                  placeholder="faculty@rgmcet.edu.in"
+                  value={ttFacultyEmail}
+                  onChange={(e) => setTtFacultyEmail(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary font-mono"
+                  required
+                />
+              </div>
+
+              <div className="flex items-end">
+                <button
+                  type="submit"
+                  className="w-full py-2 px-4 rounded-xl bg-brand-primary text-white font-bold text-xs shadow-sm hover:bg-brand-primary/90 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Assign Slot</span>
+                </button>
               </div>
             </div>
+          </form>
 
-            <div className="overflow-x-auto rounded-xl border border-borderLine">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-surface-2 text-textMuted font-bold uppercase tracking-wider border-b border-borderLine">
+          {/* Timetable Weekly Matrix */}
+          <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden shadow-sm">
+            <div className="p-3.5 bg-surface-2 border-b border-borderLine flex items-center justify-between">
+              <span className="text-xs font-bold text-textPrimary">
+                Weekly Timetable Matrix ({selectedSemester} - Sec {selectedSection})
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-surface-2 text-textMuted font-bold uppercase text-[10px] border-b border-borderLine">
                   <tr>
-                    <th className="py-3 px-4">Subject Name</th>
-                    <th className="py-3 px-4">Type</th>
-                    <th className="py-3 px-4">Dept</th>
-                    <th className="py-3 px-4">Sec</th>
-                    <th className="py-3 px-4">Faculty Name</th>
-                    <th className="py-3 px-4 text-center">Enrolled Students</th>
-                    <th className="py-3 px-4 text-right">Roster Actions</th>
+                    <th className="px-3 py-2.5 w-24 border-r border-borderLine">Day</th>
+                    {[1, 2, 3, 4, 5, 6, 7].map(p => (
+                      <th key={p} className="px-3 py-2.5 text-center border-r border-borderLine">
+                        Period {p}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-borderLine">
-                  {rosterAllotments.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="py-8 text-center text-textMuted">
-                        No subject allocations found for Semester {rosterSemester}. Allocate subjects in Tab 1 first.
-                      </td>
+                  {DAYS_OF_WEEK.map(day => (
+                    <tr key={day} className="hover:bg-surface-2/30">
+                      <td className="px-3 py-3 font-bold text-textPrimary bg-surface-2/40 border-r border-borderLine">{day}</td>
+                      {[1, 2, 3, 4, 5, 6, 7].map(period => {
+                        const slot = timetableEntries.find((t: TimetableEntry) => t.day_of_week === day && t.period_start === period);
+                        return (
+                          <td key={period} className="px-2 py-2 border-r border-borderLine text-center align-top min-w-[120px]">
+                            {slot ? (
+                              <div className="p-2 rounded-xl bg-surface-2 border border-brand-primary/30 space-y-1 relative group">
+                                <div className="font-bold text-[11px] text-brand-primary leading-tight">{slot.subject_name}</div>
+                                <div className="text-[10px] text-textMuted truncate">{slot.faculty_email.split('@')[0]}</div>
+                                <button
+                                  onClick={() => handleDeleteTimetableSlot(slot.id)}
+                                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-rose-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-xs"
+                                  title="Delete Slot"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-[10px] text-textMuted opacity-30">—</span>
+                            )}
+                          </td>
+                        );
+                      })}
                     </tr>
-                  ) : (
-                    rosterAllotments.map((a: SubjectAllotment) => (
-                      <tr key={a.id} className="hover:bg-surface-2/40 transition-colors">
-                        <td className="py-3 px-4 font-bold text-textPrimary">{a.subject_name}</td>
-                        <td className="py-3 px-4">
-                          <span
-                            className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${
-                              a.subject_type === 'Lab'
-                                ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
-                                : 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
-                            }`}
-                          >
-                            {a.subject_type}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 font-medium text-textSecondary">{a.department || 'General'}</td>
-                        <td className="py-3 px-4 font-bold text-textSecondary">{a.section || 'A'}</td>
-                        <td className="py-3 px-4 font-medium text-textPrimary">{a.faculty_name}</td>
-                        <td className="py-3 px-4 text-center">
-                          <span className="font-mono font-bold text-brand-primary">
-                            {a.roster_count || 0} Students
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          <button
-                            onClick={() => setInspectAllotment(a)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-surface-2 hover:bg-surface-3 border border-borderLine text-textPrimary text-xs font-bold transition-all"
-                          >
-                            <Users className="w-3.5 h-3.5 text-brand-primary" />
-                            Inspect & Manage Students
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
+                  ))}
                 </tbody>
               </table>
             </div>
           </div>
         </div>
       )}
-
-      {/* ────────────────────────────────────────────────────────────────────────── */}
-      {/* INSPECT ROSTER & LATE JOINING EDITOR MODAL */}
-      {/* ────────────────────────────────────────────────────────────────────────── */}
-      {inspectAllotment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-surface border border-borderLine rounded-2xl max-w-3xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in-50">
-            <div className="p-5 border-b border-borderLine flex items-center justify-between bg-surface-2">
-              <div>
-                <h3 className="text-base font-bold text-textPrimary flex items-center gap-2">
-                  <Users className="w-4 h-4 text-brand-primary" />
-                  Enrolled Students Roster
-                </h3>
-                <p className="text-xs text-textSecondary mt-0.5">
-                  {inspectAllotment.subject_name} (Sec {inspectAllotment.section}) — {inspectAllotment.faculty_name}
-                </p>
-              </div>
-              <button
-                onClick={() => setInspectAllotment(null)}
-                className="text-textMuted hover:text-textPrimary p-1.5 rounded-lg hover:bg-surface-3 transition-colors"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="p-5 overflow-y-auto flex-1">
-              {isLoadingRoster ? (
-                <div className="py-8 text-center text-textMuted">
-                  <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-brand-primary" />
-                  Loading student roster...
-                </div>
-              ) : currentRoster.length === 0 ? (
-                <div className="py-8 text-center text-textMuted">
-                  No students currently enrolled in this subject. Upload a roster or add single entries via Student Roster tab above.
-                </div>
-              ) : (
-                <div className="rounded-xl border border-borderLine overflow-hidden">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-surface-2 text-textMuted font-bold uppercase tracking-wider border-b border-borderLine">
-                      <tr>
-                        <th className="py-2.5 px-3.5">#</th>
-                        <th className="py-2.5 px-3.5">Roll Number</th>
-                        <th className="py-2.5 px-3.5">Student Name</th>
-                        <th className="py-2.5 px-3.5">Date of Joining</th>
-                        <th className="py-2.5 px-3.5">Email</th>
-                        <th className="py-2.5 px-3.5 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-borderLine">
-                      {currentRoster.map((r: any, idx: number) => {
-                        const isEditing = editingJoiningDateRosterId === r.id;
-                        const joinDateStr = r.joining_date ? new Date(r.joining_date).toISOString().split('T')[0] : '';
-
-                        return (
-                          <tr key={r.id || idx} className="hover:bg-surface-2/40 transition-colors">
-                            <td className="py-2 px-3.5 text-textMuted font-mono">{idx + 1}</td>
-                            <td className="py-2 px-3.5 font-bold font-mono text-brand-primary">{r.roll_number}</td>
-                            <td className="py-2 px-3.5 font-semibold text-textPrimary">{r.student_name || '—'}</td>
-                            <td className="py-2 px-3.5">
-                              {isEditing ? (
-                                <div className="flex items-center gap-1.5">
-                                  <input
-                                    type="date"
-                                    value={newJoiningDate}
-                                    onChange={(e) => setNewJoiningDate(e.target.value)}
-                                    className="bg-surface-2 border border-brand-primary text-textPrimary text-xs px-2 py-0.5 rounded-lg"
-                                  />
-                                  <button
-                                    onClick={() => {
-                                      if (newJoiningDate) {
-                                        updateJoiningDateMutation.mutate({ rosterId: r.id, date: newJoiningDate });
-                                      }
-                                    }}
-                                    className="p-1 bg-emerald-600 text-white rounded hover:bg-emerald-500"
-                                    title="Save Date"
-                                  >
-                                    <Check className="w-3 h-3" />
-                                  </button>
-                                  <button
-                                    onClick={() => setEditingJoiningDateRosterId(null)}
-                                    className="p-1 bg-surface-3 text-textMuted rounded hover:text-textPrimary"
-                                    title="Cancel"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-textSecondary font-mono text-[11px]">
-                                    {joinDateStr || 'Default (Start)'}
-                                  </span>
-                                  <button
-                                    onClick={() => {
-                                      setEditingJoiningDateRosterId(r.id);
-                                      setNewJoiningDate(joinDateStr || new Date().toISOString().split('T')[0]);
-                                    }}
-                                    className="p-1 text-textMuted hover:text-brand-primary rounded"
-                                    title="Edit joining date for late-joining student"
-                                  >
-                                    <Edit2 className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              )}
-                            </td>
-                            <td className="py-2 px-3.5 text-textSecondary font-mono text-[11px]">
-                              {r.student_email}
-                            </td>
-                            <td className="py-2 px-3.5 text-right">
-                              <button
-                                onClick={() => setDeletingRosterStudent({ id: r.id, roll_number: r.roll_number, student_name: r.student_name })}
-                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-[11px] font-bold transition-all"
-                                title="Unassign student from this subject"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                                Unassign
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            <div className="p-4 border-t border-borderLine bg-surface-2 flex justify-between items-center text-xs">
-              <span className="text-textSecondary font-semibold">
-                Total Enrolled: <strong className="text-textPrimary">{currentRoster.length}</strong> students
-              </span>
-              <button
-                onClick={() => setInspectAllotment(null)}
-                className="px-4 py-1.5 rounded-xl bg-brand-primary text-white font-semibold hover:bg-brand-primary/90 transition-all"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── CONFIRMATION MODAL: DELETE ALLOTMENT ── */}
-      {deletingAllotment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-surface border border-borderLine rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in fade-in-50">
-            <div className="flex items-start gap-3">
-              <div className="p-3 bg-red-500/10 text-red-400 rounded-xl shrink-0">
-                <Trash2 className="w-6 h-6" />
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-base font-bold text-textPrimary">Delete Subject Allocation?</h3>
-                <p className="text-xs text-textSecondary">
-                  Are you sure you want to delete the allocation for <strong className="text-textPrimary">{deletingAllotment.subject_name}</strong> (Section {deletingAllotment.section}) assigned to <strong className="text-textPrimary">{deletingAllotment.faculty_name}</strong>?
-                </p>
-                <p className="text-[11px] text-amber-400 font-semibold pt-1">
-                  ⚠️ This will permanently remove all associated student rosters and attendance session records for this subject.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-borderLine">
-              <button
-                onClick={() => setDeletingAllotment(null)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-textSecondary bg-surface-2 hover:bg-surface-3 border border-borderLine transition-all"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => deletingAllotment && deleteMutation.mutate(deletingAllotment.id)}
-                disabled={deleteMutation.isPending}
-                className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-500 shadow-md transition-all disabled:opacity-50"
-              >
-                {deleteMutation.isPending ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    Deleting...
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Yes, Delete Allocation
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── CONFIRMATION MODAL: UNASSIGN STUDENT FROM ROSTER ── */}
-      {deletingRosterStudent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-surface border border-borderLine rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in fade-in-50">
-            <div className="flex items-start gap-3">
-              <div className="p-3 bg-red-500/10 text-red-400 rounded-xl shrink-0">
-                <Trash2 className="w-6 h-6" />
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-base font-bold text-textPrimary">Unassign Student from Subject?</h3>
-                <p className="text-xs text-textSecondary">
-                  Are you sure you want to unassign student <strong className="text-textPrimary font-mono">{deletingRosterStudent.roll_number}</strong> {deletingRosterStudent.student_name ? `(${deletingRosterStudent.student_name})` : ''} from this subject roster?
-                </p>
-                <p className="text-[11px] text-textMuted pt-1">
-                  This will only remove the student from this specific subject without affecting their enrolment in any other subjects.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-borderLine">
-              <button
-                onClick={() => setDeletingRosterStudent(null)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-textSecondary bg-surface-2 hover:bg-surface-3 border border-borderLine transition-all"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => deletingRosterStudent && deleteRosterStudentMutation.mutate(deletingRosterStudent.id)}
-                disabled={deleteRosterStudentMutation.isPending}
-                className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-500 shadow-md transition-all disabled:opacity-50"
-              >
-                {deleteRosterStudentMutation.isPending ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    Unassigning...
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Yes, Unassign Student
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Official Timetable Document PDF Viewer Modal */}
-      {viewingPdfDoc && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
-          <div className="bg-surface border border-borderLine rounded-2xl max-w-5xl w-full h-[88vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in-50">
-            <div className="p-4 border-b border-borderLine flex items-center justify-between bg-surface-2">
-              <div className="flex items-center gap-2.5 min-w-0 pr-4">
-                <FileText className="w-4 h-4 text-purple-400 shrink-0" />
-                <h3 className="text-sm font-bold text-textPrimary font-mono truncate">{viewingPdfDoc.name}</h3>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <a
-                  href={viewingPdfDoc.data}
-                  download={viewingPdfDoc.name}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-3 hover:bg-surface text-textPrimary text-xs rounded-xl border border-borderLine transition-all font-semibold"
-                >
-                  <Download className="w-3.5 h-3.5" /> Download PDF
-                </a>
-                <button
-                  onClick={() => setViewingPdfDoc(null)}
-                  className="p-1.5 text-textMuted hover:text-textPrimary rounded-xl hover:bg-surface-3 transition-colors"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 bg-slate-950 overflow-hidden relative">
-              <iframe
-                src={viewingPdfDoc.data}
-                title={viewingPdfDoc.name}
-                className="w-full h-full border-0"
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* PDF Modal */}
-      <AttendancePdfModal
-        isOpen={showPdfModal}
-        onClose={() => setShowPdfModal(false)}
-        defaultYear="2nd Year"
-        defaultDepartment={selectedDepartment === 'All' ? '' : selectedDepartment}
-        defaultSection={selectedSection}
-      />
-    </div>
-  );
-};
-
-// ── SubjectMasterTab Component (Ported from dsattendance admin/subjects.php) ──────────────────
-const SubjectMasterTab: React.FC<{
-  subjectForm: any;
-  setSubjectForm: (f: any) => void;
-  subjectSearchQuery: string;
-  setSubjectSearchQuery: (q: string) => void;
-  subjectFilterSem: string;
-  setSubjectFilterSem: (s: any) => void;
-  isSubmittingSubject: boolean;
-  setIsSubmittingSubject: (v: boolean) => void;
-  subjectFormStatus: { type: 'success' | 'error' | 'idle'; message: string };
-  setSubjectFormStatus: (s: any) => void;
-  deletingSubjectId: string | null;
-  setDeletingSubjectId: (id: string | null) => void;
-  queryClient: any;
-}> = ({
-  subjectForm,
-  setSubjectForm,
-  subjectSearchQuery,
-  setSubjectSearchQuery,
-  subjectFilterSem,
-  setSubjectFilterSem,
-  isSubmittingSubject,
-  setIsSubmittingSubject,
-  subjectFormStatus,
-  setSubjectFormStatus,
-  deletingSubjectId,
-  setDeletingSubjectId,
-  queryClient,
-}) => {
-  const { user } = useAuth();
-  const { data: allSubjectsRaw = [], isLoading } = useQuery({
-    queryKey: ['masterSubjectList'],
-    queryFn: () => api.getMasterSubjects().catch(() => []),
-  });
-  const allSubjects = Array.isArray(allSubjectsRaw) ? allSubjectsRaw : [];
-
-  const ALL_SEMS: (SemesterLabel | 'All')[] = ['All', '1-1', '1-2', '2-1', '2-2', '3-1', '3-2', '4-1', '4-2'];
-
-  const filtered = allSubjects.filter((s: any) => {
-    if (!s) return false;
-    const q = (subjectSearchQuery || '').toLowerCase();
-    const semMatch = subjectFilterSem === 'All' || s.semester_label === subjectFilterSem;
-    const textMatch = !q || (s.subject_name || '').toLowerCase().includes(q) || (s.subject_code || '').toLowerCase().includes(q) || (s.department || '').toLowerCase().includes(q);
-    return semMatch && textMatch;
-  });
-
-  const handleSave = async () => {
-    if (!subjectForm.semester_label || !subjectForm.subject_code || !subjectForm.subject_name) {
-      setSubjectFormStatus({ type: 'error', message: 'Class, Subject Code and Subject Name are required.' });
-      return;
-    }
-    setIsSubmittingSubject(true);
-    try {
-      if (subjectForm.id) {
-        await api.updateMasterSubject(subjectForm.id, subjectForm);
-        setSubjectFormStatus({ type: 'success', message: 'Subject updated successfully.' });
-      } else {
-        await api.createMasterSubject(subjectForm);
-        setSubjectFormStatus({ type: 'success', message: 'Subject added successfully.' });
-      }
-      queryClient.invalidateQueries({ queryKey: ['masterSubjectList'] });
-      setSubjectForm({ id: '', semester_label: '' as SemesterLabel | '', subject_code: '', subject_name: '', short_name: '', subject_type: 'Theory', department: '', regulation: '' });
-    } catch (err: any) {
-      setSubjectFormStatus({ type: 'error', message: err.message || 'Failed to save subject.' });
-    } finally {
-      setIsSubmittingSubject(false);
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    try {
-      await api.deleteMasterSubject(id);
-      queryClient.invalidateQueries({ queryKey: ['masterSubjectList'] });
-      setDeletingSubjectId(null);
-    } catch (err: any) {
-      setSubjectFormStatus({ type: 'error', message: err.message || 'Failed to delete subject.' });
-      setDeletingSubjectId(null);
-    }
-  };
-
-  return (
-    <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-center gap-3 p-4 bg-surface border border-borderLine rounded-2xl shadow-sm">
-        <div className="p-2.5 bg-brand-primary/10 text-brand-primary rounded-xl">
-          <BookOpen className="w-5 h-5" />
-        </div>
-        <div>
-          <h3 className="text-sm font-bold text-textPrimary">Subject Master List</h3>
-          <p className="text-xs text-textSecondary">Add, edit and delete subjects before allotting them to faculty. Matches <b>admin/subjects.php</b> from dsattendance.</p>
-        </div>
-      </div>
-
-      {/* Add / Edit Form (matches dsattendance row form) */}
-      <div className="bg-surface border border-borderLine rounded-2xl p-5 shadow-sm space-y-3">
-        <h4 className="text-xs font-bold text-textPrimary uppercase tracking-wide">
-          {subjectForm.id ? '✏️ Edit Subject' : '➕ Add New Subject'}
-        </h4>
-
-        {subjectFormStatus.type !== 'idle' && (
-          <div className={`p-3 rounded-xl text-xs font-semibold flex items-center justify-between ${
-            subjectFormStatus.type === 'success'
-              ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
-              : 'bg-rose-500/10 border border-rose-500/20 text-rose-400'
-          }`}>
-            <span>{subjectFormStatus.message}</span>
-            <button onClick={() => setSubjectFormStatus({ type: 'idle', message: '' })} className="cursor-pointer opacity-70 hover:opacity-100">✕</button>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
-          {/* Class / Semester */}
-          <div className="lg:col-span-1">
-            <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Class</label>
-            <select
-              value={subjectForm.semester_label}
-              onChange={e => setSubjectForm({ ...subjectForm, semester_label: e.target.value })}
-              className="w-full px-2 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary"
-            >
-              <option value="">Select</option>
-              {['1-1', '1-2', '2-1', '2-2', '3-1', '3-2', '4-1', '4-2'].map(s => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Subject Code */}
-          <div className="lg:col-span-1">
-            <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Subject Code</label>
-            <input
-              type="text"
-              placeholder="e.g. CS401"
-              value={subjectForm.subject_code}
-              onChange={e => setSubjectForm({ ...subjectForm, subject_code: e.target.value })}
-              className="w-full px-2 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary"
-            />
-          </div>
-
-          {/* Subject Name / Title */}
-          <div className="lg:col-span-2">
-            <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Subject Title</label>
-            <input
-              type="text"
-              placeholder="e.g. Data Structures"
-              value={subjectForm.subject_name}
-              onChange={e => setSubjectForm({ ...subjectForm, subject_name: e.target.value })}
-              className="w-full px-2 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary"
-            />
-          </div>
-
-          {/* Short Name */}
-          <div className="lg:col-span-1">
-            <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Short Name</label>
-            <input
-              type="text"
-              placeholder="e.g. DS"
-              value={subjectForm.short_name}
-              onChange={e => setSubjectForm({ ...subjectForm, short_name: e.target.value })}
-              className="w-full px-2 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary"
-            />
-          </div>
-
-          {/* Type Theory / Lab */}
-          <div className="lg:col-span-1">
-            <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Type</label>
-            <select
-              value={subjectForm.subject_type}
-              onChange={e => setSubjectForm({ ...subjectForm, subject_type: e.target.value })}
-              className="w-full px-2 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary"
-            >
-              <option value="Theory">Theory</option>
-              <option value="Lab">Lab</option>
-            </select>
-          </div>
-
-          {/* Department */}
-          <div className="lg:col-span-1">
-            <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Department</label>
-            <select
-              value={subjectForm.department}
-              onChange={e => setSubjectForm({ ...subjectForm, department: e.target.value })}
-              className="w-full px-2 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary"
-            >
-              <option value="">Select Dept</option>
-              {VALID_DEPARTMENT_NAMES.map(d => (
-                <option key={d} value={d}>{d}</option>
-              ))}
-              <option value="S&H">S&H (1st Year)</option>
-            </select>
-          </div>
-
-          {/* Regulation + Save */}
-          <div className="lg:col-span-1 flex gap-2 items-end">
-            <div className="flex-1">
-              <label className="block text-[10px] font-bold text-textMuted uppercase mb-1">Regulation</label>
-              <input
-                type="text"
-                placeholder="R22"
-                value={subjectForm.regulation}
-                onChange={e => setSubjectForm({ ...subjectForm, regulation: e.target.value })}
-                className="w-full px-2 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary"
-              />
-            </div>
-            <button
-              onClick={handleSave}
-              disabled={isSubmittingSubject}
-              className="px-3 py-2 rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white font-bold text-xs shadow-sm transition-all cursor-pointer disabled:opacity-50 whitespace-nowrap flex items-center gap-1"
-            >
-              {isSubmittingSubject ? (
-                <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-              ) : (
-                <Check className="w-3.5 h-3.5" />
-              )}
-              {subjectForm.id ? 'Update' : 'Save'}
-            </button>
-            {subjectForm.id && (
-              <button
-                onClick={() => setSubjectForm({ id: '', semester_label: '' as SemesterLabel | '', subject_code: '', subject_name: '', short_name: '', subject_type: 'Theory', department: '', regulation: '' })}
-                className="px-3 py-2 rounded-xl bg-surface hover:bg-surface-3 border border-borderLine text-textMuted text-xs font-bold cursor-pointer"
-              >
-                Cancel
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Filter + Table (matches dsattendance striped table layout) */}
-      <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden shadow-sm">
-        {/* Table Header / Filters */}
-        <div className="p-3 bg-surface-2 border-b border-borderLine flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-xs font-bold text-textPrimary">
-            <BookOpen className="w-3.5 h-3.5 text-brand-primary" />
-            <span>All Subjects ({filtered.length})</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <select
-              value={subjectFilterSem}
-              onChange={e => setSubjectFilterSem(e.target.value as any)}
-              className="px-2 py-1.5 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary focus:outline-none"
-            >
-              {ALL_SEMS.map(s => (
-                <option key={s} value={s}>{s === 'All' ? 'All Classes' : `Class ${s}`}</option>
-              ))}
-            </select>
-            <div className="flex items-center gap-2 bg-surface px-3 py-1.5 rounded-xl border border-borderLine w-52">
-              <Search className="w-3.5 h-3.5 text-textMuted shrink-0" />
-              <input
-                type="text"
-                value={subjectSearchQuery}
-                onChange={e => setSubjectSearchQuery(e.target.value)}
-                placeholder="Search subject or code..."
-                className="w-full bg-transparent text-xs text-textPrimary focus:outline-none"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Table */}
-        {isLoading ? (
-          <div className="p-12 text-center text-xs text-textMuted">Loading subjects...</div>
-        ) : filtered.length === 0 ? (
-          <div className="p-12 text-center text-xs text-textMuted space-y-2">
-            <BookOpen className="w-8 h-8 mx-auto opacity-30" />
-            <p className="font-bold text-textPrimary">No subjects found.</p>
-            <p>Use the form above to add subjects for each class/semester.</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-surface-2 border-b border-borderLine text-textMuted font-bold uppercase text-[10px]">
-                <tr>
-                  <th className="px-4 py-2.5 w-10 text-center">#</th>
-                  <th className="px-4 py-2.5">Class</th>
-                  <th className="px-4 py-2.5">Department</th>
-                  <th className="px-4 py-2.5">Subject Code</th>
-                  <th className="px-4 py-2.5">Title</th>
-                  <th className="px-4 py-2.5">Short Name</th>
-                  <th className="px-4 py-2.5">Type</th>
-                  <th className="px-4 py-2.5">Regulation</th>
-                  <th className="px-4 py-2.5 text-center">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-borderLine">
-                {filtered.map((s: any, idx: number) => (
-                  <tr
-                    key={s.id}
-                    className={`hover:bg-surface-2/50 transition-colors ${
-                      deletingSubjectId === s.id ? 'opacity-40' : ''
-                    }`}
-                  >
-                    <td className="px-4 py-2.5 text-center text-textMuted">{idx + 1}</td>
-                    <td className="px-4 py-2.5 font-bold text-textPrimary">{s.semester_label}</td>
-                    <td className="px-4 py-2.5 text-textSecondary">{s.department || '—'}</td>
-                    <td className="px-4 py-2.5 font-mono font-bold text-brand-primary">{s.subject_code}</td>
-                    <td className="px-4 py-2.5 font-semibold text-textPrimary max-w-[200px] truncate">{s.subject_name}</td>
-                    <td className="px-4 py-2.5 font-bold text-textPrimary">{s.short_name || '—'}</td>
-                    <td className="px-4 py-2.5">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                        s.subject_type === 'Lab'
-                          ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
-                          : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
-                      }`}>
-                        {s.subject_type || 'Theory'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2.5 text-textMuted">{s.regulation || '—'}</td>
-                    <td className="px-4 py-2.5 text-center">
-                      <div className="flex items-center justify-center gap-1.5">
-                        <button
-                          onClick={() => setSubjectForm({
-                            id: s.id,
-                            semester_label: s.semester_label,
-                            subject_code: s.subject_code,
-                            subject_name: s.subject_name,
-                            short_name: s.short_name || '',
-                            subject_type: s.subject_type || 'Theory',
-                            department: s.department || '',
-                            regulation: s.regulation || '',
-                          })}
-                          className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 font-bold text-[10px] border border-amber-500/20 cursor-pointer transition-all flex items-center gap-1"
-                        >
-                          <Edit2 className="w-3 h-3" />
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (window.confirm(`Delete "${s.subject_name}"?`)) {
-                              handleDelete(s.id);
-                              setDeletingSubjectId(s.id);
-                            }
-                          }}
-                          className="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 font-bold text-[10px] border border-rose-500/20 cursor-pointer transition-all flex items-center gap-1"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
     </div>
   );
 };
