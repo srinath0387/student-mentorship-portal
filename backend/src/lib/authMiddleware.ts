@@ -76,44 +76,67 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
     // ── Attempt 1: Decode as a real Cognito JWT ──
     const payload = decodeJwtPayload(token);
     if (payload && (payload.email || explicitCallerEmail)) {
-      const email = (explicitCallerEmail || payload.email || '').toLowerCase();
+      const email = (explicitCallerEmail || payload.email || '').toLowerCase().trim();
       const derivedRegNo = (payload['custom:reg_no'] || (email.includes('@') ? email.split('@')[0] : '')).toUpperCase();
-      const role = (payload['custom:role'] || 'student').toLowerCase();
-      // Derive department from roll number for students, or from DB for faculty/hod
+      let role = (payload['custom:role'] || '').toLowerCase();
       let department: string | undefined;
       let facName: string | undefined;
-      if (role === 'student' && derivedRegNo.length === 10) {
-        department = getDeptFromRollNumber(derivedRegNo);
-      } else if ((role === 'faculty' || role === 'hod') && email && !db.isMock) {
-        // Lookup faculty name + department from DB so attendance subject matching works
+
+      // DB lookup to resolve actual role, department, and name
+      if (email && !db.isMock) {
         try {
+          // 1. Check users table
+          const userCheck = await db.query(
+            'SELECT role, name, department FROM users WHERE LOWER(email) = $1 LIMIT 1', [email]
+          );
+          if (userCheck.rows.length > 0) {
+            const u = userCheck.rows[0];
+            if (!role || role === 'student') role = (u.role || role || '').toLowerCase();
+            facName = u.name || undefined;
+            department = u.department || undefined;
+          }
+
+          // 2. Check faculty table
           const facCheck = await db.query(
             'SELECT department, name FROM faculty WHERE LOWER(email) = $1 LIMIT 1', [email]
           );
           if (facCheck.rows.length > 0) {
-            department = facCheck.rows[0].department || undefined;
-            facName = facCheck.rows[0].name || undefined;
+            if (!role || role === 'student') role = 'faculty';
+            department = department || facCheck.rows[0].department || undefined;
+            facName = facName || facCheck.rows[0].name || undefined;
           }
-          // Also try users table for name
-          if (!facName) {
-            const userCheck = await db.query(
-              'SELECT name FROM users WHERE LOWER(email) = $1 LIMIT 1', [email]
+
+          // 3. Check subject_allotments table (if faculty is allotted subjects)
+          if (!role || role === 'student') {
+            const allotCheck = await db.query(
+              'SELECT faculty_name, department FROM subject_allotments WHERE LOWER(faculty_email) = $1 LIMIT 1', [email]
             );
-            if (userCheck.rows.length > 0) {
-              facName = userCheck.rows[0].name || undefined;
+            if (allotCheck.rows.length > 0) {
+              role = 'faculty';
+              department = department || allotCheck.rows[0].department || undefined;
+              facName = facName || allotCheck.rows[0].faculty_name || undefined;
             }
           }
-          // Fallback: try hod_credentials for department
-          if (!department && role === 'hod') {
+
+          // 4. Check hod_credentials
+          if (!department || role === 'hod') {
             const hodCheck = await db.query(
               'SELECT department FROM hod_credentials WHERE LOWER(email) = $1 LIMIT 1', [email]
             );
             if (hodCheck.rows.length > 0) {
-              department = hodCheck.rows[0].department || undefined;
+              role = role || 'hod';
+              department = department || hodCheck.rows[0].department || undefined;
             }
           }
         } catch { /* degrade gracefully */ }
       }
+
+      if (!role) role = 'student';
+
+      if (role === 'student' && derivedRegNo.length === 10 && !department) {
+        department = getDeptFromRollNumber(derivedRegNo);
+      }
+
       req.auth = {
         email,
         role,
