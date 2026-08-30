@@ -295,17 +295,6 @@ export const AttendancePage: React.FC = () => {
               </button>
             </div>
           </div>
-
-          <div>
-            <p className="px-3 text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1.5">Account</p>
-            <button
-              onClick={() => logout()}
-              className="w-full flex items-center gap-2.5 px-3.5 py-2 rounded-xl text-xs font-bold text-rose-300 hover:bg-rose-500/20 transition-all text-left"
-            >
-              <LogOut className="w-4 h-4" />
-              <span>Logout</span>
-            </button>
-          </div>
         </div>
       </aside>
 
