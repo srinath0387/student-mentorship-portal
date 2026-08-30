@@ -1256,7 +1256,12 @@ export const api = {
 
   // ── MODULE: Subject Master List (admin/subjects.php equivalent) ────────────
   getMasterSubjects: async (): Promise<any[]> => {
-    return fetchWithAuth('/subjects/master');
+    try {
+      const res = await fetchWithAuth('/subjects/master');
+      return Array.isArray(res) ? res : [];
+    } catch {
+      return [];
+    }
   },
 
   createMasterSubject: async (data: {

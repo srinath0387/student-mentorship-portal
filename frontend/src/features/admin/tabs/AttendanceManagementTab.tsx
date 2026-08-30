@@ -43,7 +43,7 @@ export const AttendanceManagementTab: React.FC = () => {
       ? normalizeDepartmentName(user.department)
       : 'All';
 
-  const [activeSubTab, setActiveSubTab] = useState<'subjects' | 'allotments' | 'rosters' | 'timetable'>('subjects');
+  const [activeSubTab, setActiveSubTab] = useState<'allotments' | 'subjects' | 'rosters' | 'timetable'>('allotments');
   const [selectedSemester, setSelectedSemester] = useState<SemesterLabel>('2-1');
   const [selectedDepartment, setSelectedDepartment] = useState<string>(defaultFilterDept);
   const [selectedSection, setSelectedSection] = useState<string>('A');
@@ -147,10 +147,11 @@ export const AttendanceManagementTab: React.FC = () => {
     queryFn: () => api.getAllFaculty().catch(() => []),
   });
 
-  const { data: masterSubjectsList = [] } = useQuery({
+  const { data: rawMasterSubjects = [] } = useQuery({
     queryKey: ['masterSubjectList'],
-    queryFn: () => api.getMasterSubjects(),
+    queryFn: () => api.getMasterSubjects().catch(() => []),
   });
+  const masterSubjectsList = Array.isArray(rawMasterSubjects) ? rawMasterSubjects : [];
 
   // ── Fetch Timetable ──
   const { data: timetableEntries = [], isLoading: isLoadingTimetable } = useQuery({
@@ -2382,17 +2383,19 @@ const SubjectMasterTab: React.FC<{
   queryClient,
 }) => {
   const { user } = useAuth();
-  const { data: allSubjects = [], isLoading } = useQuery({
+  const { data: allSubjectsRaw = [], isLoading } = useQuery({
     queryKey: ['masterSubjectList'],
-    queryFn: () => api.getMasterSubjects(),
+    queryFn: () => api.getMasterSubjects().catch(() => []),
   });
+  const allSubjects = Array.isArray(allSubjectsRaw) ? allSubjectsRaw : [];
 
   const ALL_SEMS: (SemesterLabel | 'All')[] = ['All', '1-1', '1-2', '2-1', '2-2', '3-1', '3-2', '4-1', '4-2'];
 
-  const filtered = (allSubjects as any[]).filter((s: any) => {
-    const q = subjectSearchQuery.toLowerCase();
+  const filtered = allSubjects.filter((s: any) => {
+    if (!s) return false;
+    const q = (subjectSearchQuery || '').toLowerCase();
     const semMatch = subjectFilterSem === 'All' || s.semester_label === subjectFilterSem;
-    const textMatch = !q || s.subject_name?.toLowerCase().includes(q) || s.subject_code?.toLowerCase().includes(q) || s.department?.toLowerCase().includes(q);
+    const textMatch = !q || (s.subject_name || '').toLowerCase().includes(q) || (s.subject_code || '').toLowerCase().includes(q) || (s.department || '').toLowerCase().includes(q);
     return semMatch && textMatch;
   });
 
