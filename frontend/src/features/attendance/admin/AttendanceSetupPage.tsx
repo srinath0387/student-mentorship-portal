@@ -38,9 +38,13 @@ export const AttendanceSetupPage: React.FC = () => {
   const [subStatus, setSubStatus] = useState<{type:string;message:string}|null>(null);
   const [editingSubId, setEditingSubId] = useState<string|null>(null);
 
+  const [masterFetchTs, setMasterFetchTs] = useState(0);
+
   const { data: rawMasterSubjects = [], refetch: refetchMaster, isLoading: isMasterLoading } = useQuery({
-    queryKey: ['masterSubjects'],
+    queryKey: ['masterSubjects', masterFetchTs],
     queryFn: () => api.getMasterSubjects(),
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
   const masterSubjects = Array.isArray(rawMasterSubjects) ? rawMasterSubjects : [];
   const filteredSubjects = masterSubjects.filter((s: any) =>
@@ -51,6 +55,7 @@ export const AttendanceSetupPage: React.FC = () => {
 
   const handleAddSubject = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubStatus(null);
     try {
       if (editingSubId) {
         await api.updateMasterSubject(editingSubId, subForm);
@@ -60,9 +65,14 @@ export const AttendanceSetupPage: React.FC = () => {
         await api.createMasterSubject(subForm);
         setSubStatus({ type: 'success', message: 'Subject added to master catalog.' });
       }
-      await qc.invalidateQueries({ queryKey: ['masterSubjects'] });
+      // force genuine network re-fetch by bumping timestamp key
+      setMasterFetchTs(Date.now());
       await refetchMaster();
-      setSubForm({ semester_label: '', department: '', subject_code: '', subject_name: '', short_name: '', subject_type: 'Theory', regulation: 'R22' });
+      // clear filters so the newly added subject is visible
+      setSubSemFilter('');
+      setSubDeptFilter('');
+      setSubSearch('');
+      setSubForm({ semester_label: '', department: 'CSE', subject_code: '', subject_name: '', short_name: '', subject_type: 'Theory', regulation: 'R22' });
     } catch (err: any) {
       setSubStatus({ type: 'error', message: err.message || 'Failed to save subject.' });
     }

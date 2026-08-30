@@ -10070,7 +10070,7 @@ app.get('/subjects/master', requireAuth, async (req: Request, res: Response) => 
     }
     if (department && department !== 'All') {
       params.push(department);
-      query += ` AND (department = $${params.length} OR department = '' OR department IS NULL)`;
+      query += ` AND department = $${params.length}`;
     }
 
     query += ` ORDER BY semester_label, subject_code, subject_name`;
