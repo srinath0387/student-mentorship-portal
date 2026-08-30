@@ -70,10 +70,12 @@ export const AttendanceSetupPage: React.FC = () => {
         await api.createMasterSubject(subForm);
         setSubStatus({ type: 'success', message: 'Subject added to master catalog.' });
       }
-      // force genuine network re-fetch by bumping timestamp key
+      // Fully wipe cache so React Query can't serve a stale empty list
+      await qc.invalidateQueries({ queryKey: ['masterSubjects'] });
+      qc.removeQueries({ queryKey: ['masterSubjects'] });
+      // Bump timestamp → new queryKey → new network request with _t cache-buster
       setMasterFetchTs(Date.now());
-      await refetchMaster();
-      // clear filters so the newly added subject is visible
+      // Clear filters so newly added subject is visible
       setSubSemFilter('');
       setSubDeptFilter('');
       setSubSearch('');

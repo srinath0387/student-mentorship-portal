@@ -1256,20 +1256,18 @@ export const api = {
 
   // ── MODULE: Subject Master List (admin/subjects.php equivalent) ────────────
   getMasterSubjects: async (semester?: string, department?: string): Promise<any[]> => {
-    try {
-      const query = new URLSearchParams();
-      if (semester && semester !== 'All') query.append('semester', semester);
-      if (department && department !== 'All') query.append('department', department);
-      const qs = query.toString() ? `?${query.toString()}` : '';
-      const res = await fetchWithAuth(`/subjects/master${qs}`);
-      if (Array.isArray(res)) return res;
-      if (res && Array.isArray(res.rows)) return res.rows;
-      if (res && Array.isArray(res.data)) return res.data;
-      return [];
-    } catch (e) {
-      console.error('[API] getMasterSubjects error:', e);
-      return [];
-    }
+    const query = new URLSearchParams();
+    if (semester && semester !== 'All') query.append('semester', semester);
+    if (department && department !== 'All') query.append('department', department);
+    // Always add _t to bust browser GET cache
+    query.append('_t', String(Date.now()));
+    const qs = `?${query.toString()}`;
+    const res = await fetchWithAuth(`/subjects/master${qs}`, { cache: 'no-store' } as any);
+    if (Array.isArray(res)) return res;
+    if (res && Array.isArray(res.rows)) return res.rows;
+    if (res && Array.isArray(res.data)) return res.data;
+    console.warn('[API] getMasterSubjects unexpected response shape:', res);
+    return [];
   },
 
   createMasterSubject: async (data: {
