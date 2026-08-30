@@ -10044,6 +10044,7 @@ app.get('/first-year/students', requireRole('admin', 'hod', 'coordinator'), asyn
 
 // ── MODULE: Master Subjects CRUD (admin/subjects.php equivalent) ────────────
 app.get('/subjects/master', requireAuth, async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   try {
     await db.query(`
       CREATE TABLE IF NOT EXISTS master_subjects (
@@ -10075,8 +10076,10 @@ app.get('/subjects/master', requireAuth, async (req: Request, res: Response) => 
 
     query += ` ORDER BY semester_label, subject_code, subject_name`;
     const result = await db.query(query, params);
-    res.json(result.rows);
+    console.log(`[API /subjects/master GET] Found ${result.rows?.length || 0} subjects`);
+    res.json(result.rows || []);
   } catch (err: any) {
+    console.error('Error in GET /subjects/master:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -10119,6 +10122,7 @@ app.post('/subjects/master', requireRole('admin', 'hod', 'coordinator'), async (
       ]
     );
 
+    console.log('[API /subjects/master POST] Created subject:', result.rows[0]);
     res.status(201).json(result.rows[0]);
   } catch (err: any) {
     console.error('Error in POST /subjects/master:', err);

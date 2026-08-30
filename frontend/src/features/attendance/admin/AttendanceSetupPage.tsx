@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as XLSX from 'xlsx';
-import { BookOpen, Users, Clock, Trash2, Plus, Upload, Search, Edit2, Check, X } from 'lucide-react';
+import { BookOpen, Users, Clock, Trash2, Plus, Upload, Search, Edit2, Check, X, RotateCcw } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { VALID_DEPARTMENT_NAMES } from '../../../lib/validation/auth';
 
@@ -37,6 +37,7 @@ export const AttendanceSetupPage: React.FC = () => {
   const [subForm, setSubForm] = useState({ semester_label:'', department:'CSE', subject_code:'', subject_name:'', short_name:'', subject_type:'Theory' as 'Theory'|'Lab', regulation:'R22' });
   const [subStatus, setSubStatus] = useState<{type:string;message:string}|null>(null);
   const [editingSubId, setEditingSubId] = useState<string|null>(null);
+  const [localSubjects, setLocalSubjects] = useState<any[]>([]);
 
   const [masterFetchTs, setMasterFetchTs] = useState(0);
 
@@ -44,14 +45,16 @@ export const AttendanceSetupPage: React.FC = () => {
     queryKey: ['masterSubjects', masterFetchTs],
     queryFn: async () => {
       const result = await api.getMasterSubjects();
-      console.log('[AttendanceSetup] getMasterSubjects raw result:', result, 'type:', typeof result, 'isArray:', Array.isArray(result));
+      if (Array.isArray(result) && result.length > 0) {
+        setLocalSubjects(result);
+      }
       return result;
     },
     staleTime: 0,
     refetchOnMount: 'always',
   });
-  console.log('[AttendanceSetup] rawMasterSubjects:', rawMasterSubjects, 'masterError:', masterError);
-  const masterSubjects = Array.isArray(rawMasterSubjects) ? rawMasterSubjects : [];
+
+  const masterSubjects = localSubjects.length > 0 ? localSubjects : (Array.isArray(rawMasterSubjects) ? rawMasterSubjects : []);
   const filteredSubjects = masterSubjects.filter((s: any) =>
     (!subSemFilter || s.semester_label === subSemFilter) &&
     (!subDeptFilter || s.department === subDeptFilter) &&
@@ -63,25 +66,36 @@ export const AttendanceSetupPage: React.FC = () => {
     setSubStatus(null);
     try {
       if (editingSubId) {
-        await api.updateMasterSubject(editingSubId, subForm);
+        const updated = await api.updateMasterSubject(editingSubId, subForm);
         setSubStatus({ type: 'success', message: 'Subject updated in master catalog.' });
+        setLocalSubjects(prev => prev.map(s => s.id === editingSubId ? { ...s, ...subForm, ...(updated || {}) } : s));
         setEditingSubId(null);
       } else {
-        await api.createMasterSubject(subForm);
+        const created = await api.createMasterSubject(subForm);
         setSubStatus({ type: 'success', message: 'Subject added to master catalog.' });
+        const newObj = (created && created.id) ? created : { id: 'ms_' + Date.now(), ...subForm };
+        setLocalSubjects(prev => [newObj, ...prev.filter(s => s.id !== newObj.id)]);
       }
-      // Fully wipe cache so React Query can't serve a stale empty list
-      await qc.invalidateQueries({ queryKey: ['masterSubjects'] });
-      qc.removeQueries({ queryKey: ['masterSubjects'] });
-      // Bump timestamp → new queryKey → new network request with _t cache-buster
-      setMasterFetchTs(Date.now());
-      // Clear filters so newly added subject is visible
       setSubSemFilter('');
       setSubDeptFilter('');
       setSubSearch('');
       setSubForm({ semester_label: '', department: 'CSE', subject_code: '', subject_name: '', short_name: '', subject_type: 'Theory', regulation: 'R22' });
+      setMasterFetchTs(Date.now());
+      refetchMaster();
     } catch (err: any) {
       setSubStatus({ type: 'error', message: err.message || 'Failed to save subject.' });
+    }
+  };
+
+  const handleDeleteSubject = async (id: string) => {
+    if (!window.confirm('Are you sure you want to remove this subject from the master catalog?')) return;
+    try {
+      setLocalSubjects(prev => prev.filter(s => s.id !== id));
+      await api.deleteMasterSubject(id);
+      setMasterFetchTs(Date.now());
+      refetchMaster();
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete subject.');
     }
   };
 
@@ -256,9 +270,12 @@ export const AttendanceSetupPage: React.FC = () => {
                 <option value="">All Departments</option>{DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
               </select>
               <div className="ml-auto flex items-center gap-3 text-xs">
+                <button type="button" onClick={()=>{setMasterFetchTs(Date.now());refetchMaster();}} className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-borderLine hover:bg-surface-2 text-textSecondary font-bold text-[11px]" title="Refresh Catalog">
+                  <RotateCcw className={`w-3 h-3 ${isMasterLoading?'animate-spin text-brand-primary':''}`}/> Refresh
+                </button>
                 {isMasterLoading && <span className="text-blue-500 font-bold animate-pulse">Loading…</span>}
                 {masterError && <span className="text-red-500 font-bold">Error: {String(masterError)}</span>}
-                <span className="text-textMuted">DB: <strong>{masterSubjects.length}</strong> total · Shown: <strong>{filteredSubjects.length}</strong></span>
+                <span className="text-textMuted font-semibold">Total: <strong className="text-textPrimary">{masterSubjects.length}</strong> · Shown: <strong className="text-textPrimary">{filteredSubjects.length}</strong></span>
               </div>
             </div>
             <div className="overflow-x-auto">
@@ -278,8 +295,8 @@ export const AttendanceSetupPage: React.FC = () => {
                       <td className="px-4 py-2.5 text-textSecondary">{s.regulation}</td>
                       <td className="px-4 py-2.5 text-center">
                         <div className="flex items-center justify-center gap-2">
-                          <button onClick={()=>{setEditingSubId(s.id);setSubForm({semester_label:s.semester_label,department:s.department,subject_code:s.subject_code,subject_name:s.subject_name,short_name:s.short_name||'',subject_type:s.subject_type,regulation:s.regulation||'R22'});setTab('subjects');}} className="text-brand-primary hover:opacity-70"><Edit2 className="w-3.5 h-3.5"/></button>
-                          <button onClick={async()=>{if(!window.confirm('Delete this subject?'))return;await api.deleteMasterSubject(s.id);qc.invalidateQueries({queryKey:['masterSubjects']});}} className="text-rose-500 hover:opacity-70"><Trash2 className="w-3.5 h-3.5"/></button>
+                          <button onClick={()=>{setEditingSubId(s.id);setSubForm({semester_label:s.semester_label,department:s.department,subject_code:s.subject_code,subject_name:s.subject_name,short_name:s.short_name||'',subject_type:s.subject_type,regulation:s.regulation||'R22'});setTab('subjects');}} className="text-brand-primary hover:opacity-70" title="Edit"><Edit2 className="w-3.5 h-3.5"/></button>
+                          <button onClick={()=>handleDeleteSubject(s.id)} className="text-rose-500 hover:opacity-70" title="Delete"><Trash2 className="w-3.5 h-3.5"/></button>
                         </div>
                       </td>
                     </tr>
