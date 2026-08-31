@@ -1585,40 +1585,66 @@ app.get('/students', async (req: Request, res: Response) => {
 app.post('/students', async (req: Request, res: Response) => {
   try {
     const validatedData = studentProfileSchema.parse(req.body);
-    const rawRoll = (validatedData.roll_number || req.body.roll_number || '').toString();
+    const rawRoll = (validatedData.roll_number || req.body.roll_number || '').toString().trim();
     if (!rawRoll) {
       return res.status(400).json({ error: 'roll_number is required' });
     }
     const regNo = rawRoll.toUpperCase();
+    const department = validatedData.department || getDeptFromRollNumber(regNo) || 'CSE';
+    const year = validatedData.year || '3rd Year';
+    const name = validatedData.name || `Student ${regNo}`;
+    const email = validatedData.email || `${regNo.toLowerCase()}@rgmcet.edu.in`;
+    const batch = validatedData.batch || '2023-2027';
+    const section = validatedData.section || 'A';
+    const isLat = isLateralEntry(regNo);
 
     if (db.isMock) {
       if (db.mockStore.students.has(regNo)) {
         return res.status(400).json({ error: 'Student with this registration number already exists' });
       }
-      const newStudent = { ...validatedData, roll_number: regNo, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+      const newStudent = {
+        ...validatedData,
+        roll_number: regNo,
+        name,
+        email,
+        department,
+        year,
+        batch,
+        section,
+        is_lateral_entry: isLat,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
       db.mockStore.students.set(regNo, newStudent);
       return res.status(201).json({ message: 'Student created successfully', student: newStudent });
     }
 
+    await db.query('ALTER TABLE students ADD COLUMN IF NOT EXISTS is_lateral_entry BOOLEAN DEFAULT FALSE;').catch(() => {});
+
     const result = await db.query(
       `INSERT INTO students (roll_number, name, email, year, phone, address, native_place, department, batch, section,
         hostel_day_scholar, driving_license, passport, relocation_willingness, family_business, financial_background,
-        faculty_mentor_id, photo_url, resume_url, linkedin_url)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+        faculty_mentor_id, photo_url, resume_url, linkedin_url, is_lateral_entry)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
        ON CONFLICT (roll_number) DO UPDATE SET
          name = EXCLUDED.name,
          email = EXCLUDED.email,
          year = EXCLUDED.year,
+         department = EXCLUDED.department,
+         batch = EXCLUDED.batch,
+         section = EXCLUDED.section,
+         is_lateral_entry = EXCLUDED.is_lateral_entry,
          updated_at = CURRENT_TIMESTAMP
        RETURNING *`,
       [
-        regNo, validatedData.name, validatedData.email, validatedData.year || '',
+        regNo, name, email, year,
         validatedData.phone || null, validatedData.address || null, validatedData.native_place || null,
-        validatedData.department || '', validatedData.batch || '', validatedData.section || '',
+        department, batch, section,
         validatedData.hostel_day_scholar || null, validatedData.driving_license || false, validatedData.passport || false,
         validatedData.relocation_willingness || false, validatedData.family_business || null,
         validatedData.financial_background || null, validatedData.faculty_mentor_id || null,
         validatedData.photo_url || null, validatedData.resume_url || null, validatedData.linkedin_url || null,
+        isLat,
       ]
     );
 
@@ -1712,8 +1738,9 @@ app.post('/students/bulk-import', requireRole('admin'), async (req: Request, res
            batch = EXCLUDED.batch,
            section = EXCLUDED.section,
            cgpa = EXCLUDED.cgpa,
+           is_lateral_entry = EXCLUDED.is_lateral_entry,
            updated_at = CURRENT_TIMESTAMP`,
-        [rawRoll, name, email, year, phone, department, batch, section, cgpa]
+        [rawRoll, name, email, year, phone, department, batch, section, cgpa, isLat]
       );
 
       // Save academic entry if CGPA provided
