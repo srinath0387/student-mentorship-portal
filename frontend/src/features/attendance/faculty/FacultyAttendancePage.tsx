@@ -431,8 +431,20 @@ export const FacultyAttendancePage: React.FC = () => {
                       <button onClick={()=>{
                         if (slot.semester_label) setSem(slot.semester_label as any);
                         if (slot.section) setSection(slot.section);
-                        const m=mySubjects.find(s=>s.subject_name===slot.subject_name&&s.section===slot.section);
-                        if(m) setSubjectId(m.id);
+                        let m = mySubjects.find(s => 
+                          s.subject_name?.toLowerCase().trim() === slot.subject_name?.toLowerCase().trim() && 
+                          (!slot.section || s.section === slot.section)
+                        );
+                        if (!m) {
+                          m = mySubjects.find(s => 
+                            s.subject_name?.toLowerCase().includes(slot.subject_name?.toLowerCase()) || 
+                            slot.subject_name?.toLowerCase().includes(s.subject_name?.toLowerCase())
+                          );
+                        }
+                        if (!m && mySubjects.length > 0) {
+                          m = mySubjects.find(s => s.section === slot.section) || mySubjects[0];
+                        }
+                        if (m) setSubjectId(m.id);
                         setIsLoaded(true);
                         setNav('mark');
                       }} className="px-4 py-2 bg-brand-primary text-white font-bold text-xs rounded-xl hover:opacity-90 transition-opacity">
@@ -944,8 +956,45 @@ export const FacultyAttendancePage: React.FC = () => {
                         <tr key={day} className="border-b border-borderLine">
                           <td className="px-4 py-2.5 font-bold bg-surface-2 border-r border-borderLine">{day}</td>
                           {[1,2,3,4,5,6,7].map(p=>{
-                            const slot = (Array.isArray(rawTT)?rawTT:[]).find((t:TimetableEntry)=>t.day_of_week===day&&t.period_start===p&&t.faculty_email?.toLowerCase()===user?.email?.toLowerCase());
-                            return <td key={p} className="px-2 py-2 border-r border-borderLine text-center">{slot?<div className="bg-brand-soft border border-brand-primary/20 rounded-xl p-2 text-[10px] font-bold text-brand-primary">{slot.subject_name}<div className="text-[9px] text-textMuted font-normal">Sec {slot.section}</div></div>:<span className="text-textMuted opacity-30 text-[10px]">—</span>}</td>;
+                            const slot = myTimetable.find((t: TimetableEntry) => 
+                              t.day_of_week === day && 
+                              t.period_start === p
+                            );
+                            return (
+                              <td key={p} className="px-2 py-2 border-r border-borderLine text-center">
+                                {slot ? (
+                                  <button
+                                    onClick={() => {
+                                      if (slot.semester_label) setSem(slot.semester_label as any);
+                                      if (slot.section) setSection(slot.section);
+                                      let m = mySubjects.find(s => 
+                                        s.subject_name?.toLowerCase().trim() === slot.subject_name?.toLowerCase().trim() && 
+                                        (!slot.section || s.section === slot.section)
+                                      );
+                                      if (!m) {
+                                        m = mySubjects.find(s => 
+                                          s.subject_name?.toLowerCase().includes(slot.subject_name?.toLowerCase()) || 
+                                          slot.subject_name?.toLowerCase().includes(s.subject_name?.toLowerCase())
+                                        );
+                                      }
+                                      if (!m && mySubjects.length > 0) {
+                                        m = mySubjects.find(s => s.section === slot.section) || mySubjects[0];
+                                      }
+                                      if (m) setSubjectId(m.id);
+                                      setIsLoaded(true);
+                                      setNav('mark');
+                                    }}
+                                    className="w-full text-left bg-brand-soft hover:bg-brand-primary hover:text-white transition-all border border-brand-primary/20 rounded-xl p-2 group cursor-pointer shadow-xs"
+                                    title={`Click to mark attendance for ${slot.subject_name}`}
+                                  >
+                                    <div className="text-[10px] font-bold text-brand-primary group-hover:text-white transition-colors">{slot.subject_name}</div>
+                                    <div className="text-[9px] text-textMuted group-hover:text-white/80 font-normal mt-0.5">Sec {slot.section} • P{slot.period_start}</div>
+                                  </button>
+                                ) : (
+                                  <span className="text-textMuted opacity-30 text-[10px]">—</span>
+                                )}
+                              </td>
+                            );
                           })}
                         </tr>
                       ))}

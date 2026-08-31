@@ -746,15 +746,20 @@ export const AuthPage: React.FC = () => {
           }
         } else {
           let dbUser: any = preFetchedDbUser;
-          if (!dbUser && activeTab === 'student') {
-            dbUser = await api.getStudentByEmail(data.email).catch(() => null);
+          if (!dbUser) {
+            if (activeTab === 'student') {
+              dbUser = await api.getStudentByEmail(data.email).catch(() => null);
+            } else if (activeTab === 'faculty') {
+              dbUser = await api.getFacultyByEmail(data.email).catch(() => null);
+            }
           }
           if (dbUser) {
-            rollNo = dbUser.roll_number || data.email.split('@')[0].toUpperCase();
-            displayName = dbUser.name || 'Student';
-            login(data.email, 'student', rollNo, displayName, undefined);
-            registerSession(data.email, 'student');
-            navigate('/dashboard');
+            rollNo = dbUser.roll_number || dbUser.faculty_id || data.email.split('@')[0].toUpperCase();
+            displayName = dbUser.name || (activeTab === 'faculty' ? 'Faculty Member' : 'Student');
+            const userDept = dbUser.department || (activeTab === 'faculty' ? (loginDept || 'CSE (Data Science)') : (rollNo ? getDeptFromRollNumber(rollNo) : 'CSE (Data Science)'));
+            login(data.email, activeTab, rollNo, displayName, undefined, userDept);
+            registerSession(data.email, activeTab);
+            navigate(activeTab === 'faculty' ? '/faculty/dashboard' : '/dashboard');
             return;
           }
           throw new Error(msg || 'Authentication failed');

@@ -6706,8 +6706,28 @@ app.get('/attendance/timetable', requireAuth, async (req: Request, res: Response
       query += ` AND day_of_week = $${params.length}`;
     }
     if (facultyEmail) {
-      params.push(facultyEmail.toLowerCase().trim());
-      query += ` AND LOWER(faculty_email) = $${params.length}`;
+      const email = facultyEmail.toLowerCase().trim();
+      const prefix = email.split('@')[0].replace(/[^a-z0-9]/gi, '');
+      const rootToken = prefix.replace(/(cseds|cse|ds|aiml|cyber|rgmcet|faculty|dept)$/i, '');
+      params.push(email);
+      params.push(prefix);
+      params.push(rootToken.length >= 4 ? rootToken : prefix);
+      const p1 = params.length - 2;
+      const p2 = params.length - 1;
+      const p3 = params.length;
+
+      query += ` AND (
+        LOWER(faculty_email) = $${p1}
+        OR SPLIT_PART(LOWER(faculty_email), '@', 1) = $${p2}
+        OR LOWER(faculty_email) ILIKE '%' || $${p3} || '%'
+        OR EXISTS (
+          SELECT 1 FROM subject_allotments sa 
+          WHERE (LOWER(sa.faculty_email) = $${p1} OR SPLIT_PART(LOWER(sa.faculty_email), '@', 1) = $${p2} OR LOWER(sa.faculty_email) ILIKE '%' || $${p3} || '%')
+            AND sa.semester_label = timetable_entries.semester_label 
+            AND sa.section = timetable_entries.section 
+            AND LOWER(sa.subject_name) = LOWER(timetable_entries.subject_name)
+        )
+      )`;
     }
 
     query += ` ORDER BY 
