@@ -6129,23 +6129,24 @@ app.get('/attendance/daily-period-grid', requireRole('faculty', 'hod', 'coordina
 
 
 // 11. Student / Parent / General: Get Student Attendance Summary (Per-Subject % & Overall %)
-// Correctly accounts for student's joining_date for each subject!
 app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res: Response) => {
   try {
     const rollNumber = req.params.rollNumber.toUpperCase();
 
     // Security check: students can only view own attendance
-    if (req.auth?.role === 'student' && req.auth.regNo !== rollNumber) {
+    if (req.auth?.role === 'student' && req.auth.regNo && req.auth.regNo.toUpperCase() !== rollNumber && !req.auth.email.toUpperCase().includes(rollNumber)) {
       return res.status(403).json({ error: 'Access denied: Students can only view their own attendance.' });
     }
 
     // Get student details
-    const studentRes = await db.query('SELECT roll_number, name, department, batch, section, year FROM students WHERE roll_number = $1', [rollNumber]);
+    const studentRes = await db.query('SELECT roll_number, name, department, batch, section, year FROM students WHERE UPPER(roll_number) = $1', [rollNumber]);
     const student = studentRes.rows[0] || { roll_number: rollNumber };
+    const dept = student.department || '';
+    const sec = student.section || '';
 
-    // Query all subjects this student is enrolled in with joining_date filter
-    const subjectsQuery = `
-      SELECT 
+    // Query subjects: first by subject_rosters, fallback to records / department allotments
+    let subjectsRes = await db.query(
+      `SELECT 
         a.id AS allotment_id,
         a.subject_name,
         a.subject_type,
@@ -6158,12 +6159,38 @@ app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res
       JOIN subject_allotments a ON a.id = sr.allotment_id
       LEFT JOIN attendance_sessions s ON s.allotment_id = a.id
       LEFT JOIN attendance_records r ON r.session_id = s.id AND r.roll_number = sr.roll_number
-      WHERE sr.roll_number = $1
+      WHERE UPPER(sr.roll_number) = $1
       GROUP BY a.id, a.subject_name, a.subject_type, a.semester_label, a.faculty_name, sr.joining_date
-      ORDER BY a.semester_label, a.subject_name
-    `;
+      ORDER BY a.semester_label, a.subject_name`,
+      [rollNumber]
+    );
 
-    const subjectsRes = await db.query(subjectsQuery, [rollNumber]);
+    if (subjectsRes.rows.length === 0) {
+      subjectsRes = await db.query(
+        `SELECT 
+          a.id AS allotment_id,
+          a.subject_name,
+          a.subject_type,
+          a.semester_label,
+          a.faculty_name,
+          NULL as joining_date,
+          COALESCE(SUM(s.num_periods), 0) AS total_periods_held,
+          COALESCE(SUM(CASE WHEN r.is_present = true THEN s.num_periods ELSE 0 END), 0) AS periods_attended
+        FROM subject_allotments a
+        LEFT JOIN attendance_sessions s ON s.allotment_id = a.id
+        LEFT JOIN attendance_records r ON r.session_id = s.id AND UPPER(r.roll_number) = $1
+        WHERE (
+          EXISTS (SELECT 1 FROM attendance_records ar JOIN attendance_sessions sess ON sess.id = ar.session_id WHERE sess.allotment_id = a.id AND UPPER(ar.roll_number) = $1)
+          OR (
+            ($2 <> '' AND (LOWER(REPLACE(a.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($2, ' ', '')) || '%' OR LOWER(REPLACE($2, ' ', '')) ILIKE '%' || LOWER(REPLACE(a.department, ' ', '')) || '%'))
+            AND ($3 <> '' AND a.section = $3)
+          )
+        )
+        GROUP BY a.id, a.subject_name, a.subject_type, a.semester_label, a.faculty_name
+        ORDER BY a.semester_label, a.subject_name`,
+        [rollNumber, dept, sec]
+      );
+    }
 
     let grandTotalHeld = 0;
     let grandTotalAttended = 0;
@@ -6204,16 +6231,15 @@ app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res
 });
 
 // 12. Student / Parent / Faculty / HOD / Admin: Day-wise 7-Period Attendance Dot Grid
-// Excludes sessions held prior to student's joining date
 app.get('/attendance/student/:rollNumber/daywise', requireAuth, async (req: Request, res: Response) => {
   try {
     const rollNumber = req.params.rollNumber.toUpperCase();
 
-    if (req.auth?.role === 'student' && req.auth.regNo !== rollNumber) {
+    if (req.auth?.role === 'student' && req.auth.regNo && req.auth.regNo.toUpperCase() !== rollNumber && !req.auth.email.toUpperCase().includes(rollNumber)) {
       return res.status(403).json({ error: 'Access denied: Students can only view their own attendance.' });
     }
 
-    const fromDate = (req.query.from as string) || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const fromDate = (req.query.from as string) || new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     const toDate = (req.query.to as string) || new Date().toISOString().split('T')[0];
 
     const recordsQuery = `
@@ -6228,11 +6254,11 @@ app.get('/attendance/student/:rollNumber/daywise', requireAuth, async (req: Requ
       FROM attendance_records r
       JOIN attendance_sessions s ON s.id = r.session_id
       JOIN subject_allotments a ON a.id = s.allotment_id
-      JOIN subject_rosters sr ON sr.allotment_id = a.id AND sr.roll_number = r.roll_number
-      WHERE r.roll_number = $1
+      LEFT JOIN subject_rosters sr ON sr.allotment_id = a.id AND UPPER(sr.roll_number) = UPPER(r.roll_number)
+      WHERE UPPER(r.roll_number) = $1
         AND s.session_date >= $2
         AND s.session_date <= $3
-        AND s.session_date >= COALESCE(sr.joining_date, '1970-01-01'::date)
+        AND (sr.joining_date IS NULL OR s.session_date >= sr.joining_date)
       ORDER BY s.session_date DESC, s.period_start ASC
     `;
 

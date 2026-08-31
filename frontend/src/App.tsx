@@ -21,7 +21,7 @@ const CodingAnalyticsPage = lazy(() => import('./features/coding/CodingAnalytics
 const PlatformStatsRedirect = lazy(() => import('./features/coding/PlatformStatsRedirect').then(m => ({ default: m.PlatformStatsRedirect })));
 const FacultyManagementPage = lazy(() => import('./features/admin/FacultyManagementPage'));
 const MyMentorPage = lazy(() => import('./features/mentor/MyMentorPage'));
-const AttendancePage = lazy(() => import('./features/attendance/faculty/FacultyAttendancePage').then(m => ({ default: m.FacultyAttendancePage })));
+const AttendancePage = lazy(() => import('./features/attendance/AttendancePage').then(m => ({ default: m.AttendancePage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
