@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate, useSearchParams, useLocation, useParams, Navigate } from 'react-router-dom';
-import { ShieldCheck, UserCheck, Lock, CheckCircle2, XCircle, Loader2, Sparkles, Eye, EyeOff, ArrowLeft } from 'lucide-react';
+import { ShieldCheck, UserCheck, Lock, CheckCircle2, XCircle, Loader2, Sparkles, Eye, EyeOff, ArrowLeft, KeyRound, Mail } from 'lucide-react';
 import { studentSignUpSchema, facultySignUpSchema, loginSchema, adminLoginSchema, TIER1_SUPER_ADMIN_EMAILS, StudentSignUpInput, FacultySignUpInput, LoginInput, DEPARTMENT_CODE_MAP, VALID_DEPARTMENT_NAMES, getDeptCodeFromRollNumber, getDeptFromRollNumber } from '../../lib/validation/auth';
 import { api } from '../../lib/api';
-import { cognitoSignUp, cognitoSignIn, cognitoSignOut, isCognitoConfigError } from '../../lib/cognitoAuth';
+import { cognitoSignUp, cognitoSignIn, cognitoSignOut, isCognitoConfigError, cognitoForgotPassword, cognitoConfirmPassword } from '../../lib/cognitoAuth';
 import { useAuth } from '../../context/AuthContext';
 import { PillButton } from '../../components/common/PillButton';
 import { Footer } from '../../components/layout/Footer';
@@ -155,6 +155,65 @@ export const AuthPage: React.FC = () => {
     resolver: zodResolver(adminLoginSchema),
     mode: 'onChange',
   });
+
+  // Forgot Password Modal State
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotCode, setForgotCode] = useState('');
+  const [forgotNewPassword, setForgotNewPassword] = useState('');
+  const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
+  const [showForgotNewPassword, setShowForgotNewPassword] = useState(false);
+  const [forgotStep, setForgotStep] = useState<'email' | 'code' | 'success'>('email');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotError, setForgotError] = useState<string | null>(null);
+  const [forgotSuccess, setForgotSuccess] = useState<string | null>(null);
+
+  const handleSendResetCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanEmail = forgotEmail.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setForgotError('Please enter a valid email address.');
+      return;
+    }
+    setForgotLoading(true);
+    setForgotError(null);
+    try {
+      await cognitoForgotPassword(cleanEmail);
+      setForgotStep('code');
+      setForgotSuccess(`Verification code sent to ${cleanEmail}. Please check your inbox & spam folder.`);
+    } catch (err: any) {
+      setForgotError(err?.message || 'Failed to send verification code. Please check your email.');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const handleConfirmResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotCode.trim()) {
+      setForgotError('Please enter the 6-digit verification code sent to your email.');
+      return;
+    }
+    if (!forgotNewPassword || forgotNewPassword.length < 8) {
+      setForgotError('New password must be at least 8 characters long.');
+      return;
+    }
+    if (forgotNewPassword !== forgotConfirmPassword) {
+      setForgotError('Passwords do not match.');
+      return;
+    }
+    setForgotLoading(true);
+    setForgotError(null);
+    try {
+      await cognitoConfirmPassword(forgotEmail.trim().toLowerCase(), forgotCode.trim(), forgotNewPassword);
+      setForgotStep('success');
+      setForgotSuccess('Password reset successfully! You can now log in with your new password.');
+    } catch (err: any) {
+      setForgotError(err?.message || 'Failed to reset password. Please verify the code and try again.');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
 
   const handleGoBack = () => {
     navigate('/');
@@ -1383,7 +1442,22 @@ export const AuthPage: React.FC = () => {
                     </div>
 
                     <div>
-                      <label className="block text-xs font-semibold text-textPrimary mb-1">Password *</label>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="block text-xs font-semibold text-textPrimary">Password *</label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setForgotEmail(watchedLoginEmail || '');
+                            setShowForgotModal(true);
+                            setForgotStep('email');
+                            setForgotError(null);
+                            setForgotSuccess(null);
+                          }}
+                          className="text-[11px] font-semibold text-brand-primary hover:underline cursor-pointer"
+                        >
+                          Forgot Password?
+                        </button>
+                      </div>
                       <div className="relative">
                         <input
                           {...registerLogin('password')}
@@ -1914,7 +1988,22 @@ export const AuthPage: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-textPrimary mb-1">Password</label>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block text-xs font-semibold text-textPrimary">Password</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setForgotEmail(watchedLoginEmail || '');
+                          setShowForgotModal(true);
+                          setForgotStep('email');
+                          setForgotError(null);
+                          setForgotSuccess(null);
+                        }}
+                        className="text-[11px] font-semibold text-brand-primary hover:underline cursor-pointer"
+                      >
+                        Forgot Password?
+                      </button>
+                    </div>
                     <div className="relative">
                       <input
                         {...registerLogin('password')}
@@ -2094,6 +2183,165 @@ export const AuthPage: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Forgot / Reset Password Modal ── */}
+      {showForgotModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-fade-in">
+          <div className="bg-surface border border-borderLine rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4 relative">
+            <button
+              onClick={() => setShowForgotModal(false)}
+              className="absolute top-4 right-4 text-textMuted hover:text-textPrimary text-lg font-bold"
+            >
+              ✕
+            </button>
+
+            <div className="text-center space-y-1">
+              <div className="w-12 h-12 rounded-full bg-brand-primary/10 text-brand-primary flex items-center justify-center mx-auto mb-2">
+                <KeyRound className="w-6 h-6" />
+              </div>
+              <h2 className="text-lg font-black text-textPrimary">Reset Your Password</h2>
+              <p className="text-xs text-textSecondary">
+                {forgotStep === 'email' && 'Enter your institutional @rgmcet.edu.in email to receive a password reset code.'}
+                {forgotStep === 'code' && 'Enter the verification code sent to your email and choose a new password.'}
+                {forgotStep === 'success' && 'Your password has been reset successfully.'}
+              </p>
+            </div>
+
+            {forgotError && (
+              <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-300 dark:border-red-800 rounded-xl text-xs text-red-700 dark:text-red-300 flex items-start gap-2">
+                <XCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{forgotError}</span>
+              </div>
+            )}
+
+            {forgotSuccess && (
+              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 rounded-xl text-xs text-emerald-700 dark:text-emerald-300 flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{forgotSuccess}</span>
+              </div>
+            )}
+
+            {forgotStep === 'email' && (
+              <form onSubmit={handleSendResetCode} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-textPrimary mb-1">Your Email Address</label>
+                  <div className="relative">
+                    <input
+                      type="email"
+                      value={forgotEmail}
+                      onChange={(e) => setForgotEmail(e.target.value)}
+                      placeholder="username@rgmcet.edu.in"
+                      required
+                      className="w-full px-3.5 py-2 pl-9 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                    />
+                    <Mail className="w-4 h-4 text-textMuted absolute left-3 top-1/2 -translate-y-1/2" />
+                  </div>
+                </div>
+
+                <div className="pt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotModal(false)}
+                    className="flex-1 py-2 text-xs font-semibold rounded-xl border border-borderLine text-textSecondary hover:bg-surface-2 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={forgotLoading}
+                    className="flex-1 py-2 text-xs font-bold rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    {forgotLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                    <span>{forgotLoading ? 'Sending OTP...' : 'Send OTP Code'}</span>
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {forgotStep === 'code' && (
+              <form onSubmit={handleConfirmResetPassword} className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-textPrimary mb-1">Verification Code (from Email)</label>
+                  <input
+                    type="text"
+                    value={forgotCode}
+                    onChange={(e) => setForgotCode(e.target.value)}
+                    placeholder="Enter 6-digit code"
+                    required
+                    className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary tracking-widest font-mono font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-textPrimary mb-1">New Password (min 8 chars)</label>
+                  <div className="relative">
+                    <input
+                      type={showForgotNewPassword ? 'text' : 'password'}
+                      value={forgotNewPassword}
+                      onChange={(e) => setForgotNewPassword(e.target.value)}
+                      placeholder="Enter new password"
+                      required
+                      className="w-full px-3.5 py-2 pr-10 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotNewPassword(!showForgotNewPassword)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-textSecondary hover:text-textPrimary p-1 rounded-md"
+                    >
+                      {showForgotNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-textPrimary mb-1">Confirm New Password</label>
+                  <input
+                    type="password"
+                    value={forgotConfirmPassword}
+                    onChange={(e) => setForgotConfirmPassword(e.target.value)}
+                    placeholder="Re-enter new password"
+                    required
+                    className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                  />
+                </div>
+
+                <div className="pt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setForgotStep('email')}
+                    className="flex-1 py-2 text-xs font-semibold rounded-xl border border-borderLine text-textSecondary hover:bg-surface-2 cursor-pointer"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={forgotLoading}
+                    className="flex-1 py-2 text-xs font-bold rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    {forgotLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                    <span>{forgotLoading ? 'Resetting...' : 'Reset Password'}</span>
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {forgotStep === 'success' && (
+              <div className="pt-3 text-center space-y-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowForgotModal(false);
+                    setForgotStep('email');
+                  }}
+                  className="w-full py-2.5 text-xs font-bold rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white shadow-md transition-all active:scale-95 cursor-pointer"
+                >
+                  Return to Login
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -100,6 +100,48 @@ export function cognitoSignIn(email: string, password: string): Promise<CognitoA
 }
 
 /**
+ * Initiate Forgot Password flow with Cognito (sends OTP verification code to user's email).
+ */
+export function cognitoForgotPassword(email: string): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const cognitoUser = new CognitoUser({
+      Username: email.toLowerCase().trim(),
+      Pool: userPool,
+    });
+
+    cognitoUser.forgotPassword({
+      onSuccess: (data) => {
+        resolve(data);
+      },
+      onFailure: (err) => {
+        reject(new Error(err?.message || 'Failed to initiate password reset'));
+      },
+    });
+  });
+}
+
+/**
+ * Confirm new password using the verification code sent to email.
+ */
+export function cognitoConfirmPassword(email: string, verificationCode: string, newPassword: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cognitoUser = new CognitoUser({
+      Username: email.toLowerCase().trim(),
+      Pool: userPool,
+    });
+
+    cognitoUser.confirmPassword(verificationCode.trim(), newPassword, {
+      onSuccess: () => {
+        resolve();
+      },
+      onFailure: (err) => {
+        reject(new Error(err?.message || 'Password reset confirmation failed'));
+      },
+    });
+  });
+}
+
+/**
  * Sign out the current user from Cognito.
  */
 export function cognitoSignOut(): void {
