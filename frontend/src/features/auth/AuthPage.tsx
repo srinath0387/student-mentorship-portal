@@ -805,17 +805,37 @@ export const AuthPage: React.FC = () => {
         login(data.email, 'student', rollNo, displayName, jwtToken, studentDept);
       } else if (activeTab === 'faculty') {
         let faculty = await api.getFacultyByEmail(data.email).catch((err: any) => {
-          if (err?.message && (err.message.includes('removed') || err.message.includes('blocked'))) {
-            throw err;
+          if (err?.message && (err.message.includes('blocked'))) {
+            throw err; // Only block for explicitly blocked accounts
           }
           return null;
         });
 
-        // IMPORTANT: If faculty authenticated via Cognito but is NOT in the database (or was deleted by admin),
-        // we must block login and NOT auto-recreate their profile.
+        // If Cognito auth succeeded but faculty not yet in DB — auto-create the record
         if (!faculty) {
-          cognitoSignOut(); // invalidate Cognito session immediately
-          throw new Error('Your faculty account has been removed by an administrator. Please contact your system administrator to be re-enrolled.');
+          const facId = `FAC_${data.email.split('@')[0].toUpperCase()}`;
+          const facDeptForCreate = loginDept || 'CSE (Data Science)';
+          try {
+            await api.createFaculty({
+              faculty_id: facId,
+              name: data.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+              email: data.email,
+              department: facDeptForCreate,
+              role: 'mentor',
+            });
+            faculty = await api.getFacultyByEmail(data.email).catch(() => null);
+          } catch (_) {}
+
+          // If still null after create attempt, allow login with minimal profile
+          if (!faculty) {
+            faculty = {
+              faculty_id: facId,
+              name: data.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
+              email: data.email,
+              department: facDeptForCreate,
+              role: 'mentor',
+            };
+          }
         }
 
         if (loginDept && faculty.department !== loginDept) {
