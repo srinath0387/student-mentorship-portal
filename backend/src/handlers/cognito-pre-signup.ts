@@ -22,8 +22,13 @@ export const handler = async (
       try {
         await db.query(`CREATE TABLE IF NOT EXISTS blocked_emails (email TEXT PRIMARY KEY, blocked_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP, reason TEXT)`);
         
-        // If the email is currently active in the faculty table, auto-unblock and allow sign up
-        const activeCheck = await db.query('SELECT 1 FROM faculty WHERE LOWER(email) = $1', [email]);
+        // If the email is active in faculty, users, or subject_allotments, auto-unblock and allow sign up
+        const activeCheck = await db.query(
+          `SELECT 1 FROM faculty WHERE LOWER(email) = $1 
+           UNION SELECT 1 FROM users WHERE LOWER(email) = $1 
+           UNION SELECT 1 FROM subject_allotments WHERE LOWER(faculty_email) = $1`,
+          [email]
+        );
         if (activeCheck.rows.length > 0) {
           await db.query('DELETE FROM blocked_emails WHERE LOWER(email) = $1', [email]).catch(() => {});
         } else {

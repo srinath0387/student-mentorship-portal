@@ -497,16 +497,8 @@ export const AuthPage: React.FC = () => {
 
       const generatedFacId = `FAC_${data.email.split('@')[0].toUpperCase()}`;
       let jwtToken: string | undefined;
-      await cognitoSignUp({
-        email: data.email,
-        password: data.password,
-        regNo: generatedFacId,
-        year: 'Faculty',
-        role: 'faculty',
-      });
-      const authResult = await cognitoSignIn(data.email, data.password);
-      jwtToken = authResult.idToken;
 
+      // 1. Create/unblock faculty in database first
       await api.createFaculty({
         faculty_id: generatedFacId,
         name: data.fullName,
@@ -516,6 +508,17 @@ export const AuthPage: React.FC = () => {
       }).catch((dbErr: any) => {
         console.warn('[DB Faculty Create Notice]:', dbErr.message);
       });
+
+      // 2. Register with Cognito
+      await cognitoSignUp({
+        email: data.email,
+        password: data.password,
+        regNo: generatedFacId,
+        year: 'Faculty',
+        role: 'faculty',
+      });
+      const authResult = await cognitoSignIn(data.email, data.password);
+      jwtToken = authResult.idToken;
 
       login(data.email, 'faculty', generatedFacId, data.fullName, jwtToken, data.department);
       registerSession(data.email, 'faculty');
@@ -536,16 +539,8 @@ export const AuthPage: React.FC = () => {
 
       const generatedHodId = `HOD_${data.email.split('@')[0].toUpperCase()}`;
       let jwtToken: string | undefined;
-      await cognitoSignUp({
-        email: data.email,
-        password: data.password,
-        regNo: generatedHodId,
-        year: 'HOD',
-        role: 'hod',
-      });
-      const authResult = await cognitoSignIn(data.email, data.password);
-      jwtToken = authResult.idToken;
 
+      // 1. Create/unblock HOD in database first
       await api.createFaculty({
         faculty_id: generatedHodId,
         name: data.fullName,
@@ -555,6 +550,17 @@ export const AuthPage: React.FC = () => {
       }).catch((dbErr: any) => {
         console.warn('[DB HOD Create Notice]:', dbErr.message);
       });
+
+      // 2. Register with Cognito
+      await cognitoSignUp({
+        email: data.email,
+        password: data.password,
+        regNo: generatedHodId,
+        year: 'HOD',
+        role: 'hod',
+      });
+      const authResult = await cognitoSignIn(data.email, data.password);
+      jwtToken = authResult.idToken;
 
       login(data.email, 'hod', generatedHodId, data.fullName, jwtToken, data.department);
       registerSession(data.email, 'hod');
