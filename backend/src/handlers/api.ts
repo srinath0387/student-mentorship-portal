@@ -3451,11 +3451,8 @@ app.post('/faculty', async (req: Request, res: Response) => {
       return res.status(201).json({ message: 'Faculty registered successfully', faculty: newFaculty });
     }
 
-    // Check if email is in blocked_emails
-    const blockedCheck = await db.query('SELECT reason FROM blocked_emails WHERE LOWER(email) = $1', [cleanEmail]).catch(() => ({ rows: [] }));
-    if (blockedCheck.rows.length > 0) {
-      return res.status(403).json({ error: `This email (${cleanEmail}) has been removed and blocked by an administrator.` });
-    }
+    // If faculty is being registered or updated, ensure email is removed from blocked_emails
+    await db.query('DELETE FROM blocked_emails WHERE LOWER(email) = $1', [cleanEmail]).catch(() => {});
 
     // Upsert the new faculty record (on email conflict, update name/dept/role)
     const result = await db.query(
@@ -3590,15 +3587,18 @@ app.get('/faculty/by-email/:email', async (req: Request, res: Response) => {
       return res.json({ faculty_id: 'FAC001', name: 'Dr. M. V. Ramana', email, department: 'CSE', role: 'mentor' });
     }
 
-    // Tier 0: Check if email is in blocked_emails
+    // Tier 0: Check if email is active in faculty table -> auto-unblock
+    const exact = await db.query('SELECT * FROM faculty WHERE LOWER(TRIM(email)) = $1', [email]);
+    if (exact.rows.length > 0) {
+      await db.query('DELETE FROM blocked_emails WHERE LOWER(email) = $1', [email]).catch(() => {});
+      return res.json(exact.rows[0]);
+    }
+
+    // Tier 0.5: Check blocked_emails for non-existent faculty
     const blockedCheck = await db.query('SELECT reason FROM blocked_emails WHERE LOWER(email) = $1', [email]).catch(() => ({ rows: [] }));
     if (blockedCheck.rows.length > 0) {
       return res.status(403).json({ error: 'This faculty account has been removed and blocked by an administrator.', isBlocked: true });
     }
-
-    // Tier 1: Exact email match in faculty table
-    const exact = await db.query('SELECT * FROM faculty WHERE LOWER(TRIM(email)) = $1', [email]);
-    if (exact.rows.length > 0) return res.json(exact.rows[0]);
 
     // Tier 2: Check users table for this email
     const userMatch = await db.query('SELECT * FROM users WHERE LOWER(TRIM(email)) = $1 LIMIT 1', [email]).catch(() => ({ rows: [] }));
@@ -4146,6 +4146,9 @@ app.patch('/faculty/:id/email', requireRole('admin'), async (req: Request, res: 
       [cleanEmail, facId]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Faculty not found' });
+
+    // Ensure email is unblocked
+    await db.query('DELETE FROM blocked_emails WHERE LOWER(email) = $1', [cleanEmail]).catch(() => {});
     res.json({ message: 'Email linked successfully', faculty: result.rows[0] });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

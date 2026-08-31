@@ -21,9 +21,16 @@ export const handler = async (
     if (role === 'faculty' || role === 'hod') {
       try {
         await db.query(`CREATE TABLE IF NOT EXISTS blocked_emails (email TEXT PRIMARY KEY, blocked_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP, reason TEXT)`);
-        const blocked = await db.query('SELECT 1 FROM blocked_emails WHERE email = $1', [email]);
-        if (blocked.rows.length > 0) {
-          throw new Error('This email has been deactivated by the administrator. Please contact the system administrator to restore access.');
+        
+        // If the email is currently active in the faculty table, auto-unblock and allow sign up
+        const activeCheck = await db.query('SELECT 1 FROM faculty WHERE LOWER(email) = $1', [email]);
+        if (activeCheck.rows.length > 0) {
+          await db.query('DELETE FROM blocked_emails WHERE LOWER(email) = $1', [email]).catch(() => {});
+        } else {
+          const blocked = await db.query('SELECT 1 FROM blocked_emails WHERE LOWER(email) = $1', [email]);
+          if (blocked.rows.length > 0) {
+            throw new Error('This email has been deactivated by the administrator. Please contact the system administrator to restore access.');
+          }
         }
       } catch (dbErr: any) {
         if (dbErr.message.includes('deactivated')) throw dbErr;
