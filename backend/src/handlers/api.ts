@@ -3582,7 +3582,7 @@ app.post('/faculty', async (req: Request, res: Response) => {
   }
 });
 
-// GET /faculty/by-email/:email — 3-tier lookup: exact → name-fuzzy → 404
+// GET /faculty/by-email/:email — Multi-tier lookup: exact -> users table -> subject_allotments -> email prefix / domain variations -> name-fuzzy -> 404
 app.get('/faculty/by-email/:email', async (req: Request, res: Response) => {
   try {
     const email = req.params.email.toLowerCase().trim();
@@ -3596,36 +3596,117 @@ app.get('/faculty/by-email/:email', async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'This faculty account has been removed and blocked by an administrator.', isBlocked: true });
     }
 
-    // Tier 1: exact email match
-    const exact = await db.query('SELECT * FROM faculty WHERE LOWER(email) = $1', [email]);
+    // Tier 1: Exact email match in faculty table
+    const exact = await db.query('SELECT * FROM faculty WHERE LOWER(TRIM(email)) = $1', [email]);
     if (exact.rows.length > 0) return res.json(exact.rows[0]);
 
-    // Tier 2: name-based fuzzy match from email prefix
-    // Safety: prefix must be >= 6 chars to be reliable; require ALL normalized words
-    // from the candidate faculty name to appear in the email prefix (word-containment, not substring).
-    // We also only auto-link to placeholder (pending_email) records to avoid mis-linking real faculty.
-    const prefix = email.split('@')[0].replace(/[^a-z]/gi, '').toLowerCase();
-    if (prefix.length >= 6) {
-      const all = await db.query('SELECT * FROM faculty', []);
-      const normFac = (s: string) => s.toLowerCase()
+    // Tier 2: Check users table for this email
+    const userMatch = await db.query('SELECT * FROM users WHERE LOWER(TRIM(email)) = $1 LIMIT 1', [email]).catch(() => ({ rows: [] }));
+    if (userMatch.rows.length > 0) {
+      const u = userMatch.rows[0];
+      const facId = u.faculty_id || `FAC_${email.split('@')[0].toUpperCase()}`;
+      const facName = u.name || 'Faculty Member';
+      const facDept = u.department || 'CSE (Data Science)';
+      const facRole = u.role || 'mentor';
+
+      await db.query(
+        `INSERT INTO faculty (faculty_id, name, email, department, role)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (faculty_id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name, department = EXCLUDED.department`,
+        [facId, facName, email, facDept, facRole]
+      ).catch(() => {});
+
+      const synced = await db.query('SELECT * FROM faculty WHERE LOWER(TRIM(email)) = $1', [email]);
+      if (synced.rows.length > 0) return res.json(synced.rows[0]);
+    }
+
+    // Tier 3: Check subject_allotments for exact faculty_email match
+    const allotMatch = await db.query('SELECT * FROM subject_allotments WHERE LOWER(TRIM(faculty_email)) = $1 LIMIT 1', [email]).catch(() => ({ rows: [] }));
+    if (allotMatch.rows.length > 0) {
+      const a = allotMatch.rows[0];
+      const facId = `FAC_${email.split('@')[0].toUpperCase()}`;
+      const facName = a.faculty_name || 'Faculty Member';
+      const facDept = a.department || 'CSE (Data Science)';
+
+      await db.query(
+        `INSERT INTO faculty (faculty_id, name, email, department, role)
+         VALUES ($1, $2, $3, $4, 'mentor')
+         ON CONFLICT (faculty_id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name, department = EXCLUDED.department`,
+        [facId, facName, email, facDept]
+      ).catch(() => {});
+
+      const synced = await db.query('SELECT * FROM faculty WHERE LOWER(TRIM(email)) = $1', [email]);
+      if (synced.rows.length > 0) return res.json(synced.rows[0]);
+    }
+
+    // Tier 4: Email prefix / domain variation match (e.g. shakeercseds vs shakeer vs shakeer.cseds)
+    const emailPrefix = email.split('@')[0].toLowerCase().trim();
+    // Extract root token from email (e.g. "shakeercseds" -> "shakeer", "srinath.cse" -> "srinath")
+    const cleanPrefix = emailPrefix.replace(/[^a-z0-9]/gi, '');
+    const rootToken = cleanPrefix.replace(/(cseds|cse|ds|aiml|cyber|rgmcet|faculty|dept)$/i, '').replace(/^(dr|prof|mr|mrs|ms|er)/i, '');
+
+    const allFaculty = await db.query('SELECT * FROM faculty', []).catch(() => ({ rows: [] }));
+    
+    // Check faculty email usernames
+    let matchedFac = allFaculty.rows.find((f: any) => {
+      const fEmail = (f.email || '').toLowerCase().trim();
+      if (!fEmail || fEmail.startsWith('pending_')) return false;
+      const fPrefix = fEmail.split('@')[0].replace(/[^a-z0-9]/gi, '');
+      const fRoot = fPrefix.replace(/(cseds|cse|ds|aiml|cyber|rgmcet|faculty|dept)$/i, '');
+      
+      if (fPrefix === cleanPrefix) return true;
+      if (rootToken.length >= 4 && fRoot === rootToken) return true;
+      if (rootToken.length >= 4 && fPrefix.includes(rootToken)) return true;
+      return false;
+    });
+
+    // Tier 5: Match by faculty name in faculty table
+    if (!matchedFac && (rootToken.length >= 4 || cleanPrefix.length >= 4)) {
+      const normName = (s: string) => (s || '').toLowerCase()
         .replace(/^(dr|prof|mr|mrs|ms|er)\.?\s*/i, '')
         .replace(/\b[a-z]\.\s*/g, '')
-        .replace(/[^a-z]/g, '')
+        .replace(/[^a-z0-9]/g, '')
         .trim();
-      const match = all.rows.find((f: any) => {
-        // Only auto-link placeholder records; real-email records need admin action
-        if (f.email && !String(f.email).startsWith('pending_')) return false;
-        const n = normFac(f.name);
-        if (n.length < 4) return false;
-        // The entire normalized name must be contained within the email prefix (or vice versa)
-        // AND the overlap must be at least 6 chars to avoid short-name false positives
-        const overlap = n.length >= 6 ? prefix.includes(n) : (n.includes(prefix) && prefix.length >= 6);
-        return overlap;
+
+      const searchKey = rootToken.length >= 4 ? rootToken : cleanPrefix;
+
+      matchedFac = allFaculty.rows.find((f: any) => {
+        const n = normName(f.name);
+        if (!n || n.length < 3) return false;
+        return n.includes(searchKey) || searchKey.includes(n);
       });
-      if (match) {
-        // Auto-link email to the matched faculty record
-        await db.query('UPDATE faculty SET email = $1, updated_at = CURRENT_TIMESTAMP WHERE faculty_id = $2', [email, match.faculty_id]);
-        return res.json({ ...match, email });
+    }
+
+    if (matchedFac) {
+      // Auto-link/update faculty email to the requested login email
+      await db.query('UPDATE faculty SET email = $1, updated_at = CURRENT_TIMESTAMP WHERE faculty_id = $2', [email, matchedFac.faculty_id]).catch(() => {});
+      return res.json({ ...matchedFac, email });
+    }
+
+    // Tier 6: Check subject_allotments by faculty_name or faculty_email containing rootToken
+    if (rootToken.length >= 4) {
+      const allotFuzzy = await db.query(
+        `SELECT * FROM subject_allotments 
+         WHERE LOWER(faculty_name) ILIKE '%' || $1 || '%' OR LOWER(faculty_email) ILIKE '%' || $1 || '%' 
+         LIMIT 1`,
+        [rootToken]
+      ).catch(() => ({ rows: [] }));
+
+      if (allotFuzzy.rows.length > 0) {
+        const a = allotFuzzy.rows[0];
+        const facId = `FAC_${email.split('@')[0].toUpperCase()}`;
+        const facName = a.faculty_name || 'Faculty Member';
+        const facDept = a.department || 'CSE (Data Science)';
+
+        await db.query(
+          `INSERT INTO faculty (faculty_id, name, email, department, role)
+           VALUES ($1, $2, $3, $4, 'mentor')
+           ON CONFLICT (faculty_id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name, department = EXCLUDED.department`,
+          [facId, facName, email, facDept]
+        ).catch(() => {});
+
+        const synced = await db.query('SELECT * FROM faculty WHERE LOWER(TRIM(email)) = $1', [email]);
+        if (synced.rows.length > 0) return res.json(synced.rows[0]);
       }
     }
 
