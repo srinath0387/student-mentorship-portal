@@ -45,42 +45,17 @@ export const FacultyAttendancePage: React.FC = () => {
   const [reportSubId, setReportSubId] = useState('All');
   const [reportSection, setReportSection] = useState('All');
 
-  // Fetch allotted subjects (with automatic fallback to getAllotments if needed)
+  // Fetch allotted subjects strictly for the logged-in faculty
   const { data: rawSubjects = [], refetch: refetchSubjects } = useQuery({
     queryKey: ['mySubjectsAll', user?.email, user?.department],
     queryFn: async () => {
       try {
         const res = await api.getMyAttendanceSubjects();
-        if (Array.isArray(res) && res.length > 0) return res;
+        return Array.isArray(res) ? res : [];
       } catch (e) {
         console.warn('my-subjects fetch error:', e);
+        return [];
       }
-      try {
-        const all = await api.getAllotments();
-        if (Array.isArray(all) && all.length > 0) {
-          const userEmail = (user?.email || '').toLowerCase().trim();
-          const userPrefix = userEmail.includes('@') ? userEmail.split('@')[0] : '';
-          const userName = (user?.name || '').toLowerCase().trim();
-          const userDept = (user?.department || '').toLowerCase().trim();
-
-          const matched = all.filter((a: any) => {
-            const fEmail = (a.faculty_email || '').toLowerCase().trim();
-            const fName = (a.faculty_name || '').toLowerCase().trim();
-            const fDept = (a.department || '').toLowerCase().trim();
-
-            if (userEmail && fEmail === userEmail) return true;
-            if (userPrefix && userPrefix.length >= 3 && (fEmail.includes(userPrefix) || fName.includes(userPrefix))) return true;
-            if (userName && (fName.includes(userName) || userName.includes(fName))) return true;
-            if (userDept && fDept === userDept) return true;
-            return false;
-          });
-
-          return matched.length > 0 ? matched : all;
-        }
-      } catch (e) {
-        console.error('getAllotments fallback error:', e);
-      }
-      return [];
     },
     staleTime: 0,
     refetchOnMount: 'always',

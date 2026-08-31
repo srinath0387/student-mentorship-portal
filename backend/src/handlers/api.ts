@@ -5600,44 +5600,26 @@ app.get('/attendance/my-subjects', requireRole('faculty', 'hod', 'admin', 'coord
       return res.json(hodRows.length > 0 ? hodRows : allRows);
     }
 
-    // For faculty: match by email, prefix, name, or department
-    const emailPrefix = facultyEmail.includes('@') ? facultyEmail.split('@')[0].replace(/[^a-z0-9]/gi, '') : '';
+    // For faculty: match strictly by assigned faculty email or faculty name
+    const emailPrefix = facultyEmail.includes('@') ? facultyEmail.split('@')[0].toLowerCase().trim() : facultyEmail;
     const cleanName = facultyName.replace(/^(dr|prof|mr|mrs|ms|er)\.?\s*/i, '').toLowerCase().trim();
-    const nameTokens = cleanName ? cleanName.split(/[\s._-]+/).filter((t: string) => t.length >= 3) : [];
 
     const matched = allRows.filter((a: any) => {
       const fEmail = (a.faculty_email || '').toLowerCase().trim();
-      const fName = (a.faculty_name || '').toLowerCase().trim();
-      // Exact email
-      if (facultyEmail && fEmail === facultyEmail) return true;
-      // Email prefix
-      if (emailPrefix && emailPrefix.length >= 3 && fEmail.includes(emailPrefix)) return true;
-      // Exact name
-      if (cleanName && (fName === cleanName || fName.includes(cleanName) || cleanName.includes(fName))) return true;
-      // Name tokens
-      if (nameTokens.length > 0 && nameTokens.some((tok: string) => fName.includes(tok) || fEmail.includes(tok))) return true;
+      const fName = (a.faculty_name || '').replace(/^(dr|prof|mr|mrs|ms|er)\.?\s*/i, '').toLowerCase().trim();
+      const fEmailPrefix = fEmail.includes('@') ? fEmail.split('@')[0] : fEmail;
+
+      // 1. Exact email match
+      if (facultyEmail && fEmail && fEmail === facultyEmail) return true;
+      // 2. Exact email username match (e.g. srinath.cse@... vs srinath.cse@rgmcet.edu.in)
+      if (emailPrefix && fEmailPrefix && emailPrefix === fEmailPrefix) return true;
+      // 3. Exact faculty name match
+      if (cleanName && fName && (fName === cleanName || (cleanName.length >= 4 && (fName.includes(cleanName) || cleanName.includes(fName))))) return true;
 
       return false;
     });
 
-    if (matched.length > 0) {
-      return res.json(matched);
-    }
-
-    // Fallback 1: match by department if known
-    if (userDept && userDept !== 'All' && userDept !== 'General') {
-      const deptRows = allRows.filter((a: any) => {
-        const d = (a.department || '').toLowerCase().replace(/\s+/g, '');
-        const target = userDept.toLowerCase().replace(/\s+/g, '');
-        return d.includes(target) || target.includes(d);
-      });
-      if (deptRows.length > 0) {
-        return res.json(deptRows);
-      }
-    }
-
-    // Fallback 2: Universal fallback — return all allotments so faculty is NEVER blocked
-    return res.json(allRows);
+    return res.json(matched);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
