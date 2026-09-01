@@ -4208,11 +4208,11 @@ app.post('/faculty/smart-auto-merge', requireRole('admin'), async (req: Request,
 
     // 1. Fetch all faculty
     const allFacRes = await db.query(`
-      SELECT f.*, 
+      SELECT f.faculty_id, f.name, f.email, f.department, f.role, f.created_at, f.updated_at,
         COUNT(DISTINCT ma.roll_number)::int AS mentee_count
       FROM faculty f
       LEFT JOIN mentor_assignments ma ON UPPER(ma.faculty_id) = UPPER(f.faculty_id)
-      GROUP BY f.faculty_id, f.name, f.email, f.department, f.role, f.designation, f.phone, f.created_at, f.updated_at
+      GROUP BY f.faculty_id, f.name, f.email, f.department, f.role, f.created_at, f.updated_at
       ORDER BY f.name ASC
     `);
 
@@ -4385,11 +4385,11 @@ app.get('/faculty/unlinked-candidates', requireRole('admin'), async (req: Reques
     if (db.isMock) return res.json({ candidates: [], totalUnlinked: 0 });
 
     const allFacRes = await db.query(`
-      SELECT f.*, 
+      SELECT f.faculty_id, f.name, f.email, f.department, f.role, f.created_at, f.updated_at,
         COUNT(DISTINCT ma.roll_number)::int AS mentee_count
       FROM faculty f
       LEFT JOIN mentor_assignments ma ON UPPER(ma.faculty_id) = UPPER(f.faculty_id)
-      GROUP BY f.faculty_id, f.name, f.email, f.department, f.role, f.designation, f.phone, f.created_at, f.updated_at
+      GROUP BY f.faculty_id, f.name, f.email, f.department, f.role, f.created_at, f.updated_at
       ORDER BY f.name ASC
     `);
 
