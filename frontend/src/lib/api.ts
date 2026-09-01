@@ -425,6 +425,33 @@ export const api = {
     });
   },
 
+  // Smart Auto-Merge all unlinked faculty records with registered faculty/users (admin)
+  smartAutoMergeFaculty: async (): Promise<{
+    success: boolean;
+    mergedCount: number;
+    merged: any[];
+    remainingUnlinkedCount: number;
+    remainingUnlinked: any[];
+    message: string;
+  }> => {
+    return fetchWithAuth('/faculty/smart-auto-merge', {
+      method: 'POST',
+    });
+  },
+
+  // Manually merge source faculty into target faculty (admin)
+  mergeFacultyRecords: async (sourceFacultyId: string, targetFacultyId: string): Promise<any> => {
+    return fetchWithAuth('/faculty/merge', {
+      method: 'POST',
+      body: JSON.stringify({ sourceFacultyId, targetFacultyId }),
+    });
+  },
+
+  // Get unlinked faculty with candidate suggestions (admin)
+  getUnlinkedFacultyCandidates: async (): Promise<{ candidates: any[]; totalUnlinked: number }> => {
+    return fetchWithAuth('/faculty/unlinked-candidates');
+  },
+
   // Update faculty display name (admin)
   patchFacultyName: async (facultyId: string, name: string): Promise<any> => {
     return fetchWithAuth(`/faculty/${facultyId}/name`, {

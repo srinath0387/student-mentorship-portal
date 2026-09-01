@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
-import { Mail, Users, Pencil, Check, X, Trash2, AlertTriangle, Link, Eye } from 'lucide-react';
+import { Mail, Users, Pencil, Check, X, Trash2, AlertTriangle, Link, Eye, Sparkles } from 'lucide-react';
 import { FacultyProfileInspectionModal } from '../../faculty/components/FacultyProfileInspectionModal';
 
 interface Props {
@@ -20,6 +20,7 @@ export const FacultyRecordsTable: React.FC<Props> = ({ onLinkEmail }) => {
   const [renameValue, setRenameValue] = useState('');
   const [renameSaving, setRenameSaving] = useState(false);
   const [renameError, setRenameError] = useState('');
+  const [autoMerging, setAutoMerging] = useState(false);
 
   const startRename = (fac: any) => { setRenamingId(fac.faculty_id); setRenameValue(fac.name); setRenameError(''); };
   const cancelRename = () => { setRenamingId(null); setRenameValue(''); setRenameError(''); };
@@ -71,11 +72,28 @@ export const FacultyRecordsTable: React.FC<Props> = ({ onLinkEmail }) => {
 
   return (
     <div className="bg-surface border border-borderLine rounded-xl p-6 shadow-sm">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <div>
           <h3 className="text-base font-bold text-textPrimary">Faculty Records</h3>
           <p className="text-xs text-textSecondary mt-0.5">{faculty.length} faculty member{faculty.length !== 1 ? 's' : ''} in system</p>
         </div>
+        <button
+          onClick={() => {
+            setAutoMerging(true);
+            api.smartAutoMergeFaculty()
+              .then((res) => {
+                queryClient.invalidateQueries({ queryKey: ['adminFaculty'] });
+                alert(res.message);
+              })
+              .catch((err) => alert(`Auto-merge error: ${err.message}`))
+              .finally(() => setAutoMerging(false));
+          }}
+          disabled={autoMerging}
+          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-purple-500/40 bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 text-xs font-bold hover:bg-purple-600 hover:text-white transition-colors disabled:opacity-60 shadow-xs"
+        >
+          <Sparkles className={`w-3.5 h-3.5 ${autoMerging ? 'animate-spin text-purple-400' : 'text-purple-600 dark:text-purple-400'}`} />
+          <span>{autoMerging ? 'Auto-Merging…' : '✨ Smart Auto-Link & Merge'}</span>
+        </button>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">

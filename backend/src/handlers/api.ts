@@ -6,6 +6,7 @@ import { calculateEmployabilityScore } from '../services/employability';
 import { runCodingProfileCronSync, fetchLeetCodeStatsDirect, fetchGitHubStatsDirect, fetchEduSkillsStatsDirect, cleanEduSkillsHandle } from '../services/cronSync';
 import { cachedFetch } from '../services/platformCache';
 import { deleteCognitoUsers, deleteAllCognitoUsers, updateCognitoUserPassword } from '../services/cognitoService';
+import { calculateFacultyNameSimilarity, isEmailNameMatch, mergeFacultyRecordsInDb } from '../services/facultyMatching';
 import {
   studentProfileSchema,
   academicSchema,
@@ -4198,7 +4199,271 @@ app.get('/faculty', requireRole('admin', 'hod', 'coordinator', 'faculty'), async
   }
 });
 
-// PATCH /faculty/:id/email — Admin manually links an email to a faculty record
+// POST /faculty/smart-auto-merge — Admin utility to scan all unlinked/placeholder faculty records and auto-merge with registered faculty/users
+app.post('/faculty/smart-auto-merge', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    if (db.isMock) {
+      return res.json({ success: true, message: 'Mock mode — 0 records merged', mergedCount: 0, merged: [] });
+    }
+
+    // 1. Fetch all faculty
+    const allFacRes = await db.query(`
+      SELECT f.*, 
+        COUNT(DISTINCT ma.roll_number)::int AS mentee_count
+      FROM faculty f
+      LEFT JOIN mentor_assignments ma ON UPPER(ma.faculty_id) = UPPER(f.faculty_id)
+      GROUP BY f.faculty_id, f.name, f.email, f.department, f.role, f.designation, f.phone, f.created_at, f.updated_at
+      ORDER BY f.name ASC
+    `);
+
+    // 2. Separate into registered (real email) and unlinked (pending_ or no email)
+    const registeredFaculty: any[] = [];
+    const unlinkedFaculty: any[] = [];
+
+    for (const f of allFacRes.rows) {
+      const email = (f.email || '').toLowerCase().trim();
+      if (!email || email.startsWith('pending_') || !email.includes('@')) {
+        unlinkedFaculty.push(f);
+      } else {
+        registeredFaculty.push(f);
+      }
+    }
+
+    // 3. Fetch all registered users with role in ('faculty', 'hod') to also match against users table
+    const allUsersRes = await db.query(
+      `SELECT * FROM users WHERE LOWER(role) IN ('faculty', 'hod') AND LOWER(email) LIKE '%@rgmcet.edu.in'`
+    ).catch(() => ({ rows: [] }));
+    const registeredUsers = allUsersRes.rows;
+
+    const mergedList: any[] = [];
+    const remainingUnlinked: any[] = [];
+
+    for (const unlinked of unlinkedFaculty) {
+      let bestMatch: { targetFacultyId: string; targetName: string; targetEmail: string; confidence: number; reason: string } | null = null;
+
+      // Check against registered faculty first
+      for (const reg of registeredFaculty) {
+        const nameSim = calculateFacultyNameSimilarity(unlinked.name, reg.name);
+        const emailMatch = isEmailNameMatch(reg.email, unlinked.name);
+
+        let totalConfidence = nameSim.confidence;
+        if (emailMatch) totalConfidence = Math.max(totalConfidence, 90);
+
+        // Boost if departments match
+        if (unlinked.department && reg.department && unlinked.department === reg.department) {
+          totalConfidence = Math.min(100, totalConfidence + 5);
+        }
+
+        if (totalConfidence >= 80 && (!bestMatch || totalConfidence > bestMatch.confidence)) {
+          bestMatch = {
+            targetFacultyId: reg.faculty_id,
+            targetName: reg.name,
+            targetEmail: reg.email,
+            confidence: totalConfidence,
+            reason: nameSim.reason || 'Email username match',
+          };
+        }
+      }
+
+      // If no match in registered faculty, check registered users table
+      if (!bestMatch) {
+        for (const user of registeredUsers) {
+          const nameSim = calculateFacultyNameSimilarity(unlinked.name, user.name || '');
+          const emailMatch = isEmailNameMatch(user.email, unlinked.name);
+
+          let totalConfidence = nameSim.confidence;
+          if (emailMatch) totalConfidence = Math.max(totalConfidence, 90);
+
+          if (totalConfidence >= 80) {
+            let targetFacId = user.faculty_id;
+            if (!targetFacId) {
+              targetFacId = `FAC_${user.email.split('@')[0].toUpperCase()}`;
+            }
+
+            await db.query(
+              `INSERT INTO faculty (faculty_id, name, email, department, role)
+               VALUES ($1, $2, $3, $4, $5)
+               ON CONFLICT (faculty_id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name`,
+              [targetFacId, user.name || unlinked.name, user.email.toLowerCase().trim(), user.department || unlinked.department || 'CSE (Data Science)', user.role || 'mentor']
+            ).catch(() => {});
+
+            bestMatch = {
+              targetFacultyId: targetFacId,
+              targetName: user.name || unlinked.name,
+              targetEmail: user.email,
+              confidence: totalConfidence,
+              reason: `Matched registered portal user (${nameSim.reason || 'Email match'})`,
+            };
+            break;
+          }
+        }
+      }
+
+      // Execute merge if high-confidence match found
+      if (bestMatch && bestMatch.confidence >= 80) {
+        try {
+          const mergeResult = await mergeFacultyRecordsInDb(unlinked.faculty_id, bestMatch.targetFacultyId, db);
+          mergedList.push({
+            unlinkedId: unlinked.faculty_id,
+            unlinkedName: unlinked.name,
+            mergedIntoId: bestMatch.targetFacultyId,
+            mergedIntoName: bestMatch.targetName,
+            mergedIntoEmail: bestMatch.targetEmail,
+            confidence: bestMatch.confidence,
+            reason: bestMatch.reason,
+            menteesMigrated: mergeResult.menteesMigrated,
+          });
+        } catch (mErr: any) {
+          console.warn(`[AutoMerge] Failed merging ${unlinked.faculty_id}:`, mErr.message);
+          remainingUnlinked.push(unlinked);
+        }
+      } else {
+        remainingUnlinked.push(unlinked);
+      }
+    }
+
+    // Run final mentor assignment sync
+    await db.query(`
+      UPDATE students s
+      SET faculty_mentor_id = ma.faculty_id, updated_at = NOW()
+      FROM mentor_assignments ma
+      WHERE UPPER(s.roll_number) = UPPER(ma.roll_number)
+        AND s.faculty_mentor_id IS DISTINCT FROM ma.faculty_id
+    `).catch(() => {});
+
+    res.json({
+      success: true,
+      mergedCount: mergedList.length,
+      merged: mergedList,
+      remainingUnlinkedCount: remainingUnlinked.length,
+      remainingUnlinked: remainingUnlinked.map((f: any) => ({
+        faculty_id: f.faculty_id,
+        name: f.name,
+        email: f.email,
+        department: f.department,
+        mentee_count: f.mentee_count,
+      })),
+      message: `Successfully auto-merged ${mergedList.length} faculty record(s). ${remainingUnlinked.length} record(s) remaining unlinked.`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /faculty/merge — Admin manually merges a source faculty into a target faculty
+app.post('/faculty/merge', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    const { sourceFacultyId, targetFacultyId } = req.body;
+    if (!sourceFacultyId || !targetFacultyId) {
+      return res.status(400).json({ error: 'sourceFacultyId and targetFacultyId are required' });
+    }
+
+    if (db.isMock) {
+      return res.json({ success: true, message: 'Mock mode — merge complete' });
+    }
+
+    const result = await mergeFacultyRecordsInDb(sourceFacultyId, targetFacultyId, db);
+
+    // Sync students.faculty_mentor_id
+    await db.query(`
+      UPDATE students s
+      SET faculty_mentor_id = ma.faculty_id, updated_at = NOW()
+      FROM mentor_assignments ma
+      WHERE UPPER(s.roll_number) = UPPER(ma.roll_number)
+        AND s.faculty_mentor_id IS DISTINCT FROM ma.faculty_id
+    `).catch(() => {});
+
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /faculty/unlinked-candidates — Admin gets unlinked faculty with suggested registered matches
+app.get('/faculty/unlinked-candidates', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    if (db.isMock) return res.json({ candidates: [], totalUnlinked: 0 });
+
+    const allFacRes = await db.query(`
+      SELECT f.*, 
+        COUNT(DISTINCT ma.roll_number)::int AS mentee_count
+      FROM faculty f
+      LEFT JOIN mentor_assignments ma ON UPPER(ma.faculty_id) = UPPER(f.faculty_id)
+      GROUP BY f.faculty_id, f.name, f.email, f.department, f.role, f.designation, f.phone, f.created_at, f.updated_at
+      ORDER BY f.name ASC
+    `);
+
+    const registeredFaculty: any[] = [];
+    const unlinkedFaculty: any[] = [];
+
+    for (const f of allFacRes.rows) {
+      const email = (f.email || '').toLowerCase().trim();
+      if (!email || email.startsWith('pending_') || !email.includes('@')) {
+        unlinkedFaculty.push(f);
+      } else {
+        registeredFaculty.push(f);
+      }
+    }
+
+    const allUsersRes = await db.query(
+      `SELECT * FROM users WHERE LOWER(role) IN ('faculty', 'hod') AND LOWER(email) LIKE '%@rgmcet.edu.in'`
+    ).catch(() => ({ rows: [] }));
+    const registeredUsers = allUsersRes.rows;
+
+    const results = unlinkedFaculty.map((unlinked) => {
+      const suggestions: any[] = [];
+
+      for (const reg of registeredFaculty) {
+        const sim = calculateFacultyNameSimilarity(unlinked.name, reg.name);
+        const emailMatch = isEmailNameMatch(reg.email, unlinked.name);
+        let conf = sim.confidence;
+        if (emailMatch) conf = Math.max(conf, 90);
+
+        if (conf >= 50) {
+          suggestions.push({
+            faculty_id: reg.faculty_id,
+            name: reg.name,
+            email: reg.email,
+            department: reg.department,
+            confidence: conf,
+            reason: sim.reason || 'Email pattern match',
+          });
+        }
+      }
+
+      for (const user of registeredUsers) {
+        const sim = calculateFacultyNameSimilarity(unlinked.name, user.name || '');
+        const emailMatch = isEmailNameMatch(user.email, unlinked.name);
+        let conf = sim.confidence;
+        if (emailMatch) conf = Math.max(conf, 90);
+
+        if (conf >= 50 && !suggestions.some((s) => s.email === user.email)) {
+          suggestions.push({
+            faculty_id: user.faculty_id || `FAC_${user.email.split('@')[0].toUpperCase()}`,
+            name: user.name || user.email,
+            email: user.email,
+            department: user.department,
+            confidence: conf,
+            reason: `Registered portal user (${sim.reason || 'Email match'})`,
+          });
+        }
+      }
+
+      suggestions.sort((a, b) => b.confidence - a.confidence);
+
+      return {
+        unlinked,
+        suggestions: suggestions.slice(0, 5),
+      };
+    });
+
+    res.json({ candidates: results, totalUnlinked: unlinkedFaculty.length });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /faculty/:id/email — Admin manually links an email to a faculty record (auto-merges if email already exists)
 app.patch('/faculty/:id/email', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const facId = req.params.id.toUpperCase();
@@ -4210,17 +4475,28 @@ app.patch('/faculty/:id/email', requireRole('admin'), async (req: Request, res: 
       return res.json({ message: 'Email linked successfully', faculty_id: facId, email: cleanEmail });
     }
 
-    // Check another faculty doesn't already own this email
+    // Check if another faculty already owns this email
     const conflict = await db.query(
-      'SELECT faculty_id FROM faculty WHERE LOWER(email) = $1 AND faculty_id != $2',
+      'SELECT faculty_id, name FROM faculty WHERE LOWER(email) = $1 AND UPPER(faculty_id) != $2',
       [cleanEmail, facId]
     );
+
     if (conflict.rows.length > 0) {
-      return res.status(409).json({ error: `Email already linked to faculty ${conflict.rows[0].faculty_id}` });
+      const targetFacId = conflict.rows[0].faculty_id;
+      // Auto-merge the placeholder/unlinked record into the registered target faculty!
+      const mergeRes = await mergeFacultyRecordsInDb(facId, targetFacId, db);
+      await db.query('DELETE FROM blocked_emails WHERE LOWER(email) = $1', [cleanEmail]).catch(() => {});
+      const finalFac = await db.query('SELECT * FROM faculty WHERE UPPER(faculty_id) = $1', [targetFacId.toUpperCase()]);
+      return res.json({
+        message: `Email was already linked to "${conflict.rows[0].name}" (${targetFacId}); records automatically merged with ${mergeRes.menteesMigrated} mentees migrated!`,
+        faculty: finalFac.rows[0] || { faculty_id: targetFacId, email: cleanEmail },
+        merged: true,
+        targetFacultyId: targetFacId,
+      });
     }
 
     const result = await db.query(
-      `UPDATE faculty SET email = $1, updated_at = CURRENT_TIMESTAMP WHERE faculty_id = $2 RETURNING *`,
+      `UPDATE faculty SET email = $1, updated_at = CURRENT_TIMESTAMP WHERE UPPER(faculty_id) = $2 RETURNING *`,
       [cleanEmail, facId]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Faculty not found' });

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import { Search, Mail, Pencil, Link, Trash2, AlertTriangle, Users, Check, X, ShieldAlert, UserCheck, RefreshCw, UserPlus, Eye, Filter, Building } from 'lucide-react';
+import { Search, Mail, Pencil, Link, Trash2, AlertTriangle, Users, Check, X, ShieldAlert, UserCheck, RefreshCw, UserPlus, Eye, Filter, Building, Sparkles, Wand2, GitMerge } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { VALID_DEPARTMENT_NAMES, normalizeDepartmentName } from '../../lib/validation/auth';
 import { AddMenteeModal } from './components/AddMenteeModal';
@@ -57,6 +57,17 @@ export default function FacultyManagementPage() {
   const [showBlocked, setShowBlocked] = useState(false);
   const [actionError, setActionError] = useState<Record<string, string>>({});
 
+  // Manual Merge state
+  const [mergeSourceFac, setMergeSourceFac] = useState<FacultyRow | null>(null);
+  const [mergeTargetFacId, setMergeTargetFacId] = useState<string>('');
+  const [mergeReport, setMergeReport] = useState<{
+    mergedCount: number;
+    merged: any[];
+    remainingUnlinkedCount: number;
+    remainingUnlinked: any[];
+    message: string;
+  } | null>(null);
+
   const { data: faculty = [], isLoading: facLoading } = useQuery<FacultyRow[]>({
     queryKey: ['adminFaculty', selectedDept],
     queryFn: () => api.getAllFaculty(selectedDept === 'All' ? undefined : selectedDept),
@@ -95,8 +106,42 @@ export default function FacultyManagementPage() {
 
   const linkEmailMut = useMutation({
     mutationFn: ({ id, email }: { id: string; email: string }) => api.patchFacultyEmail(id, email),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['adminFaculty'] }); setLinkEmailId(null); },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['adminFaculty'] });
+      qc.invalidateQueries({ queryKey: ['facultyMenteeDetail'] });
+      setLinkEmailId(null);
+      if (data?.message) {
+        setSyncResult(data.message);
+        setTimeout(() => setSyncResult(null), 6000);
+      }
+    },
     onError: (e: any) => setActionError(p => ({ ...p, linkEmail: e.message })),
+  });
+
+  const autoMergeMut = useMutation({
+    mutationFn: () => api.smartAutoMergeFaculty(),
+    onSuccess: (data) => {
+      setMergeReport(data);
+      qc.invalidateQueries({ queryKey: ['adminFaculty'] });
+      qc.invalidateQueries({ queryKey: ['facultyMenteeDetail'] });
+      setSyncResult(data.message);
+      setTimeout(() => setSyncResult(null), 6000);
+    },
+    onError: (e: any) => setSyncResult(`Auto-merge failed: ${e.message}`),
+  });
+
+  const manualMergeMut = useMutation({
+    mutationFn: ({ sourceId, targetId }: { sourceId: string; targetId: string }) =>
+      api.mergeFacultyRecords(sourceId, targetId),
+    onSuccess: (data) => {
+      setSyncResult(data.message || 'Records merged successfully');
+      qc.invalidateQueries({ queryKey: ['adminFaculty'] });
+      qc.invalidateQueries({ queryKey: ['facultyMenteeDetail'] });
+      setMergeSourceFac(null);
+      setMergeTargetFacId('');
+      setTimeout(() => setSyncResult(null), 6000);
+    },
+    onError: (e: any) => setActionError(p => ({ ...p, merge: e.message })),
   });
 
   const deleteMut = useMutation({
@@ -132,7 +177,8 @@ export default function FacultyManagementPage() {
   });
 
   // Detect unlinked faculty with mentees (possible duplicates or orphaned records)
-  const unlinkedWithMentees = faculty.filter(f => f.email?.startsWith('pending_') && (f.mentee_count ?? 0) > 0);
+  const unlinkedWithMentees = faculty.filter(f => (!f.email || f.email.startsWith('pending_')) && (f.mentee_count ?? 0) > 0);
+  const totalUnlinked = faculty.filter(f => !f.email || f.email.startsWith('pending_'));
 
   const filtered = faculty.filter(f => {
     const matchSearch =
@@ -184,6 +230,18 @@ export default function FacultyManagementPage() {
             </div>
           )}
 
+          {/* Smart Auto-Link & Merge Button */}
+          <button
+            id="smart-auto-merge-btn"
+            onClick={() => autoMergeMut.mutate()}
+            disabled={autoMergeMut.isPending}
+            title="Scan and auto-merge duplicate unlinked CSV records into real registered faculty accounts using AI fuzzy name matching"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-purple-500/40 bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 text-xs font-bold hover:bg-purple-600 hover:text-white transition-colors disabled:opacity-60 shadow-xs"
+          >
+            <Sparkles className={`w-3.5 h-3.5 ${autoMergeMut.isPending ? 'animate-spin text-purple-400' : 'text-purple-600 dark:text-purple-400'}`} />
+            <span>{autoMergeMut.isPending ? 'Auto-Merging…' : '✨ Smart Auto-Link & Merge'}</span>
+          </button>
+
           {/* Sync button: reconciles mentor_assignments ↔ students.faculty_mentor_id */}
           <button
             id="sync-mentor-assignments-btn"
@@ -212,7 +270,7 @@ export default function FacultyManagementPage() {
       {/* Sync result toast */}
       {syncResult && (
         <div className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-semibold ${
-          syncResult.startsWith('Sync failed')
+          syncResult.startsWith('Sync failed') || syncResult.startsWith('Auto-merge failed')
             ? 'bg-alert-soft border-alert/40 text-alert'
             : 'bg-success-soft border-success/40 text-success'
         }`}>
@@ -221,19 +279,32 @@ export default function FacultyManagementPage() {
         </div>
       )}
 
-      {/* Unlinked-with-mentees warning banner */}
+      {/* Unlinked-with-mentees warning banner with Instant 1-Click Auto-Merge Action */}
       {unlinkedWithMentees.length > 0 && (
-        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-300/60 rounded-2xl p-4 flex gap-3 items-start shadow-xs">
-          <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
-          <div>
-            <p className="text-xs font-bold text-amber-700 dark:text-amber-400">
-              {unlinkedWithMentees.length} unlinked faculty record{unlinkedWithMentees.length > 1 ? 's' : ''} with mentees assigned
-            </p>
-            <p className="text-[11px] text-amber-600 dark:text-amber-500 mt-0.5">
-              These records were auto-created from CSV but don't have a real email linked yet.
-              Faculty cannot log in until you click <strong>Link Email</strong> on their row.
-              Records: {unlinkedWithMentees.map(f => f.name).join(', ')}
-            </p>
+        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-300/60 rounded-2xl p-5 flex flex-col md:flex-row gap-4 items-start md:items-center justify-between shadow-xs">
+          <div className="flex gap-3 items-start flex-1 min-w-0">
+            <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="text-xs font-bold text-amber-800 dark:text-amber-300">
+                {unlinkedWithMentees.length} unlinked faculty record{unlinkedWithMentees.length > 1 ? 's' : ''} with mentees assigned
+              </p>
+              <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-0.5 leading-relaxed">
+                These records were auto-created from CSV with name variations (case, initials, surname expansions). Click <strong>Smart Auto-Link</strong> to automatically match and merge them with registered faculty accounts, or click <strong>Link / Merge</strong> on any row.
+              </p>
+              <p className="text-[10px] text-amber-600 dark:text-amber-500 mt-1 truncate max-w-3xl font-medium">
+                Records: {unlinkedWithMentees.map(f => f.name).join(', ')}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0 w-full md:w-auto">
+            <button
+              onClick={() => autoMergeMut.mutate()}
+              disabled={autoMergeMut.isPending}
+              className="w-full md:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-xs transition-colors disabled:opacity-60"
+            >
+              <Sparkles className={`w-4 h-4 ${autoMergeMut.isPending ? 'animate-spin' : ''}`} />
+              <span>{autoMergeMut.isPending ? 'Auto-Merging…' : '✨ Auto-Merge All Unlinked'}</span>
+            </button>
           </div>
         </div>
       )}
@@ -433,6 +504,15 @@ export default function FacultyManagementPage() {
                       >
                         <Mail className="w-3 h-3" /> {isLinked ? 'Update Email' : 'Link Email'}
                       </button>
+                      {!isLinked && (
+                        <button
+                          onClick={() => { setMergeSourceFac(f); setMergeTargetFacId(''); }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-purple-500/40 bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-xs font-semibold hover:bg-purple-600 hover:text-white transition-colors"
+                          title="Merge this unlinked placeholder into a registered faculty account"
+                        >
+                          <GitMerge className="w-3 h-3" /> Merge Record
+                        </button>
+                      )}
                       {isDeleting ? (
                         <>
                           <button
@@ -613,6 +693,155 @@ export default function FacultyManagementPage() {
           faculty={inspectingFaculty}
           onClose={() => setInspectingFaculty(null)}
         />
+      )}
+
+      {/* ── Auto-Merge Report Modal ── */}
+      {mergeReport && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-surface border border-borderLine rounded-2xl p-6 max-w-lg w-full shadow-2xl max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-borderLine">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-300">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-textPrimary">Auto-Merge Complete</h3>
+                  <p className="text-xs text-textSecondary">{mergeReport.message}</p>
+                </div>
+              </div>
+              <button onClick={() => setMergeReport(null)} className="p-1 rounded-lg hover:bg-surface-2 text-textSecondary">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="py-4 overflow-y-auto space-y-3 flex-1">
+              {mergeReport.merged.length > 0 ? (
+                <div>
+                  <h4 className="text-xs font-bold text-success uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <Check className="w-3.5 h-3.5" /> Successfully Merged ({mergeReport.merged.length})
+                  </h4>
+                  <div className="space-y-2">
+                    {mergeReport.merged.map((m: any, idx: number) => (
+                      <div key={idx} className="p-3 rounded-xl bg-surface-2 border border-borderLine text-xs space-y-1">
+                        <div className="flex items-center justify-between font-bold">
+                          <span className="text-amber-600 dark:text-amber-400">{m.unlinkedName}</span>
+                          <span className="text-textSecondary">➔</span>
+                          <span className="text-green-600 dark:text-green-400">{m.mergedIntoName}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[11px] text-textSecondary">
+                          <span>Email: <strong className="text-textPrimary">{m.mergedIntoEmail}</strong></span>
+                          <span>{m.menteesMigrated} mentee(s) transferred</span>
+                        </div>
+                        <p className="text-[10px] text-textMuted italic">{m.reason} ({m.confidence}% match)</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 rounded-xl bg-surface-2 text-center text-xs text-textSecondary">
+                  No automated high-confidence matches found for remaining unlinked records. You can link emails or merge manually below.
+                </div>
+              )}
+
+              {mergeReport.remainingUnlinked && mergeReport.remainingUnlinked.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="text-xs font-bold text-amber-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5" /> Still Unlinked ({mergeReport.remainingUnlinked.length})
+                  </h4>
+                  <p className="text-[11px] text-textSecondary mb-2">
+                    These faculty members haven't registered on the portal yet or have unique names. You can click <strong>Link Email</strong> on their row once they sign up.
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {mergeReport.remainingUnlinked.map((f: any) => (
+                      <span key={f.faculty_id} className="px-2.5 py-1 rounded-lg bg-amber-100/70 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 text-[11px] font-semibold">
+                        {f.name} ({f.mentee_count ?? 0} mentees)
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="pt-3 border-t border-borderLine flex justify-end">
+              <button
+                onClick={() => setMergeReport(null)}
+                className="px-4 py-2 rounded-xl bg-brand-primary text-white font-bold text-xs hover:bg-brand-primary/90 transition-colors"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Manual Merge Modal ── */}
+      {mergeSourceFac && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-surface border border-borderLine rounded-2xl p-6 max-w-md w-full shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-borderLine">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-300">
+                  <GitMerge className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-textPrimary">Merge Faculty Record</h3>
+                  <p className="text-xs text-textSecondary">Transfer all mentees & allotments to registered account</p>
+                </div>
+              </div>
+              <button onClick={() => setMergeSourceFac(null)} className="p-1 rounded-lg hover:bg-surface-2 text-textSecondary">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="py-4 space-y-4 text-xs">
+              <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-300/40">
+                <span className="font-bold text-amber-800 dark:text-amber-300 block mb-0.5">Source (Unlinked CSV Record):</span>
+                <p className="font-semibold text-textPrimary text-sm">{mergeSourceFac.name}</p>
+                <p className="text-[11px] text-textSecondary mt-0.5">ID: {mergeSourceFac.faculty_id} • Mentees: {mergeSourceFac.mentee_count ?? 0}</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-textPrimary mb-1.5">
+                  Merge into Registered Faculty Account:
+                </label>
+                <select
+                  value={mergeTargetFacId}
+                  onChange={(e) => setMergeTargetFacId(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-borderLine bg-background text-xs font-semibold text-textPrimary focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  <option value="">-- Select Registered Faculty Member --</option>
+                  {faculty
+                    .filter((f) => f.faculty_id !== mergeSourceFac.faculty_id && f.email && !f.email.startsWith('pending_'))
+                    .map((f) => (
+                      <option key={f.faculty_id} value={f.faculty_id}>
+                        {f.name} ({f.email}) - {f.department}
+                      </option>
+                    ))}
+                </select>
+                <p className="text-[11px] text-textMuted mt-1.5">
+                  All assigned mentees ({mergeSourceFac.mentee_count ?? 0}), timetable classes, and subject allotments will be transferred to this faculty member. The unlinked placeholder record will then be safely removed.
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-borderLine flex justify-end gap-2">
+              <button
+                onClick={() => setMergeSourceFac(null)}
+                className="px-3.5 py-2 rounded-xl border border-borderLine bg-surface text-textSecondary text-xs font-semibold hover:bg-background"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={!mergeTargetFacId || manualMergeMut.isPending}
+                onClick={() => manualMergeMut.mutate({ sourceId: mergeSourceFac.faculty_id, targetId: mergeTargetFacId })}
+                className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs disabled:opacity-50 transition-colors inline-flex items-center gap-1.5"
+              >
+                <GitMerge className="w-3.5 h-3.5" />
+                <span>{manualMergeMut.isPending ? 'Merging…' : 'Confirm Merge'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
