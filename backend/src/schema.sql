@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS academics (
 CREATE TABLE IF NOT EXISTS coding_profiles (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     student_id VARCHAR(10) NOT NULL REFERENCES students(roll_number) ON DELETE CASCADE,
-    platform VARCHAR(50) NOT NULL CHECK (platform IN ('GitHub', 'LeetCode', 'GeeksforGeeks', 'HackerRank', 'Codeforces', 'CodeChef', 'Kaggle', 'StackOverflow', 'GSoC-LFX')),
+    platform VARCHAR(50) NOT NULL CHECK (platform IN ('GitHub', 'LeetCode', 'GeeksforGeeks', 'HackerRank', 'Codeforces', 'CodeChef', 'Kaggle', 'StackOverflow', 'GSoC-LFX', 'EduSkills')),
     handle VARCHAR(100) NOT NULL,
     streak INT DEFAULT 0,
     repositories_count INT DEFAULT 0,
@@ -98,9 +98,20 @@ CREATE TABLE IF NOT EXISTS certifications (
     title VARCHAR(200) NOT NULL,
     date_completed DATE,
     certificate_file_url TEXT,
+    verified BOOLEAN DEFAULT FALSE,
     suggested BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(student_id, title)
 );
+-- Migration: if table already exists, add columns/constraints safely
+ALTER TABLE certifications ADD COLUMN IF NOT EXISTS verified BOOLEAN DEFAULT FALSE;
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'certifications_student_id_title_key'
+  ) THEN
+    ALTER TABLE certifications ADD CONSTRAINT certifications_student_id_title_key UNIQUE (student_id, title);
+  END IF;
+END $$;
 
 -- 7. Soft Skills Table
 CREATE TABLE IF NOT EXISTS soft_skills (

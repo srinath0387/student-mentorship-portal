@@ -3,7 +3,7 @@ import cors from 'cors';
 import serverless from 'serverless-http';
 import { db } from '../db';
 import { calculateEmployabilityScore } from '../services/employability';
-import { runCodingProfileCronSync, fetchLeetCodeStatsDirect, fetchGitHubStatsDirect } from '../services/cronSync';
+import { runCodingProfileCronSync, fetchLeetCodeStatsDirect, fetchGitHubStatsDirect, fetchEduSkillsStatsDirect, cleanEduSkillsHandle } from '../services/cronSync';
 import { cachedFetch } from '../services/platformCache';
 import { deleteCognitoUsers, deleteAllCognitoUsers, updateCognitoUserPassword } from '../services/cognitoService';
 import {
@@ -2924,6 +2924,84 @@ app.get('/proxy/gfg/:handle', async (req: Request, res: Response) => {
     res.status(500).json({ error: err.message || 'Failed to fetch GFG profile' });
   }
 });
+// GET /proxy/eduskills/:handle — Proxy live EduSkills & Credly badge data
+app.get('/proxy/eduskills/:handle', async (req: Request, res: Response) => {
+  try {
+    const rawHandle = decodeURIComponent(String(req.params.handle || '')).trim();
+    const handle = cleanEduSkillsHandle(rawHandle);
+    if (!handle || handle.toLowerCase() === 'not linked') {
+      return res.status(400).json({ error: 'Valid EduSkills or Credly handle is required' });
+    }
+
+    const { data: result, fromCache } = await cachedFetch('eduskills', handle, async () => {
+      const data = await fetchEduSkillsStatsDirect(handle);
+      if (!data) {
+        throw Object.assign(new Error('not_found'), { isNotFound: true });
+      }
+      return data;
+    });
+
+    res.set('X-Cache', fromCache ? 'HIT' : 'MISS');
+    res.json(result);
+  } catch (err: any) {
+    if (err.isNotFound) return res.status(404).json({ error: `EduSkills / Credly user "${req.params.handle}" not found` });
+    res.status(500).json({ error: err.message || 'Failed to fetch EduSkills certifications' });
+  }
+});
+
+// POST /proxy/eduskills/sync-student/:rollNumber — Syncs earned EduSkills badges into student certifications table
+app.post('/proxy/eduskills/sync-student/:rollNumber', async (req: Request, res: Response) => {
+  try {
+    const rollNumber = String(req.params.rollNumber || '').toUpperCase().trim();
+    const { handle } = req.body;
+    if (!handle || String(handle).trim() === '' || String(handle).toLowerCase() === 'not linked') {
+      return res.status(400).json({ error: 'Valid handle is required' });
+    }
+
+    const cleanH = cleanEduSkillsHandle(handle);
+    const data = await fetchEduSkillsStatsDirect(cleanH);
+    if (!data) {
+      return res.status(404).json({ error: 'Could not fetch EduSkills / Credly badges for this handle' });
+    }
+
+    if (!db.isMock && data.badges && data.badges.length > 0) {
+      for (const badge of data.badges) {
+        await db.query(
+          `INSERT INTO certifications (student_id, provider, title, date_completed, certificate_file_url, verified)
+           VALUES ($1, 'EduSkills', $2, $3, $4, TRUE)
+           ON CONFLICT (student_id, title) DO UPDATE SET
+             provider = 'EduSkills',
+             date_completed = COALESCE(EXCLUDED.date_completed, certifications.date_completed),
+             certificate_file_url = COALESCE(EXCLUDED.certificate_file_url, certifications.certificate_file_url),
+             verified = TRUE`,
+          [
+            rollNumber,
+            badge.title,
+            badge.issuedAt ? new Date(badge.issuedAt) : null,
+            badge.verifyUrl || badge.badgeUrl || null,
+          ]
+        ).catch(() => {});
+      }
+
+      // Also ensure coding_profiles has an entry for EduSkills
+      await db.query(
+        `INSERT INTO coding_profiles (student_id, platform, handle, score_rating, repositories_count)
+         VALUES ($1, 'EduSkills', $2, $3, $3)
+         ON CONFLICT (student_id, platform) DO UPDATE SET
+           handle = EXCLUDED.handle,
+           score_rating = EXCLUDED.score_rating,
+           repositories_count = EXCLUDED.repositories_count,
+           last_synced = CURRENT_TIMESTAMP`,
+        [rollNumber, cleanH, data.totalCertificates]
+      ).catch(() => {});
+    }
+
+    res.json({ message: 'EduSkills certifications synced successfully', data });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to sync EduSkills certifications' });
+  }
+});
+
 // ============================================================================
 // Tech Skills
 // ============================================================================

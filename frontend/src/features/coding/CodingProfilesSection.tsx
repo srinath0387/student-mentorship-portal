@@ -111,20 +111,23 @@ export const CodingProfilesSection: React.FC<CodingProfilesSectionProps> = ({
         checkAndAdd('CodeChef', (student as any).codechef_handle || (student as any).codechef);
         checkAndAdd('GeeksforGeeks', (student as any).geeksforgeeks_handle || (student as any).geeksforgeeks);
         checkAndAdd('HackerRank', (student as any).hackerrank_handle || (student as any).hackerrank);
+        checkAndAdd('EduSkills', (student as any).eduskills_handle || (student as any).eduskills || (student as any).credly);
       }
 
       setLoadingPlatform(true);
       const newSnapshots: Partial<Record<PlatformId, PlatformStatsSnapshot>> = {};
 
       for (const item of activeList) {
-        const pId = item.platform.toLowerCase().replace(/\s+/g, '') as PlatformId;
-        const normalizedId: PlatformId =
-          pId === 'leetcode' ? 'leetcode' :
-          pId === 'github' ? 'github' :
-          pId === 'codeforces' ? 'codeforces' :
-          pId === 'codechef' ? 'codechef' :
-          pId === 'geeksforgeeks' ? 'geeksforgeeks' :
-          pId === 'hackerrank' ? 'hackerrank' : 'coding-stats';
+        const pRaw = item.platform.toLowerCase().replace(/\s+/g, '');
+        const normalizedId: PlatformId = (
+          pRaw === 'leetcode' ? 'leetcode' :
+          pRaw === 'github' ? 'github' :
+          pRaw === 'codeforces' ? 'codeforces' :
+          pRaw === 'codechef' ? 'codechef' :
+          pRaw === 'geeksforgeeks' ? 'geeksforgeeks' :
+          pRaw === 'hackerrank' ? 'hackerrank' :
+          pRaw === 'eduskills' || pRaw === 'credly' ? 'eduskills' : 'coding-stats'
+        ) as PlatformId;
 
         if (item.handle) {
           try {
@@ -177,6 +180,39 @@ export const CodingProfilesSection: React.FC<CodingProfilesSectionProps> = ({
                     commits_count: 0,
                     prs_merged: 0,
                   }).then(() => {
+                    queryClient.invalidateQueries({ queryKey: ['hodStudents'] });
+                    queryClient.invalidateQueries({ queryKey: ['leaderboardStudents'] });
+                    queryClient.invalidateQueries({ queryKey: ['students'] });
+                    queryClient.invalidateQueries({ queryKey: ['facultyMentees'] });
+                  }).catch(() => {});
+                }
+              } else if (normalizedId === 'eduskills') {
+                const certsVal = liveData.kpis?.find((k) => k.label.toLowerCase().includes('cert'))?.value ?? 0;
+                const certsNum = Number(certsVal) || 0;
+                if (certsNum > 0) {
+                  api.saveCodingProfile(activeRollNo, {
+                    platform: 'EduSkills',
+                    handle: item.handle,
+                    score_rating: certsNum,
+                    easy_count: 0,
+                    medium_count: 0,
+                    hard_count: 0,
+                    streak: 0,
+                    contest_rating: 0,
+                    repositories_count: certsNum,
+                    commits_count: 0,
+                    prs_merged: 0,
+                  }).then(() => {
+                    fetch(`${import.meta.env.VITE_API_BASE_URL || 'https://caam6j4dbh.execute-api.ap-south-1.amazonaws.com/prod'}/proxy/eduskills/sync-student/${activeRollNo}`, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        ...(sessionStorage.getItem('advitiyans_jwt_token') ? { Authorization: `Bearer ${sessionStorage.getItem('advitiyans_jwt_token')}` } : {}),
+                      },
+                      body: JSON.stringify({ handle: item.handle }),
+                    }).catch(() => {});
+
+                    queryClient.invalidateQueries({ queryKey: ['studentCertifications', activeRollNo] });
                     queryClient.invalidateQueries({ queryKey: ['hodStudents'] });
                     queryClient.invalidateQueries({ queryKey: ['leaderboardStudents'] });
                     queryClient.invalidateQueries({ queryKey: ['students'] });
@@ -302,6 +338,7 @@ export const CodingProfilesSection: React.FC<CodingProfilesSectionProps> = ({
         'codeforces': 'Codeforces',
         'codechef': 'CodeChef',
         'kaggle': 'Kaggle',
+        'eduskills': 'EduSkills',
       };
 
       const platformName = platformConfig?.name || 'LeetCode';
@@ -325,6 +362,12 @@ export const CodingProfilesSection: React.FC<CodingProfilesSectionProps> = ({
           /^https?:\/\/(www\.)?hackerrank\.com\//i,
         ],
         kaggle:        [/^https?:\/\/(www\.)?kaggle\.com\//i],
+        eduskills:     [
+          /^https?:\/\/(www\.)?credly\.com\/(users|earner\/earned\/badge)?\/?/i,
+          /^https?:\/\/(www\.)?eduskillsfoundation\.org\/(verify|student)?\/?/i,
+          /^users\//i,
+          /^u\//i,
+        ],
       };
 
       let sanitizedHandle = handleInput.trim().replace(/^@/, '');

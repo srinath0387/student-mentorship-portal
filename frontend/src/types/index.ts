@@ -132,7 +132,8 @@ export interface CodingProfile {
     | 'CodeChef'
     | 'Kaggle'
     | 'StackOverflow'
-    | 'GSoC-LFX';
+    | 'GSoC-LFX'
+    | 'EduSkills';
   handle: string;
   streak: number;
   repositories_count: number;

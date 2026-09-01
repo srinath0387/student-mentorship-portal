@@ -172,6 +172,7 @@ export const codingProfileSchema = z.object({
     'Kaggle',
     'StackOverflow',
     'GSoC-LFX',
+    'EduSkills',
   ]),
   handle: z.string().min(1),
   streak: z.number().int().nonnegative().default(0),

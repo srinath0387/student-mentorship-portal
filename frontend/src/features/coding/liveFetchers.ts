@@ -744,8 +744,107 @@ export async function fetchLiveHackerRank(handle: string): Promise<PlatformStats
   };
 }
 
+export function cleanEduSkillsHandle(handle: string): string {
+  if (!handle) return '';
+  return handle
+    .trim()
+    .replace(/^https?:\/\/(www\.)?credly\.com\/(users|earner\/earned\/badge)?\/?/i, '')
+    .replace(/^https?:\/\/(www\.)?eduskillsfoundation\.org\/(verify|student)?\/?/i, '')
+    .replace(/^u\//i, '')
+    .replace(/^users\//i, '')
+    .replace(/^@/, '')
+    .replace(/\/.*$/, '')
+    .trim();
+}
+
+export async function fetchLiveEduSkills(handle: string): Promise<PlatformStatsSnapshot> {
+  const cleanHandle = cleanEduSkillsHandle(handle);
+  if (!cleanHandle || cleanHandle.toLowerCase() === 'not linked') {
+    return {
+      platform: 'eduskills',
+      handle: '',
+      profileUrl: 'https://www.credly.com',
+      lastRefreshedAt: new Date().toISOString(),
+      syncStatus: 'synced',
+      kpis: [
+        { label: 'Total Certifications', value: 0 },
+        { label: 'Cloud & AI Badges', value: 0 },
+        { label: 'User name', value: 'Not Linked' },
+      ],
+      breakdown: [],
+      awards: [],
+      topicAnalysis: [],
+      activity: [],
+      heatmap: {},
+    };
+  }
+
+  let totalCerts = 0;
+  let badgesList: any[] = [];
+  let categories: Record<string, number> = {};
+
+  try {
+    const token = sessionStorage.getItem('advitiyans_jwt_token') || '';
+    const res = await fetch(`${BACKEND_API_BASE}/proxy/eduskills/${encodeURIComponent(cleanHandle)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      totalCerts = data.totalCertificates || 0;
+      badgesList = Array.isArray(data.badges) ? data.badges : [];
+      categories = data.categories || {};
+    }
+  } catch (e) {
+    console.warn('[LiveEduSkills] Fetch error:', e);
+  }
+
+  const topicAnalysis = Object.entries(categories)
+    .filter(([_, count]) => count > 0)
+    .map(([label, count]) => ({ label, count }));
+
+  const breakdown = [
+    { label: 'Cloud Computing', solved: categories['Cloud Computing'] || 0, total: Math.max(1, totalCerts), color: '#3B82F6' },
+    { label: 'Cybersecurity', solved: categories['Cybersecurity'] || 0, total: Math.max(1, totalCerts), color: '#EF4444' },
+    { label: 'Data & AI', solved: categories['Data & AI'] || 0, total: Math.max(1, totalCerts), color: '#10B981' },
+    { label: 'RPA & Automation', solved: categories['RPA & Automation'] || 0, total: Math.max(1, totalCerts), color: '#8B5CF6' },
+    { label: 'Networking & Systems', solved: categories['Networking & Systems'] || 0, total: Math.max(1, totalCerts), color: '#F59E0B' },
+  ].filter((b) => b.solved > 0);
+
+  const awards = badgesList.slice(0, 8).map((b) => ({
+    title: b.title,
+    icon: b.badgeUrl || '🎓',
+    earnedAt: b.issuedAt ? new Date(b.issuedAt).toLocaleDateString() : undefined,
+  }));
+
+  const activity = badgesList.map((b) => ({
+    date: b.issuedAt ? new Date(b.issuedAt).toLocaleDateString() : 'Verified',
+    title: `${b.title} (${b.issuer})`,
+    status: 'Verified',
+    type: b.category,
+  }));
+
+  return {
+    platform: 'eduskills',
+    handle: cleanHandle,
+    profileUrl: `https://www.credly.com/users/${cleanHandle}`,
+    lastRefreshedAt: new Date().toISOString(),
+    syncStatus: 'synced',
+    kpis: [
+      { label: 'Total Certifications', value: totalCerts },
+      { label: 'Verified Badges', value: badgesList.length },
+      { label: 'Credly Handle', value: cleanHandle, isLink: true },
+    ],
+    breakdown: breakdown.length > 0 ? breakdown : undefined,
+    awards: awards.length > 0 ? awards : [{ title: 'EduSkills / Credly Linked', icon: '🎓' }],
+    topicAnalysis: topicAnalysis.length > 0 ? topicAnalysis : [{ label: 'Industry Tracks', count: totalCerts }],
+    activity,
+    heatmap: {},
+  };
+}
+
 /**
- * Universal live fetcher â€” routes to the correct platform-specific fetcher.
+ * Universal live fetcher — routes to the correct platform-specific fetcher.
  * All platforms now have real API implementations.
  */
 export async function fetchLivePlatformSnapshot(
@@ -759,6 +858,7 @@ export async function fetchLivePlatformSnapshot(
   if (platformId === 'geeksforgeeks') return await fetchLiveGeeksforGeeks(handle);
   if (platformId === 'codechef') return await fetchLiveCodeChef(handle);
   if (platformId === 'hackerrank') return await fetchLiveHackerRank(handle);
+  if (platformId === 'eduskills') return await fetchLiveEduSkills(handle);
 
   // Final safety fallback for any unrecognised platform IDs
   const cleanHandle = handle.replace(/^@/, '').trim();

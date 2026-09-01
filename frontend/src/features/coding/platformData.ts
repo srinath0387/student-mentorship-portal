@@ -7,7 +7,8 @@ export type PlatformId =
   | 'geeksforgeeks'
   | 'hackerrank'
   | 'codeforces'
-  | 'codechef';
+  | 'codechef'
+  | 'eduskills';
 
 export interface PlatformStatsSnapshot {
   platform: PlatformId;
@@ -130,5 +131,18 @@ export const PLATFORM_CONFIGS: PlatformConfig[] = [
     topicLabel: 'Problem Breakdown',
     activityTabs: ['Recent Submissions', 'Contest History'],
     description: 'Monthly contests, long challenges, and coding rating',
+  },
+  {
+    id: 'eduskills',
+    name: 'EduSkills / Credly',
+    shortName: 'EduSkills',
+    color: '#1E3A8A',
+    bgColor: '#EFF6FF',
+    emoji: '🎓',
+    profileBaseUrl: 'https://www.credly.com/users/',
+    primaryVizType: 'donut',
+    topicLabel: 'Certification Domain Breakdown',
+    activityTabs: ['Earned Badges', 'Certificates'],
+    description: 'AWS Academy, Palo Alto Networks, Red Hat, Fortinet, and Alteryx verified certifications',
   },
 ];
