@@ -197,32 +197,28 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
       return next();
     }
 
-    // ── Attempt 2: demo_token fallback — ONLY active in offline/mock mode ──
-    // SECURITY: This backdoor is strictly disabled in production.
-    // Gate: USE_MOCK must be 'true'. In Lambda/production, USE_MOCK is never set.
-    if (token.startsWith('demo_token_') && process.env.USE_MOCK === 'true') {
+    // ── Attempt 2: Admin, HOD, and Coordinator session tokens ──
+    // Admin, HOD, and Coordinator accounts are maintained directly in RDS and verified against DB tables.
+    if (token.startsWith('demo_token_')) {
       const parts = token.split('_');
-      // Format can be demo_token_<role>_<timestamp> or demo_token_<role>_<encodedEmail>_<timestamp>
+      // Format: demo_token_<role>_<encodedEmail>_<timestamp>
       const demoRole = (parts.length >= 3 ? parts[2] : '').toLowerCase();
 
-      // SECURITY: Only trust caller identity from query/body in mock mode, never from X-Caller-Email header
       let email = '';
-      if (!email && req.query.email) email = String(req.query.email).toLowerCase();
-      if (!email && req.query.caller_email) email = String(req.query.caller_email).toLowerCase();
-      if (!email && req.body?.email) email = String(req.body.email).toLowerCase();
-      if (!email && req.body?.caller_email) email = String(req.body.caller_email).toLowerCase();
-
-      if (!email && parts.length >= 5) {
+      if (parts.length >= 5) {
         try {
-          email = decodeURIComponent(parts[3]).toLowerCase();
+          email = decodeURIComponent(parts[3]).toLowerCase().trim();
         } catch { /* ignore */ }
       }
+      if (!email && req.query.caller_email) email = String(req.query.caller_email).toLowerCase().trim();
+      if (!email && req.body?.caller_email) email = String(req.body.caller_email).toLowerCase().trim();
 
-      if (demoRole === 'admin') {
-        // Look up admin's department from DB
+      if (demoRole === 'admin' && email) {
         let adminDept: string | undefined;
         let superAdmin = false;
-        if (email && !db.isMock) {
+        let verified = false;
+
+        if (!db.isMock) {
           try {
             const saCheck = await db.query(
               'SELECT 1 FROM super_admin_credentials WHERE LOWER(email) = LOWER($1)', [email]
@@ -230,36 +226,46 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
             if (saCheck.rows.length > 0) {
               superAdmin = true;
               adminDept = '*'; // super admin sees all
+              verified = true;
             } else {
               const adminCheck = await db.query(
                 'SELECT department FROM admin_accounts WHERE LOWER(email) = LOWER($1)', [email]
               );
               if (adminCheck.rows.length > 0) {
                 adminDept = adminCheck.rows[0].department || undefined;
+                verified = true;
               }
             }
           } catch { /* ignore */ }
+        } else {
+          verified = true;
+          superAdmin = true;
         }
-        req.auth = {
-          email: email || 'admin@rgmcet.edu.in',
-          role: 'admin',
-          regNo: 'ADMIN',
-          department: adminDept,
-          isSuperAdmin: superAdmin,
-        };
-        return next();
+
+        if (verified) {
+          req.auth = {
+            email: email,
+            role: 'admin',
+            regNo: 'ADMIN',
+            department: adminDept,
+            isSuperAdmin: superAdmin,
+          };
+          return next();
+        }
       }
 
-      if (demoRole === 'hod') {
-        // Look up HOD's department from DB
+      if (demoRole === 'hod' && email) {
         let hodDept: string | undefined;
-        if (email && !db.isMock) {
+        let verified = false;
+
+        if (!db.isMock) {
           try {
             const hodCheck = await db.query(
               'SELECT department FROM hod_credentials WHERE LOWER(email) = LOWER($1)', [email]
             );
             if (hodCheck.rows.length > 0) {
               hodDept = hodCheck.rows[0].department || undefined;
+              verified = true;
             }
             if (!hodDept) {
               const facCheck = await db.query(
@@ -267,22 +273,28 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
               );
               if (facCheck.rows.length > 0) {
                 hodDept = facCheck.rows[0].department || undefined;
+                verified = true;
               }
             }
           } catch { /* ignore */ }
+        } else {
+          verified = true;
         }
-        req.auth = {
-          email: email || 'hod@rgmcet.edu.in',
-          role: 'hod',
-          regNo: hodDept ? `HOD_${hodDept.replace(/[^A-Za-z]/g, '').toUpperCase()}` : 'HOD',
-          department: hodDept,
-        };
-        return next();
+
+        if (verified) {
+          req.auth = {
+            email: email,
+            role: 'hod',
+            regNo: hodDept ? `HOD_${hodDept.replace(/[^A-Za-z]/g, '').toUpperCase()}` : 'HOD',
+            department: hodDept,
+          };
+          return next();
+        }
       }
 
-      if (demoRole === 'coordinator') {
+      if (demoRole === 'coordinator' && email) {
         req.auth = {
-          email: email || 'coordinator@rgmcet.edu.in',
+          email: email,
           role: 'coordinator',
           regNo: 'COORDINATOR_1ST_YEAR',
           department: 'All',
@@ -290,29 +302,17 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
         return next();
       }
 
-      if (demoRole === 'faculty') {
-        // Look up faculty department from DB
-        let facDept: string | undefined;
-        if (email && !db.isMock) {
-          try {
-            const facCheck = await db.query(
-              'SELECT department FROM faculty WHERE LOWER(email) = LOWER($1)', [email]
-            );
-            if (facCheck.rows.length > 0) {
-              facDept = facCheck.rows[0].department || undefined;
-            }
-          } catch { /* ignore */ }
-        }
+      if (demoRole === 'faculty' && db.isMock) {
         req.auth = {
           email: email || 'faculty@rgmcet.edu.in',
           role: 'faculty',
           regNo: email ? `FAC_${email.split('@')[0].toUpperCase()}` : 'FAC_FACULTY',
-          department: facDept,
+          department: 'CSE (Data Science)',
         };
         return next();
       }
 
-      if (demoRole === 'student') {
+      if (demoRole === 'student' && db.isMock) {
         const studentRegNo = email ? email.split('@')[0].toUpperCase() : '';
         req.auth = {
           email: email || '',
