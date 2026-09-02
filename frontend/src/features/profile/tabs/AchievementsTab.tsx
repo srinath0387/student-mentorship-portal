@@ -84,7 +84,7 @@ export const AchievementsTab: React.FC<AchievementsTabProps> = ({ achievements, 
               </span>
               <div className="flex items-center gap-2 text-xs text-textSecondary">
                 <Calendar className="w-3.5 h-3.5" />
-                <span>{item.achievement_date || '2024'}</span>
+                <span>{item.achievement_date ? item.achievement_date.slice(0, 10) : ''}</span>
               </div>
             </div>
 

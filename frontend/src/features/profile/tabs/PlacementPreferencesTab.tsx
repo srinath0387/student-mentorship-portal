@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Target, Sparkles, Building, Check, Edit2, Save, X, BookOpen, Award } from 'lucide-react';
+import { Target, Sparkles, Building, Check, Edit2, Save, X, BookOpen, Award, Loader2 } from 'lucide-react';
 import { PlacementProfile, ScoreBreakdown } from '../../../types';
 import { api } from '../../../lib/api';
 import { useAuth } from '../../../context/AuthContext';
@@ -167,8 +167,14 @@ export const PlacementPreferencesTab: React.FC<PlacementPreferencesTabProps> = (
 
           {isEditing && (
             <div className="flex justify-end pt-4 border-t border-borderLine">
-              <PillButton variant="primary" size="md" onClick={handleSave} disabled={saving} icon={<Save className="w-4 h-4" />}>
-                Save Preferences
+              <PillButton
+                variant="primary"
+                size="md"
+                onClick={handleSave}
+                disabled={saving}
+                icon={saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              >
+                {saving ? 'Saving Preferences...' : 'Save Preferences'}
               </PillButton>
             </div>
           )}

@@ -509,7 +509,7 @@ export const DashboardPage: React.FC = () => {
                         <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-brand-soft text-brand-primary">
                           {item.type}
                         </span>
-                        <span className="text-[10px] text-textMuted">{item.achievement_date || '2024'}</span>
+                        <span className="text-[10px] text-textMuted">{item.achievement_date ? item.achievement_date.slice(0, 10) : ''}</span>
                       </div>
                       <h4 className="text-xs font-bold text-textPrimary">{item.title}</h4>
                       <p className="text-[11px] text-textSecondary line-clamp-1 mt-0.5">{item.description}</p>
