@@ -30,7 +30,7 @@ export const AchievementsTab: React.FC<AchievementsTabProps> = ({ achievements, 
   const [type, setType] = useState<any>('Hackathon');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [date, setDate] = useState('2024-04-10');
+  const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [organization, setOrganization] = useState('');
   const [saving, setSaving] = useState(false);
   const { user } = useAuth();
@@ -140,7 +140,13 @@ export const AchievementsTab: React.FC<AchievementsTabProps> = ({ achievements, 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-textPrimary mb-1">Date</label>
-                  <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full px-3 py-2 text-sm rounded-lg border border-borderLine bg-background" />
+                  <input
+                    type="date"
+                    value={date}
+                    max={new Date().toISOString().split('T')[0]}
+                    onChange={(e) => setDate(e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-borderLine bg-background"
+                  />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-textPrimary mb-1">Organization</label>

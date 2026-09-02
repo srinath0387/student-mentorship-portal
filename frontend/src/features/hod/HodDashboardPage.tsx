@@ -1182,8 +1182,8 @@ export const HodDashboardPage: React.FC = () => {
             )}
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+          <div className="overflow-x-auto custom-scrollbar">
+            <table className="w-full min-w-[700px] text-left border-collapse">
               <thead>
                 <tr className="border-b border-borderLine bg-background text-[11px] font-semibold text-textSecondary uppercase tracking-wider">
                   <th className="py-3 px-4">Rank</th>

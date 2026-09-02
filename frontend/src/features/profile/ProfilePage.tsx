@@ -60,7 +60,7 @@ export const ProfilePage: React.FC = () => {
   };
 
   // Queries for profile sections — all keyed by activeRollNo so switching students busts cache
-  const { data: student, refetch: refetchStudent } = useQuery({ queryKey: ['studentProfile', activeRollNo], queryFn: () => api.getStudentProfile(activeRollNo), enabled: Boolean(activeRollNo) });
+  const { data: student, refetch: refetchStudent, isLoading: isStudentLoading } = useQuery({ queryKey: ['studentProfile', activeRollNo], queryFn: () => api.getStudentProfile(activeRollNo), enabled: Boolean(activeRollNo) });
   const { data: academics = [], refetch: refetchAcademics } = useQuery({ queryKey: ['academics', activeRollNo], queryFn: () => api.getAcademics(activeRollNo), enabled: Boolean(activeRollNo) });
   const { data: codingProfiles = [], refetch: refetchCoding } = useQuery({ queryKey: ['codingProfiles', activeRollNo], queryFn: () => api.getCodingProfiles(activeRollNo), enabled: Boolean(activeRollNo) });
   const { data: techSkills = [], refetch: refetchSkills } = useQuery({ queryKey: ['techSkills', activeRollNo], queryFn: () => api.getTechSkills(activeRollNo), enabled: Boolean(activeRollNo) });
@@ -75,6 +75,15 @@ export const ProfilePage: React.FC = () => {
     return (
       <div className="flex items-center justify-center h-64 text-textSecondary text-sm">
         <p>No student profile linked to this account.</p>
+      </div>
+    );
+  }
+
+  if (isStudentLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-96 text-textSecondary text-sm space-y-3">
+        <div className="w-8 h-8 border-3 border-brand-primary border-t-transparent rounded-full animate-spin" />
+        <p className="font-semibold text-textPrimary">Loading student profile...</p>
       </div>
     );
   }

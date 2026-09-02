@@ -342,6 +342,30 @@ app.get('/', (_req: Request, res: Response) => {
 });
 
 // ============================================================================
+// Rate Limiter for Sensitive Authentication Endpoints
+// ============================================================================
+const authAttemptsMap = new Map<string, { count: number; resetAt: number }>();
+
+function checkRateLimit(key: string, maxAttempts = 10, windowMs = 60000): { allowed: boolean; retryAfterSeconds?: number } {
+  const now = Date.now();
+  const entry = authAttemptsMap.get(key);
+  if (!entry || now > entry.resetAt) {
+    authAttemptsMap.set(key, { count: 1, resetAt: now + windowMs });
+    if (authAttemptsMap.size > 1000) {
+      for (const [k, v] of authAttemptsMap.entries()) {
+        if (now > v.resetAt) authAttemptsMap.delete(k);
+      }
+    }
+    return { allowed: true };
+  }
+  if (entry.count >= maxAttempts) {
+    return { allowed: false, retryAfterSeconds: Math.ceil((entry.resetAt - now) / 1000) };
+  }
+  entry.count += 1;
+  return { allowed: true };
+}
+
+// ============================================================================
 // Auth: Admin & HOD Login — Server-Side Credential Validation
 // Passwords are stored in Lambda env vars (not in frontend code).
 // Frontend calls this instead of checking credentials locally.
@@ -354,6 +378,16 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
     }
 
     const emailLower = email.toLowerCase();
+
+    // Rate limiting: 10 attempts per minute per email/IP
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+    const rateCheck = checkRateLimit(`admin_login_${emailLower}_${clientIp}`, 10, 60000);
+    if (!rateCheck.allowed) {
+      return res.status(429).json({
+        valid: false,
+        error: `Too many login attempts. Please try again in ${rateCheck.retryAfterSeconds} seconds.`,
+      });
+    }
 
     // ── Priority 1A: Tier-1 Gmail super-admins (highest authority) ───────────
     // jayakrushna1622@gmail.com, dineshkumarpathipati@gmail.com, jayanthkumarnaidu777@gmail.com
@@ -1612,6 +1646,13 @@ app.get('/students', requireAuth, async (req: Request, res: Response) => {
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.map(c => c.startsWith('(') ? c : `s.${c}`).join(' AND ')}` : '';
+
+    // Pagination — default 500 per page to prevent Lambda memory/timeout issues
+    const rawLimit = parseInt(String(req.query.limit || '500'), 10);
+    const rawOffset = parseInt(String(req.query.offset || '0'), 10);
+    const pageLimit = Math.min(Math.max(rawLimit, 1), 1000); // cap at 1000
+    const pageOffset = Math.max(rawOffset, 0);
+
     const result = await db.query(`
       SELECT DISTINCT ON (s.roll_number) 
         s.*,
@@ -1633,6 +1674,7 @@ app.get('/students', requireAuth, async (req: Request, res: Response) => {
       ${whereClause}
       GROUP BY s.roll_number, s.name, s.email, s.year, s.phone, s.address, s.native_place, s.department, s.batch, s.section, s.hostel_day_scholar, s.driving_license, s.passport, s.relocation_willingness, s.family_business, s.financial_background, s.faculty_mentor_id, s.photo_url, s.resume_url, s.linkedin_url, s.linkedin_updated, s.is_lateral_entry, s.created_at, s.updated_at
       ORDER BY s.roll_number, s.created_at DESC
+      LIMIT ${pageLimit} OFFSET ${pageOffset}
     `, params);
     res.json(result.rows);
   } catch (err: any) {
@@ -4881,11 +4923,12 @@ app.post('/faculty/:facultyId/mentees', requireRole('admin'), async (req: Reques
     }
 
     // Verify faculty exists
-    const facCheck = await db.query('SELECT faculty_id, name FROM faculty WHERE UPPER(faculty_id) = $1', [facId]);
+    const facCheck = await db.query('SELECT faculty_id, name, department FROM faculty WHERE UPPER(faculty_id) = $1', [facId]);
     if (facCheck.rows.length === 0) {
       return res.status(404).json({ error: `Faculty record ${facId} not found` });
     }
     const facultyName = facCheck.rows[0].name;
+    const facultyDept = facCheck.rows[0].department;
 
     // Ensure mentor_assignments table exists
     await db.query(`
@@ -4909,9 +4952,20 @@ app.post('/faculty/:facultyId/mentees', requireRole('admin'), async (req: Reques
         [roll]
       );
 
+      // Also look up the student's department if not yet in mentor_assignments
+      let studentDept: string | null = cur.rows[0]?.department || null;
+      if (!studentDept) {
+        const stuCheck = await db.query('SELECT department FROM students WHERE UPPER(roll_number) = $1 LIMIT 1', [roll]);
+        studentDept = stuCheck.rows[0]?.department || null;
+      }
+
       const prevFacId = cur.rows[0]?.current_faculty_id;
       const prevFacName = cur.rows[0]?.current_faculty_name;
       const isReassigned = Boolean(prevFacId && prevFacId.toUpperCase() !== facId);
+
+      // Department mismatch warning (soft check — don't block, just warn)
+      const deptMismatch = facultyDept && studentDept &&
+        facultyDept.toLowerCase().trim() !== studentDept.toLowerCase().trim();
 
       // Upsert into mentor_assignments
       await db.query(
@@ -4935,10 +4989,11 @@ app.post('/faculty/:facultyId/mentees', requireRole('admin'), async (req: Reques
         name: studentData.name || null,
         year: studentData.year || null,
         section: studentData.section || null,
-        department: studentData.department || null,
+        department: studentData.department || studentDept || null,
         registered: Boolean(sUp.rows.length > 0 || studentData.name),
         status: isReassigned ? 'reassigned' : 'assigned',
         reassignedFrom: isReassigned ? (prevFacName || prevFacId) : null,
+        ...(deptMismatch ? { warning: `Student dept (${studentDept}) differs from faculty dept (${facultyDept})` } : {}),
       });
     }
 

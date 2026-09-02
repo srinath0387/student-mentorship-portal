@@ -174,7 +174,27 @@ export const codingProfileSchema = z.object({
     'GSoC-LFX',
     'EduSkills',
   ]),
-  handle: z.string().min(1),
+  handle: z.string().min(1).transform((val) => {
+    // Strip full URLs — extract just the username/handle
+    let cleaned = val.trim();
+    // Remove protocol and www
+    cleaned = cleaned.replace(/^https?:\/\/(www\.)?/i, '');
+    // Remove known domain prefixes (github.com/username → username)
+    const domainPrefixes = [
+      'github.com/', 'leetcode.com/u/', 'leetcode.com/', 'geeksforgeeks.org/user/', 'geeksforgeeks.org/',
+      'hackerrank.com/profile/', 'hackerrank.com/', 'codeforces.com/profile/', 'codeforces.com/',
+      'codechef.com/users/', 'codechef.com/', 'kaggle.com/', 'stackoverflow.com/users/',
+    ];
+    for (const prefix of domainPrefixes) {
+      if (cleaned.toLowerCase().startsWith(prefix.toLowerCase())) {
+        cleaned = cleaned.slice(prefix.length);
+        break;
+      }
+    }
+    // Remove trailing slashes and query params
+    cleaned = cleaned.replace(/[/?#].*$/, '').trim();
+    return cleaned;
+  }),
   streak: z.number().int().nonnegative().default(0),
   repositories_count: z.number().int().nonnegative().default(0),
   commits_count: z.number().int().nonnegative().default(0),
@@ -211,7 +231,12 @@ export const achievementSchema = z.object({
   type: z.enum(['Achievement', 'Failure-Learning', 'Challenge Overcome', 'Hackathon', 'Conference', 'Meetup', 'Capstone Project', 'Startup', 'Industry Project', 'Department Event', 'Club']),
   title: z.string().min(1),
   description: z.string().min(1),
-  achievement_date: z.string().optional().nullable(),
+  achievement_date: z.string().optional().nullable().refine((val) => {
+    if (!val) return true; // optional — allow empty
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return false; // invalid date
+    return d <= new Date(); // reject future dates
+  }, { message: 'Achievement date cannot be in the future' }),
   organization: z.string().optional().nullable(),
 });
 
