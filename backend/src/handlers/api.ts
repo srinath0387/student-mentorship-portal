@@ -11127,6 +11127,67 @@ app.delete('/subjects/master/:id', requireRole('admin', 'hod', 'coordinator'), a
 // ============================================================================
 
 /**
+ * GET /certifications/summary
+ * Returns top certifications with student counts for dashboard summary cards.
+ */
+app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
+  try {
+    const callerRole = req.auth?.role;
+    const callerDept = req.auth?.department;
+
+    let deptFilterSql = '';
+    const params: any[] = [];
+
+    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+      params.push(callerDept);
+      deptFilterSql = `
+        AND (
+          LOWER(REPLACE(s.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($1, ' ', '')) || '%'
+          OR LOWER(REPLACE($1, ' ', '')) ILIKE '%' || LOWER(REPLACE(s.department, ' ', '')) || '%'
+        )
+      `;
+    }
+
+    const summaryQuery = `
+      WITH unified_certs AS (
+        SELECT 
+          sc.roll_number,
+          sc.certificate_name,
+          sc.issuer
+        FROM student_certifications sc
+        UNION ALL
+        SELECT 
+          c.student_id AS roll_number,
+          c.title AS certificate_name,
+          c.provider AS issuer
+        FROM certifications c
+        WHERE NOT EXISTS (
+          SELECT 1 FROM student_certifications sc2 
+          WHERE sc2.roll_number = c.student_id AND LOWER(TRIM(sc2.certificate_name)) = LOWER(TRIM(c.title))
+        )
+      )
+      SELECT 
+        uc.certificate_name AS display_name,
+        LOWER(TRIM(uc.certificate_name)) AS canonical_name,
+        COALESCE(MAX(uc.issuer), 'Certification') AS issuer,
+        COUNT(DISTINCT uc.roll_number) AS student_count
+      FROM unified_certs uc
+      JOIN students s ON s.roll_number = uc.roll_number
+      WHERE uc.certificate_name IS NOT NULL AND TRIM(uc.certificate_name) <> ''
+      ${deptFilterSql}
+      GROUP BY 1, 2
+      ORDER BY student_count DESC, display_name ASC
+      LIMIT 12
+    `;
+
+    const result = await db.query(summaryQuery, params);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
  * GET /certifications/search?q=aws
  * Role-scoped typeahead search returning certification name, issuer, and student count.
  */
@@ -11136,7 +11197,7 @@ app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'fa
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
 
-    if (!query || query.length < 2) {
+    if (!query) {
       return res.json([]);
     }
 
@@ -11155,23 +11216,38 @@ app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'fa
     }
 
     const searchQuery = `
+      WITH unified_certs AS (
+        SELECT 
+          sc.roll_number,
+          sc.certificate_name,
+          sc.issuer
+        FROM student_certifications sc
+        UNION ALL
+        SELECT 
+          c.student_id AS roll_number,
+          c.title AS certificate_name,
+          c.provider AS issuer
+        FROM certifications c
+        WHERE NOT EXISTS (
+          SELECT 1 FROM student_certifications sc2 
+          WHERE sc2.roll_number = c.student_id AND LOWER(TRIM(sc2.certificate_name)) = LOWER(TRIM(c.title))
+        )
+      )
       SELECT 
-        COALESCE(c.display_name, sc.certificate_name) AS display_name,
-        COALESCE(c.canonical_name, LOWER(TRIM(sc.certificate_name))) AS canonical_name,
-        COALESCE(c.issuer, sc.issuer) AS issuer,
-        COUNT(DISTINCT sc.roll_number) AS student_count
-      FROM student_certifications sc
-      JOIN students s ON s.roll_number = sc.roll_number
-      LEFT JOIN certification_catalogs c ON c.id = sc.catalog_id
+        uc.certificate_name AS display_name,
+        LOWER(TRIM(uc.certificate_name)) AS canonical_name,
+        COALESCE(MAX(uc.issuer), 'Certification') AS issuer,
+        COUNT(DISTINCT uc.roll_number) AS student_count
+      FROM unified_certs uc
+      JOIN students s ON s.roll_number = uc.roll_number
       WHERE (
-        sc.certificate_name ILIKE $1 
-        OR (c.canonical_name IS NOT NULL AND c.canonical_name ILIKE $1)
-        OR sc.issuer ILIKE $1
+        uc.certificate_name ILIKE $1 
+        OR uc.issuer ILIKE $1
       )
       ${deptFilterSql}
-      GROUP BY 1, 2, 3
+      GROUP BY 1, 2
       ORDER BY student_count DESC, display_name ASC
-      LIMIT 10
+      LIMIT 15
     `;
 
     const result = await db.query(searchQuery, params);
@@ -11196,7 +11272,7 @@ app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', '
     }
 
     let deptFilter = '';
-    const params: any[] = [certName];
+    const params: any[] = [`%${certName}%`];
 
     if (callerRole === 'hod' && callerDept && callerDept !== '*') {
       params.push(callerDept);
@@ -11209,27 +11285,52 @@ app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', '
     }
 
     const studentsQuery = `
+      WITH unified_certs AS (
+        SELECT 
+          sc.roll_number,
+          sc.certificate_name,
+          sc.issuer,
+          sc.issue_date,
+          sc.verification_url,
+          sc.badge_image_url,
+          sc.proof_document_url,
+          sc.source,
+          sc.status AS verification_status
+        FROM student_certifications sc
+        UNION ALL
+        SELECT 
+          c.student_id AS roll_number,
+          c.title AS certificate_name,
+          c.provider AS issuer,
+          c.date_completed AS issue_date,
+          c.certificate_file_url AS verification_url,
+          NULL AS badge_image_url,
+          c.certificate_file_url AS proof_document_url,
+          'manual' AS source,
+          CASE WHEN c.verified = true THEN 'verified' ELSE 'pending' END AS verification_status
+        FROM certifications c
+        WHERE NOT EXISTS (
+          SELECT 1 FROM student_certifications sc2 
+          WHERE sc2.roll_number = c.student_id AND LOWER(TRIM(sc2.certificate_name)) = LOWER(TRIM(c.title))
+        )
+      )
       SELECT 
         s.roll_number,
         s.name AS student_name,
         s.department,
         s.section,
         s.year,
-        sc.certificate_name,
-        sc.issuer,
-        sc.issue_date,
-        sc.verification_url,
-        sc.badge_image_url,
-        sc.proof_document_url,
-        sc.source,
-        sc.status AS verification_status
-      FROM student_certifications sc
-      JOIN students s ON s.roll_number = sc.roll_number
-      LEFT JOIN certification_catalogs c ON c.id = sc.catalog_id
-      WHERE (
-        sc.certificate_name ILIKE $1 
-        OR c.canonical_name = LOWER(TRIM($1))
-      )
+        uc.certificate_name,
+        uc.issuer,
+        uc.issue_date,
+        uc.verification_url,
+        uc.badge_image_url,
+        uc.proof_document_url,
+        uc.source,
+        uc.verification_status
+      FROM unified_certs uc
+      JOIN students s ON s.roll_number = uc.roll_number
+      WHERE uc.certificate_name ILIKE $1 OR uc.issuer ILIKE $1
       ${deptFilter}
       ORDER BY s.roll_number ASC
     `;

@@ -1350,6 +1350,10 @@ export const api = {
   },
 
   // Certification Search & Credly Sync
+  getCertificationsSummary: async (): Promise<any[]> => {
+    return fetchWithAuth('/certifications/summary');
+  },
+
   searchCertifications: async (query: string): Promise<any[]> => {
     return fetchWithAuth(`/certifications/search?q=${encodeURIComponent(query)}`);
   },

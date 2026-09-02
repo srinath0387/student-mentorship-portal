@@ -41,6 +41,7 @@ import { PlacementPreferencesTab } from '../profile/tabs/PlacementPreferencesTab
 import { HodAttendancePage } from '../attendance/hod/HodAttendancePage';
 import { HodLeaveApprovalTab } from '../leave/HodLeaveApprovalTab';
 import { HolidayCalendarTab } from '../admin/tabs/HolidayCalendarTab';
+import { CertificationAnalyticsView } from '../certifications/components/CertificationAnalyticsView';
 
 const YEARS = ['1st Year', '2nd Year', '3rd Year', '4th Year'] as const;
 const SECTIONS = ['Section A', 'Section B', 'Section C'] as const;
@@ -118,7 +119,7 @@ function mapStudentToHodEntry(student: any, index: number, liveSolved?: number):
 }
 
 export const HodDashboardPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'leaves' | 'holidays' | 'attendance' | 'analytics' | 'students' | 'rankings' | 'placement' | 'mentees' | 'settings'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'certifications' | 'leaves' | 'holidays' | 'attendance' | 'analytics' | 'students' | 'rankings' | 'placement' | 'mentees' | 'settings'>('overview');
   const [hodAttendanceSubTab, setHodAttendanceSubTab] = useState<'grid' | 'unposted' | 'tracking' | 'allotments'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -590,6 +591,7 @@ export const HodDashboardPage: React.FC = () => {
           <nav className="flex px-2 pt-2 pb-0 gap-1 border-b border-borderLine">
             {[
               { key: 'overview', label: '📊 Year-Wise Overview' },
+              { key: 'certifications', label: '🎓 Certification Analytics' },
               { key: 'leaves', label: '🌴 Leave & OD Approvals' },
               { key: 'holidays', label: '📅 Academic & Holiday Calendar' },
               { key: 'attendance', label: '📋 Attendance Tracker' },
@@ -615,6 +617,9 @@ export const HodDashboardPage: React.FC = () => {
           </nav>
         </div>
       </div>
+
+      {/* ── TAB: Certification Analytics ── */}
+      {activeTab === 'certifications' && <CertificationAnalyticsView />}
 
       {/* ── TAB: Leave & OD Approvals ── */}
       {activeTab === 'leaves' && <HodLeaveApprovalTab />}

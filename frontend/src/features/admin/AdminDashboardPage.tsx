@@ -52,6 +52,7 @@ import { AttendanceSetupPage } from '../attendance/admin/AttendanceSetupPage';
 import { HodLeaveApprovalTab } from '../leave/HodLeaveApprovalTab';
 import { HolidayCalendarTab } from './tabs/HolidayCalendarTab';
 import { LeaveCreditManagementTab } from './tabs/LeaveCreditManagementTab';
+import { CertificationAnalyticsView } from '../certifications/components/CertificationAnalyticsView';
 
 const DEPARTMENTS = VALID_DEPARTMENT_NAMES;
 const YEARS = ['1st Year', '2nd Year', '3rd Year', '4th Year'] as const;
@@ -550,6 +551,7 @@ export const AdminDashboardPage: React.FC = () => {
           <nav className="flex px-2 pt-2 pb-0 gap-1 border-b border-borderLine">
             {[
               { key: 'students', label: 'Student Directory (CRUD)' },
+              { key: 'certifications', label: '🎓 Certification Analytics' },
               { key: 'leaves', label: '🌴 Leave & OD Approvals' },
               { key: 'leave-credits', label: '🎫 Leave Credit Mgmt' },
               { key: 'holidays', label: '📅 Holiday Calendar' },
@@ -610,6 +612,9 @@ export const AdminDashboardPage: React.FC = () => {
         <StatCard icon={<Code2 className="w-5 h-5" />} iconBgColor="bg-[#FFA116]/10 text-[#FFA116]"
           accentColor="brand" label="LeetCode Profiles" value={`${leetcodeCount} Linked`} subtext="Students with LeetCode connected" />
       </div>
+
+      {/* ── TAB: Certification Analytics ── */}
+      {activeTab === 'certifications' && <CertificationAnalyticsView />}
 
       {/* ── TAB: Leave & OD Approvals ── */}
       {activeTab === 'leaves' && <HodLeaveApprovalTab />}
