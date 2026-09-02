@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Award, Users, Search, Download, ExternalLink, ShieldCheck, CheckCircle2, FileText, ChevronRight, X, Loader2 } from 'lucide-react';
 import { api } from '../../../lib/api';
@@ -24,6 +24,22 @@ export const CertificationAnalyticsView: React.FC = () => {
     staleTime: 0,
   });
   const certifiedStudents = Array.isArray(rawStudents) ? rawStudents : [];
+
+  const [studentSearchQuery, setStudentSearchQuery] = useState('');
+
+  const filteredStudents = useMemo(() => {
+    if (!studentSearchQuery.trim()) return certifiedStudents;
+    const q = studentSearchQuery.toLowerCase().trim();
+    return certifiedStudents.filter((s: any) =>
+      (s.roll_number && s.roll_number.toLowerCase().includes(q)) ||
+      (s.student_name && s.student_name.toLowerCase().includes(q)) ||
+      (s.department && s.department.toLowerCase().includes(q)) ||
+      (s.section && s.section.toLowerCase().includes(q)) ||
+      (s.year && s.year.toLowerCase().includes(q)) ||
+      (s.issuer && s.issuer.toLowerCase().includes(q)) ||
+      (s.source && s.source.toLowerCase().includes(q))
+    );
+  }, [certifiedStudents, studentSearchQuery]);
 
   const [openingRollNo, setOpeningRollNo] = useState<string | null>(null);
 
@@ -71,9 +87,9 @@ export const CertificationAnalyticsView: React.FC = () => {
   };
 
   const handleExportCSV = () => {
-    if (!certifiedStudents || certifiedStudents.length === 0) return;
+    if (!filteredStudents || filteredStudents.length === 0) return;
     const headers = ['Roll Number', 'Student Name', 'Department', 'Section', 'Year', 'Certificate', 'Issuer', 'Issue Date', 'Source', 'Status'];
-    const rows = certifiedStudents.map((s: any) => [
+    const rows = filteredStudents.map((s: any) => [
       s.roll_number,
       s.student_name,
       s.department,
@@ -166,31 +182,61 @@ export const CertificationAnalyticsView: React.FC = () => {
       {/* Selected Certification Student List Table */}
       {selectedCertName && (
         <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden shadow-xs space-y-3">
-          <div className="p-4 bg-surface-2/50 border-b border-borderLine flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="p-4 bg-surface-2/50 border-b border-borderLine flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-brand-soft text-brand-primary flex items-center justify-center font-black">
+              <div className="w-8 h-8 rounded-xl bg-brand-soft text-brand-primary flex items-center justify-center font-black shrink-0">
                 <Users className="w-4 h-4" />
               </div>
               <div>
                 <h4 className="text-xs font-black text-textPrimary">
                   Certified Students: <span className="text-brand-primary">{selectedCertName}</span>
                 </h4>
-                <p className="text-[10px] text-textMuted">{certifiedStudents.length} student(s) completed this certification</p>
+                <p className="text-[10px] text-textMuted">
+                  {studentSearchQuery.trim()
+                    ? `${filteredStudents.length} of ${certifiedStudents.length} student(s) found`
+                    : `${certifiedStudents.length} student(s) completed this certification`}
+                </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+              {/* Search Bar beside Export CSV */}
+              <div className="relative w-full sm:w-60">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-textMuted pointer-events-none" />
+                <input
+                  type="text"
+                  value={studentSearchQuery}
+                  onChange={(e) => setStudentSearchQuery(e.target.value)}
+                  placeholder="Search by roll, name, sec..."
+                  className="w-full pl-8 pr-7 py-1.5 text-xs bg-surface border border-borderLine rounded-xl text-textPrimary placeholder:text-textMuted focus:outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary transition-all"
+                />
+                {studentSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setStudentSearchQuery('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-textMuted hover:text-textPrimary"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
               <button
                 type="button"
                 onClick={handleExportCSV}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-borderLine text-textSecondary hover:text-textPrimary hover:bg-surface text-xs font-bold transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-borderLine text-textSecondary hover:text-textPrimary hover:bg-surface text-xs font-bold transition-colors cursor-pointer shrink-0"
               >
                 <Download className="w-3.5 h-3.5" /> Export CSV
               </button>
+
               <button
                 type="button"
-                onClick={() => setSelectedCertName(null)}
-                className="p-1.5 rounded-xl border border-borderLine text-textMuted hover:text-textPrimary hover:bg-surface"
+                onClick={() => {
+                  setSelectedCertName(null);
+                  setStudentSearchQuery('');
+                }}
+                className="p-1.5 rounded-xl border border-borderLine text-textMuted hover:text-textPrimary hover:bg-surface cursor-pointer shrink-0"
+                title="Close student list"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -201,9 +247,11 @@ export const CertificationAnalyticsView: React.FC = () => {
             <div className="p-12 text-center text-xs text-textMuted animate-pulse flex items-center justify-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin text-brand-primary" /> Loading student list...
             </div>
-          ) : certifiedStudents.length === 0 ? (
+          ) : filteredStudents.length === 0 ? (
             <div className="p-10 text-center text-xs text-textMuted">
-              No students found for this certification.
+              {studentSearchQuery.trim()
+                ? `No students matching "${studentSearchQuery}" found for this certification.`
+                : 'No students found for this certification.'}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -221,7 +269,7 @@ export const CertificationAnalyticsView: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-borderLine">
-                  {certifiedStudents.map((s: any, idx: number) => (
+                  {filteredStudents.map((s: any, idx: number) => (
                     <tr key={`${s.roll_number}-${idx}`} className="hover:bg-surface-2 transition-colors">
                       <td className="px-4 py-3 text-center font-bold text-textMuted">{idx + 1}</td>
                       <td className="px-4 py-3 font-mono font-black text-textPrimary">{s.roll_number}</td>
