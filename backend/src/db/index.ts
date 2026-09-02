@@ -559,7 +559,52 @@ async function ensureSchema(p: Pool) {
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );`,
     `CREATE INDEX IF NOT EXISTS idx_master_subjects_sem ON master_subjects(semester_label);`,
-    `CREATE INDEX IF NOT EXISTS idx_master_subjects_dept ON master_subjects(department);`
+    `CREATE INDEX IF NOT EXISTS idx_master_subjects_dept ON master_subjects(department);`,
+
+    // ── Certification Catalogs & Student Certifications ───────────────────────
+    `ALTER TABLE students ADD COLUMN IF NOT EXISTS credly_profile_url TEXT;`,
+    `CREATE TABLE IF NOT EXISTS certification_catalogs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      canonical_name VARCHAR(255) NOT NULL UNIQUE,
+      display_name VARCHAR(255) NOT NULL,
+      issuer VARCHAR(255) NOT NULL,
+      category VARCHAR(100) DEFAULT 'Cloud/DevOps',
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );`,
+    `CREATE TABLE IF NOT EXISTS student_certifications (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      catalog_id UUID REFERENCES certification_catalogs(id) ON DELETE SET NULL,
+      roll_number VARCHAR(50) NOT NULL REFERENCES students(roll_number) ON DELETE CASCADE,
+      certificate_name VARCHAR(255) NOT NULL,
+      issuer VARCHAR(255) NOT NULL,
+      issue_date DATE,
+      expiry_date DATE,
+      verification_url TEXT,
+      badge_image_url TEXT,
+      proof_document_url TEXT,
+      source VARCHAR(20) DEFAULT 'manual',
+      status VARCHAR(20) DEFAULT 'pending',
+      verified_by VARCHAR(150),
+      verified_at TIMESTAMP WITH TIME ZONE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );`,
+    `CREATE INDEX IF NOT EXISTS idx_student_cert_roll ON student_certifications(roll_number);`,
+    `CREATE INDEX IF NOT EXISTS idx_student_cert_catalog ON student_certifications(catalog_id);`,
+    `INSERT INTO certification_catalogs (canonical_name, display_name, issuer, category) VALUES
+      ('aws-cloud-practitioner', 'AWS Certified Cloud Practitioner', 'Amazon Web Services', 'Cloud/DevOps'),
+      ('aws-solutions-architect', 'AWS Certified Solutions Architect', 'Amazon Web Services', 'Cloud/DevOps'),
+      ('azure-fundamentals', 'Microsoft Azure Fundamentals (AZ-900)', 'Microsoft', 'Cloud/DevOps'),
+      ('mongodb-associate-developer', 'MongoDB Certified Associate Developer', 'MongoDB', 'Database/Backend'),
+      ('google-cloud-engineer', 'Google Cloud Associate Cloud Engineer', 'Google Cloud', 'Cloud/DevOps'),
+      ('cisco-ccna', 'Cisco Certified Network Associate (CCNA)', 'Cisco', 'Networking'),
+      ('oracle-java-associate', 'Oracle Certified Associate - Java SE', 'Oracle', 'Programming'),
+      ('python-pcep', 'PCEP – Certified Entry-Level Python Programmer', 'Python Institute', 'Programming'),
+      ('redhat-rhcsa', 'Red Hat Certified System Administrator (RHCSA)', 'Red Hat', 'Linux/DevOps'),
+      ('hashicorp-terraform', 'HashiCorp Certified: Terraform Associate', 'HashiCorp', 'DevOps'),
+      ('docker-certified-associate', 'Docker Certified Associate', 'Docker', 'Containers'),
+      ('kubernetes-cka', 'Certified Kubernetes Administrator (CKA)', 'CNCF / Linux Foundation', 'Cloud/DevOps')
+    ON CONFLICT (canonical_name) DO NOTHING;`
   ];
 
   try {

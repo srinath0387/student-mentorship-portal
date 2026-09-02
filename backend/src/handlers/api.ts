@@ -11252,13 +11252,69 @@ function buildCertDeptFilter(role?: string, dept?: string, paramStartIndex = 1) 
   return { sql: `AND ${cond}`, params };
 }
 
+// Dedicated self-healing table setup for certification catalogs & student certifications
+const ensureCertificationTables = async () => {
+  if (db.isMock) return;
+  try {
+    await db.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS credly_profile_url TEXT;`).catch(() => {});
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS certification_catalogs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        canonical_name VARCHAR(255) NOT NULL UNIQUE,
+        display_name VARCHAR(255) NOT NULL,
+        issuer VARCHAR(255) NOT NULL,
+        category VARCHAR(100) DEFAULT 'Cloud/DevOps',
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS student_certifications (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        catalog_id UUID REFERENCES certification_catalogs(id) ON DELETE SET NULL,
+        roll_number VARCHAR(50) NOT NULL,
+        certificate_name VARCHAR(255) NOT NULL,
+        issuer VARCHAR(255) NOT NULL,
+        issue_date DATE,
+        expiry_date DATE,
+        verification_url TEXT,
+        badge_image_url TEXT,
+        proof_document_url TEXT,
+        source VARCHAR(20) DEFAULT 'manual',
+        status VARCHAR(20) DEFAULT 'pending',
+        verified_by VARCHAR(150),
+        verified_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await db.query(`
+      INSERT INTO certification_catalogs (canonical_name, display_name, issuer, category) VALUES
+        ('aws-cloud-practitioner', 'AWS Certified Cloud Practitioner', 'Amazon Web Services', 'Cloud/DevOps'),
+        ('aws-solutions-architect', 'AWS Certified Solutions Architect', 'Amazon Web Services', 'Cloud/DevOps'),
+        ('azure-fundamentals', 'Microsoft Azure Fundamentals (AZ-900)', 'Microsoft', 'Cloud/DevOps'),
+        ('mongodb-associate-developer', 'MongoDB Certified Associate Developer', 'MongoDB', 'Database/Backend'),
+        ('google-cloud-engineer', 'Google Cloud Associate Cloud Engineer', 'Google Cloud', 'Cloud/DevOps'),
+        ('cisco-ccna', 'Cisco Certified Network Associate (CCNA)', 'Cisco', 'Networking'),
+        ('oracle-java-associate', 'Oracle Certified Associate - Java SE', 'Oracle', 'Programming'),
+        ('python-pcep', 'PCEP – Certified Entry-Level Python Programmer', 'Python Institute', 'Programming'),
+        ('redhat-rhcsa', 'Red Hat Certified System Administrator (RHCSA)', 'Red Hat', 'Linux/DevOps'),
+        ('hashicorp-terraform', 'HashiCorp Certified: Terraform Associate', 'HashiCorp', 'DevOps'),
+        ('docker-certified-associate', 'Docker Certified Associate', 'Docker', 'Containers'),
+        ('kubernetes-cka', 'Certified Kubernetes Administrator (CKA)', 'CNCF / Linux Foundation', 'Cloud/DevOps')
+      ON CONFLICT (canonical_name) DO NOTHING;
+    `);
+  } catch (err: any) {
+    console.warn('[Certs Table Init Warning]:', err.message);
+  }
+};
+
 /**
  * GET /certifications/summary
  * Returns top certifications with student counts for dashboard summary cards.
  */
 app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
   try {
-    await ensureLeaveAndSubjectsHandledTables();
+    await ensureCertificationTables();
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
 
@@ -11305,7 +11361,7 @@ app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'f
       FULL OUTER JOIN certification_catalogs cat 
         ON LOWER(TRIM(csc.display_name)) = LOWER(TRIM(cat.display_name))
         OR csc.canonical_name = cat.canonical_name
-      ORDER BY student_count DESC, display_name ASC
+      ORDER BY COALESCE(csc.student_count, 0) DESC, COALESCE(csc.display_name, cat.display_name) ASC
       LIMIT 12
     `;
 
@@ -11322,7 +11378,7 @@ app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'f
  */
 app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
   try {
-    await ensureLeaveAndSubjectsHandledTables();
+    await ensureCertificationTables();
     const query = (req.query.q as string || '').trim();
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
@@ -11379,7 +11435,7 @@ app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'fa
         COALESCE(csc.display_name, cat.display_name) ILIKE $1 
         OR COALESCE(csc.issuer, cat.issuer) ILIKE $1
       )
-      ORDER BY student_count DESC, display_name ASC
+      ORDER BY COALESCE(csc.student_count, 0) DESC, COALESCE(csc.display_name, cat.display_name) ASC
       LIMIT 15
     `;
 
@@ -11396,7 +11452,7 @@ app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'fa
  */
 app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
   try {
-    await ensureLeaveAndSubjectsHandledTables();
+    await ensureCertificationTables();
     const certName = (req.query.cert_name as string || '').trim();
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
