@@ -1647,11 +1647,14 @@ app.get('/students', requireAuth, async (req: Request, res: Response) => {
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.map(c => c.startsWith('(') ? c : `s.${c}`).join(' AND ')}` : '';
 
-    // Pagination — default 500 per page to prevent Lambda memory/timeout issues
-    const rawLimit = parseInt(String(req.query.limit || '500'), 10);
-    const rawOffset = parseInt(String(req.query.offset || '0'), 10);
-    const pageLimit = Math.min(Math.max(rawLimit, 1), 1000); // cap at 1000
-    const pageOffset = Math.max(rawOffset, 0);
+    let paginationClause = '';
+    if (req.query.limit !== undefined && req.query.limit !== 'all' && req.query.limit !== 'All') {
+      const rawLimit = parseInt(String(req.query.limit), 10);
+      const rawOffset = parseInt(String(req.query.offset || '0'), 10);
+      const pageLimit = Math.min(Math.max(isNaN(rawLimit) ? 10000 : rawLimit, 1), 10000);
+      const pageOffset = Math.max(isNaN(rawOffset) ? 0 : rawOffset, 0);
+      paginationClause = `LIMIT ${pageLimit} OFFSET ${pageOffset}`;
+    }
 
     const result = await db.query(`
       SELECT DISTINCT ON (s.roll_number) 
@@ -1674,7 +1677,7 @@ app.get('/students', requireAuth, async (req: Request, res: Response) => {
       ${whereClause}
       GROUP BY s.roll_number, s.name, s.email, s.year, s.phone, s.address, s.native_place, s.department, s.batch, s.section, s.hostel_day_scholar, s.driving_license, s.passport, s.relocation_willingness, s.family_business, s.financial_background, s.faculty_mentor_id, s.photo_url, s.resume_url, s.linkedin_url, s.linkedin_updated, s.is_lateral_entry, s.created_at, s.updated_at
       ORDER BY s.roll_number, s.created_at DESC
-      LIMIT ${pageLimit} OFFSET ${pageOffset}
+      ${paginationClause}
     `, params);
     res.json(result.rows);
   } catch (err: any) {
