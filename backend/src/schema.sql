@@ -304,4 +304,68 @@ CREATE TABLE IF NOT EXISTS class_incharges (
 
 CREATE INDEX IF NOT EXISTS idx_class_incharges_faculty ON class_incharges(faculty_email);
 
+-- 20. Credly Profile & Certification Catalog
+ALTER TABLE students ADD COLUMN IF NOT EXISTS credly_profile_url TEXT;
+
+CREATE TABLE IF NOT EXISTS certification_catalogs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    canonical_name VARCHAR(255) NOT NULL UNIQUE,
+    display_name VARCHAR(255) NOT NULL,
+    issuer VARCHAR(255) NOT NULL,
+    category VARCHAR(100) DEFAULT 'Cloud/DevOps',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS student_certifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    catalog_id UUID REFERENCES certification_catalogs(id) ON DELETE SET NULL,
+    roll_number VARCHAR(50) NOT NULL REFERENCES students(roll_number) ON DELETE CASCADE,
+    certificate_name VARCHAR(255) NOT NULL,
+    issuer VARCHAR(255) NOT NULL,
+    issue_date DATE,
+    expiry_date DATE,
+    verification_url TEXT,
+    badge_image_url TEXT,
+    proof_document_url TEXT,
+    source VARCHAR(20) DEFAULT 'manual' CHECK (source IN ('manual', 'credly')),
+    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'verified', 'rejected')),
+    verified_by VARCHAR(150),
+    verified_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_student_cert_issue UNIQUE(roll_number, certificate_name, issue_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_student_cert_roll ON student_certifications(roll_number);
+CREATE INDEX IF NOT EXISTS idx_student_cert_catalog ON student_certifications(catalog_id);
+
+-- 21. Student Internships
+CREATE TABLE IF NOT EXISTS student_internships (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    roll_number VARCHAR(50) NOT NULL REFERENCES students(roll_number) ON DELETE CASCADE,
+    company_name VARCHAR(255) NOT NULL,
+    role VARCHAR(255) NOT NULL,
+    internship_type VARCHAR(50) DEFAULT 'Full-time' CHECK (internship_type IN ('Full-time', 'Part-time', 'Virtual', 'Research')),
+    mode VARCHAR(30) DEFAULT 'On-site' CHECK (mode IN ('On-site', 'Remote', 'Hybrid')),
+    start_date DATE NOT NULL,
+    end_date DATE,
+    stipend_amount NUMERIC(10, 2) DEFAULT 0,
+    offer_letter_url TEXT,
+    completion_certificate_url TEXT,
+    status VARCHAR(30) DEFAULT 'ongoing' CHECK (status IN ('ongoing', 'completed', 'cancelled')),
+    mentor_email VARCHAR(150),
+    mentor_name VARCHAR(150),
+    verification_status VARCHAR(20) DEFAULT 'pending' CHECK (verification_status IN ('pending', 'verified', 'rejected')),
+    verified_by VARCHAR(150),
+    verified_at TIMESTAMP WITH TIME ZONE,
+    remarks TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_internships_roll ON student_internships(roll_number);
+CREATE INDEX IF NOT EXISTS idx_internships_mentor ON student_internships(mentor_email);
+CREATE INDEX IF NOT EXISTS idx_internships_status ON student_internships(verification_status);
+
 -- End of schema.sql
+

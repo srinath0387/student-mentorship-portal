@@ -1348,5 +1348,41 @@ export const api = {
       method: 'DELETE',
     });
   },
+
+  // Certification Search & Credly Sync
+  searchCertifications: async (query: string): Promise<any[]> => {
+    return fetchWithAuth(`/certifications/search?q=${encodeURIComponent(query)}`);
+  },
+
+  getCertifiedStudents: async (certName: string): Promise<any[]> => {
+    return fetchWithAuth(`/certifications/students?cert_name=${encodeURIComponent(certName)}`);
+  },
+
+  syncCredlyCertifications: async (data: { roll_number?: string; credly_profile_url?: string }): Promise<any> => {
+    return fetchWithAuth('/certifications/credly/sync', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Student Internships
+  getInternships: async (): Promise<any[]> => {
+    return fetchWithAuth('/internships');
+  },
+
+  createInternship: async (data: any): Promise<any> => {
+    return fetchWithAuth('/internships', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  verifyInternship: async (id: string, data: { verification_status: 'verified' | 'rejected' | 'pending'; remarks?: string }): Promise<any> => {
+    return fetchWithAuth(`/internships/${encodeURIComponent(id)}/verify`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
 };
+
 

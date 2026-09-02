@@ -7,6 +7,7 @@ import { runCodingProfileCronSync, fetchLeetCodeStatsDirect, fetchGitHubStatsDir
 import { cachedFetch } from '../services/platformCache';
 import { deleteCognitoUsers, deleteAllCognitoUsers, updateCognitoUserPassword } from '../services/cognitoService';
 import { calculateFacultyNameSimilarity, isEmailNameMatch, mergeFacultyRecordsInDb } from '../services/facultyMatching';
+import { syncStudentCredlyCertifications } from '../services/credlySync';
 import {
   studentProfileSchema,
   academicSchema,
@@ -11121,6 +11122,294 @@ app.delete('/subjects/master/:id', requireRole('admin', 'hod', 'coordinator'), a
   }
 });
 
+// ============================================================================
+// FEATURE 1: CERTIFICATIONS TYPEAHEAD SEARCH & CREDLY SYNC
+// ============================================================================
+
+/**
+ * GET /certifications/search?q=aws
+ * Role-scoped typeahead search returning certification name, issuer, and student count.
+ */
+app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
+  try {
+    const query = (req.query.q as string || '').trim().toLowerCase();
+    const callerRole = req.auth?.role;
+    const callerDept = req.auth?.department;
+
+    if (!query || query.length < 2) {
+      return res.json([]);
+    }
+
+    let deptFilterSql = '';
+    const params: any[] = [`%${query}%`];
+
+    // HOD Scoping
+    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+      params.push(callerDept);
+      deptFilterSql = `
+        AND (
+          LOWER(REPLACE(s.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($2, ' ', '')) || '%'
+          OR LOWER(REPLACE($2, ' ', '')) ILIKE '%' || LOWER(REPLACE(s.department, ' ', '')) || '%'
+        )
+      `;
+    }
+
+    const searchQuery = `
+      SELECT 
+        COALESCE(c.display_name, sc.certificate_name) AS display_name,
+        COALESCE(c.canonical_name, LOWER(TRIM(sc.certificate_name))) AS canonical_name,
+        COALESCE(c.issuer, sc.issuer) AS issuer,
+        COUNT(DISTINCT sc.roll_number) AS student_count
+      FROM student_certifications sc
+      JOIN students s ON s.roll_number = sc.roll_number
+      LEFT JOIN certification_catalogs c ON c.id = sc.catalog_id
+      WHERE (
+        sc.certificate_name ILIKE $1 
+        OR (c.canonical_name IS NOT NULL AND c.canonical_name ILIKE $1)
+        OR sc.issuer ILIKE $1
+      )
+      ${deptFilterSql}
+      GROUP BY 1, 2, 3
+      ORDER BY student_count DESC, display_name ASC
+      LIMIT 10
+    `;
+
+    const result = await db.query(searchQuery, params);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /certifications/students?cert_name=
+ * Returns students who hold a specific certification (role-scoped).
+ */
+app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
+  try {
+    const certName = (req.query.cert_name as string || '').trim();
+    const callerRole = req.auth?.role;
+    const callerDept = req.auth?.department;
+
+    if (!certName) {
+      return res.status(400).json({ error: 'cert_name parameter is required' });
+    }
+
+    let deptFilter = '';
+    const params: any[] = [certName];
+
+    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+      params.push(callerDept);
+      deptFilter = `
+        AND (
+          LOWER(REPLACE(s.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($2, ' ', '')) || '%'
+          OR LOWER(REPLACE($2, ' ', '')) ILIKE '%' || LOWER(REPLACE(s.department, ' ', '')) || '%'
+        )
+      `;
+    }
+
+    const studentsQuery = `
+      SELECT 
+        s.roll_number,
+        s.name AS student_name,
+        s.department,
+        s.section,
+        s.year,
+        sc.certificate_name,
+        sc.issuer,
+        sc.issue_date,
+        sc.verification_url,
+        sc.badge_image_url,
+        sc.proof_document_url,
+        sc.source,
+        sc.status AS verification_status
+      FROM student_certifications sc
+      JOIN students s ON s.roll_number = sc.roll_number
+      LEFT JOIN certification_catalogs c ON c.id = sc.catalog_id
+      WHERE (
+        sc.certificate_name ILIKE $1 
+        OR c.canonical_name = LOWER(TRIM($1))
+      )
+      ${deptFilter}
+      ORDER BY s.roll_number ASC
+    `;
+
+    const result = await db.query(studentsQuery, params);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /certifications/credly/sync
+ * Sync Credly profile badges for a student
+ */
+app.post('/certifications/credly/sync', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const rollNumber = (req.auth?.role === 'student' ? req.auth.regNo : req.body.roll_number)?.trim().toUpperCase();
+    const credlyUrl = req.body.credly_profile_url;
+
+    if (!rollNumber) {
+      return res.status(400).json({ error: 'Roll number is required' });
+    }
+
+    let urlToUse = credlyUrl;
+    if (!urlToUse) {
+      const sRes = await db.query('SELECT credly_profile_url FROM students WHERE roll_number = $1', [rollNumber]);
+      urlToUse = sRes.rows[0]?.credly_profile_url;
+    }
+
+    if (!urlToUse) {
+      return res.status(400).json({ error: 'No Credly profile URL found for student' });
+    }
+
+    const syncRes = await syncStudentCredlyCertifications(rollNumber, urlToUse);
+    res.json({ success: true, ...syncRes });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// FEATURE 2: INTERNSHIPS ENDPOINTS WITH ROLE SCOPING
+// ============================================================================
+
+/**
+ * GET /internships
+ * Scoped view of internships:
+ * - Student: sees own internships
+ * - Faculty/Mentor: sees assigned mentees
+ * - HOD: sees department
+ * - Admin: sees all
+ */
+app.get('/internships', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const callerRole = req.auth?.role;
+    const callerEmail = req.auth?.email?.toLowerCase();
+    const callerDept = req.auth?.department;
+    const callerRoll = req.auth?.regNo?.toUpperCase();
+
+    let query = `
+      SELECT 
+        i.*,
+        s.name AS student_name,
+        s.department,
+        s.section,
+        s.year,
+        s.mentor_name AS current_mentor_name,
+        s.mentor_email AS current_mentor_email
+      FROM student_internships i
+      JOIN students s ON s.roll_number = i.roll_number
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+
+    if (callerRole === 'student') {
+      params.push(callerRoll || '');
+      query += ` AND UPPER(i.roll_number) = $${params.length}`;
+    } else if (callerRole === 'faculty') {
+      params.push(callerEmail);
+      query += ` AND (LOWER(s.mentor_email) = $${params.length} OR LOWER(i.mentor_email) = $${params.length})`;
+    } else if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+      params.push(callerDept);
+      query += ` AND (
+        LOWER(REPLACE(s.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($${params.length}, ' ', '')) || '%'
+        OR LOWER(REPLACE($${params.length}, ' ', '')) ILIKE '%' || LOWER(REPLACE(s.department, ' ', '')) || '%'
+      )`;
+    }
+
+    query += ` ORDER BY i.created_at DESC`;
+
+    const result = await db.query(query, params);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /internships
+ * Create a new internship entry (Student or Mentor/Admin)
+ */
+app.post('/internships', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const {
+      roll_number,
+      company_name,
+      role,
+      internship_type = 'Full-time',
+      mode = 'On-site',
+      start_date,
+      end_date,
+      stipend_amount = 0,
+      offer_letter_url,
+      completion_certificate_url,
+      status = 'ongoing'
+    } = req.body;
+
+    const targetRoll = (req.auth?.role === 'student' ? req.auth.regNo : roll_number)?.trim().toUpperCase();
+
+    if (!targetRoll || !company_name || !role || !start_date) {
+      return res.status(400).json({ error: 'Roll number, company name, role, and start date are required' });
+    }
+
+    // Snapshot current student mentor
+    const studentRes = await db.query('SELECT mentor_name, mentor_email FROM students WHERE roll_number = $1', [targetRoll]);
+    const student = studentRes.rows[0] || {};
+
+    const insertRes = await db.query(
+      `INSERT INTO student_internships (
+        roll_number, company_name, role, internship_type, mode, 
+        start_date, end_date, stipend_amount, offer_letter_url, 
+        completion_certificate_url, status, mentor_name, mentor_email
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      RETURNING *`,
+      [
+        targetRoll, company_name.trim(), role.trim(), internship_type, mode,
+        start_date, end_date || null, stipend_amount || 0, offer_letter_url || null,
+        completion_certificate_url || null, status, student.mentor_name || null, student.mentor_email || null
+      ]
+    );
+
+    res.status(201).json(insertRes.rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * PUT /internships/:id/verify
+ * Verify an internship (Mentor, HOD, Admin)
+ */
+app.put('/internships/:id/verify', requireRole('faculty', 'hod', 'admin', 'super_admin'), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { verification_status, remarks } = req.body;
+
+    if (!['verified', 'rejected', 'pending'].includes(verification_status)) {
+      return res.status(400).json({ error: 'Invalid verification status (must be verified, rejected, or pending)' });
+    }
+
+    const updateRes = await db.query(
+      `UPDATE student_internships 
+       SET verification_status = $1, remarks = $2, verified_by = $3, verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $4
+       RETURNING *`,
+      [verification_status, remarks || null, req.auth?.email, id]
+    );
+
+    if (updateRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Internship record not found' });
+    }
+
+    res.json(updateRes.rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export const handler = serverless(app);
 export default app;
+
 
