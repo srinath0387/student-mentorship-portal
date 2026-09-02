@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import { db } from '../db';
 import { getDeptFromRollNumber, DEPARTMENT_CODE_MAP } from './validation';
 
@@ -6,7 +7,7 @@ import { getDeptFromRollNumber, DEPARTMENT_CODE_MAP } from './validation';
 // Auth Middleware for Advitiyans API
 //
 // Three layers:
-//   1. extractAuth   — decodes JWT or validates session. NEVER blocks. Sets req.auth.
+//   1. extractAuth   — cryptographically verifies Cognito JWT or checks session. Sets req.auth.
 //   2. requireAuth   — blocks if req.auth is null (no valid identity).
 //   3. requireRole   — blocks if req.auth.role not in allowed list.
 //   4. requireOwnerOrRole — blocks if user is a student and doesn't own the resource.
@@ -29,15 +30,34 @@ declare global {
   }
 }
 
+const userPoolId = process.env.COGNITO_USER_POOL_ID || process.env.USER_POOL_ID || 'ap-south-1_sYp8CvKjn';
+const clientId = process.env.COGNITO_CLIENT_ID || process.env.CLIENT_ID || '6ufn4tstvrk6718ujcsjun6lpe';
+
+// Lazy-initialized verifier for cryptographic signature check
+let cognitoIdVerifier: any = null;
+
+function getCognitoVerifier() {
+  if (!cognitoIdVerifier && userPoolId && userPoolId.includes('_')) {
+    try {
+      cognitoIdVerifier = CognitoJwtVerifier.create({
+        userPoolId: userPoolId,
+        tokenUse: 'id',
+        clientId: clientId || null,
+      });
+    } catch (e: any) {
+      console.warn('[Cognito Verifier Init Warning]:', e.message);
+    }
+  }
+  return cognitoIdVerifier;
+}
+
 /**
  * Decode a JWT payload (base64url) without cryptographic verification.
- * Returns null if the token is malformed or clearly fake.
+ * Used ONLY as fallback in offline/mock test environments.
  */
 function decodeJwtPayload(token: string): Record<string, any> | null {
   try {
-    // Reject obviously fake tokens (demo tokens from AuthContext fallback)
     if (token.startsWith('demo_token_')) return null;
-
     const parts = token.split('.');
     if (parts.length !== 3) return null;
 
@@ -50,11 +70,40 @@ function decodeJwtPayload(token: string): Record<string, any> | null {
 }
 
 /**
+ * Cryptographically verify a Cognito JWT against AWS Cognito JWKS.
+ * Returns verified claims or null if invalid/expired.
+ */
+async function verifyJwt(token: string): Promise<Record<string, any> | null> {
+  if (!token || token.startsWith('demo_token_')) return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+
+  const verifier = getCognitoVerifier();
+  if (verifier) {
+    try {
+      const verified = await verifier.verify(token);
+      return verified as Record<string, any>;
+    } catch (verifyErr: any) {
+      console.warn('[JWT Cryptographic Verification Warning]:', verifyErr.message);
+      // If cryptographic verification failed due to signature mismatch or expiry, reject immediately
+      return null;
+    }
+  }
+
+  // Fallback for mock/test environments
+  if (process.env.USE_MOCK === 'true' || process.env.NODE_ENV === 'test') {
+    return decodeJwtPayload(token);
+  }
+
+  return null;
+}
+
+/**
  * extractAuth — Non-blocking middleware. Runs on every request.
  *
  * Attempts to identify the caller via:
- *   1. JWT in Authorization header (Cognito tokens for student/faculty)
- *   2. Session-based fallback (for admin/HOD who use demo_token + valid session)
+ *   1. Cryptographically verified Cognito JWT in Authorization header
+ *   2. Session-based fallback (for offline dev / mock mode)
  *
  * Sets req.auth = { email, role, regNo } or req.auth = null.
  * NEVER returns 401 — downstream guards decide access.
@@ -74,8 +123,8 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
 
     const token = authHeader.slice(7);
 
-    // ── Attempt 1: Decode as a real Cognito JWT ──
-    const payload = decodeJwtPayload(token);
+    // ── Attempt 1: Cryptographically verify Cognito JWT ──
+    const payload = await verifyJwt(token);
     if (payload && payload.email) {
       const email = (payload.email || '').toLowerCase().trim();
       const derivedRegNo = (payload['custom:reg_no'] || (email.includes('@') ? email.split('@')[0] : '')).toUpperCase();

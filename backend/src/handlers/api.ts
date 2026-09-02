@@ -29,6 +29,43 @@ import bcrypt from 'bcryptjs';
 
 const BCRYPT_ROUNDS = 10;
 
+/**
+ * Compare entered plaintext password against stored password (which might be bcrypt hash or legacy plaintext).
+ * If it matches as legacy plaintext, optionally upgrades the stored password to a bcrypt hash in the database.
+ */
+async function compareAndUpgradePassword(
+  entered: string,
+  stored: string,
+  upgradeCallback?: (newHash: string) => Promise<void>
+): Promise<boolean> {
+  if (!entered || !stored) return false;
+
+  let isMatch = false;
+  const isBcrypt = stored.startsWith('$2a$') || stored.startsWith('$2b$') || stored.startsWith('$2y$');
+
+  if (isBcrypt) {
+    try {
+      isMatch = await bcrypt.compare(entered, stored);
+    } catch {
+      isMatch = false;
+    }
+  } else {
+    // Legacy plaintext match
+    isMatch = (entered === stored);
+    // If matched, seamlessly upgrade to bcrypt in the background
+    if (isMatch && upgradeCallback) {
+      try {
+        const newHash = await bcrypt.hash(entered, BCRYPT_ROUNDS);
+        await upgradeCallback(newHash);
+      } catch (upgradeErr: any) {
+        console.warn('[Bcrypt Upgrade Notice]:', upgradeErr.message);
+      }
+    }
+  }
+
+  return isMatch;
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
@@ -332,7 +369,11 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
           [emailLower]
         );
         if (saResult.rows.length > 0) {
-          if (saResult.rows[0].password === password) {
+          const stored = saResult.rows[0].password;
+          const isMatch = await compareAndUpgradePassword(password, stored, async (newHash) => {
+            await db.query('UPDATE super_admin_credentials SET password = $1, updated_at = NOW() WHERE LOWER(email) = $2', [newHash, emailLower]);
+          });
+          if (isMatch) {
             return res.json({ valid: true, role: 'admin', isSuperAdmin: true, department: '*', email: saResult.rows[0].email });
           }
           await new Promise(resolve => setTimeout(resolve, 600));
@@ -351,7 +392,11 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
           [emailLower]
         );
         if (saResult.rows.length > 0) {
-          if (saResult.rows[0].password === password) {
+          const stored = saResult.rows[0].password;
+          const isMatch = await compareAndUpgradePassword(password, stored, async (newHash) => {
+            await db.query('UPDATE super_admin_credentials SET password = $1, updated_at = NOW() WHERE LOWER(email) = $2', [newHash, emailLower]);
+          });
+          if (isMatch) {
             return res.json({ valid: true, role: 'admin', isSuperAdmin: true, department: '*', email: saResult.rows[0].email });
           }
           await new Promise(resolve => setTimeout(resolve, 600));
@@ -369,7 +414,11 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
         );
         if (adminResult.rows.length > 0) {
           const adminRow = adminResult.rows[0];
-          if (adminRow.password === password) {
+          const stored = adminRow.password;
+          const isMatch = await compareAndUpgradePassword(password, stored, async (newHash) => {
+            await db.query('UPDATE admin_accounts SET password = $1, updated_at = NOW() WHERE LOWER(email) = $2', [newHash, emailLower]);
+          });
+          if (isMatch) {
             const isCoordinator = emailLower === 'coordinator@rgmcet.edu.in' || adminRow.department === 'Coordinator';
             const assignedDept = adminRow.department || department || (isCoordinator ? 'All' : 'CSE (Data Science)');
             return res.json({
@@ -395,7 +444,11 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
         let hodDbResult = await db.query('SELECT email, password, department FROM hod_credentials WHERE LOWER(email) = $1', [emailLower]);
         if (hodDbResult.rows.length > 0) {
           const hodRow = hodDbResult.rows[0];
-          if (password === hodRow.password) {
+          const stored = hodRow.password;
+          const isMatch = await compareAndUpgradePassword(password, stored, async (newHash) => {
+            await db.query('UPDATE hod_credentials SET password = $1, updated_at = NOW() WHERE LOWER(email) = $2', [newHash, emailLower]);
+          });
+          if (isMatch) {
             const assignedDept = hodRow.department || department || 'CSE (Data Science)';
             return res.json({ valid: true, role: 'hod', department: assignedDept, email: hodRow.email });
           }
@@ -581,7 +634,7 @@ app.get('/super-admin/tier1b', requireRole('admin'), async (req: Request, res: R
       return res.status(403).json({ error: 'Tier 1A super-admin access required' });
     }
     const result = await db.query(
-      'SELECT email, password, updated_at FROM super_admin_credentials ORDER BY email ASC'
+      'SELECT email, updated_at FROM super_admin_credentials ORDER BY email ASC'
     );
     res.json(result.rows);
   } catch (err: any) {
@@ -606,11 +659,12 @@ app.post('/super-admin/tier1b', requireRole('admin'), async (req: Request, res: 
     if (TIER1A_EMAILS_LOWER.includes(email.toLowerCase())) {
       return res.status(400).json({ error: 'This email already has Tier 1A super-admin privileges' });
     }
+    const hashedPassword = await bcrypt.hash(String(password), BCRYPT_ROUNDS);
     await db.query(
       `INSERT INTO super_admin_credentials (email, password, updated_at)
        VALUES (LOWER($1), $2, NOW())
        ON CONFLICT (email) DO UPDATE SET password = $2, updated_at = NOW()`,
-      [email, password]
+      [email, hashedPassword]
     );
     res.json({ success: true });
   } catch (err: any) {
@@ -644,7 +698,7 @@ const SUPER_ADMIN_EMAILS_LOWER = [
   'jayanthkumarnaidu777@gmail.com',
 ];
 
-// GET /super-admin/admins — list all regular admins (email, name, password, department, created_at)
+// GET /super-admin/admins — list all regular admins (email, name, department, created_at)
 app.get('/super-admin/admins', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const callerEmail = String(req.query.caller_email || '');
@@ -652,7 +706,7 @@ app.get('/super-admin/admins', requireRole('admin'), async (req: Request, res: R
       return res.status(403).json({ error: 'Super admin access required' });
     }
     const result = await db.query(
-      'SELECT email, name, password, department, created_by, created_at FROM admin_accounts ORDER BY created_at DESC'
+      'SELECT email, name, department, created_by, created_at, updated_at FROM admin_accounts ORDER BY created_at DESC'
     );
     res.json(result.rows);
   } catch (err: any) {
@@ -677,11 +731,12 @@ app.post('/super-admin/admins', requireRole('admin'), async (req: Request, res: 
       return res.status(400).json({ error: 'Cannot create a regular admin account for a super admin email' });
     }
     const dept = department || 'CSE (Data Science)';
+    const hashedPassword = await bcrypt.hash(String(password), BCRYPT_ROUNDS);
     await db.query(
       `INSERT INTO admin_accounts (email, name, password, department, created_by, created_at, updated_at)
        VALUES (LOWER($1), $2, $3, $4, LOWER($5), NOW(), NOW())
        ON CONFLICT (email) DO UPDATE SET name = $2, password = $3, department = $4, updated_at = NOW()`,
-      [email, name, password, dept, caller_email]
+      [email, name, hashedPassword, dept, caller_email]
     );
     res.json({ success: true });
   } catch (err: any) {
@@ -722,9 +777,10 @@ app.put('/super-admin/admins/:email/password', requireRole('admin'), async (req:
     if (SUPER_ADMIN_EMAILS_LOWER.includes(targetEmail)) {
       return res.status(400).json({ error: 'Use /super-admin/my-password to change a super admin password' });
     }
+    const hashedPassword = await bcrypt.hash(String(password), BCRYPT_ROUNDS);
     await db.query(
       'UPDATE admin_accounts SET password = $1, updated_at = NOW() WHERE LOWER(email) = $2',
-      [password, targetEmail]
+      [hashedPassword, targetEmail]
     );
     res.json({ success: true });
   } catch (err: any) {
@@ -743,9 +799,10 @@ app.put('/super-admin/my-password', requireRole('admin'), async (req: Request, r
       return res.status(400).json({ error: 'Password must be at least 4 characters' });
     }
     // Updates ONLY the row for my_email — cannot target another super admin
+    const hashedPassword = await bcrypt.hash(String(new_password), BCRYPT_ROUNDS);
     await db.query(
       'UPDATE super_admin_credentials SET password = $1, updated_at = NOW() WHERE LOWER(email) = LOWER($2)',
-      [new_password, my_email]
+      [hashedPassword, my_email]
     );
     res.json({ success: true });
   } catch (err: any) {
