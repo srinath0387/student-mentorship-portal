@@ -9547,6 +9547,21 @@ const ensureLeaveAndSubjectsHandledTables = async () => {
         category VARCHAR(100) DEFAULT 'Cloud/DevOps',
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
+
+      INSERT INTO certification_catalogs (canonical_name, display_name, issuer, category) VALUES
+        ('aws-cloud-practitioner', 'AWS Certified Cloud Practitioner', 'Amazon Web Services', 'Cloud/DevOps'),
+        ('aws-solutions-architect', 'AWS Certified Solutions Architect', 'Amazon Web Services', 'Cloud/DevOps'),
+        ('azure-fundamentals', 'Microsoft Azure Fundamentals (AZ-900)', 'Microsoft', 'Cloud/DevOps'),
+        ('mongodb-associate-developer', 'MongoDB Certified Associate Developer', 'MongoDB', 'Database/Backend'),
+        ('google-cloud-engineer', 'Google Cloud Associate Cloud Engineer', 'Google Cloud', 'Cloud/DevOps'),
+        ('cisco-ccna', 'Cisco Certified Network Associate (CCNA)', 'Cisco', 'Networking'),
+        ('oracle-java-associate', 'Oracle Certified Associate - Java SE', 'Oracle', 'Programming'),
+        ('python-pcep', 'PCEP – Certified Entry-Level Python Programmer', 'Python Institute', 'Programming'),
+        ('redhat-rhcsa', 'Red Hat Certified System Administrator (RHCSA)', 'Red Hat', 'Linux/DevOps'),
+        ('hashicorp-terraform', 'HashiCorp Certified: Terraform Associate', 'HashiCorp', 'DevOps'),
+        ('docker-certified-associate', 'Docker Certified Associate', 'Docker', 'Containers'),
+        ('kubernetes-cka', 'Certified Kubernetes Administrator (CKA)', 'CNCF / Linux Foundation', 'Cloud/DevOps')
+      ON CONFLICT (canonical_name) DO NOTHING;
     `);
     await db.query(`
       CREATE TABLE IF NOT EXISTS student_certifications (
@@ -11197,53 +11212,99 @@ app.delete('/subjects/master/:id', requireRole('admin', 'hod', 'coordinator'), a
  * GET /certifications/summary
  * Returns top certifications with student counts for dashboard summary cards.
  */
+// Helper: build robust role & branch-code department SQL filter for students
+function buildCertDeptFilter(role?: string, dept?: string, paramStartIndex = 1) {
+  if (role !== 'hod' || !dept || dept === '*' || dept === 'All') {
+    return { sql: '', params: [] as any[] };
+  }
+  const d = dept.toLowerCase().trim();
+  let code = '';
+  if (d.includes('data science') || d.includes('(ds)') || d === 'ds' || d.includes('32')) code = '32';
+  else if (d.includes('ai') || d.includes('ml') || d.includes('33')) code = '33';
+  else if (d.includes('bs') || d.includes('business') || d.includes('34')) code = '34';
+  else if (d.includes('cyber') || d.includes('(cs)') || d.includes('37')) code = '37';
+  else if (d === 'cse' || d.includes('computer science') || d.includes('05')) code = '05';
+  else if (d.includes('ece') || d.includes('electronics') || d.includes('04')) code = '04';
+  else if (d.includes('eee') || d.includes('electrical') || d.includes('02')) code = '02';
+  else if (d.includes('mech') || d.includes('03')) code = '03';
+  else if (d.includes('civil') || d.includes('01')) code = '01';
+  else if (d === 'mba' || d.includes('business admin') || d.includes('1e') || d.includes('e00')) code = 'E00';
+  else if (d === 'mca' || d.includes('computer app') || d.includes('1f') || d.includes('f00')) code = 'F00';
+
+  const params: any[] = [dept];
+  let cond = `(
+    LOWER(REPLACE(COALESCE(s.department, ''), ' ', '')) ILIKE '%' || LOWER(REPLACE($${paramStartIndex}, ' ', '')) || '%'
+    OR LOWER(REPLACE($${paramStartIndex}, ' ', '')) ILIKE '%' || LOWER(REPLACE(COALESCE(s.department, ''), ' ', '')) || '%'
+  `;
+  if (code === 'E00') {
+    cond += ` OR SUBSTRING(s.roll_number, 5, 2) = '1E' OR s.roll_number ILIKE '%1E00%' OR s.department ILIKE '%mba%'`;
+  } else if (code === 'F00') {
+    cond += ` OR SUBSTRING(s.roll_number, 5, 2) = '1F' OR s.roll_number ILIKE '%1F00%' OR s.department ILIKE '%mca%'`;
+  } else if (code) {
+    cond += ` OR SUBSTRING(s.roll_number, 7, 2) = '${code}'`;
+    if (code === '32') cond += ` OR LOWER(COALESCE(s.department, '')) ILIKE '%data science%' OR LOWER(COALESCE(s.department, '')) ILIKE '%ds%'`;
+    if (code === '05') cond += ` OR (SUBSTRING(s.roll_number, 7, 2) = '05' AND LOWER(COALESCE(s.department, '')) NOT ILIKE '%data science%' AND LOWER(COALESCE(s.department, '')) NOT ILIKE '%ds%')`;
+    if (code === '33') cond += ` OR LOWER(COALESCE(s.department, '')) ILIKE '%ai%' OR LOWER(COALESCE(s.department, '')) ILIKE '%ml%'`;
+    if (code === '34') cond += ` OR LOWER(COALESCE(s.department, '')) ILIKE '%business%' OR LOWER(COALESCE(s.department, '')) ILIKE '%csbs%'`;
+    if (code === '37') cond += ` OR LOWER(COALESCE(s.department, '')) ILIKE '%cyber%'`;
+  }
+  cond += `)`;
+  return { sql: `AND ${cond}`, params };
+}
+
+/**
+ * GET /certifications/summary
+ * Returns top certifications with student counts for dashboard summary cards.
+ */
 app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
   try {
     await ensureLeaveAndSubjectsHandledTables();
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
 
-    let deptFilterSql = '';
-    const params: any[] = [];
-
-    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
-      params.push(callerDept);
-      deptFilterSql = `
-        AND (
-          LOWER(REPLACE(s.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($1, ' ', '')) || '%'
-          OR LOWER(REPLACE($1, ' ', '')) ILIKE '%' || LOWER(REPLACE(s.department, ' ', '')) || '%'
-        )
-      `;
-    }
+    const { sql: deptFilterSql, params } = buildCertDeptFilter(callerRole, callerDept, 1);
 
     const summaryQuery = `
       WITH unified_certs AS (
         SELECT 
-          sc.roll_number,
-          sc.certificate_name,
-          sc.issuer
+          UPPER(TRIM(sc.roll_number)) AS roll_number,
+          TRIM(sc.certificate_name) AS certificate_name,
+          TRIM(sc.issuer) AS issuer
         FROM student_certifications sc
+        WHERE sc.certificate_name IS NOT NULL AND TRIM(sc.certificate_name) <> ''
         UNION ALL
         SELECT 
-          c.student_id AS roll_number,
-          c.title AS certificate_name,
-          c.provider AS issuer
+          UPPER(TRIM(c.student_id)) AS roll_number,
+          TRIM(c.title) AS certificate_name,
+          TRIM(COALESCE(c.provider, 'Certification')) AS issuer
         FROM certifications c
-        WHERE NOT EXISTS (
-          SELECT 1 FROM student_certifications sc2 
-          WHERE sc2.roll_number = c.student_id AND LOWER(TRIM(sc2.certificate_name)) = LOWER(TRIM(c.title))
-        )
+        WHERE c.title IS NOT NULL AND TRIM(c.title) <> ''
+          AND NOT EXISTS (
+            SELECT 1 FROM student_certifications sc2 
+            WHERE UPPER(TRIM(sc2.roll_number)) = UPPER(TRIM(c.student_id))
+              AND LOWER(TRIM(sc2.certificate_name)) = LOWER(TRIM(c.title))
+          )
+      ),
+      cert_student_counts AS (
+        SELECT 
+          uc.certificate_name AS display_name,
+          LOWER(TRIM(uc.certificate_name)) AS canonical_name,
+          COALESCE(MAX(NULLIF(uc.issuer, '')), 'Certification') AS issuer,
+          COUNT(DISTINCT uc.roll_number) AS student_count
+        FROM unified_certs uc
+        JOIN students s ON UPPER(TRIM(s.roll_number)) = uc.roll_number
+        WHERE 1=1 ${deptFilterSql}
+        GROUP BY 1, 2
       )
       SELECT 
-        uc.certificate_name AS display_name,
-        LOWER(TRIM(uc.certificate_name)) AS canonical_name,
-        COALESCE(MAX(uc.issuer), 'Certification') AS issuer,
-        COUNT(DISTINCT uc.roll_number) AS student_count
-      FROM unified_certs uc
-      JOIN students s ON s.roll_number = uc.roll_number
-      WHERE uc.certificate_name IS NOT NULL AND TRIM(uc.certificate_name) <> ''
-      ${deptFilterSql}
-      GROUP BY 1, 2
+        COALESCE(csc.display_name, cat.display_name) AS display_name,
+        COALESCE(csc.canonical_name, cat.canonical_name) AS canonical_name,
+        COALESCE(csc.issuer, cat.issuer, 'Certification') AS issuer,
+        COALESCE(csc.student_count, 0) AS student_count
+      FROM cert_student_counts csc
+      FULL OUTER JOIN certification_catalogs cat 
+        ON LOWER(TRIM(csc.display_name)) = LOWER(TRIM(cat.display_name))
+        OR csc.canonical_name = cat.canonical_name
       ORDER BY student_count DESC, display_name ASC
       LIMIT 12
     `;
@@ -11262,7 +11323,7 @@ app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'f
 app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
   try {
     await ensureLeaveAndSubjectsHandledTables();
-    const query = (req.query.q as string || '').trim().toLowerCase();
+    const query = (req.query.q as string || '').trim();
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
 
@@ -11270,51 +11331,54 @@ app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'fa
       return res.json([]);
     }
 
-    let deptFilterSql = '';
-    const params: any[] = [`%${query}%`];
-
-    // HOD Scoping
-    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
-      params.push(callerDept);
-      deptFilterSql = `
-        AND (
-          LOWER(REPLACE(s.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($2, ' ', '')) || '%'
-          OR LOWER(REPLACE($2, ' ', '')) ILIKE '%' || LOWER(REPLACE(s.department, ' ', '')) || '%'
-        )
-      `;
-    }
+    const { sql: deptFilterSql, params: deptParams } = buildCertDeptFilter(callerRole, callerDept, 2);
+    const params = [`%${query}%`, ...deptParams];
 
     const searchQuery = `
       WITH unified_certs AS (
         SELECT 
-          sc.roll_number,
-          sc.certificate_name,
-          sc.issuer
+          UPPER(TRIM(sc.roll_number)) AS roll_number,
+          TRIM(sc.certificate_name) AS certificate_name,
+          TRIM(sc.issuer) AS issuer
         FROM student_certifications sc
+        WHERE sc.certificate_name IS NOT NULL AND TRIM(sc.certificate_name) <> ''
         UNION ALL
         SELECT 
-          c.student_id AS roll_number,
-          c.title AS certificate_name,
-          c.provider AS issuer
+          UPPER(TRIM(c.student_id)) AS roll_number,
+          TRIM(c.title) AS certificate_name,
+          TRIM(COALESCE(c.provider, 'Certification')) AS issuer
         FROM certifications c
-        WHERE NOT EXISTS (
-          SELECT 1 FROM student_certifications sc2 
-          WHERE sc2.roll_number = c.student_id AND LOWER(TRIM(sc2.certificate_name)) = LOWER(TRIM(c.title))
-        )
+        WHERE c.title IS NOT NULL AND TRIM(c.title) <> ''
+          AND NOT EXISTS (
+            SELECT 1 FROM student_certifications sc2 
+            WHERE UPPER(TRIM(sc2.roll_number)) = UPPER(TRIM(c.student_id))
+              AND LOWER(TRIM(sc2.certificate_name)) = LOWER(TRIM(c.title))
+          )
+      ),
+      cert_student_counts AS (
+        SELECT 
+          uc.certificate_name AS display_name,
+          LOWER(TRIM(uc.certificate_name)) AS canonical_name,
+          COALESCE(MAX(NULLIF(uc.issuer, '')), 'Certification') AS issuer,
+          COUNT(DISTINCT uc.roll_number) AS student_count
+        FROM unified_certs uc
+        JOIN students s ON UPPER(TRIM(s.roll_number)) = uc.roll_number
+        WHERE 1=1 ${deptFilterSql}
+        GROUP BY 1, 2
       )
       SELECT 
-        uc.certificate_name AS display_name,
-        LOWER(TRIM(uc.certificate_name)) AS canonical_name,
-        COALESCE(MAX(uc.issuer), 'Certification') AS issuer,
-        COUNT(DISTINCT uc.roll_number) AS student_count
-      FROM unified_certs uc
-      JOIN students s ON s.roll_number = uc.roll_number
+        COALESCE(csc.display_name, cat.display_name) AS display_name,
+        COALESCE(csc.canonical_name, cat.canonical_name) AS canonical_name,
+        COALESCE(csc.issuer, cat.issuer, 'Certification') AS issuer,
+        COALESCE(csc.student_count, 0) AS student_count
+      FROM cert_student_counts csc
+      FULL OUTER JOIN certification_catalogs cat 
+        ON LOWER(TRIM(csc.display_name)) = LOWER(TRIM(cat.display_name))
+        OR csc.canonical_name = cat.canonical_name
       WHERE (
-        uc.certificate_name ILIKE $1 
-        OR uc.issuer ILIKE $1
+        COALESCE(csc.display_name, cat.display_name) ILIKE $1 
+        OR COALESCE(csc.issuer, cat.issuer) ILIKE $1
       )
-      ${deptFilterSql}
-      GROUP BY 1, 2
       ORDER BY student_count DESC, display_name ASC
       LIMIT 15
     `;
@@ -11341,25 +11405,15 @@ app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', '
       return res.status(400).json({ error: 'cert_name parameter is required' });
     }
 
-    let deptFilter = '';
-    const params: any[] = [`%${certName}%`];
-
-    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
-      params.push(callerDept);
-      deptFilter = `
-        AND (
-          LOWER(REPLACE(s.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($2, ' ', '')) || '%'
-          OR LOWER(REPLACE($2, ' ', '')) ILIKE '%' || LOWER(REPLACE(s.department, ' ', '')) || '%'
-        )
-      `;
-    }
+    const { sql: deptFilterSql, params: deptParams } = buildCertDeptFilter(callerRole, callerDept, 3);
+    const params = [`%${certName}%`, certName, ...deptParams];
 
     const studentsQuery = `
       WITH unified_certs AS (
         SELECT 
-          sc.roll_number,
-          sc.certificate_name,
-          sc.issuer,
+          UPPER(TRIM(sc.roll_number)) AS roll_number,
+          TRIM(sc.certificate_name) AS certificate_name,
+          TRIM(sc.issuer) AS issuer,
           sc.issue_date,
           sc.verification_url,
           sc.badge_image_url,
@@ -11367,11 +11421,12 @@ app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', '
           sc.source,
           sc.status AS verification_status
         FROM student_certifications sc
+        WHERE sc.certificate_name IS NOT NULL AND TRIM(sc.certificate_name) <> ''
         UNION ALL
         SELECT 
-          c.student_id AS roll_number,
-          c.title AS certificate_name,
-          c.provider AS issuer,
+          UPPER(TRIM(c.student_id)) AS roll_number,
+          TRIM(c.title) AS certificate_name,
+          TRIM(COALESCE(c.provider, 'Certification')) AS issuer,
           c.date_completed AS issue_date,
           c.certificate_file_url AS verification_url,
           NULL AS badge_image_url,
@@ -11379,17 +11434,19 @@ app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', '
           'manual' AS source,
           CASE WHEN c.verified = true THEN 'verified' ELSE 'pending' END AS verification_status
         FROM certifications c
-        WHERE NOT EXISTS (
-          SELECT 1 FROM student_certifications sc2 
-          WHERE sc2.roll_number = c.student_id AND LOWER(TRIM(sc2.certificate_name)) = LOWER(TRIM(c.title))
-        )
+        WHERE c.title IS NOT NULL AND TRIM(c.title) <> ''
+          AND NOT EXISTS (
+            SELECT 1 FROM student_certifications sc2 
+            WHERE UPPER(TRIM(sc2.roll_number)) = UPPER(TRIM(c.student_id))
+              AND LOWER(TRIM(sc2.certificate_name)) = LOWER(TRIM(c.title))
+          )
       )
       SELECT 
         s.roll_number,
         s.name AS student_name,
-        s.department,
-        s.section,
-        s.year,
+        COALESCE(s.department, '') AS department,
+        COALESCE(s.section, '') AS section,
+        COALESCE(s.year, '') AS year,
         uc.certificate_name,
         uc.issuer,
         uc.issue_date,
@@ -11399,9 +11456,13 @@ app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', '
         uc.source,
         uc.verification_status
       FROM unified_certs uc
-      JOIN students s ON s.roll_number = uc.roll_number
-      WHERE uc.certificate_name ILIKE $1 OR uc.issuer ILIKE $1
-      ${deptFilter}
+      JOIN students s ON UPPER(TRIM(s.roll_number)) = uc.roll_number
+      WHERE (
+        uc.certificate_name ILIKE $1 
+        OR uc.issuer ILIKE $1
+        OR LOWER(TRIM(uc.certificate_name)) = LOWER(TRIM($2))
+      )
+      ${deptFilterSql}
       ORDER BY s.roll_number ASC
     `;
 
