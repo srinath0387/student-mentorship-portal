@@ -8,20 +8,22 @@ export const CertificationAnalyticsView: React.FC = () => {
   const [selectedCertName, setSelectedCertName] = useState<string | null>(null);
 
   // Fetch top certifications summary (e.g. AWS: 400, etc.)
-  const { data: summary = [], isLoading: isSummaryLoading, refetch: refetchSummary } = useQuery({
+  const { data: rawSummary = [], isLoading: isSummaryLoading, refetch: refetchSummary } = useQuery({
     queryKey: ['certificationsSummary'],
     queryFn: () => api.getCertificationsSummary().catch(() => []),
     staleTime: 0,
     refetchOnMount: 'always',
   });
+  const summary = Array.isArray(rawSummary) ? rawSummary : [];
 
   // Fetch students for selected certification
-  const { data: certifiedStudents = [], isLoading: isStudentsLoading } = useQuery({
+  const { data: rawStudents = [], isLoading: isStudentsLoading } = useQuery({
     queryKey: ['certifiedStudents', selectedCertName],
     queryFn: () => selectedCertName ? api.getCertifiedStudents(selectedCertName).catch(() => []) : Promise.resolve([]),
     enabled: Boolean(selectedCertName),
     staleTime: 0,
   });
+  const certifiedStudents = Array.isArray(rawStudents) ? rawStudents : [];
 
   const handleExportCSV = () => {
     if (!certifiedStudents || certifiedStudents.length === 0) return;

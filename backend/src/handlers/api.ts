@@ -9525,8 +9525,65 @@ const ensureLeaveAndSubjectsHandledTables = async () => {
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
     `);
+
+    // 6. Certifications & Internships Tables
+    await db.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS credly_profile_url TEXT;`).catch(() => {});
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS certification_catalogs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        canonical_name VARCHAR(255) NOT NULL UNIQUE,
+        display_name VARCHAR(255) NOT NULL,
+        issuer VARCHAR(255) NOT NULL,
+        category VARCHAR(100) DEFAULT 'Cloud/DevOps',
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS student_certifications (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        catalog_id UUID REFERENCES certification_catalogs(id) ON DELETE SET NULL,
+        roll_number VARCHAR(50) NOT NULL,
+        certificate_name VARCHAR(255) NOT NULL,
+        issuer VARCHAR(255) NOT NULL,
+        issue_date DATE,
+        expiry_date DATE,
+        verification_url TEXT,
+        badge_image_url TEXT,
+        proof_document_url TEXT,
+        source VARCHAR(20) DEFAULT 'manual',
+        status VARCHAR(20) DEFAULT 'pending',
+        verified_by VARCHAR(150),
+        verified_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS student_internships (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        roll_number VARCHAR(50) NOT NULL,
+        company_name VARCHAR(255) NOT NULL,
+        role VARCHAR(255) NOT NULL,
+        internship_type VARCHAR(50) DEFAULT 'Full-time',
+        mode VARCHAR(30) DEFAULT 'On-site',
+        start_date DATE NOT NULL,
+        end_date DATE,
+        stipend_amount NUMERIC(10, 2) DEFAULT 0,
+        offer_letter_url TEXT,
+        completion_certificate_url TEXT,
+        status VARCHAR(30) DEFAULT 'ongoing',
+        mentor_email VARCHAR(150),
+        mentor_name VARCHAR(150),
+        verification_status VARCHAR(20) DEFAULT 'pending',
+        verified_by VARCHAR(150),
+        verified_at TIMESTAMPTZ,
+        remarks TEXT,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
   } catch (err: any) {
-    console.warn('[Schema] Failed to ensure leave/subjects handled tables:', err.message);
+    console.warn('[Schema] Failed to ensure leave/subjects/certs tables:', err.message);
   }
 };
 
@@ -11132,6 +11189,7 @@ app.delete('/subjects/master/:id', requireRole('admin', 'hod', 'coordinator'), a
  */
 app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
   try {
+    await ensureLeaveAndSubjectsHandledTables();
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
 
@@ -11193,6 +11251,7 @@ app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'f
  */
 app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
   try {
+    await ensureLeaveAndSubjectsHandledTables();
     const query = (req.query.q as string || '').trim().toLowerCase();
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
@@ -11263,6 +11322,7 @@ app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'fa
  */
 app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
   try {
+    await ensureLeaveAndSubjectsHandledTables();
     const certName = (req.query.cert_name as string || '').trim();
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
