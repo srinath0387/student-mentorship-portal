@@ -63,11 +63,11 @@ app.get('/health', async (_req: Request, res: Response) => {
 });
 
 // ONE-TIME: Clean up coding_profiles handles stored as full URLs
-// Protected by ADMIN_SECRET header OR a fixed one-time token.
+// Protected by ADMIN_SECRET header — must be set in Lambda environment variables.
 app.post('/admin/cleanup-handles', async (req: Request, res: Response) => {
   const secret = String(req.headers['x-admin-secret'] || '');
-  const adminSecret = process.env.ADMIN_SECRET || 'advitiyans-cleanup-2026';
-  if (secret !== adminSecret) {
+  const adminSecret = process.env.ADMIN_SECRET || '';
+  if (!adminSecret || secret !== adminSecret) {
     return res.status(403).json({ error: 'Forbidden' });
   }
   try {
@@ -1583,7 +1583,7 @@ app.get('/students', async (req: Request, res: Response) => {
   }
 });
 
-app.post('/students', async (req: Request, res: Response) => {
+app.post('/students', extractAuth, requireAuth, async (req: Request, res: Response) => {
   try {
     const validatedData = studentProfileSchema.parse(req.body);
     const rawRoll = (validatedData.roll_number || req.body.roll_number || '').toString();

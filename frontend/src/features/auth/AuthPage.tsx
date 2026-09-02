@@ -744,24 +744,10 @@ export const AuthPage: React.FC = () => {
         }
 
         if (isCognitoConfigError(cognitoErr)) {
+          // SECURITY: Do NOT bypass auth on Cognito configuration errors.
+          // Granting access without password verification is a critical auth bypass.
           console.warn('[Cognito Config Notice]:', msg);
-          let dbUser: any = preFetchedDbUser;
-          if (!dbUser) {
-            if (activeTab === 'student') {
-              dbUser = await api.getStudentByEmail(data.email).catch(() => null);
-            } else if (activeTab === 'faculty') {
-              dbUser = await api.getFacultyByEmail(data.email).catch(() => null);
-            }
-          }
-
-          if (dbUser) {
-            rollNo = dbUser.roll_number || dbUser.faculty_id || data.email.split('@')[0].toUpperCase();
-            displayName = dbUser.name || 'User';
-            login(data.email, activeTab, rollNo, displayName, undefined);
-            registerSession(data.email, activeTab);
-            navigate(activeTab === 'student' ? '/dashboard' : activeTab === 'faculty' ? '/faculty/dashboard' : '/hod/dashboard');
-            return;
-          }
+          throw new Error('Authentication service is temporarily unavailable. Please try again in a moment or contact support.');
         }
 
         if (msg.includes('User does not exist') || msg.includes('UserNotFoundException')) {
@@ -775,33 +761,10 @@ export const AuthPage: React.FC = () => {
             }
           }
 
-          // For faculty: if not found in DB, auto-create with selected department and allow first-time registration
-          if (!dbUser && activeTab === 'faculty') {
-            const facId = `FAC_${data.email.split('@')[0].toUpperCase()}`;
-            const facName = data.email.split('@')[0]
-              .replace(/[._]/g, ' ')
-              .replace(/\b\w/g, (c: string) => c.toUpperCase());
-            const facDeptNew = loginDept || 'CSE (Data Science)';
-            try {
-              await api.createFaculty({
-                faculty_id: facId,
-                name: facName,
-                email: data.email,
-                department: facDeptNew,
-                role: 'mentor',
-              });
-              dbUser = { faculty_id: facId, name: facName, email: data.email, department: facDeptNew, role: 'mentor' };
-            } catch (_) {
-              // If create failed (e.g. faculty_id collision), try lookup again
-              dbUser = await api.getFacultyByEmail(data.email).catch(() => null);
-              if (!dbUser) {
-                dbUser = { faculty_id: facId, name: facName, email: data.email, department: facDeptNew, role: 'mentor' };
-              }
-            }
-          }
-
+          // SECURITY: Removed faculty auto-creation from login.
+          // Unregistered faculty must sign up using the registration form with their security key.
           if (!dbUser) {
-            throw new Error(`No ${activeTab} account found for this email. Please check your email or contact system admin.`);
+            throw new Error(`No ${activeTab} account found for this email. Please register first or contact the system admin.`);
           }
 
           try {
@@ -824,14 +787,9 @@ export const AuthPage: React.FC = () => {
               throw new Error(`Password requirement: ${signMsg}`);
             }
             if (isCognitoConfigError(autoSignUpErr)) {
+              // SECURITY: Do NOT bypass auth on Cognito config errors in the signup path either
               console.warn('[Cognito Config Notice]:', signMsg);
-              rollNo = dbUser.roll_number || dbUser.faculty_id || data.email.split('@')[0].toUpperCase();
-              displayName = dbUser.name || 'User';
-              const dept = dbUser.department || loginDept || 'CSE (Data Science)';
-              login(data.email, activeTab, rollNo, displayName, undefined, dept);
-              registerSession(data.email, activeTab);
-              navigate(activeTab === 'student' ? '/dashboard' : activeTab === 'faculty' ? '/faculty/dashboard' : '/hod/dashboard');
-              return;
+              throw new Error('Authentication service is temporarily unavailable. Please try again in a moment.');
             }
             throw new Error(signMsg || 'Invalid email or password. Please check your credentials and try again.');
           }

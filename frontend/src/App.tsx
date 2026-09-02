@@ -92,6 +92,26 @@ const RootRedirect: React.FC = () => {
   return <LandingPage />;
 };
 
+/**
+ * ProtectedRoute — Redirects users who don't have the required role.
+ * Authenticated users with the wrong role are sent to their own dashboard,
+ * not shown a blank/error page.
+ */
+const ProtectedRoute: React.FC<{ allowedRoles: string[] }> = ({ allowedRoles }) => {
+  const { isAuthenticated, isLoading, role } = useAuth();
+  if (isLoading) return <DashboardSkeleton />;
+  if (!isAuthenticated) return <Navigate to="/" replace />;
+  if (role && !allowedRoles.includes(role)) {
+    // Send the user to their own role's dashboard
+    if (role === 'admin') return <Navigate to="/admin/dashboard" replace />;
+    if (role === 'hod') return <Navigate to="/hod/dashboard" replace />;
+    if (role === 'coordinator') return <Navigate to="/coordinator/dashboard" replace />;
+    if (role === 'faculty') return <Navigate to="/faculty/dashboard" replace />;
+    return <Navigate to="/dashboard" replace />;
+  }
+  return <Outlet />;
+};
+
 const MainLayout: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);  // mobile overlay
   const [collapsed, setCollapsed] = useState(false);           // desktop icon-rail
@@ -171,14 +191,30 @@ export const App: React.FC = () => {
               <Route path="/profile" element={<ProfilePage />} />
               <Route path="/profile/coding-profiles/:platform" element={<PlatformStatsRedirect />} />
               <Route path="/program-stats/:platform" element={<PlatformStatsRedirect />} />
-              <Route path="/coordinator/dashboard" element={<CoordinatorDashboardPage />} />
-              <Route path="/faculty/dashboard" element={<FacultyDashboardPage />} />
-              <Route path="/attendance" element={<AttendancePage />} />
-              <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
-              <Route path="/admin/faculty" element={<FacultyManagementPage />} />
               <Route path="/mentor" element={<MyMentorPage />} />
-              <Route path="/hod/dashboard" element={<HodDashboardPage />} />
               <Route path="/coding-analytics" element={<CodingAnalyticsPage />} />
+              <Route path="/attendance" element={<AttendancePage />} />
+
+              {/* Faculty-only routes */}
+              <Route element={<ProtectedRoute allowedRoles={['faculty', 'hod', 'admin']} />}>
+                <Route path="/faculty/dashboard" element={<FacultyDashboardPage />} />
+              </Route>
+
+              {/* Coordinator-only routes */}
+              <Route element={<ProtectedRoute allowedRoles={['coordinator', 'admin']} />}>
+                <Route path="/coordinator/dashboard" element={<CoordinatorDashboardPage />} />
+              </Route>
+
+              {/* HOD-only routes */}
+              <Route element={<ProtectedRoute allowedRoles={['hod', 'admin']} />}>
+                <Route path="/hod/dashboard" element={<HodDashboardPage />} />
+              </Route>
+
+              {/* Admin-only routes */}
+              <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
+                <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
+                <Route path="/admin/faculty" element={<FacultyManagementPage />} />
+              </Route>
             </Route>
             <Route path="*" element={<RootRedirect />} />
           </Routes>

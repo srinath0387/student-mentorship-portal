@@ -268,28 +268,28 @@ export async function mergeFacultyRecordsInDb(
     [tgtId, srcId]
   ).catch((e: any) => console.warn('[Merge] students update error:', e.message));
 
-  // 3. Migrate subject_allotments, timetable, and class_incharges if source had an email
+  // 3. Migrate subject_allotments, timetable_entries, and class_incharges if source had an email
   if (sourceEmail && targetEmail && sourceEmail !== targetEmail) {
     await db.query(
       `UPDATE subject_allotments
-       SET faculty_email = $1, faculty_name = $2, updated_at = NOW()
+       SET faculty_email = $1, faculty_name = $2
        WHERE LOWER(faculty_email) = $3`,
       [targetEmail, targetName, sourceEmail]
-    ).catch(() => {});
+    ).catch((e: any) => console.warn('[Merge] subject_allotments update error:', e.message));
 
     await db.query(
-      `UPDATE timetable
-       SET faculty_email = $1, faculty_name = $2, updated_at = NOW()
+      `UPDATE timetable_entries
+       SET faculty_email = $1, faculty_name = $2
        WHERE LOWER(faculty_email) = $3`,
       [targetEmail, targetName, sourceEmail]
-    ).catch(() => {});
+    ).catch((e: any) => console.warn('[Merge] timetable_entries update error:', e.message));
 
     await db.query(
       `UPDATE class_incharges
        SET faculty_email = $1, faculty_name = $2
        WHERE LOWER(faculty_email) = $3`,
       [targetEmail, targetName, sourceEmail]
-    ).catch(() => {});
+    ).catch((e: any) => console.warn('[Merge] class_incharges update error:', e.message));
   }
 
   // 4. Delete the source placeholder record

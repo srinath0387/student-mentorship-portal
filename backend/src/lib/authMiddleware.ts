@@ -68,15 +68,16 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
       return next();
     }
 
-    // Check if caller email is passed explicitly via X-Caller-Email header
-    const explicitCallerEmail = req.headers['x-caller-email'] ? String(req.headers['x-caller-email']).toLowerCase().trim() : '';
+    // SECURITY: X-Caller-Email header is intentionally NOT trusted.
+    // Caller identity is derived exclusively from the validated JWT token payload.
+    // This prevents privilege escalation via header injection.
 
     const token = authHeader.slice(7);
 
     // ── Attempt 1: Decode as a real Cognito JWT ──
     const payload = decodeJwtPayload(token);
-    if (payload && (payload.email || explicitCallerEmail)) {
-      const email = (explicitCallerEmail || payload.email || '').toLowerCase().trim();
+    if (payload && payload.email) {
+      const email = (payload.email || '').toLowerCase().trim();
       const derivedRegNo = (payload['custom:reg_no'] || (email.includes('@') ? email.split('@')[0] : '')).toUpperCase();
       let role = (payload['custom:role'] || '').toLowerCase();
       let department: string | undefined;
@@ -147,13 +148,16 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
       return next();
     }
 
-    // ── Attempt 2: demo_token fallback (Admin, HOD, and offline dev fallback) ──
-    if (token.startsWith('demo_token_')) {
+    // ── Attempt 2: demo_token fallback — ONLY active in offline/mock mode ──
+    // SECURITY: This backdoor is strictly disabled in production.
+    // Gate: USE_MOCK must be 'true'. In Lambda/production, USE_MOCK is never set.
+    if (token.startsWith('demo_token_') && process.env.USE_MOCK === 'true') {
       const parts = token.split('_');
       // Format can be demo_token_<role>_<timestamp> or demo_token_<role>_<encodedEmail>_<timestamp>
       const demoRole = (parts.length >= 3 ? parts[2] : '').toLowerCase();
 
-      let email = explicitCallerEmail;
+      // SECURITY: Only trust caller identity from query/body in mock mode, never from X-Caller-Email header
+      let email = '';
       if (!email && req.query.email) email = String(req.query.email).toLowerCase();
       if (!email && req.query.caller_email) email = String(req.query.caller_email).toLowerCase();
       if (!email && req.body?.email) email = String(req.body.email).toLowerCase();
