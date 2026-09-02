@@ -10788,15 +10788,6 @@ app.delete('/hod/permissions/students/:id', requireRole('hod', 'admin', 'coordin
 
 
 
-// Catch-all SPA route fallback for client-side React routes
-
-
-
-app.get('*', (_req: Request, res: Response) => {
-  return sendIndexHtml(res);
-});
-
-
 // ============================================================================
 // Startup Migration: Enforce Semester Lock on Existing Data
 // Only runs in traditional server mode (not serverless/Lambda).
@@ -11697,7 +11688,11 @@ app.put('/internships/:id/verify', requireRole('faculty', 'hod', 'admin', 'super
   }
 });
 
+// Catch-all SPA route fallback — MUST be the last route registered
+// so it doesn't shadow any API GET routes above.
+app.get('*', (_req: Request, res: Response) => {
+  return sendIndexHtml(res);
+});
+
 export const handler = serverless(app);
 export default app;
-
-
