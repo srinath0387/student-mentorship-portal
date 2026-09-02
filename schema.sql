@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS students (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT check_roll_number_format CHECK (roll_number ~ '^\d{4}[15][Aa](01|02|03|04|05|32|33|34|37)[0-9A-Za-z]{2}$'),
+    CONSTRAINT check_roll_number_format CHECK (roll_number ~* '^(\d{4}[15]A(01|02|03|04|05|32|33|34|37)[0-9A-Za-z]{2}|\d{4}1E00[0-9A-Za-z]{2}|\d{4}1F00[0-9A-Za-z]{2})$'),
     CONSTRAINT check_rgmcet_email CHECK (email ~* '^[a-zA-Z0-9._%+-]+@rgmcet\.edu\.in$')
 );
 

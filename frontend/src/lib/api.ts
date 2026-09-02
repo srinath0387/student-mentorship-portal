@@ -82,7 +82,14 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
       } catch {
         /* ignore text parse error */
       }
-      if (response.status === 413) {
+      if (response.status === 401) {
+        // If not already on auth/login page, clear stale token and trigger clean re-login
+        if (typeof window !== 'undefined' && !window.location.hash.includes('login') && !window.location.hash.includes('landing') && window.location.hash !== '#/' && window.location.hash !== '') {
+          sessionStorage.removeItem('advitiyans_jwt_token');
+          window.dispatchEvent(new CustomEvent('auth:session_expired'));
+        }
+        errMsg = 'Your session has expired. Please log in again.';
+      } else if (response.status === 413) {
         errMsg = 'File size is too large (exceeds server limit). Please upload a file smaller than 4.5 MB.';
       } else if (response.status === 403) {
         errMsg = 'Permission denied. Please ensure you are logged in as Admin or HOD.';

@@ -1399,7 +1399,7 @@ function triggerBackgroundAutoSync() {
 }
 
 // GET /students — List/Search/Filter (Guarantees DISTINCT ON roll_number)
-app.get('/students', async (req: Request, res: Response) => {
+app.get('/students', requireAuth, async (req: Request, res: Response) => {
   // Kick off background auto-sync of stale coding profiles (fire-and-forget)
   triggerBackgroundAutoSync();
   try {
@@ -1989,7 +1989,7 @@ app.get('/students/by-email/:email', async (req: Request, res: Response) => {
 });
 
 // GET /students/:id — Get Student Profile
-app.get('/students/:id', async (req: Request, res: Response) => {
+app.get('/students/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const studentId = req.params.id.toUpperCase();
 
@@ -2073,7 +2073,12 @@ app.put('/students/:id', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), as
     const photo_url = body.photo_url !== undefined ? body.photo_url : (existing.photo_url || null);
     const resume_url = body.resume_url !== undefined ? body.resume_url : (existing.resume_url || null);
     const linkedin_url = body.linkedin_url !== undefined ? body.linkedin_url : (existing.linkedin_url || null);
-    const cgpa = body.cgpa !== undefined && body.cgpa !== null && body.cgpa !== '' ? Number(body.cgpa) : (existing.cgpa || 0);
+
+    // SECURITY: Students cannot self-modify CGPA. CGPA is computed from verified academics or updated by Admin/HOD.
+    const isPrivileged = req.auth?.role === 'admin' || req.auth?.role === 'hod';
+    const cgpa = (isPrivileged && body.cgpa !== undefined && body.cgpa !== null && body.cgpa !== '')
+      ? Number(body.cgpa)
+      : (existing.cgpa !== undefined && existing.cgpa !== null ? Number(existing.cgpa) : 0);
 
     let result;
     if (existingRes.rows.length === 0) {
@@ -2412,7 +2417,7 @@ app.post('/admin/students/bulk-delete', requireRole('admin'), async (req: Reques
 // ============================================================================
 // Academics
 // ============================================================================
-app.get('/students/:id/academics', async (req: Request, res: Response) => {
+app.get('/students/:id/academics', requireAuth, async (req: Request, res: Response) => {
   try {
     const studentId = req.params.id.toUpperCase();
 
@@ -2476,7 +2481,7 @@ app.post('/students/:id/academics', requireOwnerOrRole('id', 'faculty', 'hod', '
 // ============================================================================
 // Coding Profiles
 // ============================================================================
-app.get('/students/:id/coding-profiles', async (req: Request, res: Response) => {
+app.get('/students/:id/coding-profiles', requireAuth, async (req: Request, res: Response) => {
   try {
     const studentId = req.params.id.toUpperCase();
 
@@ -3036,7 +3041,7 @@ app.post('/proxy/eduskills/sync-student/:rollNumber', async (req: Request, res: 
             rollNumber,
             badge.title,
             badge.issuedAt ? new Date(badge.issuedAt) : null,
-            badge.verifyUrl || badge.badgeUrl || null,
+           badge.verifyUrl || badge.badgeUrl || null,
           ]
         ).catch(() => {});
       }
@@ -3063,7 +3068,7 @@ app.post('/proxy/eduskills/sync-student/:rollNumber', async (req: Request, res: 
 // ============================================================================
 // Tech Skills
 // ============================================================================
-app.get('/students/:id/tech-skills', async (req: Request, res: Response) => {
+app.get('/students/:id/tech-skills', requireAuth, async (req: Request, res: Response) => {
   try {
     const studentId = req.params.id.toUpperCase();
 
@@ -3183,7 +3188,7 @@ async function signCertificationRows(rows: any[]): Promise<any[]> {
 
 // Certifications
 // ============================================================================
-app.get('/students/:id/certifications', async (req: Request, res: Response) => {
+app.get('/students/:id/certifications', requireAuth, async (req: Request, res: Response) => {
   try {
     const studentId = req.params.id.toUpperCase();
 
@@ -3297,7 +3302,7 @@ app.delete('/students/:id/certifications/:certId', requireOwnerOrRole('id', 'fac
 // ============================================================================
 // Soft Skills
 // ============================================================================
-app.get('/students/:id/soft-skills', async (req: Request, res: Response) => {
+app.get('/students/:id/soft-skills', requireAuth, async (req: Request, res: Response) => {
   try {
     const studentId = req.params.id.toUpperCase();
 
@@ -3350,7 +3355,7 @@ app.post('/students/:id/soft-skills', requireOwnerOrRole('id', 'faculty', 'hod',
 // ============================================================================
 // Achievements
 // ============================================================================
-app.get('/students/:id/achievements', async (req: Request, res: Response) => {
+app.get('/students/:id/achievements', requireAuth, async (req: Request, res: Response) => {
   try {
     const studentId = req.params.id.toUpperCase();
 
@@ -3400,7 +3405,7 @@ app.post('/students/:id/achievements', requireOwnerOrRole('id', 'faculty', 'hod'
 // ============================================================================
 // Placement Profile
 // ============================================================================
-app.get('/students/:id/placement-profile', async (req: Request, res: Response) => {
+app.get('/students/:id/placement-profile', requireAuth, async (req: Request, res: Response) => {
   try {
     const studentId = req.params.id.toUpperCase();
 
@@ -3454,7 +3459,7 @@ app.put('/students/:id/placement-profile', requireOwnerOrRole('id', 'faculty', '
 // ============================================================================
 // Employability Score
 // ============================================================================
-app.get('/students/:id/employability-score', async (req: Request, res: Response) => {
+app.get('/students/:id/employability-score', requireAuth, async (req: Request, res: Response) => {
   try {
     const studentId = req.params.id.toUpperCase();
 
@@ -3494,7 +3499,7 @@ app.get('/students/:id/employability-score', async (req: Request, res: Response)
 // ============================================================================
 // Upload URL (S3 Pre-signed URL) — Real pre-signed URL generation
 // ============================================================================
-app.get('/students/:id/upload-url', async (req: Request, res: Response) => {
+app.get('/students/:id/upload-url', requireOwnerOrRole('id', 'faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { fileName, uploadType } = req.query;
     const studentId = req.params.id.toUpperCase();
@@ -3544,7 +3549,7 @@ app.get('/students/:id/upload-url', async (req: Request, res: Response) => {
 });
 
 // View/Download URL for existing files
-app.get('/students/:id/view-url', async (req: Request, res: Response) => {
+app.get('/students/:id/view-url', requireOwnerOrRole('id', 'faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { fileKey } = req.query;
     const bucketName = process.env.UPLOADS_BUCKET_NAME;

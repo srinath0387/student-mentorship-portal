@@ -609,6 +609,29 @@ export const db = {
   },
 
   /**
+   * Execute multiple operations inside an atomic PostgreSQL transaction (BEGIN ... COMMIT / ROLLBACK).
+   */
+  async transaction<T>(callback: (client: any) => Promise<T>): Promise<T> {
+    if (USE_MOCK) {
+      return await callback({ query: async () => ({ rows: [], rowCount: 0 }) });
+    }
+    const p = await getPool();
+    await ensureSchema(p);
+    const client = await p.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await callback(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  },
+
+  /**
    * Health check — verifies database connectivity.
    */
   async healthCheck(): Promise<{ connected: boolean; via: string; host: string }> {

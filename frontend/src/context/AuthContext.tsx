@@ -174,7 +174,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     restoreSession();
-    return () => stopPolling();
+
+    const handleSessionExpired = () => {
+      console.warn('[Auth] Session expired event received — resetting auth state');
+      sessionStorage.removeItem(JWT_TOKEN_KEY);
+      sessionStorage.removeItem(AUTH_USER_KEY);
+      setUser(null);
+      setRole('student');
+    };
+    window.addEventListener('auth:session_expired', handleSessionExpired);
+
+    return () => {
+      stopPolling();
+      window.removeEventListener('auth:session_expired', handleSessionExpired);
+    };
   }, [forceLogout, startPolling, stopPolling]);
 
   // ── Persist user to this tab's sessionStorage whenever it changes ──────────

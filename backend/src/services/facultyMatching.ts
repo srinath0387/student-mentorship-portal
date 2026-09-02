@@ -237,70 +237,72 @@ export async function mergeFacultyRecordsInDb(
     return { success: true, menteesMigrated: 0, message: 'Source and target are identical' };
   }
 
-  // Target faculty
-  const tgtRes = await db.query('SELECT * FROM faculty WHERE UPPER(faculty_id) = $1', [tgtId]);
-  if (tgtRes.rows.length === 0) {
-    throw new Error(`Target faculty "${tgtId}" does not exist in database`);
-  }
-  const targetFaculty = tgtRes.rows[0];
-  const targetEmail = (targetFaculty.email || '').toLowerCase().trim();
-  const targetName = targetFaculty.name;
+  return await db.transaction(async (tx: any) => {
+    // Target faculty
+    const tgtRes = await tx.query('SELECT * FROM faculty WHERE UPPER(faculty_id) = $1', [tgtId]);
+    if (tgtRes.rows.length === 0) {
+      throw new Error(`Target faculty "${tgtId}" does not exist in database`);
+    }
+    const targetFaculty = tgtRes.rows[0];
+    const targetEmail = (targetFaculty.email || '').toLowerCase().trim();
+    const targetName = targetFaculty.name;
 
-  // Source faculty
-  const srcRes = await db.query('SELECT * FROM faculty WHERE UPPER(faculty_id) = $1', [srcId]);
-  const sourceFaculty = srcRes.rows[0] || null;
-  const sourceEmail = (sourceFaculty?.email || '').toLowerCase().trim();
+    // Source faculty
+    const srcRes = await tx.query('SELECT * FROM faculty WHERE UPPER(faculty_id) = $1', [srcId]);
+    const sourceFaculty = srcRes.rows[0] || null;
+    const sourceEmail = (sourceFaculty?.email || '').toLowerCase().trim();
 
-  // 1. Migrate mentor_assignments
-  await db.query(
-    `INSERT INTO mentor_assignments (roll_number, faculty_id, assigned_at)
-     SELECT roll_number, $1, assigned_at FROM mentor_assignments WHERE UPPER(faculty_id) = $2
-     ON CONFLICT (roll_number) DO UPDATE
-       SET faculty_id = EXCLUDED.faculty_id, assigned_at = NOW()`,
-    [tgtId, srcId]
-  ).catch((e: any) => console.warn('[Merge] mentor_assignments insert error:', e.message));
+    // 1. Migrate mentor_assignments
+    await tx.query(
+      `INSERT INTO mentor_assignments (roll_number, faculty_id, assigned_at)
+       SELECT roll_number, $1, assigned_at FROM mentor_assignments WHERE UPPER(faculty_id) = $2
+       ON CONFLICT (roll_number) DO UPDATE
+         SET faculty_id = EXCLUDED.faculty_id, assigned_at = NOW()`,
+      [tgtId, srcId]
+    );
 
-  const maDeleted = await db.query('DELETE FROM mentor_assignments WHERE UPPER(faculty_id) = $1', [srcId]).catch(() => ({ rowCount: 0 }));
+    const maDeleted = await tx.query('DELETE FROM mentor_assignments WHERE UPPER(faculty_id) = $1', [srcId]);
 
-  // 2. Update students.faculty_mentor_id
-  const stuUpdated = await db.query(
-    'UPDATE students SET faculty_mentor_id = $1, updated_at = NOW() WHERE UPPER(faculty_mentor_id) = $2',
-    [tgtId, srcId]
-  ).catch((e: any) => console.warn('[Merge] students update error:', e.message));
+    // 2. Update students.faculty_mentor_id
+    const stuUpdated = await tx.query(
+      'UPDATE students SET faculty_mentor_id = $1, updated_at = NOW() WHERE UPPER(faculty_mentor_id) = $2',
+      [tgtId, srcId]
+    );
 
-  // 3. Migrate subject_allotments, timetable_entries, and class_incharges if source had an email
-  if (sourceEmail && targetEmail && sourceEmail !== targetEmail) {
-    await db.query(
-      `UPDATE subject_allotments
-       SET faculty_email = $1, faculty_name = $2
-       WHERE LOWER(faculty_email) = $3`,
-      [targetEmail, targetName, sourceEmail]
-    ).catch((e: any) => console.warn('[Merge] subject_allotments update error:', e.message));
+    // 3. Migrate subject_allotments, timetable_entries, and class_incharges if source had an email
+    if (sourceEmail && targetEmail && sourceEmail !== targetEmail) {
+      await tx.query(
+        `UPDATE subject_allotments
+         SET faculty_email = $1, faculty_name = $2
+         WHERE LOWER(faculty_email) = $3`,
+        [targetEmail, targetName, sourceEmail]
+      ).catch(() => {});
 
-    await db.query(
-      `UPDATE timetable_entries
-       SET faculty_email = $1, faculty_name = $2
-       WHERE LOWER(faculty_email) = $3`,
-      [targetEmail, targetName, sourceEmail]
-    ).catch((e: any) => console.warn('[Merge] timetable_entries update error:', e.message));
+      await tx.query(
+        `UPDATE timetable_entries
+         SET faculty_email = $1, faculty_name = $2
+         WHERE LOWER(faculty_email) = $3`,
+        [targetEmail, targetName, sourceEmail]
+      ).catch(() => {});
 
-    await db.query(
-      `UPDATE class_incharges
-       SET faculty_email = $1, faculty_name = $2
-       WHERE LOWER(faculty_email) = $3`,
-      [targetEmail, targetName, sourceEmail]
-    ).catch((e: any) => console.warn('[Merge] class_incharges update error:', e.message));
-  }
+      await tx.query(
+        `UPDATE class_incharges
+         SET faculty_email = $1, faculty_name = $2
+         WHERE LOWER(faculty_email) = $3`,
+        [targetEmail, targetName, sourceEmail]
+      ).catch(() => {});
+    }
 
-  // 4. Delete the source placeholder record
-  await db.query('DELETE FROM faculty WHERE UPPER(faculty_id) = $1', [srcId]).catch((e: any) => console.warn('[Merge] delete source error:', e.message));
+    // 4. Delete the source placeholder record
+    await tx.query('DELETE FROM faculty WHERE UPPER(faculty_id) = $1', [srcId]);
 
-  const totalMigrated = (maDeleted.rowCount ?? 0) + (stuUpdated.rowCount ?? 0);
-  console.log(`[Merge] Successfully merged ${srcId} ("${sourceFaculty?.name}") -> ${tgtId} ("${targetName}"), migrated ${totalMigrated} mentee references.`);
+    const totalMigrated = Math.max(maDeleted.rowCount ?? 0, stuUpdated?.rowCount ?? 0);
+    console.log(`[Merge] Successfully merged ${srcId} ("${sourceFaculty?.name}") -> ${tgtId} ("${targetName}"), migrated ${totalMigrated} mentee references.`);
 
-  return {
-    success: true,
-    menteesMigrated: totalMigrated,
-    message: `Merged "${sourceFaculty?.name || srcId}" into "${targetName}" (${tgtId}) with ${totalMigrated} mentee references migrated.`,
-  };
+    return {
+      success: true,
+      menteesMigrated: totalMigrated,
+      message: `Merged "${sourceFaculty?.name || srcId}" into "${targetName}" (${tgtId}) with ${totalMigrated} mentee references migrated.`,
+    };
+  });
 }

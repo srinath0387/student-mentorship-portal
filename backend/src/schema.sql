@@ -40,13 +40,13 @@ CREATE TABLE IF NOT EXISTS students (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT check_roll_number_format CHECK (roll_number ~ '^\d{5}[A-Za-z]32\d{2}$'),
-    CONSTRAINT check_rgmcet_email CHECK (email ~* '^[a-zA-Z0-9._%+-]+@rgmcet\.edu\.in$')
+    CONSTRAINT check_roll_number_format CHECK (roll_number ~* '^(\\d{4}[15]A(01|02|03|04|05|32|33|34|37)[0-9A-Za-z]{2}|\\d{4}1E00[0-9A-Za-z]{2}|\\d{4}1F00[0-9A-Za-z]{2})$'),
+    CONSTRAINT check_rgmcet_email CHECK (email ~* '^[a-zA-Z0-9._%+-]+@rgmcet\\.edu\\.in$')
 );
 
 -- 3. Academics Table
 CREATE TABLE IF NOT EXISTS academics (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     student_id VARCHAR(10) NOT NULL REFERENCES students(roll_number) ON DELETE CASCADE,
     semester INT NOT NULL CHECK (semester BETWEEN 1 AND 8),
     semester_gpa NUMERIC(4, 2) CHECK (semester_gpa BETWEEN 0.00 AND 10.00),
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS academics (
 
 -- 4. Coding Profiles Table
 CREATE TABLE IF NOT EXISTS coding_profiles (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     student_id VARCHAR(10) NOT NULL REFERENCES students(roll_number) ON DELETE CASCADE,
     platform VARCHAR(50) NOT NULL CHECK (platform IN ('GitHub', 'LeetCode', 'GeeksforGeeks', 'HackerRank', 'Codeforces', 'CodeChef', 'Kaggle', 'StackOverflow', 'GSoC-LFX', 'EduSkills')),
     handle VARCHAR(100) NOT NULL,
@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS coding_profiles (
 
 -- 5. Tech Skills Table
 CREATE TABLE IF NOT EXISTS tech_skills (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     student_id VARCHAR(10) NOT NULL REFERENCES students(roll_number) ON DELETE CASCADE,
     skill_category VARCHAR(100) NOT NULL,
     specific_tool VARCHAR(100) NOT NULL,
@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS tech_skills (
 
 -- 6. Certifications Table
 CREATE TABLE IF NOT EXISTS certifications (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     student_id VARCHAR(10) NOT NULL REFERENCES students(roll_number) ON DELETE CASCADE,
     provider VARCHAR(100) NOT NULL,
     title VARCHAR(200) NOT NULL,
@@ -115,7 +115,7 @@ END $$;
 
 -- 7. Soft Skills Table
 CREATE TABLE IF NOT EXISTS soft_skills (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     student_id VARCHAR(10) NOT NULL REFERENCES students(roll_number) ON DELETE CASCADE,
     skill VARCHAR(100) NOT NULL CHECK (skill IN ('Leadership', 'Communication', 'Teamwork', 'Time Management', 'Public Speaking', 'Learning Ability', 'Professionalism')),
     rating INT NOT NULL CHECK (rating BETWEEN 1 AND 5),
@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS soft_skills (
 
 -- 8. Extracurriculars Table
 CREATE TABLE IF NOT EXISTS extracurriculars (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     student_id VARCHAR(10) NOT NULL REFERENCES students(roll_number) ON DELETE CASCADE,
     category VARCHAR(50) NOT NULL CHECK (category IN ('Sport', 'Music', 'Dance', 'Photography', 'Art', 'Writing', 'Content Creation', 'Other')),
     description TEXT NOT NULL,
@@ -136,7 +136,7 @@ CREATE TABLE IF NOT EXISTS extracurriculars (
 
 -- 9. Achievements Table
 CREATE TABLE IF NOT EXISTS achievements (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     student_id VARCHAR(10) NOT NULL REFERENCES students(roll_number) ON DELETE CASCADE,
     type VARCHAR(50) NOT NULL CHECK (type IN ('Achievement', 'Failure-Learning', 'Challenge Overcome', 'Hackathon', 'Conference', 'Meetup', 'Capstone Project', 'Startup', 'Industry Project', 'Department Event', 'Club')),
     title VARCHAR(200) NOT NULL,
@@ -205,7 +205,7 @@ CREATE INDEX IF NOT EXISTS idx_achievements_student ON achievements(student_id);
 
 -- 13. Subject Allotments (Faculty-Subject Allocation for Attendance)
 CREATE TABLE IF NOT EXISTS subject_allotments (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     semester_label VARCHAR(5) NOT NULL,
     subject_name VARCHAR(200) NOT NULL,
     subject_type VARCHAR(10) NOT NULL CHECK (subject_type IN ('Theory', 'Lab')),
@@ -219,7 +219,7 @@ CREATE TABLE IF NOT EXISTS subject_allotments (
 
 -- 14. Subject Rosters (Students Enrolled in Subject)
 CREATE TABLE IF NOT EXISTS subject_rosters (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     allotment_id UUID NOT NULL REFERENCES subject_allotments(id) ON DELETE CASCADE,
     roll_number VARCHAR(10) NOT NULL,
     student_email VARCHAR(100) NOT NULL DEFAULT '',
@@ -230,7 +230,7 @@ CREATE TABLE IF NOT EXISTS subject_rosters (
 
 -- 15. Attendance Sessions (Session instance taken by faculty)
 CREATE TABLE IF NOT EXISTS attendance_sessions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     allotment_id UUID NOT NULL REFERENCES subject_allotments(id) ON DELETE CASCADE,
     session_date DATE NOT NULL,
     num_periods INT NOT NULL CHECK (num_periods BETWEEN 1 AND 3),
@@ -242,7 +242,7 @@ CREATE TABLE IF NOT EXISTS attendance_sessions (
 
 -- 16. Attendance Records (Student presence per session)
 CREATE TABLE IF NOT EXISTS attendance_records (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     session_id UUID NOT NULL REFERENCES attendance_sessions(id) ON DELETE CASCADE,
     roll_number VARCHAR(10) NOT NULL,
     is_present BOOLEAN NOT NULL DEFAULT TRUE,
@@ -251,7 +251,7 @@ CREATE TABLE IF NOT EXISTS attendance_records (
 
 -- 17. Timetable Entries (Weekly Timetable Schedule per Section & Semester)
 CREATE TABLE IF NOT EXISTS timetable_entries (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     semester_label VARCHAR(5) NOT NULL,
     department VARCHAR(50) NOT NULL DEFAULT '',
     section VARCHAR(10) NOT NULL DEFAULT '',
@@ -269,7 +269,7 @@ CREATE TABLE IF NOT EXISTS timetable_entries (
 
 -- 18. Timetable Official Documents (Uploaded PDF Timetable per Section & Semester)
 CREATE TABLE IF NOT EXISTS timetable_documents (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     semester_label VARCHAR(5) NOT NULL,
     department VARCHAR(50) NOT NULL DEFAULT '',
     section VARCHAR(10) NOT NULL DEFAULT '',
@@ -290,7 +290,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_allotment ON attendance_sessions(allotme
 CREATE INDEX IF NOT EXISTS idx_sessions_date ON attendance_sessions(session_date);
 -- 19. Class Incharges (1st Year Only: 1-1 and 1-2)
 CREATE TABLE IF NOT EXISTS class_incharges (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     semester_label VARCHAR(5) NOT NULL CHECK (semester_label IN ('1-1', '1-2')),
     department VARCHAR(50) NOT NULL,
     section VARCHAR(10) NOT NULL,
