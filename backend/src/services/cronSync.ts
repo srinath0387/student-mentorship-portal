@@ -376,10 +376,19 @@ export async function runCodingProfileCronSync(limit = 100): Promise<SyncResult>
   }
 
   try {
+    // Ensure all required columns exist on coding_profiles table
+    await db.query(`
+      ALTER TABLE coding_profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+      ALTER TABLE coding_profiles ADD COLUMN IF NOT EXISTS last_synced TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+      ALTER TABLE coding_profiles ADD COLUMN IF NOT EXISTS followers_count INT DEFAULT 0;
+      ALTER TABLE coding_profiles ADD COLUMN IF NOT EXISTS stars_count INT DEFAULT 0;
+      ALTER TABLE coding_profiles ADD COLUMN IF NOT EXISTS top_language VARCHAR(50) DEFAULT '';
+    `).catch(() => {});
+
     const profilesRes = await db.query(
       `SELECT student_id, platform, handle FROM coding_profiles
        WHERE handle IS NOT NULL AND handle != '' AND handle != 'Not Linked'
-       ORDER BY updated_at ASC NULLS FIRST
+       ORDER BY COALESCE(last_synced, updated_at, '1970-01-01'::timestamp) ASC
        LIMIT $1`,
       [limit]
     );
@@ -402,7 +411,7 @@ export async function runCodingProfileCronSync(limit = 100): Promise<SyncResult>
               await db.query(
                 `UPDATE coding_profiles
                  SET score_rating = $1, easy_count = $2, medium_count = $3, hard_count = $4,
-                     streak = COALESCE($5, streak), last_synced = CURRENT_TIMESTAMP
+                     streak = COALESCE($5, streak), last_synced = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
                  WHERE student_id = $6 AND LOWER(platform) = 'leetcode'`,
                 [lcData.solved, lcData.easy, lcData.medium, lcData.hard, lcData.streak || 0, student_id]
               ).catch(() => {});
@@ -414,7 +423,7 @@ export async function runCodingProfileCronSync(limit = 100): Promise<SyncResult>
               await db.query(
                 `UPDATE coding_profiles
                  SET repositories_count = $1, followers_count = $2, stars_count = $3,
-                     top_language = $4, last_synced = CURRENT_TIMESTAMP
+                     top_language = $4, last_synced = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
                  WHERE student_id = $5 AND LOWER(platform) = 'github'`,
                 [ghData.repos, ghData.followers, ghData.stars, ghData.topLanguage, student_id]
               ).catch(() => {});
@@ -425,7 +434,7 @@ export async function runCodingProfileCronSync(limit = 100): Promise<SyncResult>
             if (eduData) {
               await db.query(
                 `UPDATE coding_profiles
-                 SET score_rating = $1, repositories_count = $1, last_synced = CURRENT_TIMESTAMP
+                 SET score_rating = $1, repositories_count = $1, last_synced = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
                  WHERE student_id = $2 AND LOWER(platform) = 'eduskills'`,
                 [eduData.totalCertificates, student_id]
               ).catch(() => {});

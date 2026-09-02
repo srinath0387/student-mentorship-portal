@@ -1378,11 +1378,16 @@ function triggerBackgroundAutoSync() {
   // Fire-and-forget — do NOT await this
   (async () => {
     try {
+      await db.query(`
+        ALTER TABLE coding_profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+        ALTER TABLE coding_profiles ADD COLUMN IF NOT EXISTS last_synced TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+      `).catch(() => {});
+
       const staleRes = await db.query(
         `SELECT student_id, platform, handle FROM coding_profiles
          WHERE handle IS NOT NULL AND handle != '' AND handle != 'Not Linked'
-           AND (updated_at IS NULL OR updated_at < NOW() - INTERVAL '${AUTO_SYNC_STALE_HOURS} hours')
-         ORDER BY updated_at ASC NULLS FIRST
+           AND (last_synced IS NULL OR last_synced < NOW() - INTERVAL '${AUTO_SYNC_STALE_HOURS} hours')
+         ORDER BY COALESCE(last_synced, updated_at, '1970-01-01'::timestamp) ASC
          LIMIT $1`,
         [AUTO_SYNC_BATCH_LIMIT]
       );
@@ -1405,7 +1410,7 @@ function triggerBackgroundAutoSync() {
                   await db.query(
                     `UPDATE coding_profiles
                      SET score_rating = $1, easy_count = $2, medium_count = $3, hard_count = $4,
-                         streak = COALESCE($5, streak), updated_at = CURRENT_TIMESTAMP
+                         streak = COALESCE($5, streak), last_synced = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
                      WHERE student_id = $6 AND LOWER(platform) = 'leetcode'`,
                     [lcData.solved, lcData.easy, lcData.medium, lcData.hard, lcData.streak || 0, student_id]
                   ).catch(() => {});
@@ -1416,7 +1421,7 @@ function triggerBackgroundAutoSync() {
                   await db.query(
                     `UPDATE coding_profiles
                      SET repositories_count = $1, followers_count = $2, stars_count = $3,
-                         top_language = $4, updated_at = CURRENT_TIMESTAMP
+                         top_language = $4, last_synced = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
                      WHERE student_id = $5 AND LOWER(platform) = 'github'`,
                     [ghData.repos, ghData.followers, ghData.stars, ghData.topLanguage, student_id]
                   ).catch(() => {});
@@ -2710,8 +2715,8 @@ app.post('/students/:id/coding-profiles', requireOwnerOrRole('id', 'faculty', 'h
   }
 });
 
-// POST /admin/sync-coding-profiles — Admin/HOD/Faculty triggers batch sync for student coding profiles
-app.post('/admin/sync-coding-profiles', requireRole('admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
+// POST /reports/cron-sync & /admin/sync-coding-profiles — Admin/HOD/Faculty/Authorized users trigger batch sync for coding profiles
+const handleCodingProfileCronSync = async (req: Request, res: Response) => {
   try {
     const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 100;
     const result = await runCodingProfileCronSync(limit);
@@ -2719,7 +2724,10 @@ app.post('/admin/sync-coding-profiles', requireRole('admin', 'hod', 'faculty'), 
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
-});
+};
+app.post('/reports/cron-sync', requireAuth, handleCodingProfileCronSync);
+app.post('/admin/sync-coding-profiles', requireAuth, handleCodingProfileCronSync);
+app.post('/admin/cron-sync', requireAuth, handleCodingProfileCronSync);
 
 app.delete('/students/:id/coding-profiles/:platform', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
   try {
