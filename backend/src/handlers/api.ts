@@ -11342,17 +11342,31 @@ app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'f
         JOIN students s ON UPPER(TRIM(s.roll_number)) = uc.roll_number
         WHERE 1=1 ${deptFilterSql}
         GROUP BY 1, 2
+      ),
+      -- Merge student cert data with catalog: student counts first, then catalog-only rows
+      merged AS (
+        SELECT
+          COALESCE(csc.display_name, cat.display_name) AS display_name,
+          COALESCE(csc.canonical_name, cat.canonical_name) AS canonical_name,
+          COALESCE(csc.issuer, cat.issuer, 'Certification') AS issuer,
+          COALESCE(csc.student_count, 0) AS student_count
+        FROM cert_student_counts csc
+        LEFT JOIN certification_catalogs cat ON LOWER(TRIM(cat.display_name)) = LOWER(TRIM(csc.display_name))
+        UNION ALL
+        SELECT
+          cat.display_name,
+          cat.canonical_name,
+          cat.issuer,
+          0 AS student_count
+        FROM certification_catalogs cat
+        WHERE NOT EXISTS (
+          SELECT 1 FROM cert_student_counts csc
+          WHERE LOWER(TRIM(csc.display_name)) = LOWER(TRIM(cat.display_name))
+        )
       )
-      SELECT 
-        COALESCE(csc.display_name, cat.display_name) AS display_name,
-        COALESCE(csc.canonical_name, cat.canonical_name) AS canonical_name,
-        COALESCE(csc.issuer, cat.issuer, 'Certification') AS issuer,
-        COALESCE(csc.student_count, 0) AS student_count
-      FROM cert_student_counts csc
-      FULL OUTER JOIN certification_catalogs cat 
-        ON LOWER(TRIM(csc.display_name)) = LOWER(TRIM(cat.display_name))
-        OR csc.canonical_name = cat.canonical_name
-      ORDER BY COALESCE(csc.student_count, 0) DESC, COALESCE(csc.display_name, cat.display_name) ASC
+      SELECT display_name, canonical_name, issuer, student_count
+      FROM merged
+      ORDER BY student_count DESC, display_name ASC
       LIMIT 12
     `;
 
@@ -11412,21 +11426,27 @@ app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'fa
         JOIN students s ON UPPER(TRIM(s.roll_number)) = uc.roll_number
         WHERE 1=1 ${deptFilterSql}
         GROUP BY 1, 2
+      ),
+      merged AS (
+        SELECT
+          COALESCE(csc.display_name, cat.display_name) AS display_name,
+          COALESCE(csc.canonical_name, cat.canonical_name) AS canonical_name,
+          COALESCE(csc.issuer, cat.issuer, 'Certification') AS issuer,
+          COALESCE(csc.student_count, 0) AS student_count
+        FROM cert_student_counts csc
+        LEFT JOIN certification_catalogs cat ON LOWER(TRIM(cat.display_name)) = LOWER(TRIM(csc.display_name))
+        UNION ALL
+        SELECT cat.display_name, cat.canonical_name, cat.issuer, 0
+        FROM certification_catalogs cat
+        WHERE NOT EXISTS (
+          SELECT 1 FROM cert_student_counts csc
+          WHERE LOWER(TRIM(csc.display_name)) = LOWER(TRIM(cat.display_name))
+        )
       )
-      SELECT 
-        COALESCE(csc.display_name, cat.display_name) AS display_name,
-        COALESCE(csc.canonical_name, cat.canonical_name) AS canonical_name,
-        COALESCE(csc.issuer, cat.issuer, 'Certification') AS issuer,
-        COALESCE(csc.student_count, 0) AS student_count
-      FROM cert_student_counts csc
-      FULL OUTER JOIN certification_catalogs cat 
-        ON LOWER(TRIM(csc.display_name)) = LOWER(TRIM(cat.display_name))
-        OR csc.canonical_name = cat.canonical_name
-      WHERE (
-        COALESCE(csc.display_name, cat.display_name) ILIKE $1 
-        OR COALESCE(csc.issuer, cat.issuer) ILIKE $1
-      )
-      ORDER BY COALESCE(csc.student_count, 0) DESC, COALESCE(csc.display_name, cat.display_name) ASC
+      SELECT display_name, canonical_name, issuer, student_count
+      FROM merged
+      WHERE display_name ILIKE $1 OR issuer ILIKE $1
+      ORDER BY student_count DESC, display_name ASC
       LIMIT 15
     `;
 
