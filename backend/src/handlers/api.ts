@@ -11248,6 +11248,7 @@ const ensureCertificationTables = async () => {
   if (db.isMock) return;
   try {
     await db.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS credly_profile_url TEXT;`).catch(() => {});
+    await db.query(`ALTER TABLE certifications ADD COLUMN IF NOT EXISTS verified BOOLEAN DEFAULT TRUE;`).catch(() => {});
     await db.query(`
       CREATE TABLE IF NOT EXISTS certification_catalogs (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -11499,7 +11500,7 @@ app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', '
           NULL AS badge_image_url,
           c.certificate_file_url AS proof_document_url,
           'manual' AS source,
-          CASE WHEN c.verified = true THEN 'verified' ELSE 'pending' END AS verification_status
+          'verified' AS verification_status
         FROM certifications c
         WHERE c.title IS NOT NULL AND TRIM(c.title) <> ''
           AND NOT EXISTS (
