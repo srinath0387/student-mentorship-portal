@@ -25,6 +25,51 @@ export const CertificationAnalyticsView: React.FC = () => {
   });
   const certifiedStudents = Array.isArray(rawStudents) ? rawStudents : [];
 
+  const [openingRollNo, setOpeningRollNo] = useState<string | null>(null);
+
+  const handleOpenVerification = async (s: any) => {
+    const rawUrl = s.verification_url || s.proof_document_url;
+    if (!rawUrl) return;
+
+    // 1. External verify URLs (e.g. Credly, Coursera, HackerRank)
+    const isS3 = rawUrl.includes('.s3.') || rawUrl.includes('s3.amazonaws.com') || rawUrl.includes('.amazonaws.com/') || rawUrl.startsWith('students/');
+    if (!isS3) {
+      window.open(rawUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    // 2. S3 certificate uploads: extract key and get fresh pre-signed URL
+    let fileKey = '';
+    const withoutQuery = rawUrl.split('?')[0].trim();
+    const sIdx = withoutQuery.indexOf('students/');
+    if (sIdx !== -1) {
+      try {
+        fileKey = decodeURIComponent(withoutQuery.substring(sIdx));
+      } catch {
+        fileKey = withoutQuery.substring(sIdx);
+      }
+    } else {
+      const match = withoutQuery.match(/\.amazonaws\.com\/(.+)$/);
+      fileKey = match ? decodeURIComponent(match[1]) : rawUrl;
+    }
+
+    const loadKey = `${s.roll_number}-${s.certificate_name}`;
+    setOpeningRollNo(loadKey);
+
+    try {
+      const res = await api.getViewUrl(s.roll_number, fileKey);
+      if (res && res.viewUrl) {
+        window.open(res.viewUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        window.open(rawUrl, '_blank', 'noopener,noreferrer');
+      }
+    } catch {
+      window.open(rawUrl, '_blank', 'noopener,noreferrer');
+    } finally {
+      setOpeningRollNo(null);
+    }
+  };
+
   const handleExportCSV = () => {
     if (!certifiedStudents || certifiedStudents.length === 0) return;
     const headers = ['Roll Number', 'Student Name', 'Department', 'Section', 'Year', 'Certificate', 'Issuer', 'Issue Date', 'Source', 'Status'];
@@ -192,15 +237,24 @@ export const CertificationAnalyticsView: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">
-                        {s.verification_url ? (
-                          <a
-                            href={s.verification_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-primary hover:underline"
+                        {(s.verification_url || s.proof_document_url) ? (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenVerification(s)}
+                            disabled={openingRollNo === `${s.roll_number}-${s.certificate_name}`}
+                            className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-primary hover:underline disabled:opacity-50 cursor-pointer"
                           >
-                            Verify <ExternalLink className="w-3 h-3" />
-                          </a>
+                            {openingRollNo === `${s.roll_number}-${s.certificate_name}` ? (
+                              <>
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                Opening...
+                              </>
+                            ) : (
+                              <>
+                                Verify <ExternalLink className="w-3 h-3" />
+                              </>
+                            )}
+                          </button>
                         ) : (
                           <span className="text-textMuted text-[10px]">—</span>
                         )}

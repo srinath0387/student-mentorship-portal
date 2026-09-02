@@ -3258,14 +3258,32 @@ function extractS3Key(urlOrKey: string | null | undefined): string | null {
   const raw = String(urlOrKey).trim();
   if (!raw) return null;
   const withoutQuery = raw.split('?')[0].trim();
-  const idx = withoutQuery.indexOf('students/');
-  if (idx !== -1) {
+
+  // 1. Check for students/ path prefix
+  const studentsIdx = withoutQuery.indexOf('students/');
+  if (studentsIdx !== -1) {
     try {
-      return decodeURIComponent(withoutQuery.substring(idx));
+      return decodeURIComponent(withoutQuery.substring(studentsIdx));
     } catch {
-      return withoutQuery.substring(idx);
+      return withoutQuery.substring(studentsIdx);
     }
   }
+
+  // 2. Check for general S3 domain URLs
+  const s3Match = withoutQuery.match(/\.amazonaws\.com\/(.+)$/);
+  if (s3Match && s3Match[1]) {
+    try {
+      return decodeURIComponent(s3Match[1]);
+    } catch {
+      return s3Match[1];
+    }
+  }
+
+  // 3. If raw path doesn't look like an http/https URL and has slashes, it might already be an S3 key
+  if (!raw.startsWith('http://') && !raw.startsWith('https://') && raw.includes('/')) {
+    return withoutQuery.replace(/^\/+/, '');
+  }
+
   return null;
 }
 
@@ -3290,26 +3308,51 @@ async function signCertificationRows(rows: any[]): Promise<any[]> {
 
     return await Promise.all(
       rows.map(async (row) => {
-        if (!row.certificate_file_url) return row;
-        const key = extractS3Key(row.certificate_file_url);
-        if (!key) return row;
+        let updated = { ...row };
 
-        try {
-          const getCommand = new GetObjectCommand({
-            Bucket: bucketName,
-            Key: key,
-          });
-          // 24-hour expiration for dynamically generated signed URLs
-          const freshUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 86400 });
-          return {
-            ...row,
-            certificate_file_url: freshUrl,
-            file_key: key,
-          };
-        } catch (err: any) {
-          console.warn(`[S3] Failed to re-sign cert key ${key}:`, err.message);
-          return { ...row, file_key: key };
+        // 1. Re-sign certificate_file_url
+        if (updated.certificate_file_url && (updated.certificate_file_url.includes('amazonaws.com') || updated.certificate_file_url.includes('students/'))) {
+          const key = extractS3Key(updated.certificate_file_url);
+          if (key) {
+            try {
+              const getCommand = new GetObjectCommand({ Bucket: bucketName, Key: key });
+              updated.certificate_file_url = await getSignedUrl(s3Client, getCommand, { expiresIn: 86400 });
+              updated.file_key = key;
+            } catch (err: any) {
+              console.warn(`[S3] Failed to re-sign cert key ${key}:`, err.message);
+            }
+          }
         }
+
+        // 2. Re-sign verification_url
+        if (updated.verification_url && (updated.verification_url.includes('amazonaws.com') || updated.verification_url.includes('students/'))) {
+          const key = extractS3Key(updated.verification_url);
+          if (key) {
+            try {
+              const getCommand = new GetObjectCommand({ Bucket: bucketName, Key: key });
+              updated.verification_url = await getSignedUrl(s3Client, getCommand, { expiresIn: 86400 });
+              updated.file_key = key;
+            } catch (err: any) {
+              console.warn(`[S3] Failed to re-sign verification_url for key ${key}:`, err.message);
+            }
+          }
+        }
+
+        // 3. Re-sign proof_document_url
+        if (updated.proof_document_url && (updated.proof_document_url.includes('amazonaws.com') || updated.proof_document_url.includes('students/'))) {
+          const key = extractS3Key(updated.proof_document_url);
+          if (key) {
+            try {
+              const getCommand = new GetObjectCommand({ Bucket: bucketName, Key: key });
+              updated.proof_document_url = await getSignedUrl(s3Client, getCommand, { expiresIn: 86400 });
+              updated.file_key = key;
+            } catch (err: any) {
+              console.warn(`[S3] Failed to re-sign proof_document_url for key ${key}:`, err.message);
+            }
+          }
+        }
+
+        return updated;
       })
     );
   } catch (err: any) {
@@ -11586,7 +11629,8 @@ app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', '
     `;
 
     const result = await db.query(studentsQuery, params);
-    res.json(result.rows);
+    const signedRows = await signCertificationRows(result.rows);
+    res.json(signedRows);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
