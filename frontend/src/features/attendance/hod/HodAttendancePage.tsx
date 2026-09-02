@@ -156,7 +156,11 @@ export const HodAttendancePage: React.FC = () => {
 
           {/* Subject Allotments Grid */}
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredAllotments.length === 0 ? (
+            {isAllotLoading ? (
+              <div className="col-span-full bg-surface border border-borderLine rounded-2xl p-12 text-center text-textMuted text-xs animate-pulse">
+                Loading subject allotments...
+              </div>
+            ) : filteredAllotments.length === 0 ? (
               <div className="col-span-full bg-surface border border-borderLine rounded-2xl p-12 text-center text-textMuted text-xs">
                 No subject allotments found for the selected criteria.
               </div>

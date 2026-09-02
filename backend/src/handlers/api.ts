@@ -5698,6 +5698,11 @@ app.post('/attendance/allotments/single', requireRole('admin', 'hod', 'coordinat
     const cleanFacName = (faculty_name || cleanEmail.split('@')[0]).trim();
     const cleanDept = department.trim();
 
+    // MED-6: Validate semester_label format (must be like 1-1, 2-2, 3-1, 4-2)
+    if (!/^\d-\d$/.test(semester.trim())) {
+      return res.status(400).json({ error: `Invalid semester format "${semester}". Expected format: 1-1, 1-2, 2-1, 2-2, 3-1, 3-2, 4-1, 4-2` });
+    }
+
     if (!RGMCET_EMAIL_REGEX.test(cleanEmail) && !cleanEmail.endsWith('@rgmcet.edu.in')) {
       return res.status(400).json({ error: 'Invalid RGMCET faculty email domain (must be @rgmcet.edu.in)' });
     }
@@ -5795,10 +5800,24 @@ app.get('/attendance/allotments', requireRole('admin', 'hod', 'coordinator', 'fa
   }
 });
 
-// 3. Delete an Allotment (Admin / HOD / Coordinator)
+// 3. Delete an Allotment (Admin / HOD / Coordinator — with dept ownership check)
 app.delete('/attendance/allotments/:id', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+
+    // HIGH-5: Verify department ownership for HOD and Coordinator
+    if (req.auth?.role === 'hod' || req.auth?.role === 'coordinator') {
+      const allotRes = await db.query('SELECT department FROM subject_allotments WHERE id = $1', [id]);
+      if (allotRes.rows.length === 0) {
+        return res.status(404).json({ error: 'Allotment not found.' });
+      }
+      const allotDept = (allotRes.rows[0].department || '').toLowerCase().replace(/\s/g, '');
+      const callerDept = (req.auth.department || '').toLowerCase().replace(/\s/g, '');
+      if (callerDept && allotDept && allotDept !== callerDept) {
+        return res.status(403).json({ error: 'You can only delete allotments for your own department.' });
+      }
+    }
+
     await db.query('DELETE FROM subject_allotments WHERE id = $1', [id]);
     res.json({ success: true, message: 'Subject allotment deleted successfully' });
   } catch (err: any) {
@@ -5993,7 +6012,21 @@ app.get('/attendance/rosters/:allotmentId', requireRole('admin', 'hod', 'faculty
     }
     const allotmentRow = allot.rows[0];
 
-    // Query active approved student permissions (OD) on sessionDate if provided
+    // HIGH-3: Students can only view rosters for subjects they are enrolled in
+    if (req.auth?.role === 'student') {
+      const studentRoll = req.auth.regNo?.toUpperCase() || '';
+      if (studentRoll) {
+        const enrolledRes = await db.query(
+          'SELECT id FROM subject_rosters WHERE allotment_id = $1 AND UPPER(roll_number) = $2',
+          [allotmentId, studentRoll]
+        );
+        if (enrolledRes.rows.length === 0) {
+          return res.status(403).json({ error: 'Access denied: You are not enrolled in this subject.' });
+        }
+      }
+    }
+
+
     const approvedODMap = new Map<string, { permission_type: string; reason: string }>();
     if (sessionDate) {
       try {
@@ -6183,12 +6216,18 @@ app.get('/attendance/my-subjects', requireRole('faculty', 'hod', 'admin', 'coord
   }
 });
 
-/// 7. Save Attendance Session + Records (Faculty, HOD, Admin, Coordinator)
-app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student'), async (req: Request, res: Response) => {
+/// 7. Save Attendance Session + Records (Faculty, HOD, Admin, Coordinator only — NOT students)
+app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { allotment_id, session_date, num_periods, period_start, records } = req.body;
     if (!allotment_id || !session_date || !num_periods || !period_start || !Array.isArray(records)) {
       return res.status(400).json({ error: 'All fields (allotment_id, session_date, num_periods, period_start, records) are required' });
+    }
+
+    // HIGH-4: Prevent future-date attendance posting
+    const today = new Date().toISOString().split('T')[0];
+    if (session_date > today) {
+      return res.status(400).json({ error: `Cannot post attendance for a future date (${session_date}). Attendance can only be posted for today or past dates.` });
     }
 
     // Verify allotment
@@ -6197,6 +6236,11 @@ app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordin
       return res.status(404).json({ error: 'Subject allotment not found' });
     }
     const allotment = allotRes.rows[0];
+
+    // CRIT-3: Faculty can only post attendance for their own subjects
+    if (req.auth?.role === 'faculty' && allotment.faculty_email.toLowerCase() !== req.auth.email.toLowerCase()) {
+      return res.status(403).json({ error: 'You can only post attendance for subjects you are assigned to handle.' });
+    }
 
     // 1. Holiday Check — Attendance cannot be marked on declared public/institutional holidays
     const holRes = await db.query('SELECT title, type FROM holiday_calendar WHERE date = $1', [session_date]);
@@ -6208,6 +6252,7 @@ app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordin
     }
 
     const recordedBy = req.auth?.email?.toLowerCase() || allotment.faculty_email;
+
 
     // Check if session already exists for this slot
     const existing = await db.query(
@@ -6284,7 +6329,7 @@ app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordin
   }
 });
 
-// 8. Get Attendance Sessions (Filter by Allotment, Date range)
+// 8. Get Attendance Sessions (Filter by Allotment, Date range, Role-scoped)
 app.get('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student'), async (req: Request, res: Response) => {
   try {
     const allotmentId = req.query.allotment_id as string;
@@ -6306,6 +6351,23 @@ app.get('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordina
       query += ` AND s.allotment_id = $${params.length}`;
     }
 
+    // Role-based scoping (HIGH-1)
+    if (req.auth?.role === 'faculty') {
+      if (req.auth.email) {
+        params.push(req.auth.email.toLowerCase());
+        query += ` AND LOWER(a.faculty_email) = $${params.length}`;
+      }
+    } else if (req.auth?.role === 'hod' && req.auth.department && req.auth.department !== '*') {
+      params.push(req.auth.department);
+      query += ` AND (LOWER(REPLACE(a.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($${params.length}, ' ', '')) || '%' OR LOWER(REPLACE($${params.length}, ' ', '')) ILIKE '%' || LOWER(REPLACE(a.department, ' ', '')) || '%')`;
+    } else if (req.auth?.role === 'student' && req.auth.regNo) {
+      params.push(req.auth.regNo.toUpperCase());
+      query += ` AND (
+        EXISTS (SELECT 1 FROM subject_rosters sr WHERE sr.allotment_id = s.allotment_id AND UPPER(sr.roll_number) = $${params.length})
+        OR EXISTS (SELECT 1 FROM attendance_records ar WHERE ar.session_id = s.id AND UPPER(ar.roll_number) = $${params.length})
+      )`;
+    }
+
     if (dateFrom) {
       params.push(dateFrom);
       query += ` AND s.session_date >= $${params.length}`;
@@ -6324,12 +6386,12 @@ app.get('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordina
   }
 });
 
-// 9. Get Single Session Details with Records (Faculty, HOD, Admin, Coordinator)
+// 9. Get Single Session Details with Records (Role-scoped)
 app.get('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const sessRes = await db.query(
-      `SELECT s.*, a.subject_name, a.subject_type, a.section, a.semester_label, a.faculty_name, a.faculty_email
+      `SELECT s.*, a.subject_name, a.subject_type, a.section, a.semester_label, a.faculty_name, a.faculty_email, a.department
        FROM attendance_sessions s
        JOIN subject_allotments a ON a.id = s.allotment_id
        WHERE s.id = $1`,
@@ -6340,6 +6402,36 @@ app.get('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coor
     }
 
     const session = sessRes.rows[0];
+
+    // Scoping check (HIGH-2)
+    if (req.auth?.role === 'faculty') {
+      if (session.faculty_email && session.faculty_email.toLowerCase() !== req.auth.email.toLowerCase()) {
+        const callerDept = (req.auth.department || '').toLowerCase().replace(/\s/g, '');
+        const sessionDept = (session.department || '').toLowerCase().replace(/\s/g, '');
+        if (callerDept && sessionDept && callerDept !== sessionDept) {
+          return res.status(403).json({ error: 'Access denied to session details of another department.' });
+        }
+      }
+    } else if (req.auth?.role === 'hod') {
+      const callerDept = (req.auth.department || '').toLowerCase().replace(/\s/g, '');
+      const sessionDept = (session.department || '').toLowerCase().replace(/\s/g, '');
+      if (callerDept && sessionDept && callerDept !== '*' && callerDept !== sessionDept) {
+        return res.status(403).json({ error: 'Access denied to session details of another department.' });
+      }
+    } else if (req.auth?.role === 'student') {
+      const studentRoll = req.auth.regNo?.toUpperCase();
+      if (studentRoll) {
+        const enrolledRes = await db.query(
+          `SELECT 1 FROM subject_rosters WHERE allotment_id = $1 AND UPPER(roll_number) = $2
+           UNION
+           SELECT 1 FROM attendance_records WHERE session_id = $3 AND UPPER(roll_number) = $2`,
+          [session.allotment_id, studentRoll, id]
+        );
+        if (enrolledRes.rows.length === 0) {
+          return res.status(403).json({ error: 'Access denied: You are not enrolled in this session.' });
+        }
+      }
+    }
 
     const recordsRes = await db.query(
       `SELECT r.roll_number, r.is_present, s.name as student_name
@@ -6359,10 +6451,27 @@ app.get('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coor
   }
 });
 
-// 10. Delete Attendance Session (Faculty, HOD, Admin, Coordinator)
-app.delete('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student'), async (req: Request, res: Response) => {
+// 10. Delete Attendance Session (Faculty, HOD, Admin, Coordinator only — NOT students)
+app.delete('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+
+    // Fetch session to verify ownership for faculty
+    const sessRes = await db.query(
+      `SELECT s.id, a.faculty_email FROM attendance_sessions s
+       JOIN subject_allotments a ON a.id = s.allotment_id
+       WHERE s.id = $1`,
+      [id]
+    );
+    if (sessRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Attendance session not found.' });
+    }
+    const sess = sessRes.rows[0];
+    // Faculty can only delete their own sessions
+    if (req.auth?.role === 'faculty' && sess.faculty_email.toLowerCase() !== req.auth.email.toLowerCase()) {
+      return res.status(403).json({ error: 'You can only delete attendance sessions you conducted.' });
+    }
+
     await db.query('DELETE FROM attendance_sessions WHERE id = $1', [id]);
     res.json({ success: true, message: 'Attendance session deleted successfully' });
   } catch (err: any) {
@@ -6370,8 +6479,8 @@ app.delete('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'c
   }
 });
 
-// 10b. Update Attendance Session
-app.put('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student'), async (req: Request, res: Response) => {
+// 10b. Update Attendance Session (Faculty, HOD, Admin, Coordinator only — NOT students)
+app.put('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { records = [] } = req.body; // Array of { roll_number: string, is_present: boolean }
@@ -6740,7 +6849,8 @@ app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res
       const attended = parseInt(row.periods_attended || '0');
       grandTotalHeld += held;
       grandTotalAttended += attended;
-      const pct = held > 0 ? Math.round((attended / held) * 1000) / 10 : 100;
+      // MED-3: Return null when no classes held yet (don't default to 100%)
+      const pct = held > 0 ? Math.round((attended / held) * 1000) / 10 : null;
       return {
         allotment_id: row.allotment_id,
         subject_name: row.subject_name,
@@ -6754,9 +6864,10 @@ app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res
       };
     });
 
-    const overallPercentage = grandTotalHeld > 0 
-      ? Math.round((grandTotalAttended / grandTotalHeld) * 1000) / 10 
-      : 100;
+    // MED-3: Return null overall when no periods held so UI shows "N/A" not "100%"
+    const overallPercentage = grandTotalHeld > 0
+      ? Math.round((grandTotalAttended / grandTotalHeld) * 1000) / 10
+      : null;
 
     res.json({
       student,
@@ -6861,6 +6972,22 @@ app.get('/attendance/subject/:allotmentId/summary', requireRole('faculty', 'hod'
     }
     const allotment = allotRes.rows[0];
 
+    // Student enrollment validation
+    if (req.auth?.role === 'student') {
+      const studentRoll = req.auth.regNo?.toUpperCase();
+      if (studentRoll) {
+        const enrolledRes = await db.query(
+          `SELECT 1 FROM subject_rosters WHERE allotment_id = $1 AND UPPER(roll_number) = $2
+           UNION
+           SELECT 1 FROM attendance_records ar JOIN attendance_sessions s ON s.id = ar.session_id WHERE s.allotment_id = $1 AND UPPER(ar.roll_number) = $2`,
+          [allotmentId, studentRoll]
+        );
+        if (enrolledRes.rows.length === 0) {
+          return res.status(403).json({ error: 'Access denied: You are not enrolled in this subject.' });
+        }
+      }
+    }
+
     // Total periods held overall for this subject
     const heldRes = await db.query(
       'SELECT COALESCE(SUM(num_periods), 0) as total_held, COUNT(*) as sessions_count FROM attendance_sessions WHERE allotment_id = $1',
@@ -6933,7 +7060,7 @@ app.get('/attendance/subject/:allotmentId/summary', requireRole('faculty', 'hod'
     const students = studentsRes.rows.map((row: any) => {
       const held = parseInt(row.student_periods_held || '0') || totalHeldOverall;
       const attended = parseInt(row.periods_attended || '0');
-      const pct = held > 0 ? Math.round((attended / held) * 1000) / 10 : 100;
+      const pct = held > 0 ? Math.round((attended / held) * 1000) / 10 : null;
       return {
         roster_id: row.roster_id,
         roll_number: row.roll_number,
@@ -6967,6 +7094,22 @@ app.get('/attendance/subject/:allotmentId/daywise', requireRole('faculty', 'hod'
       return res.status(404).json({ error: 'Subject allotment not found' });
     }
     const allotment = allotRes.rows[0];
+
+    // Student enrollment validation
+    if (req.auth?.role === 'student') {
+      const studentRoll = req.auth.regNo?.toUpperCase();
+      if (studentRoll) {
+        const enrolledRes = await db.query(
+          `SELECT 1 FROM subject_rosters WHERE allotment_id = $1 AND UPPER(roll_number) = $2
+           UNION
+           SELECT 1 FROM attendance_records ar JOIN attendance_sessions s ON s.id = ar.session_id WHERE s.allotment_id = $1 AND UPPER(ar.roll_number) = $2`,
+          [allotmentId, studentRoll]
+        );
+        if (enrolledRes.rows.length === 0) {
+          return res.status(403).json({ error: 'Access denied: You are not enrolled in this subject.' });
+        }
+      }
+    }
 
     // Fetch all recorded sessions for this subject
     const sessionsRes = await db.query(
@@ -7426,8 +7569,8 @@ app.get('/attendance/timetable/today-slots', requireAuth, async (req: Request, r
 });
 
 // 19. Year-Wise Attendance Summary Report (for PDF & Excel Export)
-// Accessible by Admin, HOD, and Faculty (for their allotted subjects)
-app.get('/attendance/reports/year-summary', requireRole('admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
+// Accessible by Admin, HOD, Faculty, and Coordinator (for 1st year)
+app.get('/attendance/reports/year-summary', requireRole('admin', 'hod', 'faculty', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const yearParam = (req.query.year as string) || '2nd Year';
     const departmentParam = (req.query.department as string) || '';

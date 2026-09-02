@@ -40,7 +40,8 @@ export const StudentAttendanceView: React.FC<Props> = ({ rollNumber }) => {
     if (subjects.length === 0) return null;
     const totalAttended = subjects.reduce((a: number, s: any) => a + (s.periods_attended ?? s.present_hours ?? 0), 0);
     const totalHeld = subjects.reduce((a: number, s: any) => a + (s.periods_held ?? s.total_hours ?? 0), 0);
-    return totalHeld > 0 ? Math.round((totalAttended / totalHeld) * 1000) / 10 : 100;
+    // MED-3: Return null (not 100) when no periods held yet
+    return totalHeld > 0 ? Math.round((totalAttended / totalHeld) * 1000) / 10 : null;
   }, [rawData, subjects]);
 
   const totalPeriodsHeld = rawData?.total_periods_held ?? subjects.reduce((a: number, s: any) => a + (s.periods_held ?? s.total_hours ?? 0), 0);
@@ -195,8 +196,10 @@ export const StudentAttendanceView: React.FC<Props> = ({ rollNumber }) => {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {subjects.map((s: any) => {
-              const pct = Math.round(s.percentage ?? 0);
-              const colors = getColor(pct);
+              // MED-3: Handle null percentage (no periods held yet) — don't show 0%
+              const pctRaw = s.percentage ?? null;
+              const pct = pctRaw !== null ? Math.round(pctRaw) : null;
+              const colors = pct !== null ? getColor(pct) : getColor(100); // neutral green if N/A
               const held = s.periods_held ?? s.total_hours ?? 0;
               const attended = s.periods_attended ?? s.present_hours ?? 0;
 
@@ -212,8 +215,8 @@ export const StudentAttendanceView: React.FC<Props> = ({ rollNumber }) => {
                         {s.faculty_name ? ` • ${s.faculty_name}` : ''}
                       </p>
                     </div>
-                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${colors.badge}`}>
-                      {pct}%
+                     <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${colors.badge}`}>
+                      {pct !== null ? `${pct}%` : 'N/A'}
                     </span>
                   </div>
 
@@ -221,12 +224,12 @@ export const StudentAttendanceView: React.FC<Props> = ({ rollNumber }) => {
                   <div>
                     <div className="flex items-center justify-between text-[10px] font-bold mb-1">
                       <span className="text-textSecondary">{attended} / {held} Periods Attended</span>
-                      <span className={colors.text}>{colors.label}</span>
+                      <span className={colors.text}>{pct !== null ? colors.label : 'No classes yet'}</span>
                     </div>
                     <div className="w-full bg-white/70 dark:bg-black/30 rounded-full h-2.5 overflow-hidden">
                       <div
                         className={`h-2.5 rounded-full transition-all duration-700 ${colors.bar}`}
-                        style={{ width: `${Math.min(pct, 100)}%` }}
+                        style={{ width: `${pct !== null ? Math.min(pct, 100) : 0}%` }}
                       />
                     </div>
                   </div>
@@ -234,7 +237,7 @@ export const StudentAttendanceView: React.FC<Props> = ({ rollNumber }) => {
                   <div className="flex items-center gap-1.5 text-[10px] font-bold pt-1 border-t border-borderLine/30">
                     {colors.icon}
                     <span className={colors.text}>
-                      {pct >= 75 ? 'Good attendance progress' : pct >= 65 ? 'Attend next classes to reach 75%' : 'Critical: Shortage of attendance'}
+                      {pct === null ? 'No sessions recorded yet' : pct >= 75 ? 'Good attendance progress' : pct >= 65 ? 'Attend next classes to reach 75%' : 'Critical: Shortage of attendance'}
                     </span>
                   </div>
                 </div>
