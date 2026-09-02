@@ -11223,23 +11223,74 @@ function buildCertDeptFilter(role?: string, dept?: string, paramStartIndex = 1) 
   else if (d === 'mca' || d.includes('computer app') || d.includes('1f') || d.includes('f00')) code = 'F00';
 
   const params: any[] = [dept];
-  let cond = `(
-    LOWER(REPLACE(COALESCE(s.department, ''), ' ', '')) ILIKE '%' || LOWER(REPLACE($${paramStartIndex}, ' ', '')) || '%'
-    OR LOWER(REPLACE($${paramStartIndex}, ' ', '')) ILIKE '%' || LOWER(REPLACE(COALESCE(s.department, ''), ' ', '')) || '%'
-  `;
-  if (code === 'E00') {
-    cond += ` OR SUBSTRING(s.roll_number, 5, 2) = '1E' OR s.roll_number ILIKE '%1E00%' OR s.department ILIKE '%mba%'`;
+  let cond = '';
+
+  if (code === '32') {
+    cond = `(
+      SUBSTRING(s.roll_number, 7, 2) = '32'
+      OR LOWER(COALESCE(s.department, '')) ILIKE '%data science%'
+      OR LOWER(COALESCE(s.department, '')) ILIKE '%(ds)%'
+      OR LOWER(TRIM(COALESCE(s.department, ''))) = 'ds'
+      OR LOWER(REPLACE(COALESCE(s.department, ''), ' ', '')) = LOWER(REPLACE($${paramStartIndex}, ' ', ''))
+    ) AND SUBSTRING(s.roll_number, 7, 2) <> '05'`;
+  } else if (code === '05') {
+    cond = `(
+      SUBSTRING(s.roll_number, 7, 2) = '05'
+      OR LOWER(REPLACE(COALESCE(s.department, ''), ' ', '')) = 'cse'
+      OR LOWER(REPLACE(COALESCE(s.department, ''), ' ', '')) = LOWER(REPLACE($${paramStartIndex}, ' ', ''))
+    )
+    AND SUBSTRING(s.roll_number, 7, 2) NOT IN ('32', '33', '34', '37')
+    AND LOWER(COALESCE(s.department, '')) NOT ILIKE '%data science%'
+    AND LOWER(COALESCE(s.department, '')) NOT ILIKE '%ds%'
+    AND LOWER(COALESCE(s.department, '')) NOT ILIKE '%ai%'
+    AND LOWER(COALESCE(s.department, '')) NOT ILIKE '%ml%'
+    AND LOWER(COALESCE(s.department, '')) NOT ILIKE '%business%'
+    AND LOWER(COALESCE(s.department, '')) NOT ILIKE '%cyber%'`;
+  } else if (code === '33') {
+    cond = `(
+      SUBSTRING(s.roll_number, 7, 2) = '33'
+      OR LOWER(COALESCE(s.department, '')) ILIKE '%ai%'
+      OR LOWER(COALESCE(s.department, '')) ILIKE '%ml%'
+      OR LOWER(REPLACE(COALESCE(s.department, ''), ' ', '')) = LOWER(REPLACE($${paramStartIndex}, ' ', ''))
+    )`;
+  } else if (code === '34') {
+    cond = `(
+      SUBSTRING(s.roll_number, 7, 2) = '34'
+      OR LOWER(COALESCE(s.department, '')) ILIKE '%business%'
+      OR LOWER(COALESCE(s.department, '')) ILIKE '%csbs%'
+      OR LOWER(REPLACE(COALESCE(s.department, ''), ' ', '')) = LOWER(REPLACE($${paramStartIndex}, ' ', ''))
+    )`;
+  } else if (code === '37') {
+    cond = `(
+      SUBSTRING(s.roll_number, 7, 2) = '37'
+      OR LOWER(COALESCE(s.department, '')) ILIKE '%cyber%'
+      OR LOWER(REPLACE(COALESCE(s.department, ''), ' ', '')) = LOWER(REPLACE($${paramStartIndex}, ' ', ''))
+    )`;
+  } else if (code === 'E00') {
+    cond = `(
+      SUBSTRING(s.roll_number, 5, 2) = '1E'
+      OR s.roll_number ILIKE '%1E00%'
+      OR s.department ILIKE '%mba%'
+      OR LOWER(REPLACE(COALESCE(s.department, ''), ' ', '')) = LOWER(REPLACE($${paramStartIndex}, ' ', ''))
+    )`;
   } else if (code === 'F00') {
-    cond += ` OR SUBSTRING(s.roll_number, 5, 2) = '1F' OR s.roll_number ILIKE '%1F00%' OR s.department ILIKE '%mca%'`;
+    cond = `(
+      SUBSTRING(s.roll_number, 5, 2) = '1F'
+      OR s.roll_number ILIKE '%1F00%'
+      OR s.department ILIKE '%mca%'
+      OR LOWER(REPLACE(COALESCE(s.department, ''), ' ', '')) = LOWER(REPLACE($${paramStartIndex}, ' ', ''))
+    )`;
   } else if (code) {
-    cond += ` OR SUBSTRING(s.roll_number, 7, 2) = '${code}'`;
-    if (code === '32') cond += ` OR LOWER(COALESCE(s.department, '')) ILIKE '%data science%' OR LOWER(COALESCE(s.department, '')) ILIKE '%ds%'`;
-    if (code === '05') cond += ` OR (SUBSTRING(s.roll_number, 7, 2) = '05' AND LOWER(COALESCE(s.department, '')) NOT ILIKE '%data science%' AND LOWER(COALESCE(s.department, '')) NOT ILIKE '%ds%')`;
-    if (code === '33') cond += ` OR LOWER(COALESCE(s.department, '')) ILIKE '%ai%' OR LOWER(COALESCE(s.department, '')) ILIKE '%ml%'`;
-    if (code === '34') cond += ` OR LOWER(COALESCE(s.department, '')) ILIKE '%business%' OR LOWER(COALESCE(s.department, '')) ILIKE '%csbs%'`;
-    if (code === '37') cond += ` OR LOWER(COALESCE(s.department, '')) ILIKE '%cyber%'`;
+    cond = `(
+      SUBSTRING(s.roll_number, 7, 2) = '${code}'
+      OR LOWER(REPLACE(COALESCE(s.department, ''), ' ', '')) = LOWER(REPLACE($${paramStartIndex}, ' ', ''))
+    )`;
+  } else {
+    cond = `(
+      LOWER(REPLACE(COALESCE(s.department, ''), ' ', '')) = LOWER(REPLACE($${paramStartIndex}, ' ', ''))
+    )`;
   }
-  cond += `)`;
+
   return { sql: `AND ${cond}`, params };
 }
 
