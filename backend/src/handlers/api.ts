@@ -11808,5 +11808,20 @@ app.get('*', (_req: Request, res: Response) => {
   return sendIndexHtml(res);
 });
 
-export const handler = serverless(app);
+const serverlessHandler = serverless(app);
+
+export const handler = async (event: any, context: any) => {
+  // Intercept AWS EventBridge (CloudWatch Events) Scheduled rules
+  if (event.source === 'aws.events' && event['detail-type'] === 'Scheduled Event') {
+    console.log('[EventBridge] Intercepted Scheduled Event. Triggering Auto-Sync...');
+    const { runCodingProfileCronSync } = await import('../services/cronSync');
+    // Process up to 500 stale profiles during the nightly sync
+    await runCodingProfileCronSync(500);
+    return { statusCode: 200, body: 'Nightly Sync Complete' };
+  }
+
+  // Otherwise, process as standard HTTP request via Serverless-HTTP
+  return serverlessHandler(event, context);
+};
+
 export default app;

@@ -405,6 +405,8 @@ export async function runCodingProfileCronSync(limit = 100): Promise<SyncResult>
           const { student_id, platform, handle } = row;
           const platLower = String(platform).toLowerCase();
 
+          let syncSuccess = false;
+
           if (platLower === 'leetcode') {
             const lcData = await fetchLeetCodeStatsDirect(handle);
             if (lcData) {
@@ -416,6 +418,7 @@ export async function runCodingProfileCronSync(limit = 100): Promise<SyncResult>
                 [lcData.solved, lcData.easy, lcData.medium, lcData.hard, lcData.streak || 0, student_id]
               ).catch(() => {});
               result.leetcodeUpdated++;
+              syncSuccess = true;
             }
           } else if (platLower === 'github') {
             const ghData = await fetchGitHubStatsDirect(handle);
@@ -428,6 +431,7 @@ export async function runCodingProfileCronSync(limit = 100): Promise<SyncResult>
                 [ghData.repos, ghData.followers, ghData.stars, ghData.topLanguage, student_id]
               ).catch(() => {});
               result.githubUpdated++;
+              syncSuccess = true;
             }
           } else if (platLower === 'eduskills') {
             const eduData = await fetchEduSkillsStatsDirect(handle);
@@ -438,7 +442,17 @@ export async function runCodingProfileCronSync(limit = 100): Promise<SyncResult>
                  WHERE student_id = $2 AND LOWER(platform) = 'eduskills'`,
                 [eduData.totalCertificates, student_id]
               ).catch(() => {});
+              syncSuccess = true;
             }
+          }
+
+          // Poison Pill Prevention: If the fetch failed (e.g., deleted account, invalid handle),
+          // we MUST still update last_synced so they move to the back of the queue!
+          if (!syncSuccess) {
+            await db.query(
+              `UPDATE coding_profiles SET last_synced = CURRENT_TIMESTAMP WHERE student_id = $1 AND platform = $2`,
+              [student_id, platform]
+            ).catch(() => {});
           }
         })
       );

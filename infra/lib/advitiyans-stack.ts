@@ -10,6 +10,8 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as events from 'aws-cdk-lib/aws-events';
+import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as path from 'path';
 
 export class AdvitiyansStack extends cdk.Stack {
@@ -261,6 +263,13 @@ export class AdvitiyansStack extends cdk.Stack {
       ],
       resources: [userPool.userPoolArn],
     }));
+
+    // Nightly Cron Job (12:00 AM IST = 18:30 UTC) for Auto-Sync
+    const nightlySyncRule = new events.Rule(this, 'NightlyCodingProfileSync', {
+      schedule: events.Schedule.cron({ minute: '30', hour: '18', month: '*', weekDay: '*', year: '*' }),
+      description: 'Triggers the API Lambda every night at 12 AM IST to batch sync stale LeetCode and GitHub coding profiles.',
+    });
+    nightlySyncRule.addTarget(new targets.LambdaFunction(apiLambda));
 
     // ========================================================================
     // 11. API Gateway REST API
