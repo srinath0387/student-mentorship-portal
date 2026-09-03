@@ -218,7 +218,7 @@ export class AdvitiyansStack extends cdk.Stack {
       runtime: lambda.Runtime.NODEJS_22_X,
       handler: 'handlers/api.handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '../../backend/dist')),
-      timeout: cdk.Duration.seconds(29),       // API Gateway hard max; handles heavy HOD report queries
+      timeout: cdk.Duration.seconds(900),       // Max 15 mins for EventBridge Cron. API Gateway will still drop at 29s.
       memorySize: 512,                          // 2× CPU speed vs 256 MB; runs ~35% faster
       // NOTE: reservedConcurrentExecutions removed — account limit is only 10 total concurrent
       // executions. With t3.large (855 max DB connections) and only 10 max Lambda executions,
