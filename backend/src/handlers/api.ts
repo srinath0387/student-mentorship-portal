@@ -1440,8 +1440,6 @@ function triggerBackgroundAutoSync() {
 
 // GET /students — List/Search/Filter (Guarantees DISTINCT ON roll_number)
 app.get('/students', requireAuth, async (req: Request, res: Response) => {
-  // Kick off background auto-sync of stale coding profiles (fire-and-forget)
-  triggerBackgroundAutoSync();
   try {
     const { department, batch, section, year, standing, mentor_id, search } = req.query;
 
@@ -2662,9 +2660,9 @@ app.post('/students/:id/coding-profiles', requireOwnerOrRole('id', 'faculty', 'h
        validated.repositories_count, validated.commits_count, validated.prs_merged]
     );
 
-    // If platform is LeetCode, immediately fetch real stats from LeetCode GraphQL in background
+    // If platform is LeetCode, immediately fetch real stats from LeetCode GraphQL
     if (validated.platform === 'LeetCode' && validated.handle && validated.handle !== 'Not Linked') {
-      (async () => {
+      await (async () => {
         try {
           const lcData = await fetchLeetCodeStatsDirect(validated.handle);
           if (lcData) {
@@ -2684,9 +2682,9 @@ app.post('/students/:id/coding-profiles', requireOwnerOrRole('id', 'faculty', 'h
       })();
     }
 
-    // If platform is GitHub, immediately fetch stats from GitHub API in background
+    // If platform is GitHub, immediately fetch stats from GitHub API
     if (validated.platform === 'GitHub' && validated.handle && validated.handle !== 'Not Linked') {
-      (async () => {
+      await (async () => {
         try {
           const ghData = await fetchGitHubStatsDirect(validated.handle);
           if (ghData) {
