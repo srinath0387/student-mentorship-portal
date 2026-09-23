@@ -491,6 +491,29 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
           await new Promise(resolve => setTimeout(resolve, 500));
           return res.status(401).json({ valid: false, error: 'Invalid email or password.' });
         }
+
+        // No DB row found — check if it matches a known HOD email pattern and auto-seed it
+        const hodDeptMap: Record<string, string> = {
+          ce: 'Civil', eee: 'EEE', me: 'Mechanical', ece: 'ECE',
+          cse: 'CSE', cseds: 'CSE (Data Science)', cseaiml: 'CSE (AI & ML)',
+          csebs: 'CSE (BS)', csecs: 'CSE (CS)', mca: 'MCA', mba: 'MBA',
+          mathematics: 'Mathematics', english: 'English', physics: 'Physics', chemistry: 'Chemistry',
+        };
+        const matchHod = emailLower.match(/^h([a-z]+)@rgmcet\.edu\.in$/);
+        const isFyCoord = emailLower === 'fycoordinator@rgmcet.edu.in';
+        const resolvedDept = isFyCoord ? '1st Year' : (matchHod ? hodDeptMap[matchHod[1]] : null);
+
+        if (resolvedDept && password === 'hod@2026') {
+          // Auto-seed the missing row so next login hits the DB path
+          try {
+            await db.query(
+              `INSERT INTO hod_credentials (email, password, department) VALUES ($1, $2, $3)
+               ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, updated_at = NOW()`,
+              [emailLower, 'hod@2026', resolvedDept]
+            );
+          } catch { /* ignore seed errors */ }
+          return res.json({ valid: true, role: 'hod', department: resolvedDept, email: emailLower });
+        }
       } catch {
         // Fall through
       }
