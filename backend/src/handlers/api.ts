@@ -11186,6 +11186,7 @@ app.delete('/subjects/master/:id', requireRole('admin', 'hod', 'coordinator'), a
 /**
  * GET /certifications/summary
  * Returns top certifications with student counts for dashboard summary cards.
+ * Groups case-insensitively and supports department, year, section, and issuer filters.
  */
 app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
   try {
@@ -11193,17 +11194,40 @@ app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'f
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
 
-    let deptFilterSql = '';
+    const filterDept = (req.query.department as string || '').trim();
+    const filterYear = (req.query.year as string || '').trim();
+    const filterSection = (req.query.section as string || '').trim();
+    const filterIssuer = (req.query.issuer as string || '').trim();
+
+    let deptToUse = filterDept;
+    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+      deptToUse = callerDept;
+    }
+
+    const whereClauses: string[] = ["uc.certificate_name IS NOT NULL AND TRIM(uc.certificate_name) <> ''"];
     const params: any[] = [];
 
-    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
-      params.push(callerDept);
-      deptFilterSql = `
-        AND (
-          LOWER(REPLACE(s.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($1, ' ', '')) || '%'
-          OR LOWER(REPLACE($1, ' ', '')) ILIKE '%' || LOWER(REPLACE(s.department, ' ', '')) || '%'
-        )
-      `;
+    if (deptToUse && deptToUse !== 'All') {
+      params.push(deptToUse);
+      whereClauses.push(`(
+        LOWER(REPLACE(s.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($${params.length}, ' ', '')) || '%'
+        OR LOWER(REPLACE($${params.length}, ' ', '')) ILIKE '%' || LOWER(REPLACE(s.department, ' ', '')) || '%'
+      )`);
+    }
+
+    if (filterYear && filterYear !== 'All') {
+      params.push(filterYear);
+      whereClauses.push(`s.year = $${params.length}`);
+    }
+
+    if (filterSection && filterSection !== 'All') {
+      params.push(filterSection);
+      whereClauses.push(`s.section = $${params.length}`);
+    }
+
+    if (filterIssuer && filterIssuer !== 'All') {
+      params.push(`%${filterIssuer}%`);
+      whereClauses.push(`uc.issuer ILIKE $${params.length}`);
     }
 
     const summaryQuery = `
@@ -11225,17 +11249,20 @@ app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'f
         )
       )
       SELECT 
-        uc.certificate_name AS display_name,
-        LOWER(TRIM(uc.certificate_name)) AS canonical_name,
-        COALESCE(MAX(uc.issuer), 'Certification') AS issuer,
+        MAX(uc.certificate_name) AS display_name,
+        LOWER(TRIM(REGEXP_REPLACE(uc.certificate_name, '\\s+', ' ', 'g'))) AS canonical_name,
+        COALESCE(
+          MAX(CASE WHEN UPPER(TRIM(uc.issuer)) NOT IN ('OTHER', 'UNKNOWN', 'CERTIFICATION', '') THEN uc.issuer END),
+          MAX(uc.issuer),
+          'Certification'
+        ) AS issuer,
         COUNT(DISTINCT uc.roll_number) AS student_count
       FROM unified_certs uc
       JOIN students s ON s.roll_number = uc.roll_number
-      WHERE uc.certificate_name IS NOT NULL AND TRIM(uc.certificate_name) <> ''
-      ${deptFilterSql}
-      GROUP BY 1, 2
+      WHERE ${whereClauses.join(' AND ')}
+      GROUP BY LOWER(TRIM(REGEXP_REPLACE(uc.certificate_name, '\\s+', ' ', 'g')))
       ORDER BY student_count DESC, display_name ASC
-      LIMIT 12
+      LIMIT 24
     `;
 
     const result = await db.query(summaryQuery, params);
@@ -11248,6 +11275,7 @@ app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'f
 /**
  * GET /certifications/search?q=aws
  * Role-scoped typeahead search returning certification name, issuer, and student count.
+ * Case-insensitive grouping and supports filters.
  */
 app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
   try {
@@ -11256,22 +11284,40 @@ app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'fa
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
 
+    const filterDept = (req.query.department as string || '').trim();
+    const filterYear = (req.query.year as string || '').trim();
+    const filterSection = (req.query.section as string || '').trim();
+
     if (!query) {
       return res.json([]);
     }
 
-    let deptFilterSql = '';
+    let deptToUse = filterDept;
+    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+      deptToUse = callerDept;
+    }
+
+    const whereClauses: string[] = [
+      "(uc.certificate_name ILIKE $1 OR uc.issuer ILIKE $1)"
+    ];
     const params: any[] = [`%${query}%`];
 
-    // HOD Scoping
-    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
-      params.push(callerDept);
-      deptFilterSql = `
-        AND (
-          LOWER(REPLACE(s.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($2, ' ', '')) || '%'
-          OR LOWER(REPLACE($2, ' ', '')) ILIKE '%' || LOWER(REPLACE(s.department, ' ', '')) || '%'
-        )
-      `;
+    if (deptToUse && deptToUse !== 'All') {
+      params.push(deptToUse);
+      whereClauses.push(`(
+        LOWER(REPLACE(s.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($${params.length}, ' ', '')) || '%'
+        OR LOWER(REPLACE($${params.length}, ' ', '')) ILIKE '%' || LOWER(REPLACE(s.department, ' ', '')) || '%'
+      )`);
+    }
+
+    if (filterYear && filterYear !== 'All') {
+      params.push(filterYear);
+      whereClauses.push(`s.year = $${params.length}`);
+    }
+
+    if (filterSection && filterSection !== 'All') {
+      params.push(filterSection);
+      whereClauses.push(`s.section = $${params.length}`);
     }
 
     const searchQuery = `
@@ -11293,18 +11339,18 @@ app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'fa
         )
       )
       SELECT 
-        uc.certificate_name AS display_name,
-        LOWER(TRIM(uc.certificate_name)) AS canonical_name,
-        COALESCE(MAX(uc.issuer), 'Certification') AS issuer,
+        MAX(uc.certificate_name) AS display_name,
+        LOWER(TRIM(REGEXP_REPLACE(uc.certificate_name, '\\s+', ' ', 'g'))) AS canonical_name,
+        COALESCE(
+          MAX(CASE WHEN UPPER(TRIM(uc.issuer)) NOT IN ('OTHER', 'UNKNOWN', 'CERTIFICATION', '') THEN uc.issuer END),
+          MAX(uc.issuer),
+          'Certification'
+        ) AS issuer,
         COUNT(DISTINCT uc.roll_number) AS student_count
       FROM unified_certs uc
       JOIN students s ON s.roll_number = uc.roll_number
-      WHERE (
-        uc.certificate_name ILIKE $1 
-        OR uc.issuer ILIKE $1
-      )
-      ${deptFilterSql}
-      GROUP BY 1, 2
+      WHERE ${whereClauses.join(' AND ')}
+      GROUP BY LOWER(TRIM(REGEXP_REPLACE(uc.certificate_name, '\\s+', ' ', 'g')))
       ORDER BY student_count DESC, display_name ASC
       LIMIT 15
     `;
@@ -11319,6 +11365,7 @@ app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'fa
 /**
  * GET /certifications/students?cert_name=
  * Returns students who hold a specific certification (role-scoped).
+ * Case-insensitive match, deduplicates roll numbers, and supports department, year, section, and search filters.
  */
 app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
   try {
@@ -11327,21 +11374,49 @@ app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', '
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
 
+    const filterDept = (req.query.department as string || '').trim();
+    const filterYear = (req.query.year as string || '').trim();
+    const filterSection = (req.query.section as string || '').trim();
+    const filterSearch = (req.query.search as string || '').trim().toLowerCase();
+
     if (!certName) {
       return res.status(400).json({ error: 'cert_name parameter is required' });
     }
 
-    let deptFilter = '';
-    const params: any[] = [`%${certName}%`];
-
+    let deptToUse = filterDept;
     if (callerRole === 'hod' && callerDept && callerDept !== '*') {
-      params.push(callerDept);
-      deptFilter = `
-        AND (
-          LOWER(REPLACE(s.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($2, ' ', '')) || '%'
-          OR LOWER(REPLACE($2, ' ', '')) ILIKE '%' || LOWER(REPLACE(s.department, ' ', '')) || '%'
-        )
-      `;
+      deptToUse = callerDept;
+    }
+
+    const whereClauses: string[] = [
+      `(
+        LOWER(TRIM(REGEXP_REPLACE(uc.certificate_name, '\\s+', ' ', 'g'))) = LOWER(TRIM(REGEXP_REPLACE($1, '\\s+', ' ', 'g')))
+        OR uc.certificate_name ILIKE $2
+      )`
+    ];
+    const params: any[] = [certName, `%${certName}%`];
+
+    if (deptToUse && deptToUse !== 'All') {
+      params.push(deptToUse);
+      whereClauses.push(`(
+        LOWER(REPLACE(s.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($${params.length}, ' ', '')) || '%'
+        OR LOWER(REPLACE($${params.length}, ' ', '')) ILIKE '%' || LOWER(REPLACE(s.department, ' ', '')) || '%'
+      )`);
+    }
+
+    if (filterYear && filterYear !== 'All') {
+      params.push(filterYear);
+      whereClauses.push(`s.year = $${params.length}`);
+    }
+
+    if (filterSection && filterSection !== 'All') {
+      params.push(filterSection);
+      whereClauses.push(`s.section = $${params.length}`);
+    }
+
+    if (filterSearch) {
+      params.push(`%${filterSearch}%`);
+      whereClauses.push(`(s.roll_number ILIKE $${params.length} OR s.name ILIKE $${params.length})`);
     }
 
     const studentsQuery = `
@@ -11374,7 +11449,7 @@ app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', '
           WHERE sc2.roll_number = c.student_id AND LOWER(TRIM(sc2.certificate_name)) = LOWER(TRIM(c.title))
         )
       )
-      SELECT 
+      SELECT DISTINCT ON (s.roll_number)
         s.roll_number,
         s.name AS student_name,
         s.department,
@@ -11390,8 +11465,7 @@ app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', '
         uc.verification_status
       FROM unified_certs uc
       JOIN students s ON s.roll_number = uc.roll_number
-      WHERE uc.certificate_name ILIKE $1 OR uc.issuer ILIKE $1
-      ${deptFilter}
+      WHERE ${whereClauses.join(' AND ')}
       ORDER BY s.roll_number ASC
     `;
 
