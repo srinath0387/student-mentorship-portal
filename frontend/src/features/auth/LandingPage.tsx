@@ -283,8 +283,38 @@ export const LandingPage: React.FC = () => {
         navigate('/dashboard');
         return;
       }
+      }
 
-      // ── 3. Faculty / HOD / Coordinator / Admin / Oversight Roles ──
+      // ── 3. Faculty Login — Cognito first (existing accounts), adminLogin fallback ──
+      if (selectedRole.id === 'faculty') {
+        if (!trimmedId) throw new Error('Please enter your official email address.');
+        if (!trimmedPass) throw new Error('Please enter your password.');
+
+        try {
+          const cognitoRes = await cognitoSignIn(trimmedId, trimmedPass);
+          login(trimmedId, 'faculty', undefined, trimmedId.split('@')[0], cognitoRes.idToken, selectedDept);
+          await registerSession(trimmedId, 'faculty');
+          navigate('/faculty/dashboard');
+          return;
+        } catch (cognitoErr: any) {
+          if (isCognitoConfigError(cognitoErr)) {
+            // Dev/local fallback — try adminLogin (checks faculty_credentials / default password)
+            const adminRes = await api.adminLogin(trimmedId, trimmedPass, selectedDept);
+            if (adminRes.valid) {
+              const assignedDept = adminRes.department || selectedDept;
+              login(adminRes.email || trimmedId, 'faculty', undefined, adminRes.name || trimmedId.split('@')[0], undefined, assignedDept);
+              await registerSession(adminRes.email || trimmedId, 'faculty');
+              navigate('/faculty/dashboard');
+              return;
+            }
+            throw new Error(adminRes.error || 'Invalid credentials.');
+          }
+          // Cognito is configured but credentials were wrong
+          throw new Error('Invalid email or password. Use the password you registered with.');
+        }
+      }
+
+      // ── 4. HOD / Coordinator / Admin / Oversight Roles ──
       if (!trimmedId) throw new Error('Please enter your official email address.');
       if (!trimmedPass) throw new Error('Please enter your password.');
 
