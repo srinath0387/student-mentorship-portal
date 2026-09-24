@@ -347,6 +347,19 @@ async function ensureSchema(p: Pool) {
     // Remove old row 1 that duplicated hcseds; correct rows now handled by email-based upsert above
     `DELETE FROM hod_credentials WHERE id = 1;`,
 
+    // Faculty credentials table — per-faculty login credentials (email + password)
+    // Faculty register via the self-registration flow; admins can also seed via CSV import.
+    // Default password for all faculty: faculty@2026 (changed on first login ideally)
+    `CREATE TABLE IF NOT EXISTS faculty_credentials (
+      id SERIAL PRIMARY KEY,
+      email VARCHAR(100) NOT NULL,
+      password TEXT NOT NULL,
+      department VARCHAR(100),
+      faculty_id VARCHAR(50),
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_faculty_cred_email ON faculty_credentials(LOWER(email));`,
+
     // Semester unlock settings — HOD/Admin controls which semesters students can fill
     `CREATE TABLE IF NOT EXISTS semester_unlock_settings (
       year_label VARCHAR(20) PRIMARY KEY,

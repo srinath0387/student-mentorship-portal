@@ -502,7 +502,59 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
       }
     }
 
-    // ── Priority 3: HOD credentials (DB) ───────────────────────────────────
+    // ── Priority 2.5: Faculty credentials (DB) ──────────────────────────────
+    try {
+      const facResult = await db.query(
+        'SELECT email, password, department, faculty_id FROM faculty_credentials WHERE LOWER(email) = $1',
+        [emailLower]
+      );
+      if (facResult.rows.length > 0) {
+        const facRow = facResult.rows[0];
+        const stored = facRow.password;
+        const isMatch = await compareAndUpgradePassword(password, stored, async (newHash) => {
+          await db.query('UPDATE faculty_credentials SET password = $1, updated_at = NOW() WHERE LOWER(email) = $2', [newHash, emailLower]);
+        });
+        if (isMatch) {
+          const assignedDept = facRow.department || department || 'CSE (Data Science)';
+          return res.json({ valid: true, role: 'faculty', department: assignedDept, email: facRow.email, faculty_id: facRow.faculty_id });
+        }
+        // Email matched but password wrong — reject immediately
+        await new Promise(resolve => setTimeout(resolve, 500));
+        return res.status(401).json({ valid: false, error: 'Invalid email or password.' });
+      }
+
+      // No DB row — auto-seed if it's any @rgmcet.edu.in email with default password faculty@2026
+      const isFacultyEmail = emailLower.endsWith('@rgmcet.edu.in') && password === 'faculty@2026';
+      if (isFacultyEmail) {
+        // Look up the faculty profile to get department
+        let resolvedFacDept = department || 'CSE (Data Science)';
+        let resolvedFacId: string | null = null;
+        try {
+          const facProfile = await db.query(
+            'SELECT faculty_id, department FROM faculty WHERE LOWER(email) = $1 LIMIT 1',
+            [emailLower]
+          );
+          if (facProfile.rows.length > 0) {
+            resolvedFacDept = facProfile.rows[0].department || resolvedFacDept;
+            resolvedFacId = facProfile.rows[0].faculty_id || null;
+          }
+        } catch { /* ignore */ }
+        // Auto-seed the credentials row
+        try {
+          await db.query(
+            `INSERT INTO faculty_credentials (email, password, department, faculty_id)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT DO NOTHING`,
+            [emailLower, 'faculty@2026', resolvedFacDept, resolvedFacId]
+          );
+        } catch { /* ignore seed errors */ }
+        return res.json({ valid: true, role: 'faculty', department: resolvedFacDept, email: emailLower, faculty_id: resolvedFacId });
+      }
+    } catch {
+      // Fall through
+    }
+
+
     if (!db.isMock) {
       try {
         // Match strictly by email first (the official h<dept>@rgmcet.edu.in emails)
@@ -656,6 +708,11 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
         if (resolvedDept && password === expectedPass) {
           return res.json({ valid: true, role: 'hod', department: resolvedDept, email: emailLower });
         }
+      }
+
+      // Faculty mock login — any @rgmcet.edu.in email + faculty@2026 password
+      if (emailLower.endsWith('@rgmcet.edu.in') && password === 'faculty@2026') {
+        return res.json({ valid: true, role: 'faculty', department: department || 'CSE (Data Science)', email: emailLower });
       }
     }
 

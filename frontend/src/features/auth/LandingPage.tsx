@@ -582,8 +582,8 @@ export const LandingPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Department Selector (for HOD or Admin) */}
-              {(selectedRole.id === 'hod' || selectedRole.id === 'admin') && (
+              {/* Department Selector (for HOD, Admin, or Faculty) */}
+              {(selectedRole.id === 'hod' || selectedRole.id === 'admin' || selectedRole.id === 'faculty') && (
                 <div>
                   <label className="block text-xs font-semibold text-slate-200 mb-1.5">
                     Department
