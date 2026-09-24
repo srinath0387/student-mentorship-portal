@@ -302,6 +302,16 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
         return next();
       }
 
+      if (['director', 'principal', 'management', 'program_chair'].includes(demoRole) && email) {
+        req.auth = {
+          email: email,
+          role: demoRole,
+          regNo: demoRole.toUpperCase(),
+          department: demoRole === 'program_chair' ? 'CSE_ALLIED' : '*',
+        };
+        return next();
+      }
+
       if (demoRole === 'faculty' && db.isMock) {
         req.auth = {
           email: email || 'faculty@rgmcet.edu.in',

@@ -22,6 +22,7 @@ const PlatformStatsRedirect = lazy(() => import('./features/coding/PlatformStats
 const FacultyManagementPage = lazy(() => import('./features/admin/FacultyManagementPage'));
 const MyMentorPage = lazy(() => import('./features/mentor/MyMentorPage'));
 const AttendancePage = lazy(() => import('./features/attendance/AttendancePage').then(m => ({ default: m.AttendancePage })));
+const OversightDashboardPage = lazy(() => import('./features/oversight/OversightDashboardPage'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -59,6 +60,9 @@ const CacheClearer: React.FC = () => {
 
 const RoleDashboardRedirect: React.FC = () => {
   const { role } = useAuth();
+  if (['director', 'principal', 'management', 'program_chair'].includes(role || '')) {
+    return <Navigate to="/oversight/dashboard" replace />;
+  }
   if (role === 'coordinator') {
     return <Navigate to="/coordinator/dashboard" replace />;
   }
@@ -103,6 +107,7 @@ const ProtectedRoute: React.FC<{ allowedRoles: string[] }> = ({ allowedRoles }) 
   if (!isAuthenticated) return <Navigate to="/" replace />;
   if (role && !allowedRoles.includes(role)) {
     // Send the user to their own role's dashboard
+    if (['director', 'principal', 'management', 'program_chair'].includes(role)) return <Navigate to="/oversight/dashboard" replace />;
     if (role === 'admin') return <Navigate to="/admin/dashboard" replace />;
     if (role === 'hod') return <Navigate to="/hod/dashboard" replace />;
     if (role === 'coordinator') return <Navigate to="/coordinator/dashboard" replace />;
@@ -186,6 +191,11 @@ export const App: React.FC = () => {
             <Route path="/hod-login" element={<AuthPage />} />
             <Route path="/admin-login" element={<AuthPage />} />
             <Route path="/parent-login" element={<AuthPage />} />
+            <Route path="/oversight-login" element={<AuthPage />} />
+            <Route path="/director-login" element={<AuthPage />} />
+            <Route path="/principal-login" element={<AuthPage />} />
+            <Route path="/management-login" element={<AuthPage />} />
+            <Route path="/program-chair-login" element={<AuthPage />} />
             <Route element={<MainLayout />}>
               <Route path="/dashboard" element={<RoleDashboardRedirect />} />
               <Route path="/profile" element={<ProfilePage />} />
@@ -194,6 +204,11 @@ export const App: React.FC = () => {
               <Route path="/mentor" element={<MyMentorPage />} />
               <Route path="/coding-analytics" element={<CodingAnalyticsPage />} />
               <Route path="/attendance" element={<AttendancePage />} />
+
+              {/* Oversight (View-Only) routes */}
+              <Route element={<ProtectedRoute allowedRoles={['director', 'principal', 'management', 'program_chair', 'admin']} />}>
+                <Route path="/oversight/dashboard" element={<OversightDashboardPage />} />
+              </Route>
 
               {/* Faculty-only routes */}
               <Route element={<ProtectedRoute allowedRoles={['faculty', 'hod', 'admin']} />}>

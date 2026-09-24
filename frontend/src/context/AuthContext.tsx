@@ -32,6 +32,10 @@ interface AuthContextType {
   login: (email: string, role: UserRole, rollNumber?: string, name?: string, jwtToken?: string, department?: string, isSuperAdmin?: boolean) => void;
   logout: () => void;
   registerSession: (email: string, role: UserRole) => Promise<void>;
+  /** Call before starting the async login flow to prevent redirect-to-home flash */
+  markLoggingIn: () => void;
+  /** Call when login fails to clear the loading guard */
+  stopLoggingIn: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -39,6 +43,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [role, setRole] = useState<UserRole>('student');
   const [sessionKickedOut, setSessionKickedOut] = useState(false);
 
@@ -200,6 +205,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // ── Login ─────────────────────────────────────────────────────────────────
   const login = (email: string, userRole: UserRole, rollNumber?: string, name?: string, jwtToken?: string, department?: string, isSuperAdmin?: boolean) => {
+    setIsLoggingIn(false);
     setSessionKickedOut(false);
 
     const formattedReg = rollNumber ? rollNumber.toUpperCase() : '';
@@ -250,7 +256,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   return (
     <AuthContext.Provider
-      value={{ user, role, isAuthenticated: Boolean(user), isLoading, sessionKickedOut, login, logout, registerSession }}
+      value={{ user, role, isAuthenticated: Boolean(user), isLoading: isLoading || isLoggingIn, sessionKickedOut, login, logout, registerSession, markLoggingIn: () => setIsLoggingIn(true), stopLoggingIn: () => setIsLoggingIn(false) }}
     >
       {children}
     </AuthContext.Provider>

@@ -1,4 +1,4 @@
-import { CognitoIdentityProviderClient, AdminDeleteUserCommand, ListUsersCommand, AdminSetUserPasswordCommand } from '@aws-sdk/client-cognito-identity-provider';
+import { CognitoIdentityProviderClient, AdminDeleteUserCommand, ListUsersCommand, AdminSetUserPasswordCommand, AdminInitiateAuthCommand, AdminCreateUserCommand } from '@aws-sdk/client-cognito-identity-provider';
 import { db } from '../db';
 
 const cognitoClient = new CognitoIdentityProviderClient({
@@ -211,3 +211,130 @@ export async function updateCognitoUserPassword(identifier: string, newPassword:
   return false;
 }
 
+
+/**
+ * Admin-side Cognito user creation.
+ * Used when a student exists in our DB but not in Cognito (deleted, never synced, etc.).
+ * Uses AdminCreateUser (bypasses self-signup restrictions) then AdminSetUserPassword
+ * so the student can log in immediately with their provided password.
+ *
+ * Returns true on success, false if the user already exists, throws on other errors.
+ */
+export async function adminCreateCognitoUser(params: {
+  email: string;
+  password: string;
+  rollNo: string;
+  name?: string;
+  role?: string;
+  year?: string;
+}): Promise<'created' | 'exists' | 'failed'> {
+  const userPoolId = process.env.COGNITO_USER_POOL_ID;
+  if (!userPoolId) {
+    console.warn('[Cognito] COGNITO_USER_POOL_ID env var not set — cannot create user');
+    return 'failed';
+  }
+
+  const { AdminCreateUserCommand } = await import('@aws-sdk/client-cognito-identity-provider');
+
+  const email = params.email.trim().toLowerCase();
+  const rollNo = params.rollNo.toUpperCase();
+
+  try {
+    // Create the user with AdminCreateUser (suppresses welcome email, sets temp password)
+    await cognitoClient.send(
+      new AdminCreateUserCommand({
+        UserPoolId: userPoolId,
+        Username: email,
+        MessageAction: 'SUPPRESS', // Do not send welcome email
+        TemporaryPassword: params.password,
+        UserAttributes: [
+          { Name: 'email', Value: email },
+          { Name: 'email_verified', Value: 'true' },
+          { Name: 'custom:reg_no', Value: rollNo },
+          { Name: 'custom:role', Value: params.role || 'student' },
+          { Name: 'custom:year', Value: params.year || 'student' },
+          { Name: 'name', Value: params.name || rollNo },
+        ],
+      })
+    );
+    console.log(`[Cognito] AdminCreateUser succeeded for ${email}`);
+
+    // Set password as permanent so user doesn't need to change it on first login
+    await cognitoClient.send(
+      new AdminSetUserPasswordCommand({
+        UserPoolId: userPoolId,
+        Username: email,
+        Password: params.password,
+        Permanent: true,
+      })
+    );
+    console.log(`[Cognito] AdminSetUserPassword succeeded for ${email}`);
+    return 'created';
+  } catch (err: any) {
+    if (err.name === 'UsernameExistsException') {
+      // User already exists — just update password
+      await updateCognitoUserPassword(email, params.password).catch(() => {});
+      return 'exists';
+    }
+    console.warn(`[Cognito] adminCreateCognitoUser failed for ${email}:`, err.message);
+    return 'failed';
+  }
+}
+
+/**
+ * Server-side Cognito sign-in using ADMIN_USER_PASSWORD_AUTH flow.
+ *
+ * WHY THIS EXISTS:
+ * Client-side cognitoSignIn (amazon-cognito-identity-js) looks up users by
+ * Cognito Username. In pools where users were created with a UUID username
+ * (pre email-alias migration), passing the email as Username fails with
+ * "User does not exist." even though the account exists.
+ *
+ * AdminInitiateAuth resolves the email alias on the AWS server side and works
+ * regardless of how the user's Username was originally set.
+ *
+ * Returns { idToken, accessToken, refreshToken } on success, null on failure.
+ */
+export async function adminSignIn(email: string, password: string): Promise<{
+  idToken: string;
+  accessToken: string;
+  refreshToken: string;
+} | null> {
+  const userPoolId = process.env.COGNITO_USER_POOL_ID;
+  const clientId   = process.env.COGNITO_CLIENT_ID;
+
+  if (!userPoolId || !clientId) {
+    console.warn('[Cognito] Missing COGNITO_USER_POOL_ID or COGNITO_CLIENT_ID env vars');
+    return null;
+  }
+
+  try {
+    const result = await cognitoClient.send(
+      new AdminInitiateAuthCommand({
+        UserPoolId: userPoolId,
+        ClientId:   clientId,
+        AuthFlow:   'ADMIN_USER_PASSWORD_AUTH',
+        AuthParameters: {
+          USERNAME: email.trim().toLowerCase(),
+          PASSWORD: password,
+        },
+      })
+    );
+
+    const tokens = result.AuthenticationResult;
+    if (!tokens?.IdToken || !tokens.AccessToken || !tokens.RefreshToken) {
+      // Challenge required (e.g. NEW_PASSWORD_REQUIRED) — not handled here
+      console.warn('[Cognito] adminSignIn returned challenge:', result.ChallengeName);
+      return null;
+    }
+
+    return {
+      idToken:      tokens.IdToken,
+      accessToken:  tokens.AccessToken,
+      refreshToken: tokens.RefreshToken,
+    };
+  } catch (err: any) {
+    // Bubble up specific errors so callers can handle them
+    throw err;
+  }
+}

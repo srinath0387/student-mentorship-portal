@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate, useSearchParams, useLocation, useParams, Navigate } from 'react-router-dom';
 import { ShieldCheck, UserCheck, Lock, CheckCircle2, XCircle, Loader2, Sparkles, Eye, EyeOff, ArrowLeft, KeyRound, Mail } from 'lucide-react';
-import { studentSignUpSchema, facultySignUpSchema, loginSchema, adminLoginSchema, TIER1_SUPER_ADMIN_EMAILS, StudentSignUpInput, FacultySignUpInput, LoginInput, DEPARTMENT_CODE_MAP, VALID_DEPARTMENT_NAMES, getDeptCodeFromRollNumber, getDeptFromRollNumber } from '../../lib/validation/auth';
+import { studentSignUpSchema, facultySignUpSchema, loginSchema, adminLoginSchema, TIER1_SUPER_ADMIN_EMAILS, StudentSignUpInput, FacultySignUpInput, LoginInput, DEPARTMENT_CODE_MAP, VALID_DEPARTMENT_NAMES, getDeptCodeFromRollNumber, getDeptFromRollNumber, REGISTRATION_NUMBER_REGEX } from '../../lib/validation/auth';
 import { api } from '../../lib/api';
 import { cognitoSignUp, cognitoSignIn, cognitoSignOut, isCognitoConfigError, cognitoForgotPassword, cognitoConfirmPassword } from '../../lib/cognitoAuth';
 import { useAuth } from '../../context/AuthContext';
@@ -98,7 +98,7 @@ export const AuthPage: React.FC = () => {
   const [isSettingUp, setIsSettingUp] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
 
-  const { login, registerSession, sessionKickedOut } = useAuth();
+  const { login, registerSession, sessionKickedOut, markLoggingIn, stopLoggingIn } = useAuth();
 
   // Student Sign Up Form
   const {
@@ -590,6 +590,11 @@ export const AuthPage: React.FC = () => {
 
   const onLogin = async (data: LoginInput) => {
     setErrorMessage(null);
+    // ── Guard against redirect-to-home flash ──────────────────────────────────
+    // Calling markLoggingIn() sets isLoading=true immediately in AuthContext so
+    // MainLayout's auth guard does NOT fire while React is committing the new
+    // user state from login(). Cleared automatically when login() resolves.
+    markLoggingIn();
     try {
       let jwtToken: string | undefined;
       let rollNo = '';
@@ -711,8 +716,12 @@ export const AuthPage: React.FC = () => {
       }
 
       // Step 1: Run Cognito authentication & DB profile lookup in parallel for fast response
+      // We use the BACKEND /auth/cognito-signin (AdminInitiateAuth) as primary because:
+      // - Some users' Cognito username is a UUID (created before email-alias migration)
+      // - Client-side cognitoSignIn passes email as Username → fails for UUID-username users
+      // - AdminInitiateAuth resolves email aliases server-side → works for ALL users
       const [cognitoRes, dbRes] = await Promise.allSettled([
-        cognitoSignIn(data.email, data.password),
+        api.cognitoSignInViaBackend(data.email, data.password),
         activeTab === 'student'
           ? api.getStudentByEmail(data.email)
           : api.getFacultyByEmail(data.email).catch(() => null),
@@ -743,13 +752,9 @@ export const AuthPage: React.FC = () => {
           throw new Error('Incorrect password. Please check your credentials and try again.');
         }
 
-        if (isCognitoConfigError(cognitoErr)) {
-          // SECURITY: Do NOT bypass auth on Cognito configuration errors.
-          // Granting access without password verification is a critical auth bypass.
-          console.warn('[Cognito Config Notice]:', msg);
-          throw new Error('Authentication service is temporarily unavailable. Please try again in a moment or contact support.');
-        }
-
+        // ── Order matters: handle known user-not-found FIRST before config error check ──
+        // UserNotFoundException: "User does not exist." contains the word "does not exist"
+        // which would otherwise be caught by isCognitoConfigError → blocking new student auto-register.
         if (msg.includes('User does not exist') || msg.includes('UserNotFoundException')) {
           let dbUser: any = preFetchedDbUser;
 
@@ -761,7 +766,41 @@ export const AuthPage: React.FC = () => {
             }
           }
 
-          // SECURITY: Removed faculty auto-creation from login.
+          // For student: if not found in DB, auto-create record if email has valid roll number
+          if (!dbUser && activeTab === 'student') {
+            const rollFromEmail = data.email.includes('@') ? data.email.split('@')[0].toUpperCase() : data.email.toUpperCase();
+            if (REGISTRATION_NUMBER_REGEX.test(rollFromEmail) || rollFromEmail.length >= 8) {
+              const detectedDept = getDeptFromRollNumber(rollFromEmail) || 'CSE';
+              const studentName = `Student ${rollFromEmail}`;
+              try {
+                await api.createStudent({
+                  roll_number: rollFromEmail,
+                  name: studentName,
+                  email: data.email,
+                  department: detectedDept,
+                  year: '3rd Year',
+                  batch: '2023-2027',
+                  section: 'A',
+                });
+                dbUser = await api.getStudentByEmail(data.email).catch(() => null);
+              } catch (_) {
+                dbUser = await api.getStudentByEmail(data.email).catch(() => null);
+              }
+              if (!dbUser) {
+                dbUser = {
+                  roll_number: rollFromEmail,
+                  name: studentName,
+                  email: data.email,
+                  department: detectedDept,
+                  year: '3rd Year',
+                  batch: '2023-2027',
+                  section: 'A',
+                };
+              }
+            }
+          }
+
+          // SECURITY: Faculty auto-creation from login is restricted.
           // Unregistered faculty must sign up using the registration form with their security key.
           if (!dbUser) {
             throw new Error(`No ${activeTab} account found for this email. Please register first or contact the system admin.`);
@@ -780,20 +819,60 @@ export const AuthPage: React.FC = () => {
             jwtToken = authResult.idToken;
           } catch (autoSignUpErr: any) {
             const signMsg = autoSignUpErr.message || '';
+
             if (signMsg.includes('UsernameExistsException') || signMsg.includes('already exists') || signMsg.includes('User already exists')) {
-              throw new Error('Incorrect password. Please check your credentials and try again.');
+              // Student already exists in Cognito with a different password.
+              // Try signing in directly with the provided credentials.
+              try {
+                const authResult = await cognitoSignIn(data.email, data.password);
+                jwtToken = authResult.idToken;
+              } catch {
+                // Cognito signin also failed — verify against DB password
+                if (activeTab === 'student') {
+                  const serverAuth = await api.verifyStudentPassword(data.email, data.password).catch(() => null);
+                  if (serverAuth?.valid && serverAuth?.student) {
+                    // DB password valid — allow login without Cognito JWT
+                    const stu = serverAuth.student;
+                    rollNo = stu.roll_number;
+                    displayName = stu.name;
+                    const studentDept = stu.department || (rollNo ? getDeptFromRollNumber(rollNo) : 'CSE (Data Science)');
+                    login(data.email, 'student', rollNo, displayName, undefined, studentDept);
+                    registerSession(data.email, 'student');
+                    navigate('/dashboard');
+                    return;
+                  }
+                }
+                throw new Error('Incorrect password. Please check your credentials and try again.');
+              }
+            } else if (signMsg.includes('Password') || signMsg.includes('policy')) {
+              throw new Error(`Password does not meet requirements: ${signMsg}`);
+            } else {
+              // Any other Cognito signup failure (infrastructure error, pool misconfiguration,
+              // "User does not exist." from pool edge cases, etc.)
+              // Securely fall back to DB password verification — never show raw Cognito errors.
+              console.warn('[Cognito SignUp Notice]:', signMsg);
+              if (activeTab === 'student') {
+                const serverAuth = await api.verifyStudentPassword(data.email, data.password).catch(() => null);
+                if (serverAuth?.valid && serverAuth?.student) {
+                  const stu = serverAuth.student;
+                  rollNo = stu.roll_number;
+                  displayName = stu.name;
+                  const studentDept = stu.department || (rollNo ? getDeptFromRollNumber(rollNo) : 'CSE (Data Science)');
+                  login(data.email, 'student', rollNo, displayName, undefined, studentDept);
+                  registerSession(data.email, 'student');
+                  navigate('/dashboard');
+                  return;
+                }
+              }
+              throw new Error('Unable to sign in. Please check your credentials or contact support.');
             }
-            if (signMsg.includes('Password') || signMsg.includes('policy')) {
-              throw new Error(`Password requirement: ${signMsg}`);
-            }
-            if (isCognitoConfigError(autoSignUpErr)) {
-              // SECURITY: Do NOT bypass auth on Cognito config errors in the signup path either
-              console.warn('[Cognito Config Notice]:', signMsg);
-              throw new Error('Authentication service is temporarily unavailable. Please try again in a moment.');
-            }
-            throw new Error(signMsg || 'Invalid email or password. Please check your credentials and try again.');
           }
         } else {
+          // ── Check for real Cognito infrastructure errors (misconfiguration) ──
+          if (isCognitoConfigError(cognitoErr)) {
+            console.warn('[Cognito Config Notice]:', msg);
+            throw new Error('Authentication service is temporarily unavailable. Please try again in a moment or contact support.');
+          }
           let dbUser: any = preFetchedDbUser;
           if (!dbUser) {
             if (activeTab === 'student') {
@@ -839,11 +918,40 @@ export const AuthPage: React.FC = () => {
           student = await api.getStudentProfile(rollFromEmail).catch(() => null);
         }
 
-        // IMPORTANT: If student authenticated via Cognito but is NOT in the database,
-        // it means an admin deleted them. We must block login and NOT recreate their profile.
+        // If Cognito auth succeeded but student is NOT yet in the database — auto-create the record
         if (!student) {
-          cognitoSignOut(); // invalidate Cognito session immediately
-          throw new Error('Your account has been removed by an administrator. Please contact the system admin to be re-enrolled.');
+          const detectedDept = rollFromEmail ? (getDeptFromRollNumber(rollFromEmail) || 'CSE') : 'CSE';
+          const studentName = rollFromEmail ? `Student ${rollFromEmail}` : 'Student';
+          try {
+            if (rollFromEmail) {
+              await api.createStudent({
+                roll_number: rollFromEmail,
+                name: studentName,
+                email: data.email,
+                department: detectedDept,
+                year: '3rd Year',
+                batch: '2023-2027',
+                section: 'A',
+              });
+              student = await api.getStudentByEmail(data.email).catch(() => null);
+              if (!student) {
+                student = await api.getStudentProfile(rollFromEmail).catch(() => null);
+              }
+            }
+          } catch (_) {}
+
+          // Fallback to in-memory profile if DB write failed/timed-out so the student can still access the platform
+          if (!student) {
+            student = {
+              roll_number: rollFromEmail,
+              name: studentName,
+              email: data.email,
+              department: detectedDept,
+              year: '3rd Year',
+              batch: '2023-2027',
+              section: 'A',
+            };
+          }
         }
 
         rollNo = student.roll_number || rollFromEmail;
@@ -913,6 +1021,8 @@ export const AuthPage: React.FC = () => {
         navigate('/dashboard');
       }
     } catch (err: any) {
+      // Clear the loading guard so the user can try again
+      stopLoggingIn();
       setErrorMessage(err.message || 'Login failed. Please check your credentials and try again.');
     }
   };

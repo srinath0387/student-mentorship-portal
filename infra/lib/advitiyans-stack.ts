@@ -179,6 +179,19 @@ export class AdvitiyansStack extends cdk.Stack {
         reg_no: new cognito.StringAttribute({ mutable: true }),
         year: new cognito.StringAttribute({ mutable: true }),
       },
+      // ── Password Reset OTP Email Template ──
+      userVerification: {
+        emailSubject: 'OTP for RGM ManageBAC – Your One-Time Password',
+        emailBody:
+          'Dear Faculty,\n\n' +
+          'You requested a password reset for your RGM ManageBAC account ({username}).\n\n' +
+          'Your One-Time Password (OTP) is:\n\n' +
+          '{####}\n\n' +
+          'This OTP is valid for 1 hour. Do not share it with anyone.\n\n' +
+          'If you did not request this, please ignore this email.\n\n' +
+          'Regards,\nRGM ManageBAC System\nRGM College of Engineering & Technology',
+        emailStyle: cognito.VerificationEmailStyle.CODE,
+      },
       lambdaTriggers: {
         preSignUp: preSignUpLambda,
       },
@@ -234,6 +247,7 @@ export class AdvitiyansStack extends cdk.Stack {
         DB_SECRET_ARN: dbSecret.secretArn,
         DB_SSL: 'true',
         COGNITO_USER_POOL_ID: userPool.userPoolId,
+        COGNITO_CLIENT_ID: userPoolClient.userPoolClientId,
         UPLOADS_BUCKET_NAME: uploadsBucket.bucketName,
         USE_MOCK: 'false',
         // Admin/HOD credentials — sourced from GitHub Secrets, never hardcoded in frontend
@@ -260,6 +274,12 @@ export class AdvitiyansStack extends cdk.Stack {
         'cognito-idp:AdminGetUser',
         'cognito-idp:AdminDisableUser',
         'cognito-idp:ListUsers',
+        // Required for server-side sign-in (POST /auth/cognito-signin)
+        'cognito-idp:AdminInitiateAuth',
+        // Required for password sync and account healing
+        'cognito-idp:AdminSetUserPassword',
+        // Required for creating Cognito accounts for DB-only students
+        'cognito-idp:AdminCreateUser',
       ],
       resources: [userPool.userPoolArn],
     }));
