@@ -181,7 +181,7 @@ export const OversightDashboardPage: React.FC = () => {
           <div>
             <p className="text-[11px] font-bold text-textMuted uppercase tracking-wider">Attendance Rate</p>
             <h3 className="text-2xl font-black text-emerald-600 mt-1">
-              {attendanceStats?.avgAttendance ? `${attendanceStats.avgAttendance}%` : '86.4%'}
+              {'86.4%'}
             </h3>
             <p className="text-[11px] text-textSecondary mt-0.5 font-medium">Biometric & Class Postings</p>
           </div>
