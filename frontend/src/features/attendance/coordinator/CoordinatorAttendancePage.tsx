@@ -26,8 +26,10 @@ export const CoordinatorAttendancePage: React.FC = () => {
 
   // Not posted
   const { data: rawNotPosted = [], refetch: refetchNP } = useQuery({
-    queryKey: ['coordinatorNotPosted', sem],
-    queryFn: () => api.getNotPostedAttendance({ semester: sem }).catch(() => [])
+    queryKey: ['coordinatorNotPosted', sem, dept],
+    queryFn: () => api.getNotPostedAttendance({ semester: sem, department: dept || undefined }).catch(() => []),
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
   const notPosted = Array.isArray(rawNotPosted) ? rawNotPosted : [];
 

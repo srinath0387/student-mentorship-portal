@@ -3,9 +3,11 @@ import cors from 'cors';
 import serverless from 'serverless-http';
 import { db } from '../db';
 import { calculateEmployabilityScore } from '../services/employability';
-import { runCodingProfileCronSync, fetchLeetCodeStatsDirect, fetchGitHubStatsDirect } from '../services/cronSync';
+import { runCodingProfileCronSync, fetchLeetCodeStatsDirect, fetchGitHubStatsDirect, fetchEduSkillsStatsDirect, cleanEduSkillsHandle } from '../services/cronSync';
 import { cachedFetch } from '../services/platformCache';
 import { deleteCognitoUsers, deleteAllCognitoUsers, updateCognitoUserPassword } from '../services/cognitoService';
+import { calculateFacultyNameSimilarity, isEmailNameMatch, mergeFacultyRecordsInDb } from '../services/facultyMatching';
+import { syncStudentCredlyCertifications } from '../services/credlySync';
 import {
   studentProfileSchema,
   academicSchema,
@@ -27,6 +29,43 @@ import { extractAuth, requireAuth, requireRole, requireOwnerOrRole } from '../li
 import bcrypt from 'bcryptjs';
 
 const BCRYPT_ROUNDS = 10;
+
+/**
+ * Compare entered plaintext password against stored password (which might be bcrypt hash or legacy plaintext).
+ * If it matches as legacy plaintext, optionally upgrades the stored password to a bcrypt hash in the database.
+ */
+async function compareAndUpgradePassword(
+  entered: string,
+  stored: string,
+  upgradeCallback?: (newHash: string) => Promise<void>
+): Promise<boolean> {
+  if (!entered || !stored) return false;
+
+  let isMatch = false;
+  const isBcrypt = stored.startsWith('$2a$') || stored.startsWith('$2b$') || stored.startsWith('$2y$');
+
+  if (isBcrypt) {
+    try {
+      isMatch = await bcrypt.compare(entered, stored);
+    } catch {
+      isMatch = false;
+    }
+  } else {
+    // Legacy plaintext match
+    isMatch = (entered === stored);
+    // If matched, seamlessly upgrade to bcrypt in the background
+    if (isMatch && upgradeCallback) {
+      try {
+        const newHash = await bcrypt.hash(entered, BCRYPT_ROUNDS);
+        await upgradeCallback(newHash);
+      } catch (upgradeErr: any) {
+        console.warn('[Bcrypt Upgrade Notice]:', upgradeErr.message);
+      }
+    }
+  }
+
+  return isMatch;
+}
 
 const app = express();
 app.use(cors());
@@ -62,11 +101,11 @@ app.get('/health', async (_req: Request, res: Response) => {
 });
 
 // ONE-TIME: Clean up coding_profiles handles stored as full URLs
-// Protected by ADMIN_SECRET header OR a fixed one-time token.
+// Protected by ADMIN_SECRET header — must be set in Lambda environment variables.
 app.post('/admin/cleanup-handles', async (req: Request, res: Response) => {
   const secret = String(req.headers['x-admin-secret'] || '');
-  const adminSecret = process.env.ADMIN_SECRET || 'advitiyans-cleanup-2026';
-  if (secret !== adminSecret) {
+  const adminSecret = process.env.ADMIN_SECRET || '';
+  if (!adminSecret || secret !== adminSecret) {
     return res.status(403).json({ error: 'Forbidden' });
   }
   try {
@@ -304,6 +343,30 @@ app.get('/', (_req: Request, res: Response) => {
 });
 
 // ============================================================================
+// Rate Limiter for Sensitive Authentication Endpoints
+// ============================================================================
+const authAttemptsMap = new Map<string, { count: number; resetAt: number }>();
+
+function checkRateLimit(key: string, maxAttempts = 10, windowMs = 60000): { allowed: boolean; retryAfterSeconds?: number } {
+  const now = Date.now();
+  const entry = authAttemptsMap.get(key);
+  if (!entry || now > entry.resetAt) {
+    authAttemptsMap.set(key, { count: 1, resetAt: now + windowMs });
+    if (authAttemptsMap.size > 1000) {
+      for (const [k, v] of authAttemptsMap.entries()) {
+        if (now > v.resetAt) authAttemptsMap.delete(k);
+      }
+    }
+    return { allowed: true };
+  }
+  if (entry.count >= maxAttempts) {
+    return { allowed: false, retryAfterSeconds: Math.ceil((entry.resetAt - now) / 1000) };
+  }
+  entry.count += 1;
+  return { allowed: true };
+}
+
+// ============================================================================
 // Auth: Admin & HOD Login — Server-Side Credential Validation
 // Passwords are stored in Lambda env vars (not in frontend code).
 // Frontend calls this instead of checking credentials locally.
@@ -316,6 +379,16 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
     }
 
     const emailLower = email.toLowerCase();
+
+    // Rate limiting: 10 attempts per minute per email/IP
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+    const rateCheck = checkRateLimit(`admin_login_${emailLower}_${clientIp}`, 10, 60000);
+    if (!rateCheck.allowed) {
+      return res.status(429).json({
+        valid: false,
+        error: `Too many login attempts. Please try again in ${rateCheck.retryAfterSeconds} seconds.`,
+      });
+    }
 
     // ── Priority 1A: Tier-1 Gmail super-admins (highest authority) ───────────
     // jayakrushna1622@gmail.com, dineshkumarpathipati@gmail.com, jayanthkumarnaidu777@gmail.com
@@ -331,7 +404,11 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
           [emailLower]
         );
         if (saResult.rows.length > 0) {
-          if (saResult.rows[0].password === password) {
+          const stored = saResult.rows[0].password;
+          const isMatch = await compareAndUpgradePassword(password, stored, async (newHash) => {
+            await db.query('UPDATE super_admin_credentials SET password = $1, updated_at = NOW() WHERE LOWER(email) = $2', [newHash, emailLower]);
+          });
+          if (isMatch) {
             return res.json({ valid: true, role: 'admin', isSuperAdmin: true, department: '*', email: saResult.rows[0].email });
           }
           await new Promise(resolve => setTimeout(resolve, 600));
@@ -350,7 +427,11 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
           [emailLower]
         );
         if (saResult.rows.length > 0) {
-          if (saResult.rows[0].password === password) {
+          const stored = saResult.rows[0].password;
+          const isMatch = await compareAndUpgradePassword(password, stored, async (newHash) => {
+            await db.query('UPDATE super_admin_credentials SET password = $1, updated_at = NOW() WHERE LOWER(email) = $2', [newHash, emailLower]);
+          });
+          if (isMatch) {
             return res.json({ valid: true, role: 'admin', isSuperAdmin: true, department: '*', email: saResult.rows[0].email });
           }
           await new Promise(resolve => setTimeout(resolve, 600));
@@ -368,12 +449,32 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
         );
         if (adminResult.rows.length > 0) {
           const adminRow = adminResult.rows[0];
-          if (adminRow.password === password) {
-            const isCoordinator = emailLower === 'coordinator@rgmcet.edu.in' || adminRow.department === 'Coordinator';
-            const assignedDept = adminRow.department || department || (isCoordinator ? 'All' : 'CSE (Data Science)');
+          const stored = adminRow.password;
+          const isMatch = await compareAndUpgradePassword(password, stored, async (newHash) => {
+            await db.query('UPDATE admin_accounts SET password = $1, updated_at = NOW() WHERE LOWER(email) = $2', [newHash, emailLower]);
+          });
+          if (isMatch) {
+            let roleName = 'admin';
+            let assignedDept = adminRow.department || department || 'CSE (Data Science)';
+            if (emailLower === 'coordinator@rgmcet.edu.in' || adminRow.department === 'Coordinator') {
+              roleName = 'coordinator';
+              assignedDept = 'All';
+            } else if (emailLower === 'director@rgmcet.edu.in') {
+              roleName = 'director';
+              assignedDept = '*';
+            } else if (emailLower === 'principal@rgmcet.edu.in') {
+              roleName = 'principal';
+              assignedDept = '*';
+            } else if (emailLower === 'management@rgmcet.edu.in') {
+              roleName = 'management';
+              assignedDept = '*';
+            } else if (emailLower === 'chaircse@rgmcet.edu.in' || emailLower === 'programchair@rgmcet.edu.in') {
+              roleName = 'program_chair';
+              assignedDept = 'CSE_ALLIED';
+            }
             return res.json({
               valid: true,
-              role: isCoordinator ? 'coordinator' : 'admin',
+              role: roleName,
               isSuperAdmin: false,
               department: assignedDept,
               email: adminRow.email,
@@ -382,25 +483,118 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
           await new Promise(resolve => setTimeout(resolve, 600));
           return res.status(401).json({ valid: false, error: 'Invalid email or password.' });
         }
+
+        // Direct pattern fallback for oversight accounts
+        if (emailLower === 'director@rgmcet.edu.in' && password === 'director@2026') {
+          return res.json({ valid: true, role: 'director', department: '*', email: emailLower });
+        }
+        if (emailLower === 'principal@rgmcet.edu.in' && password === 'principal@2026') {
+          return res.json({ valid: true, role: 'principal', department: '*', email: emailLower });
+        }
+        if (emailLower === 'management@rgmcet.edu.in' && password === 'management@2026') {
+          return res.json({ valid: true, role: 'management', department: '*', email: emailLower });
+        }
+        if ((emailLower === 'programchair@rgmcet.edu.in' || emailLower === 'chaircse@rgmcet.edu.in') && (password === 'chair@2026' || password === 'hod@2026')) {
+          return res.json({ valid: true, role: 'program_chair', department: 'CSE_ALLIED', email: emailLower });
+        }
       } catch {
         // Table may not exist on first cold-start; fall through
       }
     }
 
-    // ── Priority 3: HOD credentials (DB) ───────────────────────────────────
+    // ── Priority 2.5: Faculty credentials (DB) ──────────────────────────────
+    try {
+      const facResult = await db.query(
+        'SELECT email, password, department, faculty_id FROM faculty_credentials WHERE LOWER(email) = $1',
+        [emailLower]
+      );
+      if (facResult.rows.length > 0) {
+        const facRow = facResult.rows[0];
+        const stored = facRow.password;
+        const isMatch = await compareAndUpgradePassword(password, stored, async (newHash) => {
+          await db.query('UPDATE faculty_credentials SET password = $1, updated_at = NOW() WHERE LOWER(email) = $2', [newHash, emailLower]);
+        });
+        if (isMatch) {
+          const assignedDept = facRow.department || department || 'CSE (Data Science)';
+          return res.json({ valid: true, role: 'faculty', department: assignedDept, email: facRow.email, faculty_id: facRow.faculty_id });
+        }
+        // Email matched but password wrong — reject immediately
+        await new Promise(resolve => setTimeout(resolve, 500));
+        return res.status(401).json({ valid: false, error: 'Invalid email or password.' });
+      }
+
+      // No DB row — auto-seed if it's any @rgmcet.edu.in email with default password faculty@2026
+      const isFacultyEmail = emailLower.endsWith('@rgmcet.edu.in') && password === 'faculty@2026';
+      if (isFacultyEmail) {
+        // Look up the faculty profile to get department
+        let resolvedFacDept = department || 'CSE (Data Science)';
+        let resolvedFacId: string | null = null;
+        try {
+          const facProfile = await db.query(
+            'SELECT faculty_id, department FROM faculty WHERE LOWER(email) = $1 LIMIT 1',
+            [emailLower]
+          );
+          if (facProfile.rows.length > 0) {
+            resolvedFacDept = facProfile.rows[0].department || resolvedFacDept;
+            resolvedFacId = facProfile.rows[0].faculty_id || null;
+          }
+        } catch { /* ignore */ }
+        // Auto-seed the credentials row
+        try {
+          await db.query(
+            `INSERT INTO faculty_credentials (email, password, department, faculty_id)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT DO NOTHING`,
+            [emailLower, 'faculty@2026', resolvedFacDept, resolvedFacId]
+          );
+        } catch { /* ignore seed errors */ }
+        return res.json({ valid: true, role: 'faculty', department: resolvedFacDept, email: emailLower, faculty_id: resolvedFacId });
+      }
+    } catch {
+      // Fall through
+    }
+
+
     if (!db.isMock) {
       try {
         // Match strictly by email first (the official h<dept>@rgmcet.edu.in emails)
         let hodDbResult = await db.query('SELECT email, password, department FROM hod_credentials WHERE LOWER(email) = $1', [emailLower]);
         if (hodDbResult.rows.length > 0) {
           const hodRow = hodDbResult.rows[0];
-          if (password === hodRow.password) {
+          const stored = hodRow.password;
+          const isMatch = await compareAndUpgradePassword(password, stored, async (newHash) => {
+            await db.query('UPDATE hod_credentials SET password = $1, updated_at = NOW() WHERE LOWER(email) = $2', [newHash, emailLower]);
+          });
+          if (isMatch) {
             const assignedDept = hodRow.department || department || 'CSE (Data Science)';
             return res.json({ valid: true, role: 'hod', department: assignedDept, email: hodRow.email });
           }
           // Email matched but password wrong — reject
           await new Promise(resolve => setTimeout(resolve, 500));
           return res.status(401).json({ valid: false, error: 'Invalid email or password.' });
+        }
+
+        // No DB row found — check if it matches a known HOD email pattern and auto-seed it
+        const hodDeptMap: Record<string, string> = {
+          ce: 'Civil', eee: 'EEE', me: 'Mechanical', ece: 'ECE',
+          cse: 'CSE', cseds: 'CSE (Data Science)', cseaiml: 'CSE (AI & ML)',
+          csebs: 'CSE (BS)', csecs: 'CSE (CS)', mca: 'MCA', mba: 'MBA',
+          mathematics: 'Mathematics', english: 'English', physics: 'Physics', chemistry: 'Chemistry',
+        };
+        const matchHod = emailLower.match(/^h([a-z]+)@rgmcet\.edu\.in$/);
+        const isFyCoord = emailLower === 'fycoordinator@rgmcet.edu.in';
+        const resolvedDept = isFyCoord ? '1st Year' : (matchHod ? hodDeptMap[matchHod[1]] : null);
+
+        if (resolvedDept && password === 'hod@2026') {
+          // Auto-seed the missing row so next login hits the DB path
+          try {
+            await db.query(
+              `INSERT INTO hod_credentials (email, password, department) VALUES ($1, $2, $3)
+               ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, updated_at = NOW()`,
+              [emailLower, 'hod@2026', resolvedDept]
+            );
+          } catch { /* ignore seed errors */ }
+          return res.json({ valid: true, role: 'hod', department: resolvedDept, email: emailLower });
         }
       } catch {
         // Fall through
@@ -515,6 +709,11 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
           return res.json({ valid: true, role: 'hod', department: resolvedDept, email: emailLower });
         }
       }
+
+      // Faculty mock login — any @rgmcet.edu.in email + faculty@2026 password
+      if (emailLower.endsWith('@rgmcet.edu.in') && password === 'faculty@2026') {
+        return res.json({ valid: true, role: 'faculty', department: department || 'CSE (Data Science)', email: emailLower });
+      }
     }
 
     return failWithDelay('Invalid email or password.');
@@ -580,7 +779,7 @@ app.get('/super-admin/tier1b', requireRole('admin'), async (req: Request, res: R
       return res.status(403).json({ error: 'Tier 1A super-admin access required' });
     }
     const result = await db.query(
-      'SELECT email, password, updated_at FROM super_admin_credentials ORDER BY email ASC'
+      'SELECT email, updated_at FROM super_admin_credentials ORDER BY email ASC'
     );
     res.json(result.rows);
   } catch (err: any) {
@@ -605,11 +804,12 @@ app.post('/super-admin/tier1b', requireRole('admin'), async (req: Request, res: 
     if (TIER1A_EMAILS_LOWER.includes(email.toLowerCase())) {
       return res.status(400).json({ error: 'This email already has Tier 1A super-admin privileges' });
     }
+    const hashedPassword = await bcrypt.hash(String(password), BCRYPT_ROUNDS);
     await db.query(
       `INSERT INTO super_admin_credentials (email, password, updated_at)
        VALUES (LOWER($1), $2, NOW())
        ON CONFLICT (email) DO UPDATE SET password = $2, updated_at = NOW()`,
-      [email, password]
+      [email, hashedPassword]
     );
     res.json({ success: true });
   } catch (err: any) {
@@ -643,7 +843,7 @@ const SUPER_ADMIN_EMAILS_LOWER = [
   'jayanthkumarnaidu777@gmail.com',
 ];
 
-// GET /super-admin/admins — list all regular admins (email, name, password, department, created_at)
+// GET /super-admin/admins — list all regular admins (email, name, department, created_at)
 app.get('/super-admin/admins', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const callerEmail = String(req.query.caller_email || '');
@@ -651,7 +851,7 @@ app.get('/super-admin/admins', requireRole('admin'), async (req: Request, res: R
       return res.status(403).json({ error: 'Super admin access required' });
     }
     const result = await db.query(
-      'SELECT email, name, password, department, created_by, created_at FROM admin_accounts ORDER BY created_at DESC'
+      'SELECT email, name, department, created_by, created_at, updated_at FROM admin_accounts ORDER BY created_at DESC'
     );
     res.json(result.rows);
   } catch (err: any) {
@@ -676,11 +876,12 @@ app.post('/super-admin/admins', requireRole('admin'), async (req: Request, res: 
       return res.status(400).json({ error: 'Cannot create a regular admin account for a super admin email' });
     }
     const dept = department || 'CSE (Data Science)';
+    const hashedPassword = await bcrypt.hash(String(password), BCRYPT_ROUNDS);
     await db.query(
       `INSERT INTO admin_accounts (email, name, password, department, created_by, created_at, updated_at)
        VALUES (LOWER($1), $2, $3, $4, LOWER($5), NOW(), NOW())
        ON CONFLICT (email) DO UPDATE SET name = $2, password = $3, department = $4, updated_at = NOW()`,
-      [email, name, password, dept, caller_email]
+      [email, name, hashedPassword, dept, caller_email]
     );
     res.json({ success: true });
   } catch (err: any) {
@@ -721,9 +922,10 @@ app.put('/super-admin/admins/:email/password', requireRole('admin'), async (req:
     if (SUPER_ADMIN_EMAILS_LOWER.includes(targetEmail)) {
       return res.status(400).json({ error: 'Use /super-admin/my-password to change a super admin password' });
     }
+    const hashedPassword = await bcrypt.hash(String(password), BCRYPT_ROUNDS);
     await db.query(
       'UPDATE admin_accounts SET password = $1, updated_at = NOW() WHERE LOWER(email) = $2',
-      [password, targetEmail]
+      [hashedPassword, targetEmail]
     );
     res.json({ success: true });
   } catch (err: any) {
@@ -742,9 +944,10 @@ app.put('/super-admin/my-password', requireRole('admin'), async (req: Request, r
       return res.status(400).json({ error: 'Password must be at least 4 characters' });
     }
     // Updates ONLY the row for my_email — cannot target another super admin
+    const hashedPassword = await bcrypt.hash(String(new_password), BCRYPT_ROUNDS);
     await db.query(
       'UPDATE super_admin_credentials SET password = $1, updated_at = NOW() WHERE LOWER(email) = LOWER($2)',
-      [new_password, my_email]
+      [hashedPassword, my_email]
     );
     res.json({ success: true });
   } catch (err: any) {
@@ -1341,7 +1544,7 @@ function triggerBackgroundAutoSync() {
 }
 
 // GET /students — List/Search/Filter (Guarantees DISTINCT ON roll_number)
-app.get('/students', async (req: Request, res: Response) => {
+app.get('/students', requireAuth, async (req: Request, res: Response) => {
   // Kick off background auto-sync of stale coding profiles (fire-and-forget)
   triggerBackgroundAutoSync();
   try {
@@ -1554,6 +1757,16 @@ app.get('/students', async (req: Request, res: Response) => {
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.map(c => c.startsWith('(') ? c : `s.${c}`).join(' AND ')}` : '';
+
+    let paginationClause = '';
+    if (req.query.limit !== undefined && req.query.limit !== 'all' && req.query.limit !== 'All') {
+      const rawLimit = parseInt(String(req.query.limit), 10);
+      const rawOffset = parseInt(String(req.query.offset || '0'), 10);
+      const pageLimit = Math.min(Math.max(isNaN(rawLimit) ? 10000 : rawLimit, 1), 10000);
+      const pageOffset = Math.max(isNaN(rawOffset) ? 0 : rawOffset, 0);
+      paginationClause = `LIMIT ${pageLimit} OFFSET ${pageOffset}`;
+    }
+
     const result = await db.query(`
       SELECT DISTINCT ON (s.roll_number) 
         s.*,
@@ -1575,6 +1788,7 @@ app.get('/students', async (req: Request, res: Response) => {
       ${whereClause}
       GROUP BY s.roll_number, s.name, s.email, s.year, s.phone, s.address, s.native_place, s.department, s.batch, s.section, s.hostel_day_scholar, s.driving_license, s.passport, s.relocation_willingness, s.family_business, s.financial_background, s.faculty_mentor_id, s.photo_url, s.resume_url, s.linkedin_url, s.linkedin_updated, s.is_lateral_entry, s.created_at, s.updated_at
       ORDER BY s.roll_number, s.created_at DESC
+      ${paginationClause}
     `, params);
     res.json(result.rows);
   } catch (err: any) {
@@ -1582,7 +1796,7 @@ app.get('/students', async (req: Request, res: Response) => {
   }
 });
 
-app.post('/students', async (req: Request, res: Response) => {
+app.post('/students', extractAuth, requireAuth, async (req: Request, res: Response) => {
   try {
     const validatedData = studentProfileSchema.parse(req.body);
     const rawRoll = (validatedData.roll_number || req.body.roll_number || '').toString().trim();
@@ -1958,7 +2172,7 @@ app.get('/students/by-email/:email', async (req: Request, res: Response) => {
 });
 
 // GET /students/:id — Get Student Profile
-app.get('/students/:id', async (req: Request, res: Response) => {
+app.get('/students/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const studentId = req.params.id.toUpperCase();
 
@@ -2042,7 +2256,12 @@ app.put('/students/:id', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), as
     const photo_url = body.photo_url !== undefined ? body.photo_url : (existing.photo_url || null);
     const resume_url = body.resume_url !== undefined ? body.resume_url : (existing.resume_url || null);
     const linkedin_url = body.linkedin_url !== undefined ? body.linkedin_url : (existing.linkedin_url || null);
-    const cgpa = body.cgpa !== undefined && body.cgpa !== null && body.cgpa !== '' ? Number(body.cgpa) : (existing.cgpa || 0);
+
+    // SECURITY: Students cannot self-modify CGPA. CGPA is computed from verified academics or updated by Admin/HOD.
+    const isPrivileged = req.auth?.role === 'admin' || req.auth?.role === 'hod';
+    const cgpa = (isPrivileged && body.cgpa !== undefined && body.cgpa !== null && body.cgpa !== '')
+      ? Number(body.cgpa)
+      : (existing.cgpa !== undefined && existing.cgpa !== null ? Number(existing.cgpa) : 0);
 
     let result;
     if (existingRes.rows.length === 0) {
@@ -2381,7 +2600,7 @@ app.post('/admin/students/bulk-delete', requireRole('admin'), async (req: Reques
 // ============================================================================
 // Academics
 // ============================================================================
-app.get('/students/:id/academics', async (req: Request, res: Response) => {
+app.get('/students/:id/academics', requireAuth, async (req: Request, res: Response) => {
   try {
     const studentId = req.params.id.toUpperCase();
 
@@ -2445,7 +2664,7 @@ app.post('/students/:id/academics', requireOwnerOrRole('id', 'faculty', 'hod', '
 // ============================================================================
 // Coding Profiles
 // ============================================================================
-app.get('/students/:id/coding-profiles', async (req: Request, res: Response) => {
+app.get('/students/:id/coding-profiles', requireAuth, async (req: Request, res: Response) => {
   try {
     const studentId = req.params.id.toUpperCase();
 
@@ -2951,10 +3170,88 @@ app.get('/proxy/gfg/:handle', async (req: Request, res: Response) => {
     res.status(500).json({ error: err.message || 'Failed to fetch GFG profile' });
   }
 });
+// GET /proxy/eduskills/:handle — Proxy live EduSkills & Credly badge data
+app.get('/proxy/eduskills/:handle', async (req: Request, res: Response) => {
+  try {
+    const rawHandle = decodeURIComponent(String(req.params.handle || '')).trim();
+    const handle = cleanEduSkillsHandle(rawHandle);
+    if (!handle || handle.toLowerCase() === 'not linked') {
+      return res.status(400).json({ error: 'Valid EduSkills or Credly handle is required' });
+    }
+
+    const { data: result, fromCache } = await cachedFetch('eduskills', handle, async () => {
+      const data = await fetchEduSkillsStatsDirect(handle);
+      if (!data) {
+        throw Object.assign(new Error('not_found'), { isNotFound: true });
+      }
+      return data;
+    });
+
+    res.set('X-Cache', fromCache ? 'HIT' : 'MISS');
+    res.json(result);
+  } catch (err: any) {
+    if (err.isNotFound) return res.status(404).json({ error: `EduSkills / Credly user "${req.params.handle}" not found` });
+    res.status(500).json({ error: err.message || 'Failed to fetch EduSkills certifications' });
+  }
+});
+
+// POST /proxy/eduskills/sync-student/:rollNumber — Syncs earned EduSkills badges into student certifications table
+app.post('/proxy/eduskills/sync-student/:rollNumber', async (req: Request, res: Response) => {
+  try {
+    const rollNumber = String(req.params.rollNumber || '').toUpperCase().trim();
+    const { handle } = req.body;
+    if (!handle || String(handle).trim() === '' || String(handle).toLowerCase() === 'not linked') {
+      return res.status(400).json({ error: 'Valid handle is required' });
+    }
+
+    const cleanH = cleanEduSkillsHandle(handle);
+    const data = await fetchEduSkillsStatsDirect(cleanH);
+    if (!data) {
+      return res.status(404).json({ error: 'Could not fetch EduSkills / Credly badges for this handle' });
+    }
+
+    if (!db.isMock && data.badges && data.badges.length > 0) {
+      for (const badge of data.badges) {
+        await db.query(
+          `INSERT INTO certifications (student_id, provider, title, date_completed, certificate_file_url, verified)
+           VALUES ($1, 'EduSkills', $2, $3, $4, TRUE)
+           ON CONFLICT (student_id, title) DO UPDATE SET
+             provider = 'EduSkills',
+             date_completed = COALESCE(EXCLUDED.date_completed, certifications.date_completed),
+             certificate_file_url = COALESCE(EXCLUDED.certificate_file_url, certifications.certificate_file_url),
+             verified = TRUE`,
+          [
+            rollNumber,
+            badge.title,
+            badge.issuedAt ? new Date(badge.issuedAt) : null,
+           badge.verifyUrl || badge.badgeUrl || null,
+          ]
+        ).catch(() => {});
+      }
+
+      // Also ensure coding_profiles has an entry for EduSkills
+      await db.query(
+        `INSERT INTO coding_profiles (student_id, platform, handle, score_rating, repositories_count)
+         VALUES ($1, 'EduSkills', $2, $3, $3)
+         ON CONFLICT (student_id, platform) DO UPDATE SET
+           handle = EXCLUDED.handle,
+           score_rating = EXCLUDED.score_rating,
+           repositories_count = EXCLUDED.repositories_count,
+           last_synced = CURRENT_TIMESTAMP`,
+        [rollNumber, cleanH, data.totalCertificates]
+      ).catch(() => {});
+    }
+
+    res.json({ message: 'EduSkills certifications synced successfully', data });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to sync EduSkills certifications' });
+  }
+});
+
 // ============================================================================
 // Tech Skills
 // ============================================================================
-app.get('/students/:id/tech-skills', async (req: Request, res: Response) => {
+app.get('/students/:id/tech-skills', requireAuth, async (req: Request, res: Response) => {
   try {
     const studentId = req.params.id.toUpperCase();
 
@@ -3074,7 +3371,7 @@ async function signCertificationRows(rows: any[]): Promise<any[]> {
 
 // Certifications
 // ============================================================================
-app.get('/students/:id/certifications', async (req: Request, res: Response) => {
+app.get('/students/:id/certifications', requireAuth, async (req: Request, res: Response) => {
   try {
     const studentId = req.params.id.toUpperCase();
 
@@ -3188,7 +3485,7 @@ app.delete('/students/:id/certifications/:certId', requireOwnerOrRole('id', 'fac
 // ============================================================================
 // Soft Skills
 // ============================================================================
-app.get('/students/:id/soft-skills', async (req: Request, res: Response) => {
+app.get('/students/:id/soft-skills', requireAuth, async (req: Request, res: Response) => {
   try {
     const studentId = req.params.id.toUpperCase();
 
@@ -3241,7 +3538,7 @@ app.post('/students/:id/soft-skills', requireOwnerOrRole('id', 'faculty', 'hod',
 // ============================================================================
 // Achievements
 // ============================================================================
-app.get('/students/:id/achievements', async (req: Request, res: Response) => {
+app.get('/students/:id/achievements', requireAuth, async (req: Request, res: Response) => {
   try {
     const studentId = req.params.id.toUpperCase();
 
@@ -3291,7 +3588,7 @@ app.post('/students/:id/achievements', requireOwnerOrRole('id', 'faculty', 'hod'
 // ============================================================================
 // Placement Profile
 // ============================================================================
-app.get('/students/:id/placement-profile', async (req: Request, res: Response) => {
+app.get('/students/:id/placement-profile', requireAuth, async (req: Request, res: Response) => {
   try {
     const studentId = req.params.id.toUpperCase();
 
@@ -3345,7 +3642,7 @@ app.put('/students/:id/placement-profile', requireOwnerOrRole('id', 'faculty', '
 // ============================================================================
 // Employability Score
 // ============================================================================
-app.get('/students/:id/employability-score', async (req: Request, res: Response) => {
+app.get('/students/:id/employability-score', requireAuth, async (req: Request, res: Response) => {
   try {
     const studentId = req.params.id.toUpperCase();
 
@@ -3385,7 +3682,7 @@ app.get('/students/:id/employability-score', async (req: Request, res: Response)
 // ============================================================================
 // Upload URL (S3 Pre-signed URL) — Real pre-signed URL generation
 // ============================================================================
-app.get('/students/:id/upload-url', async (req: Request, res: Response) => {
+app.get('/students/:id/upload-url', requireOwnerOrRole('id', 'faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { fileName, uploadType } = req.query;
     const studentId = req.params.id.toUpperCase();
@@ -3435,7 +3732,7 @@ app.get('/students/:id/upload-url', async (req: Request, res: Response) => {
 });
 
 // View/Download URL for existing files
-app.get('/students/:id/view-url', async (req: Request, res: Response) => {
+app.get('/students/:id/view-url', requireOwnerOrRole('id', 'faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { fileKey } = req.query;
     const bucketName = process.env.UPLOADS_BUCKET_NAME;
@@ -4147,7 +4444,271 @@ app.get('/faculty', requireRole('admin', 'hod', 'coordinator', 'faculty'), async
   }
 });
 
-// PATCH /faculty/:id/email — Admin manually links an email to a faculty record
+// POST /faculty/smart-auto-merge — Admin utility to scan all unlinked/placeholder faculty records and auto-merge with registered faculty/users
+app.post('/faculty/smart-auto-merge', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    if (db.isMock) {
+      return res.json({ success: true, message: 'Mock mode — 0 records merged', mergedCount: 0, merged: [] });
+    }
+
+    // 1. Fetch all faculty
+    const allFacRes = await db.query(`
+      SELECT f.faculty_id, f.name, f.email, f.department, f.role, f.created_at, f.updated_at,
+        COUNT(DISTINCT ma.roll_number)::int AS mentee_count
+      FROM faculty f
+      LEFT JOIN mentor_assignments ma ON UPPER(ma.faculty_id) = UPPER(f.faculty_id)
+      GROUP BY f.faculty_id, f.name, f.email, f.department, f.role, f.created_at, f.updated_at
+      ORDER BY f.name ASC
+    `);
+
+    // 2. Separate into registered (real email) and unlinked (pending_ or no email)
+    const registeredFaculty: any[] = [];
+    const unlinkedFaculty: any[] = [];
+
+    for (const f of allFacRes.rows) {
+      const email = (f.email || '').toLowerCase().trim();
+      if (!email || email.startsWith('pending_') || !email.includes('@')) {
+        unlinkedFaculty.push(f);
+      } else {
+        registeredFaculty.push(f);
+      }
+    }
+
+    // 3. Fetch all registered users with role in ('faculty', 'hod') to also match against users table
+    const allUsersRes = await db.query(
+      `SELECT * FROM users WHERE LOWER(role) IN ('faculty', 'hod') AND LOWER(email) LIKE '%@rgmcet.edu.in'`
+    ).catch(() => ({ rows: [] }));
+    const registeredUsers = allUsersRes.rows;
+
+    const mergedList: any[] = [];
+    const remainingUnlinked: any[] = [];
+
+    for (const unlinked of unlinkedFaculty) {
+      let bestMatch: { targetFacultyId: string; targetName: string; targetEmail: string; confidence: number; reason: string } | null = null;
+
+      // Check against registered faculty first
+      for (const reg of registeredFaculty) {
+        const nameSim = calculateFacultyNameSimilarity(unlinked.name, reg.name);
+        const emailMatch = isEmailNameMatch(reg.email, unlinked.name);
+
+        let totalConfidence = nameSim.confidence;
+        if (emailMatch) totalConfidence = Math.max(totalConfidence, 90);
+
+        // Boost if departments match
+        if (unlinked.department && reg.department && unlinked.department === reg.department) {
+          totalConfidence = Math.min(100, totalConfidence + 5);
+        }
+
+        if (totalConfidence >= 80 && (!bestMatch || totalConfidence > bestMatch.confidence)) {
+          bestMatch = {
+            targetFacultyId: reg.faculty_id,
+            targetName: reg.name,
+            targetEmail: reg.email,
+            confidence: totalConfidence,
+            reason: nameSim.reason || 'Email username match',
+          };
+        }
+      }
+
+      // If no match in registered faculty, check registered users table
+      if (!bestMatch) {
+        for (const user of registeredUsers) {
+          const nameSim = calculateFacultyNameSimilarity(unlinked.name, user.name || '');
+          const emailMatch = isEmailNameMatch(user.email, unlinked.name);
+
+          let totalConfidence = nameSim.confidence;
+          if (emailMatch) totalConfidence = Math.max(totalConfidence, 90);
+
+          if (totalConfidence >= 80) {
+            let targetFacId = user.faculty_id;
+            if (!targetFacId) {
+              targetFacId = `FAC_${user.email.split('@')[0].toUpperCase()}`;
+            }
+
+            await db.query(
+              `INSERT INTO faculty (faculty_id, name, email, department, role)
+               VALUES ($1, $2, $3, $4, $5)
+               ON CONFLICT (faculty_id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name`,
+              [targetFacId, user.name || unlinked.name, user.email.toLowerCase().trim(), user.department || unlinked.department || 'CSE (Data Science)', user.role || 'mentor']
+            ).catch(() => {});
+
+            bestMatch = {
+              targetFacultyId: targetFacId,
+              targetName: user.name || unlinked.name,
+              targetEmail: user.email,
+              confidence: totalConfidence,
+              reason: `Matched registered portal user (${nameSim.reason || 'Email match'})`,
+            };
+            break;
+          }
+        }
+      }
+
+      // Execute merge if high-confidence match found
+      if (bestMatch && bestMatch.confidence >= 80) {
+        try {
+          const mergeResult = await mergeFacultyRecordsInDb(unlinked.faculty_id, bestMatch.targetFacultyId, db);
+          mergedList.push({
+            unlinkedId: unlinked.faculty_id,
+            unlinkedName: unlinked.name,
+            mergedIntoId: bestMatch.targetFacultyId,
+            mergedIntoName: bestMatch.targetName,
+            mergedIntoEmail: bestMatch.targetEmail,
+            confidence: bestMatch.confidence,
+            reason: bestMatch.reason,
+            menteesMigrated: mergeResult.menteesMigrated,
+          });
+        } catch (mErr: any) {
+          console.warn(`[AutoMerge] Failed merging ${unlinked.faculty_id}:`, mErr.message);
+          remainingUnlinked.push(unlinked);
+        }
+      } else {
+        remainingUnlinked.push(unlinked);
+      }
+    }
+
+    // Run final mentor assignment sync
+    await db.query(`
+      UPDATE students s
+      SET faculty_mentor_id = ma.faculty_id, updated_at = NOW()
+      FROM mentor_assignments ma
+      WHERE UPPER(s.roll_number) = UPPER(ma.roll_number)
+        AND s.faculty_mentor_id IS DISTINCT FROM ma.faculty_id
+    `).catch(() => {});
+
+    res.json({
+      success: true,
+      mergedCount: mergedList.length,
+      merged: mergedList,
+      remainingUnlinkedCount: remainingUnlinked.length,
+      remainingUnlinked: remainingUnlinked.map((f: any) => ({
+        faculty_id: f.faculty_id,
+        name: f.name,
+        email: f.email,
+        department: f.department,
+        mentee_count: f.mentee_count,
+      })),
+      message: `Successfully auto-merged ${mergedList.length} faculty record(s). ${remainingUnlinked.length} record(s) remaining unlinked.`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /faculty/merge — Admin manually merges a source faculty into a target faculty
+app.post('/faculty/merge', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    const { sourceFacultyId, targetFacultyId } = req.body;
+    if (!sourceFacultyId || !targetFacultyId) {
+      return res.status(400).json({ error: 'sourceFacultyId and targetFacultyId are required' });
+    }
+
+    if (db.isMock) {
+      return res.json({ success: true, message: 'Mock mode — merge complete' });
+    }
+
+    const result = await mergeFacultyRecordsInDb(sourceFacultyId, targetFacultyId, db);
+
+    // Sync students.faculty_mentor_id
+    await db.query(`
+      UPDATE students s
+      SET faculty_mentor_id = ma.faculty_id, updated_at = NOW()
+      FROM mentor_assignments ma
+      WHERE UPPER(s.roll_number) = UPPER(ma.roll_number)
+        AND s.faculty_mentor_id IS DISTINCT FROM ma.faculty_id
+    `).catch(() => {});
+
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /faculty/unlinked-candidates — Admin gets unlinked faculty with suggested registered matches
+app.get('/faculty/unlinked-candidates', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    if (db.isMock) return res.json({ candidates: [], totalUnlinked: 0 });
+
+    const allFacRes = await db.query(`
+      SELECT f.faculty_id, f.name, f.email, f.department, f.role, f.created_at, f.updated_at,
+        COUNT(DISTINCT ma.roll_number)::int AS mentee_count
+      FROM faculty f
+      LEFT JOIN mentor_assignments ma ON UPPER(ma.faculty_id) = UPPER(f.faculty_id)
+      GROUP BY f.faculty_id, f.name, f.email, f.department, f.role, f.created_at, f.updated_at
+      ORDER BY f.name ASC
+    `);
+
+    const registeredFaculty: any[] = [];
+    const unlinkedFaculty: any[] = [];
+
+    for (const f of allFacRes.rows) {
+      const email = (f.email || '').toLowerCase().trim();
+      if (!email || email.startsWith('pending_') || !email.includes('@')) {
+        unlinkedFaculty.push(f);
+      } else {
+        registeredFaculty.push(f);
+      }
+    }
+
+    const allUsersRes = await db.query(
+      `SELECT * FROM users WHERE LOWER(role) IN ('faculty', 'hod') AND LOWER(email) LIKE '%@rgmcet.edu.in'`
+    ).catch(() => ({ rows: [] }));
+    const registeredUsers = allUsersRes.rows;
+
+    const results = unlinkedFaculty.map((unlinked) => {
+      const suggestions: any[] = [];
+
+      for (const reg of registeredFaculty) {
+        const sim = calculateFacultyNameSimilarity(unlinked.name, reg.name);
+        const emailMatch = isEmailNameMatch(reg.email, unlinked.name);
+        let conf = sim.confidence;
+        if (emailMatch) conf = Math.max(conf, 90);
+
+        if (conf >= 50) {
+          suggestions.push({
+            faculty_id: reg.faculty_id,
+            name: reg.name,
+            email: reg.email,
+            department: reg.department,
+            confidence: conf,
+            reason: sim.reason || 'Email pattern match',
+          });
+        }
+      }
+
+      for (const user of registeredUsers) {
+        const sim = calculateFacultyNameSimilarity(unlinked.name, user.name || '');
+        const emailMatch = isEmailNameMatch(user.email, unlinked.name);
+        let conf = sim.confidence;
+        if (emailMatch) conf = Math.max(conf, 90);
+
+        if (conf >= 50 && !suggestions.some((s) => s.email === user.email)) {
+          suggestions.push({
+            faculty_id: user.faculty_id || `FAC_${user.email.split('@')[0].toUpperCase()}`,
+            name: user.name || user.email,
+            email: user.email,
+            department: user.department,
+            confidence: conf,
+            reason: `Registered portal user (${sim.reason || 'Email match'})`,
+          });
+        }
+      }
+
+      suggestions.sort((a, b) => b.confidence - a.confidence);
+
+      return {
+        unlinked,
+        suggestions: suggestions.slice(0, 5),
+      };
+    });
+
+    res.json({ candidates: results, totalUnlinked: unlinkedFaculty.length });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /faculty/:id/email — Admin manually links an email to a faculty record (auto-merges if email already exists)
 app.patch('/faculty/:id/email', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const facId = req.params.id.toUpperCase();
@@ -4159,17 +4720,28 @@ app.patch('/faculty/:id/email', requireRole('admin'), async (req: Request, res: 
       return res.json({ message: 'Email linked successfully', faculty_id: facId, email: cleanEmail });
     }
 
-    // Check another faculty doesn't already own this email
+    // Check if another faculty already owns this email
     const conflict = await db.query(
-      'SELECT faculty_id FROM faculty WHERE LOWER(email) = $1 AND faculty_id != $2',
+      'SELECT faculty_id, name FROM faculty WHERE LOWER(email) = $1 AND UPPER(faculty_id) != $2',
       [cleanEmail, facId]
     );
+
     if (conflict.rows.length > 0) {
-      return res.status(409).json({ error: `Email already linked to faculty ${conflict.rows[0].faculty_id}` });
+      const targetFacId = conflict.rows[0].faculty_id;
+      // Auto-merge the placeholder/unlinked record into the registered target faculty!
+      const mergeRes = await mergeFacultyRecordsInDb(facId, targetFacId, db);
+      await db.query('DELETE FROM blocked_emails WHERE LOWER(email) = $1', [cleanEmail]).catch(() => {});
+      const finalFac = await db.query('SELECT * FROM faculty WHERE UPPER(faculty_id) = $1', [targetFacId.toUpperCase()]);
+      return res.json({
+        message: `Email was already linked to "${conflict.rows[0].name}" (${targetFacId}); records automatically merged with ${mergeRes.menteesMigrated} mentees migrated!`,
+        faculty: finalFac.rows[0] || { faculty_id: targetFacId, email: cleanEmail },
+        merged: true,
+        targetFacultyId: targetFacId,
+      });
     }
 
     const result = await db.query(
-      `UPDATE faculty SET email = $1, updated_at = CURRENT_TIMESTAMP WHERE faculty_id = $2 RETURNING *`,
+      `UPDATE faculty SET email = $1, updated_at = CURRENT_TIMESTAMP WHERE UPPER(faculty_id) = $2 RETURNING *`,
       [cleanEmail, facId]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Faculty not found' });
@@ -4492,11 +5064,12 @@ app.post('/faculty/:facultyId/mentees', requireRole('admin'), async (req: Reques
     }
 
     // Verify faculty exists
-    const facCheck = await db.query('SELECT faculty_id, name FROM faculty WHERE UPPER(faculty_id) = $1', [facId]);
+    const facCheck = await db.query('SELECT faculty_id, name, department FROM faculty WHERE UPPER(faculty_id) = $1', [facId]);
     if (facCheck.rows.length === 0) {
       return res.status(404).json({ error: `Faculty record ${facId} not found` });
     }
     const facultyName = facCheck.rows[0].name;
+    const facultyDept = facCheck.rows[0].department;
 
     // Ensure mentor_assignments table exists
     await db.query(`
@@ -4520,9 +5093,20 @@ app.post('/faculty/:facultyId/mentees', requireRole('admin'), async (req: Reques
         [roll]
       );
 
+      // Also look up the student's department if not yet in mentor_assignments
+      let studentDept: string | null = cur.rows[0]?.department || null;
+      if (!studentDept) {
+        const stuCheck = await db.query('SELECT department FROM students WHERE UPPER(roll_number) = $1 LIMIT 1', [roll]);
+        studentDept = stuCheck.rows[0]?.department || null;
+      }
+
       const prevFacId = cur.rows[0]?.current_faculty_id;
       const prevFacName = cur.rows[0]?.current_faculty_name;
       const isReassigned = Boolean(prevFacId && prevFacId.toUpperCase() !== facId);
+
+      // Department mismatch warning (soft check — don't block, just warn)
+      const deptMismatch = facultyDept && studentDept &&
+        facultyDept.toLowerCase().trim() !== studentDept.toLowerCase().trim();
 
       // Upsert into mentor_assignments
       await db.query(
@@ -4546,10 +5130,11 @@ app.post('/faculty/:facultyId/mentees', requireRole('admin'), async (req: Reques
         name: studentData.name || null,
         year: studentData.year || null,
         section: studentData.section || null,
-        department: studentData.department || null,
+        department: studentData.department || studentDept || null,
         registered: Boolean(sUp.rows.length > 0 || studentData.name),
         status: isReassigned ? 'reassigned' : 'assigned',
         reassignedFrom: isReassigned ? (prevFacName || prevFacId) : null,
+        ...(deptMismatch ? { warning: `Student dept (${studentDept}) differs from faculty dept (${facultyDept})` } : {}),
       });
     }
 
@@ -5251,6 +5836,11 @@ app.post('/attendance/allotments/single', requireRole('admin', 'hod', 'coordinat
     const cleanFacName = (faculty_name || cleanEmail.split('@')[0]).trim();
     const cleanDept = department.trim();
 
+    // MED-6: Validate semester_label format (must be like 1-1, 2-2, 3-1, 4-2)
+    if (!/^\d-\d$/.test(semester.trim())) {
+      return res.status(400).json({ error: `Invalid semester format "${semester}". Expected format: 1-1, 1-2, 2-1, 2-2, 3-1, 3-2, 4-1, 4-2` });
+    }
+
     if (!RGMCET_EMAIL_REGEX.test(cleanEmail) && !cleanEmail.endsWith('@rgmcet.edu.in')) {
       return res.status(400).json({ error: 'Invalid RGMCET faculty email domain (must be @rgmcet.edu.in)' });
     }
@@ -5348,10 +5938,24 @@ app.get('/attendance/allotments', requireRole('admin', 'hod', 'coordinator', 'fa
   }
 });
 
-// 3. Delete an Allotment (Admin / HOD / Coordinator)
+// 3. Delete an Allotment (Admin / HOD / Coordinator — with dept ownership check)
 app.delete('/attendance/allotments/:id', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+
+    // HIGH-5: Verify department ownership for HOD and Coordinator
+    if (req.auth?.role === 'hod' || req.auth?.role === 'coordinator') {
+      const allotRes = await db.query('SELECT department FROM subject_allotments WHERE id = $1', [id]);
+      if (allotRes.rows.length === 0) {
+        return res.status(404).json({ error: 'Allotment not found.' });
+      }
+      const allotDept = (allotRes.rows[0].department || '').toLowerCase().replace(/\s/g, '');
+      const callerDept = (req.auth.department || '').toLowerCase().replace(/\s/g, '');
+      if (callerDept && allotDept && allotDept !== callerDept) {
+        return res.status(403).json({ error: 'You can only delete allotments for your own department.' });
+      }
+    }
+
     await db.query('DELETE FROM subject_allotments WHERE id = $1', [id]);
     res.json({ success: true, message: 'Subject allotment deleted successfully' });
   } catch (err: any) {
@@ -5546,7 +6150,21 @@ app.get('/attendance/rosters/:allotmentId', requireRole('admin', 'hod', 'faculty
     }
     const allotmentRow = allot.rows[0];
 
-    // Query active approved student permissions (OD) on sessionDate if provided
+    // HIGH-3: Students can only view rosters for subjects they are enrolled in
+    if (req.auth?.role === 'student') {
+      const studentRoll = req.auth.regNo?.toUpperCase() || '';
+      if (studentRoll) {
+        const enrolledRes = await db.query(
+          'SELECT id FROM subject_rosters WHERE allotment_id = $1 AND UPPER(roll_number) = $2',
+          [allotmentId, studentRoll]
+        );
+        if (enrolledRes.rows.length === 0) {
+          return res.status(403).json({ error: 'Access denied: You are not enrolled in this subject.' });
+        }
+      }
+    }
+
+
     const approvedODMap = new Map<string, { permission_type: string; reason: string }>();
     if (sessionDate) {
       try {
@@ -5736,12 +6354,18 @@ app.get('/attendance/my-subjects', requireRole('faculty', 'hod', 'admin', 'coord
   }
 });
 
-/// 7. Save Attendance Session + Records (Faculty, HOD, Admin, Coordinator)
-app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student'), async (req: Request, res: Response) => {
+/// 7. Save Attendance Session + Records (Faculty, HOD, Admin, Coordinator only — NOT students)
+app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { allotment_id, session_date, num_periods, period_start, records } = req.body;
     if (!allotment_id || !session_date || !num_periods || !period_start || !Array.isArray(records)) {
       return res.status(400).json({ error: 'All fields (allotment_id, session_date, num_periods, period_start, records) are required' });
+    }
+
+    // HIGH-4: Prevent future-date attendance posting
+    const today = new Date().toISOString().split('T')[0];
+    if (session_date > today) {
+      return res.status(400).json({ error: `Cannot post attendance for a future date (${session_date}). Attendance can only be posted for today or past dates.` });
     }
 
     // Verify allotment
@@ -5750,6 +6374,11 @@ app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordin
       return res.status(404).json({ error: 'Subject allotment not found' });
     }
     const allotment = allotRes.rows[0];
+
+    // CRIT-3: Faculty can only post attendance for their own subjects
+    if (req.auth?.role === 'faculty' && allotment.faculty_email.toLowerCase() !== req.auth.email.toLowerCase()) {
+      return res.status(403).json({ error: 'You can only post attendance for subjects you are assigned to handle.' });
+    }
 
     // 1. Holiday Check — Attendance cannot be marked on declared public/institutional holidays
     const holRes = await db.query('SELECT title, type FROM holiday_calendar WHERE date = $1', [session_date]);
@@ -5761,6 +6390,7 @@ app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordin
     }
 
     const recordedBy = req.auth?.email?.toLowerCase() || allotment.faculty_email;
+
 
     // Check if session already exists for this slot
     const existing = await db.query(
@@ -5837,7 +6467,7 @@ app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordin
   }
 });
 
-// 8. Get Attendance Sessions (Filter by Allotment, Date range)
+// 8. Get Attendance Sessions (Filter by Allotment, Date range, Role-scoped)
 app.get('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student'), async (req: Request, res: Response) => {
   try {
     const allotmentId = req.query.allotment_id as string;
@@ -5859,6 +6489,23 @@ app.get('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordina
       query += ` AND s.allotment_id = $${params.length}`;
     }
 
+    // Role-based scoping (HIGH-1)
+    if (req.auth?.role === 'faculty') {
+      if (req.auth.email) {
+        params.push(req.auth.email.toLowerCase());
+        query += ` AND LOWER(a.faculty_email) = $${params.length}`;
+      }
+    } else if (req.auth?.role === 'hod' && req.auth.department && req.auth.department !== '*') {
+      params.push(req.auth.department);
+      query += ` AND (LOWER(REPLACE(a.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($${params.length}, ' ', '')) || '%' OR LOWER(REPLACE($${params.length}, ' ', '')) ILIKE '%' || LOWER(REPLACE(a.department, ' ', '')) || '%')`;
+    } else if (req.auth?.role === 'student' && req.auth.regNo) {
+      params.push(req.auth.regNo.toUpperCase());
+      query += ` AND (
+        EXISTS (SELECT 1 FROM subject_rosters sr WHERE sr.allotment_id = s.allotment_id AND UPPER(sr.roll_number) = $${params.length})
+        OR EXISTS (SELECT 1 FROM attendance_records ar WHERE ar.session_id = s.id AND UPPER(ar.roll_number) = $${params.length})
+      )`;
+    }
+
     if (dateFrom) {
       params.push(dateFrom);
       query += ` AND s.session_date >= $${params.length}`;
@@ -5877,12 +6524,12 @@ app.get('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordina
   }
 });
 
-// 9. Get Single Session Details with Records (Faculty, HOD, Admin, Coordinator)
+// 9. Get Single Session Details with Records (Role-scoped)
 app.get('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const sessRes = await db.query(
-      `SELECT s.*, a.subject_name, a.subject_type, a.section, a.semester_label, a.faculty_name, a.faculty_email
+      `SELECT s.*, a.subject_name, a.subject_type, a.section, a.semester_label, a.faculty_name, a.faculty_email, a.department
        FROM attendance_sessions s
        JOIN subject_allotments a ON a.id = s.allotment_id
        WHERE s.id = $1`,
@@ -5893,6 +6540,36 @@ app.get('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coor
     }
 
     const session = sessRes.rows[0];
+
+    // Scoping check (HIGH-2)
+    if (req.auth?.role === 'faculty') {
+      if (session.faculty_email && session.faculty_email.toLowerCase() !== req.auth.email.toLowerCase()) {
+        const callerDept = (req.auth.department || '').toLowerCase().replace(/\s/g, '');
+        const sessionDept = (session.department || '').toLowerCase().replace(/\s/g, '');
+        if (callerDept && sessionDept && callerDept !== sessionDept) {
+          return res.status(403).json({ error: 'Access denied to session details of another department.' });
+        }
+      }
+    } else if (req.auth?.role === 'hod') {
+      const callerDept = (req.auth.department || '').toLowerCase().replace(/\s/g, '');
+      const sessionDept = (session.department || '').toLowerCase().replace(/\s/g, '');
+      if (callerDept && sessionDept && callerDept !== '*' && callerDept !== sessionDept) {
+        return res.status(403).json({ error: 'Access denied to session details of another department.' });
+      }
+    } else if (req.auth?.role === 'student') {
+      const studentRoll = req.auth.regNo?.toUpperCase();
+      if (studentRoll) {
+        const enrolledRes = await db.query(
+          `SELECT 1 FROM subject_rosters WHERE allotment_id = $1 AND UPPER(roll_number) = $2
+           UNION
+           SELECT 1 FROM attendance_records WHERE session_id = $3 AND UPPER(roll_number) = $2`,
+          [session.allotment_id, studentRoll, id]
+        );
+        if (enrolledRes.rows.length === 0) {
+          return res.status(403).json({ error: 'Access denied: You are not enrolled in this session.' });
+        }
+      }
+    }
 
     const recordsRes = await db.query(
       `SELECT r.roll_number, r.is_present, s.name as student_name
@@ -5912,10 +6589,27 @@ app.get('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coor
   }
 });
 
-// 10. Delete Attendance Session (Faculty, HOD, Admin, Coordinator)
-app.delete('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student'), async (req: Request, res: Response) => {
+// 10. Delete Attendance Session (Faculty, HOD, Admin, Coordinator only — NOT students)
+app.delete('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+
+    // Fetch session to verify ownership for faculty
+    const sessRes = await db.query(
+      `SELECT s.id, a.faculty_email FROM attendance_sessions s
+       JOIN subject_allotments a ON a.id = s.allotment_id
+       WHERE s.id = $1`,
+      [id]
+    );
+    if (sessRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Attendance session not found.' });
+    }
+    const sess = sessRes.rows[0];
+    // Faculty can only delete their own sessions
+    if (req.auth?.role === 'faculty' && sess.faculty_email.toLowerCase() !== req.auth.email.toLowerCase()) {
+      return res.status(403).json({ error: 'You can only delete attendance sessions you conducted.' });
+    }
+
     await db.query('DELETE FROM attendance_sessions WHERE id = $1', [id]);
     res.json({ success: true, message: 'Attendance session deleted successfully' });
   } catch (err: any) {
@@ -5923,8 +6617,8 @@ app.delete('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'c
   }
 });
 
-// 10b. Update Attendance Session
-app.put('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student'), async (req: Request, res: Response) => {
+// 10b. Update Attendance Session (Faculty, HOD, Admin, Coordinator only — NOT students)
+app.put('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { records = [] } = req.body; // Array of { roll_number: string, is_present: boolean }
@@ -6293,7 +6987,8 @@ app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res
       const attended = parseInt(row.periods_attended || '0');
       grandTotalHeld += held;
       grandTotalAttended += attended;
-      const pct = held > 0 ? Math.round((attended / held) * 1000) / 10 : 100;
+      // MED-3: Return null when no classes held yet (don't default to 100%)
+      const pct = held > 0 ? Math.round((attended / held) * 1000) / 10 : null;
       return {
         allotment_id: row.allotment_id,
         subject_name: row.subject_name,
@@ -6307,9 +7002,10 @@ app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res
       };
     });
 
-    const overallPercentage = grandTotalHeld > 0 
-      ? Math.round((grandTotalAttended / grandTotalHeld) * 1000) / 10 
-      : 100;
+    // MED-3: Return null overall when no periods held so UI shows "N/A" not "100%"
+    const overallPercentage = grandTotalHeld > 0
+      ? Math.round((grandTotalAttended / grandTotalHeld) * 1000) / 10
+      : null;
 
     res.json({
       student,
@@ -6414,6 +7110,22 @@ app.get('/attendance/subject/:allotmentId/summary', requireRole('faculty', 'hod'
     }
     const allotment = allotRes.rows[0];
 
+    // Student enrollment validation
+    if (req.auth?.role === 'student') {
+      const studentRoll = req.auth.regNo?.toUpperCase();
+      if (studentRoll) {
+        const enrolledRes = await db.query(
+          `SELECT 1 FROM subject_rosters WHERE allotment_id = $1 AND UPPER(roll_number) = $2
+           UNION
+           SELECT 1 FROM attendance_records ar JOIN attendance_sessions s ON s.id = ar.session_id WHERE s.allotment_id = $1 AND UPPER(ar.roll_number) = $2`,
+          [allotmentId, studentRoll]
+        );
+        if (enrolledRes.rows.length === 0) {
+          return res.status(403).json({ error: 'Access denied: You are not enrolled in this subject.' });
+        }
+      }
+    }
+
     // Total periods held overall for this subject
     const heldRes = await db.query(
       'SELECT COALESCE(SUM(num_periods), 0) as total_held, COUNT(*) as sessions_count FROM attendance_sessions WHERE allotment_id = $1',
@@ -6486,7 +7198,7 @@ app.get('/attendance/subject/:allotmentId/summary', requireRole('faculty', 'hod'
     const students = studentsRes.rows.map((row: any) => {
       const held = parseInt(row.student_periods_held || '0') || totalHeldOverall;
       const attended = parseInt(row.periods_attended || '0');
-      const pct = held > 0 ? Math.round((attended / held) * 1000) / 10 : 100;
+      const pct = held > 0 ? Math.round((attended / held) * 1000) / 10 : null;
       return {
         roster_id: row.roster_id,
         roll_number: row.roll_number,
@@ -6520,6 +7232,22 @@ app.get('/attendance/subject/:allotmentId/daywise', requireRole('faculty', 'hod'
       return res.status(404).json({ error: 'Subject allotment not found' });
     }
     const allotment = allotRes.rows[0];
+
+    // Student enrollment validation
+    if (req.auth?.role === 'student') {
+      const studentRoll = req.auth.regNo?.toUpperCase();
+      if (studentRoll) {
+        const enrolledRes = await db.query(
+          `SELECT 1 FROM subject_rosters WHERE allotment_id = $1 AND UPPER(roll_number) = $2
+           UNION
+           SELECT 1 FROM attendance_records ar JOIN attendance_sessions s ON s.id = ar.session_id WHERE s.allotment_id = $1 AND UPPER(ar.roll_number) = $2`,
+          [allotmentId, studentRoll]
+        );
+        if (enrolledRes.rows.length === 0) {
+          return res.status(403).json({ error: 'Access denied: You are not enrolled in this subject.' });
+        }
+      }
+    }
 
     // Fetch all recorded sessions for this subject
     const sessionsRes = await db.query(
@@ -6979,8 +7707,8 @@ app.get('/attendance/timetable/today-slots', requireAuth, async (req: Request, r
 });
 
 // 19. Year-Wise Attendance Summary Report (for PDF & Excel Export)
-// Accessible by Admin, HOD, and Faculty (for their allotted subjects)
-app.get('/attendance/reports/year-summary', requireRole('admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
+// Accessible by Admin, HOD, Faculty, and Coordinator (for 1st year)
+app.get('/attendance/reports/year-summary', requireRole('admin', 'hod', 'faculty', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const yearParam = (req.query.year as string) || '2nd Year';
     const departmentParam = (req.query.department as string) || '';
@@ -8934,8 +9662,65 @@ const ensureLeaveAndSubjectsHandledTables = async () => {
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
     `);
+
+    // 6. Certifications & Internships Tables
+    await db.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS credly_profile_url TEXT;`).catch(() => {});
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS certification_catalogs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        canonical_name VARCHAR(255) NOT NULL UNIQUE,
+        display_name VARCHAR(255) NOT NULL,
+        issuer VARCHAR(255) NOT NULL,
+        category VARCHAR(100) DEFAULT 'Cloud/DevOps',
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS student_certifications (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        catalog_id UUID REFERENCES certification_catalogs(id) ON DELETE SET NULL,
+        roll_number VARCHAR(50) NOT NULL,
+        certificate_name VARCHAR(255) NOT NULL,
+        issuer VARCHAR(255) NOT NULL,
+        issue_date DATE,
+        expiry_date DATE,
+        verification_url TEXT,
+        badge_image_url TEXT,
+        proof_document_url TEXT,
+        source VARCHAR(20) DEFAULT 'manual',
+        status VARCHAR(20) DEFAULT 'pending',
+        verified_by VARCHAR(150),
+        verified_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS student_internships (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        roll_number VARCHAR(50) NOT NULL,
+        company_name VARCHAR(255) NOT NULL,
+        role VARCHAR(255) NOT NULL,
+        internship_type VARCHAR(50) DEFAULT 'Full-time',
+        mode VARCHAR(30) DEFAULT 'On-site',
+        start_date DATE NOT NULL,
+        end_date DATE,
+        stipend_amount NUMERIC(10, 2) DEFAULT 0,
+        offer_letter_url TEXT,
+        completion_certificate_url TEXT,
+        status VARCHAR(30) DEFAULT 'ongoing',
+        mentor_email VARCHAR(150),
+        mentor_name VARCHAR(150),
+        verification_status VARCHAR(20) DEFAULT 'pending',
+        verified_by VARCHAR(150),
+        verified_at TIMESTAMPTZ,
+        remarks TEXT,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
   } catch (err: any) {
-    console.warn('[Schema] Failed to ensure leave/subjects handled tables:', err.message);
+    console.warn('[Schema] Failed to ensure leave/subjects/certs tables:', err.message);
   }
 };
 
@@ -10531,6 +11316,472 @@ app.delete('/subjects/master/:id', requireRole('admin', 'hod', 'coordinator'), a
   }
 });
 
+// ============================================================================
+// FEATURE 1: CERTIFICATIONS TYPEAHEAD SEARCH & CREDLY SYNC
+// ============================================================================
+
+/**
+ * GET /certifications/summary
+ * Returns top certifications with student counts for dashboard summary cards.
+ * Groups case-insensitively and supports department, year, section, and issuer filters.
+ */
+app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const callerRole = req.auth?.role;
+    const callerDept = req.auth?.department;
+
+    const filterDept = (req.query.department as string || '').trim();
+    const filterYear = (req.query.year as string || '').trim();
+    const filterSection = (req.query.section as string || '').trim();
+    const filterIssuer = (req.query.issuer as string || '').trim();
+
+    let deptToUse = filterDept;
+    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+      deptToUse = callerDept;
+    }
+
+    const whereClauses: string[] = ["uc.certificate_name IS NOT NULL AND TRIM(uc.certificate_name) <> ''"];
+    const params: any[] = [];
+
+    if (deptToUse && deptToUse !== 'All') {
+      params.push(deptToUse);
+      whereClauses.push(`(
+        LOWER(REPLACE(s.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($${params.length}, ' ', '')) || '%'
+        OR LOWER(REPLACE($${params.length}, ' ', '')) ILIKE '%' || LOWER(REPLACE(s.department, ' ', '')) || '%'
+      )`);
+    }
+
+    if (filterYear && filterYear !== 'All') {
+      params.push(filterYear);
+      whereClauses.push(`s.year = $${params.length}`);
+    }
+
+    if (filterSection && filterSection !== 'All') {
+      params.push(filterSection);
+      whereClauses.push(`s.section = $${params.length}`);
+    }
+
+    if (filterIssuer && filterIssuer !== 'All') {
+      params.push(`%${filterIssuer}%`);
+      whereClauses.push(`uc.issuer ILIKE $${params.length}`);
+    }
+
+    const summaryQuery = `
+      WITH unified_certs AS (
+        SELECT 
+          sc.roll_number,
+          sc.certificate_name,
+          sc.issuer
+        FROM student_certifications sc
+        UNION ALL
+        SELECT 
+          c.student_id AS roll_number,
+          c.title AS certificate_name,
+          c.provider AS issuer
+        FROM certifications c
+        WHERE NOT EXISTS (
+          SELECT 1 FROM student_certifications sc2 
+          WHERE sc2.roll_number = c.student_id AND LOWER(TRIM(sc2.certificate_name)) = LOWER(TRIM(c.title))
+        )
+      )
+      SELECT 
+        MAX(uc.certificate_name) AS display_name,
+        LOWER(TRIM(REGEXP_REPLACE(uc.certificate_name, '\\s+', ' ', 'g'))) AS canonical_name,
+        COALESCE(
+          MAX(CASE WHEN UPPER(TRIM(uc.issuer)) NOT IN ('OTHER', 'UNKNOWN', 'CERTIFICATION', '') THEN uc.issuer END),
+          MAX(uc.issuer),
+          'Certification'
+        ) AS issuer,
+        COUNT(DISTINCT uc.roll_number) AS student_count
+      FROM unified_certs uc
+      JOIN students s ON s.roll_number = uc.roll_number
+      WHERE ${whereClauses.join(' AND ')}
+      GROUP BY LOWER(TRIM(REGEXP_REPLACE(uc.certificate_name, '\\s+', ' ', 'g')))
+      ORDER BY student_count DESC, display_name ASC
+      LIMIT 24
+    `;
+
+    const result = await db.query(summaryQuery, params);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /certifications/search?q=aws
+ * Role-scoped typeahead search returning certification name, issuer, and student count.
+ * Case-insensitive grouping and supports filters.
+ */
+app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const query = (req.query.q as string || '').trim().toLowerCase();
+    const callerRole = req.auth?.role;
+    const callerDept = req.auth?.department;
+
+    const filterDept = (req.query.department as string || '').trim();
+    const filterYear = (req.query.year as string || '').trim();
+    const filterSection = (req.query.section as string || '').trim();
+
+    if (!query) {
+      return res.json([]);
+    }
+
+    let deptToUse = filterDept;
+    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+      deptToUse = callerDept;
+    }
+
+    const whereClauses: string[] = [
+      "(uc.certificate_name ILIKE $1 OR uc.issuer ILIKE $1)"
+    ];
+    const params: any[] = [`%${query}%`];
+
+    if (deptToUse && deptToUse !== 'All') {
+      params.push(deptToUse);
+      whereClauses.push(`(
+        LOWER(REPLACE(s.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($${params.length}, ' ', '')) || '%'
+        OR LOWER(REPLACE($${params.length}, ' ', '')) ILIKE '%' || LOWER(REPLACE(s.department, ' ', '')) || '%'
+      )`);
+    }
+
+    if (filterYear && filterYear !== 'All') {
+      params.push(filterYear);
+      whereClauses.push(`s.year = $${params.length}`);
+    }
+
+    if (filterSection && filterSection !== 'All') {
+      params.push(filterSection);
+      whereClauses.push(`s.section = $${params.length}`);
+    }
+
+    const searchQuery = `
+      WITH unified_certs AS (
+        SELECT 
+          sc.roll_number,
+          sc.certificate_name,
+          sc.issuer
+        FROM student_certifications sc
+        UNION ALL
+        SELECT 
+          c.student_id AS roll_number,
+          c.title AS certificate_name,
+          c.provider AS issuer
+        FROM certifications c
+        WHERE NOT EXISTS (
+          SELECT 1 FROM student_certifications sc2 
+          WHERE sc2.roll_number = c.student_id AND LOWER(TRIM(sc2.certificate_name)) = LOWER(TRIM(c.title))
+        )
+      )
+      SELECT 
+        MAX(uc.certificate_name) AS display_name,
+        LOWER(TRIM(REGEXP_REPLACE(uc.certificate_name, '\\s+', ' ', 'g'))) AS canonical_name,
+        COALESCE(
+          MAX(CASE WHEN UPPER(TRIM(uc.issuer)) NOT IN ('OTHER', 'UNKNOWN', 'CERTIFICATION', '') THEN uc.issuer END),
+          MAX(uc.issuer),
+          'Certification'
+        ) AS issuer,
+        COUNT(DISTINCT uc.roll_number) AS student_count
+      FROM unified_certs uc
+      JOIN students s ON s.roll_number = uc.roll_number
+      WHERE ${whereClauses.join(' AND ')}
+      GROUP BY LOWER(TRIM(REGEXP_REPLACE(uc.certificate_name, '\\s+', ' ', 'g')))
+      ORDER BY student_count DESC, display_name ASC
+      LIMIT 15
+    `;
+
+    const result = await db.query(searchQuery, params);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /certifications/students?cert_name=
+ * Returns students who hold a specific certification (role-scoped).
+ * Case-insensitive match, deduplicates roll numbers, and supports department, year, section, and search filters.
+ */
+app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const certName = (req.query.cert_name as string || '').trim();
+    const callerRole = req.auth?.role;
+    const callerDept = req.auth?.department;
+
+    const filterDept = (req.query.department as string || '').trim();
+    const filterYear = (req.query.year as string || '').trim();
+    const filterSection = (req.query.section as string || '').trim();
+    const filterSearch = (req.query.search as string || '').trim().toLowerCase();
+
+    if (!certName) {
+      return res.status(400).json({ error: 'cert_name parameter is required' });
+    }
+
+    let deptToUse = filterDept;
+    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+      deptToUse = callerDept;
+    }
+
+    const whereClauses: string[] = [
+      `(
+        LOWER(TRIM(REGEXP_REPLACE(uc.certificate_name, '\\s+', ' ', 'g'))) = LOWER(TRIM(REGEXP_REPLACE($1, '\\s+', ' ', 'g')))
+        OR uc.certificate_name ILIKE $2
+      )`
+    ];
+    const params: any[] = [certName, `%${certName}%`];
+
+    if (deptToUse && deptToUse !== 'All') {
+      params.push(deptToUse);
+      whereClauses.push(`(
+        LOWER(REPLACE(s.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($${params.length}, ' ', '')) || '%'
+        OR LOWER(REPLACE($${params.length}, ' ', '')) ILIKE '%' || LOWER(REPLACE(s.department, ' ', '')) || '%'
+      )`);
+    }
+
+    if (filterYear && filterYear !== 'All') {
+      params.push(filterYear);
+      whereClauses.push(`s.year = $${params.length}`);
+    }
+
+    if (filterSection && filterSection !== 'All') {
+      params.push(filterSection);
+      whereClauses.push(`s.section = $${params.length}`);
+    }
+
+    if (filterSearch) {
+      params.push(`%${filterSearch}%`);
+      whereClauses.push(`(s.roll_number ILIKE $${params.length} OR s.name ILIKE $${params.length})`);
+    }
+
+    const studentsQuery = `
+      WITH unified_certs AS (
+        SELECT 
+          sc.roll_number,
+          sc.certificate_name,
+          sc.issuer,
+          sc.issue_date,
+          sc.verification_url,
+          sc.badge_image_url,
+          sc.proof_document_url,
+          sc.source,
+          sc.status AS verification_status
+        FROM student_certifications sc
+        UNION ALL
+        SELECT 
+          c.student_id AS roll_number,
+          c.title AS certificate_name,
+          c.provider AS issuer,
+          c.date_completed AS issue_date,
+          c.certificate_file_url AS verification_url,
+          NULL AS badge_image_url,
+          c.certificate_file_url AS proof_document_url,
+          'manual' AS source,
+          CASE WHEN c.verified = true THEN 'verified' ELSE 'pending' END AS verification_status
+        FROM certifications c
+        WHERE NOT EXISTS (
+          SELECT 1 FROM student_certifications sc2 
+          WHERE sc2.roll_number = c.student_id AND LOWER(TRIM(sc2.certificate_name)) = LOWER(TRIM(c.title))
+        )
+      )
+      SELECT DISTINCT ON (s.roll_number)
+        s.roll_number,
+        s.name AS student_name,
+        s.department,
+        s.section,
+        s.year,
+        uc.certificate_name,
+        uc.issuer,
+        uc.issue_date,
+        uc.verification_url,
+        uc.badge_image_url,
+        uc.proof_document_url,
+        uc.source,
+        uc.verification_status
+      FROM unified_certs uc
+      JOIN students s ON s.roll_number = uc.roll_number
+      WHERE ${whereClauses.join(' AND ')}
+      ORDER BY s.roll_number ASC
+    `;
+
+    const result = await db.query(studentsQuery, params);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /certifications/credly/sync
+ * Sync Credly profile badges for a student
+ */
+app.post('/certifications/credly/sync', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const rollNumber = (req.auth?.role === 'student' ? req.auth.regNo : req.body.roll_number)?.trim().toUpperCase();
+    const credlyUrl = req.body.credly_profile_url;
+
+    if (!rollNumber) {
+      return res.status(400).json({ error: 'Roll number is required' });
+    }
+
+    let urlToUse = credlyUrl;
+    if (!urlToUse) {
+      const sRes = await db.query('SELECT credly_profile_url FROM students WHERE roll_number = $1', [rollNumber]);
+      urlToUse = sRes.rows[0]?.credly_profile_url;
+    }
+
+    if (!urlToUse) {
+      return res.status(400).json({ error: 'No Credly profile URL found for student' });
+    }
+
+    const syncRes = await syncStudentCredlyCertifications(rollNumber, urlToUse);
+    res.json({ success: true, ...syncRes });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// FEATURE 2: INTERNSHIPS ENDPOINTS WITH ROLE SCOPING
+// ============================================================================
+
+/**
+ * GET /internships
+ * Scoped view of internships:
+ * - Student: sees own internships
+ * - Faculty/Mentor: sees assigned mentees
+ * - HOD: sees department
+ * - Admin: sees all
+ */
+app.get('/internships', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const callerRole = req.auth?.role;
+    const callerEmail = req.auth?.email?.toLowerCase();
+    const callerDept = req.auth?.department;
+    const callerRoll = req.auth?.regNo?.toUpperCase();
+
+    let query = `
+      SELECT 
+        i.*,
+        s.name AS student_name,
+        s.department,
+        s.section,
+        s.year,
+        s.mentor_name AS current_mentor_name,
+        s.mentor_email AS current_mentor_email
+      FROM student_internships i
+      JOIN students s ON s.roll_number = i.roll_number
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+
+    if (callerRole === 'student') {
+      params.push(callerRoll || '');
+      query += ` AND UPPER(i.roll_number) = $${params.length}`;
+    } else if (callerRole === 'faculty') {
+      params.push(callerEmail);
+      query += ` AND (LOWER(s.mentor_email) = $${params.length} OR LOWER(i.mentor_email) = $${params.length})`;
+    } else if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+      params.push(callerDept);
+      query += ` AND (
+        LOWER(REPLACE(s.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($${params.length}, ' ', '')) || '%'
+        OR LOWER(REPLACE($${params.length}, ' ', '')) ILIKE '%' || LOWER(REPLACE(s.department, ' ', '')) || '%'
+      )`;
+    }
+
+    query += ` ORDER BY i.created_at DESC`;
+
+    const result = await db.query(query, params);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /internships
+ * Create a new internship entry (Student or Mentor/Admin)
+ */
+app.post('/internships', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const {
+      roll_number,
+      company_name,
+      role,
+      internship_type = 'Full-time',
+      mode = 'On-site',
+      start_date,
+      end_date,
+      stipend_amount = 0,
+      offer_letter_url,
+      completion_certificate_url,
+      status = 'ongoing'
+    } = req.body;
+
+    const targetRoll = (req.auth?.role === 'student' ? req.auth.regNo : roll_number)?.trim().toUpperCase();
+
+    if (!targetRoll || !company_name || !role || !start_date) {
+      return res.status(400).json({ error: 'Roll number, company name, role, and start date are required' });
+    }
+
+    // Snapshot current student mentor
+    const studentRes = await db.query('SELECT mentor_name, mentor_email FROM students WHERE roll_number = $1', [targetRoll]);
+    const student = studentRes.rows[0] || {};
+
+    const insertRes = await db.query(
+      `INSERT INTO student_internships (
+        roll_number, company_name, role, internship_type, mode, 
+        start_date, end_date, stipend_amount, offer_letter_url, 
+        completion_certificate_url, status, mentor_name, mentor_email
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      RETURNING *`,
+      [
+        targetRoll, company_name.trim(), role.trim(), internship_type, mode,
+        start_date, end_date || null, stipend_amount || 0, offer_letter_url || null,
+        completion_certificate_url || null, status, student.mentor_name || null, student.mentor_email || null
+      ]
+    );
+
+    res.status(201).json(insertRes.rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * PUT /internships/:id/verify
+ * Verify an internship (Mentor, HOD, Admin)
+ */
+app.put('/internships/:id/verify', requireRole('faculty', 'hod', 'admin', 'super_admin'), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { verification_status, remarks } = req.body;
+
+    if (!['verified', 'rejected', 'pending'].includes(verification_status)) {
+      return res.status(400).json({ error: 'Invalid verification status (must be verified, rejected, or pending)' });
+    }
+
+    const updateRes = await db.query(
+      `UPDATE student_internships 
+       SET verification_status = $1, remarks = $2, verified_by = $3, verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $4
+       RETURNING *`,
+      [verification_status, remarks || null, req.auth?.email, id]
+    );
+
+    if (updateRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Internship record not found' });
+    }
+
+    res.json(updateRes.rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export const handler = serverless(app);
 export default app;
+
 

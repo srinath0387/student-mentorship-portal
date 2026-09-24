@@ -31,7 +31,7 @@ export const CertificationsTab: React.FC<CertificationsTabProps> = ({ certificat
   const [showModal, setShowModal] = useState(false);
   const [provider, setProvider] = useState('AWS');
   const [title, setTitle] = useState('');
-  const [dateCompleted, setDateCompleted] = useState('2024-03-15');
+  const [dateCompleted, setDateCompleted] = useState(() => new Date().toISOString().split('T')[0]);
   const [uploading, setUploading] = useState(false);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [editingCert, setEditingCert] = useState<Certification | null>(null);
@@ -43,7 +43,7 @@ export const CertificationsTab: React.FC<CertificationsTabProps> = ({ certificat
 
   // Format ISO dates to human-readable format (e.g. "Mar 15, 2024")
   const formatDate = (dateStr: string | undefined): string => {
-    if (!dateStr) return '2024';
+    if (!dateStr) return 'Completed';
     try {
       const date = new Date(dateStr);
       if (isNaN(date.getTime())) return dateStr;
@@ -137,7 +137,7 @@ export const CertificationsTab: React.FC<CertificationsTabProps> = ({ certificat
     setEditingCert(cert);
     setProvider(cert.provider);
     setTitle(cert.title);
-    setDateCompleted(cert.date_completed ? cert.date_completed.slice(0, 10) : '2024-03-15');
+    setDateCompleted(cert.date_completed ? cert.date_completed.slice(0, 10) : new Date().toISOString().split('T')[0]);
     setFileUrl(cert.certificate_file_url || null);
     setShowModal(true);
   };
@@ -146,7 +146,7 @@ export const CertificationsTab: React.FC<CertificationsTabProps> = ({ certificat
     setEditingCert(null);
     setProvider('AWS');
     setTitle('');
-    setDateCompleted('2024-03-15');
+    setDateCompleted(new Date().toISOString().split('T')[0]);
     setFileUrl(null);
     setShowModal(true);
   };
@@ -331,6 +331,7 @@ export const CertificationsTab: React.FC<CertificationsTabProps> = ({ certificat
                 <input
                   type="date"
                   value={dateCompleted}
+                  max={new Date().toISOString().split('T')[0]}
                   onChange={(e) => setDateCompleted(e.target.value)}
                   className="w-full px-3 py-2 text-sm rounded-lg border border-borderLine bg-background"
                 />

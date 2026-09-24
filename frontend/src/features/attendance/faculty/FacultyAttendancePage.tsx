@@ -257,7 +257,16 @@ export const FacultyAttendancePage: React.FC = () => {
       };
       return isPosted&&existingSession?.id ? api.updateAttendanceSession(existingSession.id,payload.records) : api.saveAttendanceSession(payload);
     },
-    onSuccess:()=>{ qc.invalidateQueries({queryKey:['sessions']}); qc.invalidateQueries({queryKey:['notPosted']}); setShowAbsentModal(false); setFeedback({type:'success',text:'Attendance saved successfully!'}); setTimeout(()=>setFeedback(null),4000); },
+    onSuccess:()=>{
+      qc.invalidateQueries({queryKey:['sessions']});
+      qc.invalidateQueries({queryKey:['notPosted']});
+      qc.invalidateQueries({queryKey:['dailyPeriodGrid']});
+      qc.invalidateQueries({queryKey:['attendanceAllotments']});
+      qc.invalidateQueries({queryKey:['subjectSummary']});
+      setShowAbsentModal(false);
+      setFeedback({type:'success',text:'Attendance saved successfully!'});
+      setTimeout(()=>setFeedback(null),4000);
+    },
     onError:(err:any)=>setFeedback({type:'error',text:err.message||'Failed to save.'})
   });
 

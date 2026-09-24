@@ -139,14 +139,27 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({ isOpen, onClos
 
     try {
       const res = await api.bulkImportStudents(parsedRows);
-      setResultMessage({
-        success: true,
-        text: res.message || `Successfully imported ${parsedRows.length} student records into database.`,
-      });
-      setTimeout(() => {
-        onSuccess();
-        onClose();
-      }, 1500);
+      const importedCount = res.importedCount ?? parsedRows.length;
+      const errorDetails: string[] = res.errors ?? [];
+      const errCount = res.errorsCount ?? 0;
+
+      if (errCount > 0) {
+        const errorSummary = errorDetails.slice(0, 5).join(' • ');
+        const moreNote = errorDetails.length > 5 ? ` (+${errorDetails.length - 5} more)` : '';
+        setResultMessage({
+          success: importedCount > 0,
+          text: `${importedCount} imported, ${errCount} failed: ${errorSummary}${moreNote}`,
+        });
+      } else {
+        setResultMessage({
+          success: true,
+          text: res.message || `Successfully imported ${importedCount} student records into database.`,
+        });
+        setTimeout(() => {
+          onSuccess();
+          onClose();
+        }, 1500);
+      }
     } catch (err: any) {
       setResultMessage({
         success: false,

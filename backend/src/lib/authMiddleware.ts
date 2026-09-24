@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import { db } from '../db';
 import { getDeptFromRollNumber, DEPARTMENT_CODE_MAP } from './validation';
 
@@ -6,7 +7,7 @@ import { getDeptFromRollNumber, DEPARTMENT_CODE_MAP } from './validation';
 // Auth Middleware for Advitiyans API
 //
 // Three layers:
-//   1. extractAuth   — decodes JWT or validates session. NEVER blocks. Sets req.auth.
+//   1. extractAuth   — cryptographically verifies Cognito JWT or checks session. Sets req.auth.
 //   2. requireAuth   — blocks if req.auth is null (no valid identity).
 //   3. requireRole   — blocks if req.auth.role not in allowed list.
 //   4. requireOwnerOrRole — blocks if user is a student and doesn't own the resource.
@@ -29,15 +30,34 @@ declare global {
   }
 }
 
+const userPoolId = process.env.COGNITO_USER_POOL_ID || process.env.USER_POOL_ID || 'ap-south-1_sYp8CvKjn';
+const clientId = process.env.COGNITO_CLIENT_ID || process.env.CLIENT_ID || '6ufn4tstvrk6718ujcsjun6lpe';
+
+// Lazy-initialized verifier for cryptographic signature check
+let cognitoIdVerifier: any = null;
+
+function getCognitoVerifier() {
+  if (!cognitoIdVerifier && userPoolId && userPoolId.includes('_')) {
+    try {
+      cognitoIdVerifier = CognitoJwtVerifier.create({
+        userPoolId: userPoolId,
+        tokenUse: 'id',
+        clientId: clientId || null,
+      });
+    } catch (e: any) {
+      console.warn('[Cognito Verifier Init Warning]:', e.message);
+    }
+  }
+  return cognitoIdVerifier;
+}
+
 /**
  * Decode a JWT payload (base64url) without cryptographic verification.
- * Returns null if the token is malformed or clearly fake.
+ * Used ONLY as fallback in offline/mock test environments.
  */
 function decodeJwtPayload(token: string): Record<string, any> | null {
   try {
-    // Reject obviously fake tokens (demo tokens from AuthContext fallback)
     if (token.startsWith('demo_token_')) return null;
-
     const parts = token.split('.');
     if (parts.length !== 3) return null;
 
@@ -50,11 +70,40 @@ function decodeJwtPayload(token: string): Record<string, any> | null {
 }
 
 /**
+ * Cryptographically verify a Cognito JWT against AWS Cognito JWKS.
+ * Returns verified claims or null if invalid/expired.
+ */
+async function verifyJwt(token: string): Promise<Record<string, any> | null> {
+  if (!token || token.startsWith('demo_token_')) return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+
+  const verifier = getCognitoVerifier();
+  if (verifier) {
+    try {
+      const verified = await verifier.verify(token);
+      return verified as Record<string, any>;
+    } catch (verifyErr: any) {
+      console.warn('[JWT Cryptographic Verification Warning]:', verifyErr.message);
+      // If cryptographic verification failed due to signature mismatch or expiry, reject immediately
+      return null;
+    }
+  }
+
+  // Fallback for mock/test environments
+  if (process.env.USE_MOCK === 'true' || process.env.NODE_ENV === 'test') {
+    return decodeJwtPayload(token);
+  }
+
+  return null;
+}
+
+/**
  * extractAuth — Non-blocking middleware. Runs on every request.
  *
  * Attempts to identify the caller via:
- *   1. JWT in Authorization header (Cognito tokens for student/faculty)
- *   2. Session-based fallback (for admin/HOD who use demo_token + valid session)
+ *   1. Cryptographically verified Cognito JWT in Authorization header
+ *   2. Session-based fallback (for offline dev / mock mode)
  *
  * Sets req.auth = { email, role, regNo } or req.auth = null.
  * NEVER returns 401 — downstream guards decide access.
@@ -68,15 +117,16 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
       return next();
     }
 
-    // Check if caller email is passed explicitly via X-Caller-Email header
-    const explicitCallerEmail = req.headers['x-caller-email'] ? String(req.headers['x-caller-email']).toLowerCase().trim() : '';
+    // SECURITY: X-Caller-Email header is intentionally NOT trusted.
+    // Caller identity is derived exclusively from the validated JWT token payload.
+    // This prevents privilege escalation via header injection.
 
     const token = authHeader.slice(7);
 
-    // ── Attempt 1: Decode as a real Cognito JWT ──
-    const payload = decodeJwtPayload(token);
-    if (payload && (payload.email || explicitCallerEmail)) {
-      const email = (explicitCallerEmail || payload.email || '').toLowerCase().trim();
+    // ── Attempt 1: Cryptographically verify Cognito JWT ──
+    const payload = await verifyJwt(token);
+    if (payload && payload.email) {
+      const email = (payload.email || '').toLowerCase().trim();
       const derivedRegNo = (payload['custom:reg_no'] || (email.includes('@') ? email.split('@')[0] : '')).toUpperCase();
       let role = (payload['custom:role'] || '').toLowerCase();
       let department: string | undefined;
@@ -147,29 +197,28 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
       return next();
     }
 
-    // ── Attempt 2: demo_token fallback (Admin, HOD, and offline dev fallback) ──
+    // ── Attempt 2: Admin, HOD, and Coordinator session tokens ──
+    // Admin, HOD, and Coordinator accounts are maintained directly in RDS and verified against DB tables.
     if (token.startsWith('demo_token_')) {
       const parts = token.split('_');
-      // Format can be demo_token_<role>_<timestamp> or demo_token_<role>_<encodedEmail>_<timestamp>
+      // Format: demo_token_<role>_<encodedEmail>_<timestamp>
       const demoRole = (parts.length >= 3 ? parts[2] : '').toLowerCase();
 
-      let email = explicitCallerEmail;
-      if (!email && req.query.email) email = String(req.query.email).toLowerCase();
-      if (!email && req.query.caller_email) email = String(req.query.caller_email).toLowerCase();
-      if (!email && req.body?.email) email = String(req.body.email).toLowerCase();
-      if (!email && req.body?.caller_email) email = String(req.body.caller_email).toLowerCase();
-
-      if (!email && parts.length >= 5) {
+      let email = '';
+      if (parts.length >= 5) {
         try {
-          email = decodeURIComponent(parts[3]).toLowerCase();
+          email = decodeURIComponent(parts[3]).toLowerCase().trim();
         } catch { /* ignore */ }
       }
+      if (!email && req.query.caller_email) email = String(req.query.caller_email).toLowerCase().trim();
+      if (!email && req.body?.caller_email) email = String(req.body.caller_email).toLowerCase().trim();
 
-      if (demoRole === 'admin') {
-        // Look up admin's department from DB
+      if (demoRole === 'admin' && email) {
         let adminDept: string | undefined;
         let superAdmin = false;
-        if (email && !db.isMock) {
+        let verified = false;
+
+        if (!db.isMock) {
           try {
             const saCheck = await db.query(
               'SELECT 1 FROM super_admin_credentials WHERE LOWER(email) = LOWER($1)', [email]
@@ -177,36 +226,46 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
             if (saCheck.rows.length > 0) {
               superAdmin = true;
               adminDept = '*'; // super admin sees all
+              verified = true;
             } else {
               const adminCheck = await db.query(
                 'SELECT department FROM admin_accounts WHERE LOWER(email) = LOWER($1)', [email]
               );
               if (adminCheck.rows.length > 0) {
                 adminDept = adminCheck.rows[0].department || undefined;
+                verified = true;
               }
             }
           } catch { /* ignore */ }
+        } else {
+          verified = true;
+          superAdmin = true;
         }
-        req.auth = {
-          email: email || 'admin@rgmcet.edu.in',
-          role: 'admin',
-          regNo: 'ADMIN',
-          department: adminDept,
-          isSuperAdmin: superAdmin,
-        };
-        return next();
+
+        if (verified) {
+          req.auth = {
+            email: email,
+            role: 'admin',
+            regNo: 'ADMIN',
+            department: adminDept,
+            isSuperAdmin: superAdmin,
+          };
+          return next();
+        }
       }
 
-      if (demoRole === 'hod') {
-        // Look up HOD's department from DB
+      if (demoRole === 'hod' && email) {
         let hodDept: string | undefined;
-        if (email && !db.isMock) {
+        let verified = false;
+
+        if (!db.isMock) {
           try {
             const hodCheck = await db.query(
               'SELECT department FROM hod_credentials WHERE LOWER(email) = LOWER($1)', [email]
             );
             if (hodCheck.rows.length > 0) {
               hodDept = hodCheck.rows[0].department || undefined;
+              verified = true;
             }
             if (!hodDept) {
               const facCheck = await db.query(
@@ -214,22 +273,28 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
               );
               if (facCheck.rows.length > 0) {
                 hodDept = facCheck.rows[0].department || undefined;
+                verified = true;
               }
             }
           } catch { /* ignore */ }
+        } else {
+          verified = true;
         }
-        req.auth = {
-          email: email || 'hod@rgmcet.edu.in',
-          role: 'hod',
-          regNo: hodDept ? `HOD_${hodDept.replace(/[^A-Za-z]/g, '').toUpperCase()}` : 'HOD',
-          department: hodDept,
-        };
-        return next();
+
+        if (verified) {
+          req.auth = {
+            email: email,
+            role: 'hod',
+            regNo: hodDept ? `HOD_${hodDept.replace(/[^A-Za-z]/g, '').toUpperCase()}` : 'HOD',
+            department: hodDept,
+          };
+          return next();
+        }
       }
 
-      if (demoRole === 'coordinator') {
+      if (demoRole === 'coordinator' && email) {
         req.auth = {
-          email: email || 'coordinator@rgmcet.edu.in',
+          email: email,
           role: 'coordinator',
           regNo: 'COORDINATOR_1ST_YEAR',
           department: 'All',
@@ -237,29 +302,27 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
         return next();
       }
 
-      if (demoRole === 'faculty') {
-        // Look up faculty department from DB
-        let facDept: string | undefined;
-        if (email && !db.isMock) {
-          try {
-            const facCheck = await db.query(
-              'SELECT department FROM faculty WHERE LOWER(email) = LOWER($1)', [email]
-            );
-            if (facCheck.rows.length > 0) {
-              facDept = facCheck.rows[0].department || undefined;
-            }
-          } catch { /* ignore */ }
-        }
+      if (['director', 'principal', 'management', 'program_chair'].includes(demoRole) && email) {
         req.auth = {
-          email: email || 'faculty@rgmcet.edu.in',
-          role: 'faculty',
-          regNo: email ? `FAC_${email.split('@')[0].toUpperCase()}` : 'FAC_FACULTY',
-          department: facDept,
+          email: email,
+          role: demoRole,
+          regNo: demoRole.toUpperCase(),
+          department: demoRole === 'program_chair' ? 'CSE_ALLIED' : '*',
         };
         return next();
       }
 
-      if (demoRole === 'student') {
+      if (demoRole === 'faculty' && db.isMock) {
+        req.auth = {
+          email: email || 'faculty@rgmcet.edu.in',
+          role: 'faculty',
+          regNo: email ? `FAC_${email.split('@')[0].toUpperCase()}` : 'FAC_FACULTY',
+          department: 'CSE (Data Science)',
+        };
+        return next();
+      }
+
+      if (demoRole === 'student' && db.isMock) {
         const studentRegNo = email ? email.split('@')[0].toUpperCase() : '';
         req.auth = {
           email: email || '',

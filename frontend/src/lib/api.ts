@@ -82,7 +82,14 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
       } catch {
         /* ignore text parse error */
       }
-      if (response.status === 413) {
+      if (response.status === 401) {
+        // If not already on auth/login page, clear stale token and trigger clean re-login
+        if (typeof window !== 'undefined' && !window.location.hash.includes('login') && !window.location.hash.includes('landing') && window.location.hash !== '#/' && window.location.hash !== '') {
+          sessionStorage.removeItem('advitiyans_jwt_token');
+          window.dispatchEvent(new CustomEvent('auth:session_expired'));
+        }
+        errMsg = 'Your session has expired. Please log in again.';
+      } else if (response.status === 413) {
         errMsg = 'File size is too large (exceeds server limit). Please upload a file smaller than 4.5 MB.';
       } else if (response.status === 403) {
         errMsg = 'Permission denied. Please ensure you are logged in as Admin or HOD.';
@@ -143,8 +150,8 @@ export const api = {
       return { valid: true }; // network errors: be lenient, don't kick out
     }
   },
-  // Admin & HOD Login — credentials validated server-side (never stored in frontend)
-  adminLogin: async (email: string, password: string, department?: string): Promise<{ valid: boolean; role?: 'admin' | 'hod'; isSuperAdmin?: boolean; department?: string; error?: string }> => {
+  // Admin, HOD, Coordinator & Oversight Login — credentials validated server-side (never stored in frontend)
+  adminLogin: async (email: string, password: string, department?: string): Promise<{ valid: boolean; role?: string; isSuperAdmin?: boolean; department?: string; name?: string; email?: string; error?: string }> => {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s max
@@ -423,6 +430,33 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ email }),
     });
+  },
+
+  // Smart Auto-Merge all unlinked faculty records with registered faculty/users (admin)
+  smartAutoMergeFaculty: async (): Promise<{
+    success: boolean;
+    mergedCount: number;
+    merged: any[];
+    remainingUnlinkedCount: number;
+    remainingUnlinked: any[];
+    message: string;
+  }> => {
+    return fetchWithAuth('/faculty/smart-auto-merge', {
+      method: 'POST',
+    });
+  },
+
+  // Manually merge source faculty into target faculty (admin)
+  mergeFacultyRecords: async (sourceFacultyId: string, targetFacultyId: string): Promise<any> => {
+    return fetchWithAuth('/faculty/merge', {
+      method: 'POST',
+      body: JSON.stringify({ sourceFacultyId, targetFacultyId }),
+    });
+  },
+
+  // Get unlinked faculty with candidate suggestions (admin)
+  getUnlinkedFacultyCandidates: async (): Promise<{ candidates: any[]; totalUnlinked: number }> => {
+    return fetchWithAuth('/faculty/unlinked-candidates');
   },
 
   // Update faculty display name (admin)
@@ -1314,5 +1348,62 @@ export const api = {
       method: 'DELETE',
     });
   },
+
+  // Certification Search & Credly Sync
+  getCertificationsSummary: async (params?: { department?: string; year?: string; section?: string; issuer?: string }): Promise<any[]> => {
+    const sp = new URLSearchParams();
+    if (params?.department) sp.append('department', params.department);
+    if (params?.year) sp.append('year', params.year);
+    if (params?.section) sp.append('section', params.section);
+    if (params?.issuer) sp.append('issuer', params.issuer);
+    const qs = sp.toString();
+    return fetchWithAuth(`/certifications/summary${qs ? `?${qs}` : ''}`);
+  },
+
+  searchCertifications: async (query: string, params?: { department?: string; year?: string; section?: string }): Promise<any[]> => {
+    const sp = new URLSearchParams();
+    sp.append('q', query);
+    if (params?.department) sp.append('department', params.department);
+    if (params?.year) sp.append('year', params.year);
+    if (params?.section) sp.append('section', params.section);
+    return fetchWithAuth(`/certifications/search?${sp.toString()}`);
+  },
+
+  getCertifiedStudents: async (certName: string, params?: { department?: string; year?: string; section?: string; search?: string }): Promise<any[]> => {
+    const sp = new URLSearchParams();
+    sp.append('cert_name', certName);
+    if (params?.department) sp.append('department', params.department);
+    if (params?.year) sp.append('year', params.year);
+    if (params?.section) sp.append('section', params.section);
+    if (params?.search) sp.append('search', params.search);
+    return fetchWithAuth(`/certifications/students?${sp.toString()}`);
+  },
+
+  syncCredlyCertifications: async (data: { roll_number?: string; credly_profile_url?: string }): Promise<any> => {
+    return fetchWithAuth('/certifications/credly/sync', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Student Internships
+  getInternships: async (): Promise<any[]> => {
+    return fetchWithAuth('/internships');
+  },
+
+  createInternship: async (data: any): Promise<any> => {
+    return fetchWithAuth('/internships', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  verifyInternship: async (id: string, data: { verification_status: 'verified' | 'rejected' | 'pending'; remarks?: string }): Promise<any> => {
+    return fetchWithAuth(`/internships/${encodeURIComponent(id)}/verify`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
 };
+
 

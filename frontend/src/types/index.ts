@@ -1,4 +1,4 @@
-export type UserRole = 'student' | 'faculty' | 'admin' | 'hod' | 'parent' | 'coordinator';
+export type UserRole = 'student' | 'faculty' | 'admin' | 'hod' | 'parent' | 'coordinator' | 'director' | 'principal' | 'management' | 'program_chair';
 
 export interface User {
   id: string;
@@ -132,7 +132,8 @@ export interface CodingProfile {
     | 'CodeChef'
     | 'Kaggle'
     | 'StackOverflow'
-    | 'GSoC-LFX';
+    | 'GSoC-LFX'
+    | 'EduSkills';
   handle: string;
   streak: number;
   repositories_count: number;
