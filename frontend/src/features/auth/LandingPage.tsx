@@ -96,14 +96,13 @@ const ALL_ROLES: RoleOption[] = [
     defaultEmail: 'admin@rgmcet.edu.in',
   },
 
-  // ── Institutional Oversight (View Only) ──
+  // ── Institutional Oversight ──
   {
     id: 'management',
     title: 'Management Board',
     category: 'oversight',
     icon: Building2,
     accentColor: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/30',
-    badge: 'View Only',
     description: 'Executive institutional governance, performance & compliance',
     defaultEmail: 'management@rgmcet.edu.in',
   },
@@ -113,7 +112,6 @@ const ALL_ROLES: RoleOption[] = [
     category: 'oversight',
     icon: Award,
     accentColor: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30',
-    badge: 'View Only',
     description: 'Academic oversight, institute-wide metrics & faculty reports',
     defaultEmail: 'principal@rgmcet.edu.in',
   },
@@ -123,7 +121,6 @@ const ALL_ROLES: RoleOption[] = [
     category: 'oversight',
     icon: ShieldCheck,
     accentColor: 'text-sky-400 bg-sky-500/10 border-sky-500/30',
-    badge: 'View Only',
     description: 'Strategic direction, college-wide analytics & research index',
     defaultEmail: 'director@rgmcet.edu.in',
   },
@@ -133,7 +130,6 @@ const ALL_ROLES: RoleOption[] = [
     category: 'oversight',
     icon: Sparkles,
     accentColor: 'text-violet-400 bg-violet-500/10 border-violet-500/30',
-    badge: 'View Only',
     description: 'Oversight across CSE, AI & ML, Data Science, CS & BS',
     defaultEmail: 'chaircse@rgmcet.edu.in',
   },
@@ -445,7 +441,7 @@ export const LandingPage: React.FC = () => {
 
       {/* ── Main Unified Login Container ── */}
       <main className="z-10 relative flex-1 max-w-xl w-full mx-auto px-4 py-4 flex flex-col justify-center items-center">
-        <div className="w-full bg-slate-900/80 backdrop-blur-2xl border border-white/15 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-black/60 relative overflow-hidden">
+        <div className="w-full bg-slate-900/80 backdrop-blur-2xl border border-white/15 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-black/60 relative">
           {/* Subtle Top Accent Line */}
           <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-cyan-500 via-indigo-500 to-brand-primary" />
 
@@ -472,11 +468,6 @@ export const LandingPage: React.FC = () => {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-extrabold text-white truncate">{selectedRole.title}</span>
-                        {selectedRole.badge && (
-                          <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold shrink-0">
-                            {selectedRole.badge}
-                          </span>
-                        )}
                       </div>
                       <p className="text-[11px] text-slate-300 truncate">{selectedRole.description}</p>
                     </div>
@@ -490,7 +481,7 @@ export const LandingPage: React.FC = () => {
 
             {/* Dropdown Menu Modal */}
             {isDropdownOpen && (
-              <div className="absolute top-full inset-x-0 mt-2 bg-slate-950/95 backdrop-blur-2xl border border-white/20 rounded-2xl shadow-2xl z-50 overflow-hidden max-h-[400px] flex flex-col animate-in fade-in zoom-in-95 duration-150">
+              <div className="absolute top-full inset-x-0 mt-2 bg-slate-950/95 backdrop-blur-2xl border border-white/20 rounded-2xl shadow-2xl z-[100] flex flex-col animate-in fade-in zoom-in-95 duration-150" style={{maxHeight: 'min(400px, 60vh)'}}>  
                 {/* Typeahead Search Input */}
                 <div className="p-3 border-b border-white/10 bg-slate-900/90 shrink-0 z-10 flex items-center gap-2">
                   <Search className="w-4 h-4 text-cyan-400 shrink-0 ml-1" />
@@ -510,7 +501,7 @@ export const LandingPage: React.FC = () => {
                 </div>
 
                 {/* Role List with Categories */}
-                <div className="overflow-y-auto flex-1 min-h-0 p-2 space-y-3">
+                <div className="overflow-y-auto flex-1 min-h-0 p-2 space-y-2">
                   {/* Category 1: Staff & Student Logins */}
                   {staffStudentRoles.length > 0 && (
                     <div>
@@ -547,12 +538,11 @@ export const LandingPage: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Category 2: Institutional Oversight (View Only) */}
+                  {/* Category 2: Institutional Oversight */}
                   {oversightRoles.length > 0 && (
                     <div className="pt-2 border-t border-white/10">
-                      <div className="px-3 py-1 flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-indigo-400">
+                      <div className="px-3 py-1 text-[10px] font-black uppercase tracking-wider text-indigo-400">
                         <span>Institutional Oversight</span>
-                        <span className="text-[9px] bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded font-bold">View Only</span>
                       </div>
                       <div className="space-y-1 mt-1">
                         {oversightRoles.map((role) => (
@@ -573,9 +563,6 @@ export const LandingPage: React.FC = () => {
                               <div className="min-w-0">
                                 <div className="flex items-center gap-1.5">
                                   <p className="text-xs font-bold text-white truncate">{role.title}</p>
-                                  <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 text-[9px] font-bold">
-                                    View Only
-                                  </span>
                                 </div>
                                 <p className="text-[10px] text-slate-400 truncate">{role.description}</p>
                               </div>
