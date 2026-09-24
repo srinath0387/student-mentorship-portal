@@ -48,7 +48,7 @@ const ALL_ROLES: RoleOption[] = [
     title: 'Student',
     category: 'staff_student',
     icon: GraduationCap,
-    accentColor: 'text-blue-400 bg-blue-500/10 border-blue-500/30',
+    accentColor: 'text-blue-600 bg-blue-50 border-blue-200',
     description: 'Access academic records, attendance, mentorship & coding stats',
   },
   {
@@ -56,7 +56,7 @@ const ALL_ROLES: RoleOption[] = [
     title: 'Parent',
     category: 'staff_student',
     icon: Users,
-    accentColor: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
+    accentColor: 'text-emerald-600 bg-emerald-50 border-emerald-200',
     description: 'Track student academic progress, attendance & mentor reviews',
   },
   {
@@ -64,7 +64,7 @@ const ALL_ROLES: RoleOption[] = [
     title: 'Faculty',
     category: 'staff_student',
     icon: Briefcase,
-    accentColor: 'text-purple-400 bg-purple-500/10 border-purple-500/30',
+    accentColor: 'text-purple-600 bg-purple-50 border-purple-200',
     description: 'Post attendance, manage mentees & update subject duties',
     defaultEmail: 'faculty@rgmcet.edu.in',
   },
@@ -73,7 +73,7 @@ const ALL_ROLES: RoleOption[] = [
     title: 'Head of Department (HOD)',
     category: 'staff_student',
     icon: Building2,
-    accentColor: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
+    accentColor: 'text-amber-600 bg-amber-50 border-amber-200',
     description: 'Departmental analytics, faculty management & approvals',
     defaultEmail: 'hcse@rgmcet.edu.in',
   },
@@ -82,7 +82,7 @@ const ALL_ROLES: RoleOption[] = [
     title: '1st Year Coordinator',
     category: 'staff_student',
     icon: Award,
-    accentColor: 'text-pink-400 bg-pink-500/10 border-pink-500/30',
+    accentColor: 'text-pink-600 bg-pink-50 border-pink-200',
     description: 'First year induction, student sectioning & class incharges',
     defaultEmail: 'fycoordinator@rgmcet.edu.in',
   },
@@ -91,7 +91,7 @@ const ALL_ROLES: RoleOption[] = [
     title: 'Institutional Admin',
     category: 'staff_student',
     icon: ShieldCheck,
-    accentColor: 'text-teal-400 bg-teal-500/10 border-teal-500/30',
+    accentColor: 'text-teal-600 bg-teal-50 border-teal-200',
     description: 'Full portal management, user permissions & system settings',
     defaultEmail: 'admin@rgmcet.edu.in',
   },
@@ -102,7 +102,7 @@ const ALL_ROLES: RoleOption[] = [
     title: 'Management Board',
     category: 'oversight',
     icon: Building2,
-    accentColor: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/30',
+    accentColor: 'text-indigo-600 bg-indigo-50 border-indigo-200',
     description: 'Executive institutional governance, performance & compliance',
     defaultEmail: 'management@rgmcet.edu.in',
   },
@@ -111,7 +111,7 @@ const ALL_ROLES: RoleOption[] = [
     title: 'Principal',
     category: 'oversight',
     icon: Award,
-    accentColor: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30',
+    accentColor: 'text-cyan-600 bg-cyan-50 border-cyan-200',
     description: 'Academic oversight, institute-wide metrics & faculty reports',
     defaultEmail: 'principal@rgmcet.edu.in',
   },
@@ -120,7 +120,7 @@ const ALL_ROLES: RoleOption[] = [
     title: 'Director',
     category: 'oversight',
     icon: ShieldCheck,
-    accentColor: 'text-sky-400 bg-sky-500/10 border-sky-500/30',
+    accentColor: 'text-sky-600 bg-sky-50 border-sky-200',
     description: 'Strategic direction, college-wide analytics & research index',
     defaultEmail: 'director@rgmcet.edu.in',
   },
@@ -129,7 +129,7 @@ const ALL_ROLES: RoleOption[] = [
     title: 'Program Chair (CSE & Allied)',
     category: 'oversight',
     icon: Sparkles,
-    accentColor: 'text-violet-400 bg-violet-500/10 border-violet-500/30',
+    accentColor: 'text-violet-600 bg-violet-50 border-violet-200',
     description: 'Oversight across CSE, AI & ML, Data Science, CS & BS',
     defaultEmail: 'chaircse@rgmcet.edu.in',
   },
@@ -527,13 +527,10 @@ export const LandingPage: React.FC = () => {
 
       {/* ── Main Unified Login Container ── */}
       <main className="z-10 relative flex-1 max-w-xl w-full mx-auto px-4 py-4 flex flex-col justify-center items-center">
-        <div className="w-full bg-slate-900/80 backdrop-blur-2xl border border-white/15 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-black/60 relative">
-          {/* Subtle Top Accent Line */}
-          <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-cyan-500 via-indigo-500 to-brand-primary" />
-
+        <div className="w-full bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-black/25 relative">
           {/* ── Searchable / Typeahead Role Selector Dropdown ── */}
           <div className="relative mb-6" ref={dropdownRef}>
-            <label className="block text-[11px] font-black uppercase tracking-widest text-slate-300 mb-2">
+            <label className="block text-[11px] font-black uppercase tracking-widest text-slate-500 mb-2">
               Select Your Role to Login
             </label>
 
@@ -543,7 +540,7 @@ export const LandingPage: React.FC = () => {
                 setIsDropdownOpen(!isDropdownOpen);
                 setTimeout(() => searchInputRef.current?.focus(), 50);
               }}
-              className="w-full flex items-center justify-between p-3.5 sm:p-4 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/20 text-left transition-all group focus:outline-none focus:ring-2 focus:ring-cyan-400/50"
+              className="w-full flex items-center justify-between p-3.5 sm:p-4 rounded-2xl bg-slate-50 hover:bg-slate-100/80 border border-slate-200 text-left transition-all group focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
             >
               <div className="flex items-center gap-3 min-w-0">
                 {selectedRole ? (
@@ -553,34 +550,34 @@ export const LandingPage: React.FC = () => {
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-extrabold text-white truncate">{selectedRole.title}</span>
+                        <span className="text-sm font-extrabold text-slate-900 truncate">{selectedRole.title}</span>
                       </div>
-                      <p className="text-[11px] text-slate-300 truncate">{selectedRole.description}</p>
+                      <p className="text-[11px] text-slate-500 truncate">{selectedRole.description}</p>
                     </div>
                   </>
                 ) : (
                   <span className="text-sm text-slate-400 font-semibold">Choose your role...</span>
                 )}
               </div>
-              <ChevronDown className={`w-5 h-5 text-slate-300 shrink-0 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180 text-cyan-400' : ''}`} />
+              <ChevronDown className={`w-5 h-5 text-slate-400 shrink-0 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180 text-brand-primary' : ''}`} />
             </button>
 
             {/* Dropdown Menu Modal */}
             {isDropdownOpen && (
-              <div className="absolute top-full inset-x-0 mt-2 bg-slate-950/95 backdrop-blur-2xl border border-white/20 rounded-2xl shadow-2xl z-[100] flex flex-col animate-in fade-in zoom-in-95 duration-150" style={{maxHeight: 'min(400px, 60vh)'}}>  
+              <div className="absolute top-full inset-x-0 mt-2 bg-white border border-slate-200 rounded-2xl shadow-2xl z-[100] flex flex-col animate-in fade-in zoom-in-95 duration-150" style={{maxHeight: 'min(400px, 60vh)'}}>  
                 {/* Typeahead Search Input */}
-                <div className="p-3 border-b border-white/10 bg-slate-900/90 shrink-0 z-10 flex items-center gap-2">
-                  <Search className="w-4 h-4 text-cyan-400 shrink-0 ml-1" />
+                <div className="p-3 border-b border-slate-200 bg-slate-50/90 shrink-0 z-10 flex items-center gap-2 rounded-t-2xl">
+                  <Search className="w-4 h-4 text-brand-primary shrink-0 ml-1" />
                   <input
                     ref={searchInputRef}
                     type="text"
                     value={roleSearch}
                     onChange={(e) => setRoleSearch(e.target.value)}
                     placeholder="Search roles (e.g. Program Chair, Faculty, Student)..."
-                    className="w-full bg-transparent text-xs text-white placeholder-slate-400 focus:outline-none font-medium"
+                    className="w-full bg-transparent text-xs text-slate-800 placeholder-slate-400 focus:outline-none font-medium"
                   />
                   {roleSearch && (
-                    <button type="button" onClick={() => setRoleSearch('')} className="text-slate-400 hover:text-white">
+                    <button type="button" onClick={() => setRoleSearch('')} className="text-slate-400 hover:text-slate-700">
                       <X className="w-3.5 h-3.5" />
                     </button>
                   )}
@@ -602,8 +599,8 @@ export const LandingPage: React.FC = () => {
                             onClick={() => handleSelectRole(role)}
                             className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all ${
                               selectedRole?.id === role.id 
-                                ? 'bg-cyan-500/20 text-white border border-cyan-500/40' 
-                                : 'hover:bg-white/10 text-slate-200'
+                                ? 'bg-brand-soft text-brand-primary border border-brand-primary/30 font-bold' 
+                                : 'hover:bg-slate-50 text-slate-700'
                             }`}
                           >
                             <div className="flex items-center gap-2.5 min-w-0">
@@ -611,12 +608,12 @@ export const LandingPage: React.FC = () => {
                                 <role.icon className="w-4 h-4" />
                               </div>
                               <div className="min-w-0">
-                                <p className="text-xs font-bold text-white truncate">{role.title}</p>
-                                <p className="text-[10px] text-slate-400 truncate">{role.description}</p>
+                                <p className="text-xs font-bold text-slate-900 truncate">{role.title}</p>
+                                <p className="text-[10px] text-slate-500 truncate">{role.description}</p>
                               </div>
                             </div>
                             {selectedRole?.id === role.id && (
-                              <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0 ml-2" />
+                              <CheckCircle2 className="w-4 h-4 text-brand-primary shrink-0 ml-2" />
                             )}
                           </button>
                         ))}
@@ -626,8 +623,8 @@ export const LandingPage: React.FC = () => {
 
                   {/* Category 2: Institutional Oversight */}
                   {oversightRoles.length > 0 && (
-                    <div className="pt-2 border-t border-white/10">
-                      <div className="px-3 py-1 text-[10px] font-black uppercase tracking-wider text-indigo-400">
+                    <div className="pt-2 border-t border-slate-100">
+                      <div className="px-3 py-1 text-[10px] font-black uppercase tracking-wider text-brand-primary font-bold">
                         <span>Institutional Oversight</span>
                       </div>
                       <div className="space-y-1 mt-1">
@@ -638,8 +635,8 @@ export const LandingPage: React.FC = () => {
                             onClick={() => handleSelectRole(role)}
                             className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all ${
                               selectedRole?.id === role.id 
-                                ? 'bg-indigo-500/20 text-white border border-indigo-500/40' 
-                                : 'hover:bg-white/10 text-slate-200'
+                                ? 'bg-brand-soft text-brand-primary border border-brand-primary/30 font-bold' 
+                                : 'hover:bg-slate-50 text-slate-700'
                             }`}
                           >
                             <div className="flex items-center gap-2.5 min-w-0">
@@ -648,13 +645,13 @@ export const LandingPage: React.FC = () => {
                               </div>
                               <div className="min-w-0">
                                 <div className="flex items-center gap-1.5">
-                                  <p className="text-xs font-bold text-white truncate">{role.title}</p>
+                                  <p className="text-xs font-bold text-slate-900 truncate">{role.title}</p>
                                 </div>
-                                <p className="text-[10px] text-slate-400 truncate">{role.description}</p>
+                                <p className="text-[10px] text-slate-500 truncate">{role.description}</p>
                               </div>
                             </div>
                             {selectedRole?.id === role.id && (
-                              <CheckCircle2 className="w-4 h-4 text-indigo-400 shrink-0 ml-2" />
+                              <CheckCircle2 className="w-4 h-4 text-brand-primary shrink-0 ml-2" />
                             )}
                           </button>
                         ))}
@@ -677,7 +674,7 @@ export const LandingPage: React.FC = () => {
             <form onSubmit={handleLoginSubmit} className="space-y-4">
               {/* Student Segment Toggle */}
               {selectedRole.id === 'student' && (
-                <div className="flex rounded-xl bg-white/10 p-1 border border-white/15">
+                <div className="flex rounded-xl bg-slate-100 p-1 border border-slate-200">
                   <button
                     type="button"
                     onClick={() => {
@@ -686,8 +683,8 @@ export const LandingPage: React.FC = () => {
                     }}
                     className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
                       studentYearMode === 'regular'
-                        ? 'bg-brand-primary text-white shadow-md'
-                        : 'text-slate-300 hover:text-white'
+                        ? 'bg-brand-primary text-white shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
                     Regular (2nd – 4th Year)
@@ -700,8 +697,8 @@ export const LandingPage: React.FC = () => {
                     }}
                     className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
                       studentYearMode === 'fresher'
-                        ? 'bg-brand-primary text-white shadow-md'
-                        : 'text-slate-300 hover:text-white'
+                        ? 'bg-brand-primary text-white shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
                     1st Year / Freshers
@@ -711,7 +708,7 @@ export const LandingPage: React.FC = () => {
 
               {/* Identifier Input Field */}
               <div>
-                <label className="block text-xs font-semibold text-slate-200 mb-1.5">
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
                   {selectedRole.id === 'student' 
                     ? (studentYearMode === 'fresher' ? 'Admission ID / Username / Mobile' : 'College Email (@rgmcet.edu.in)')
                     : selectedRole.id === 'parent' 
@@ -737,12 +734,12 @@ export const LandingPage: React.FC = () => {
                           ? 'e.g. 21091A3201'
                           : selectedRole.defaultEmail || 'name@rgmcet.edu.in'
                     }
-                    className="w-full pl-10 pr-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-slate-400 text-xs sm:text-sm font-medium focus:outline-none focus:ring-2 focus:ring-cyan-400/50"
+                    className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-xs sm:text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
                   />
                 </div>
                 {selectedRole.id === 'student' && studentYearMode === 'regular' && (
-                  <p className="text-[10px] text-slate-400 mt-1 ml-1">
-                    Enter your college email — same as your roll number (e.g. <span className="text-cyan-400 font-mono">23091a3227@rgmcet.edu.in</span>)
+                  <p className="text-[10px] text-slate-500 mt-1 ml-1">
+                    Enter your college email — same as your roll number (e.g. <span className="text-brand-primary font-mono font-semibold">23091a3227@rgmcet.edu.in</span>)
                   </p>
                 )}
               </div>
@@ -750,14 +747,14 @@ export const LandingPage: React.FC = () => {
               {/* Department Selector (for HOD, Admin, or Faculty) */}
               {(selectedRole.id === 'hod' || selectedRole.id === 'admin' || selectedRole.id === 'faculty') && (
                 <div>
-                  <label className="block text-xs font-semibold text-slate-200 mb-1.5">
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
                     Department
                   </label>
                   <select
                     value={selectedDept}
                     onChange={(e) => setSelectedDept(e.target.value)}
                     aria-label="Department Selection"
-                    className="w-full px-3.5 py-3 rounded-xl bg-slate-900 border border-white/20 text-white text-xs sm:text-sm font-medium focus:outline-none focus:ring-2 focus:ring-cyan-400/50"
+                    className="w-full px-3.5 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-xs sm:text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary cursor-pointer"
                   >
                     {VALID_DEPARTMENT_NAMES.map(dept => (
                       <option key={dept} value={dept}>{dept}</option>
@@ -770,7 +767,7 @@ export const LandingPage: React.FC = () => {
               {selectedRole.id === 'student' && studentYearMode === 'fresher' ? (
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs font-semibold text-slate-200">
+                    <label className="text-xs font-bold text-slate-700">
                       Date of Birth (DOB) or Password
                     </label>
                   </div>
@@ -779,7 +776,7 @@ export const LandingPage: React.FC = () => {
                       type="date"
                       value={fresherDob}
                       onChange={(e) => setFresherDob(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-white/10 border border-white/20 text-white text-xs font-medium focus:outline-none focus:ring-2 focus:ring-cyan-400/50"
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
                     />
                     <div className="relative">
                       <input
@@ -787,7 +784,7 @@ export const LandingPage: React.FC = () => {
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         placeholder="Password (if set)"
-                        className="w-full px-3.5 py-2.5 rounded-xl bg-white/10 border border-white/20 text-white placeholder-slate-400 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-cyan-400/50"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
                       />
                     </div>
                   </div>
@@ -795,14 +792,14 @@ export const LandingPage: React.FC = () => {
               ) : (
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs font-semibold text-slate-200">
+                    <label className="text-xs font-bold text-slate-700">
                       Password
                     </label>
                     {selectedRole.id === 'student' && (
                       <button
                         type="button"
                         onClick={openForgotModal}
-                        className="text-[11px] text-cyan-400 hover:underline font-semibold"
+                        className="text-[11px] text-brand-primary hover:underline font-bold cursor-pointer"
                       >
                         Forgot password?
                       </button>
@@ -811,7 +808,7 @@ export const LandingPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={openForgotModal}
-                        className="text-[11px] text-purple-400 hover:underline font-semibold"
+                        className="text-[11px] text-brand-primary hover:underline font-bold cursor-pointer"
                       >
                         Forgot password?
                       </button>
@@ -826,12 +823,12 @@ export const LandingPage: React.FC = () => {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="Enter your password"
-                      className="w-full pl-10 pr-10 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-slate-400 text-xs sm:text-sm font-medium focus:outline-none focus:ring-2 focus:ring-cyan-400/50"
+                      className="w-full pl-10 pr-10 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-xs sm:text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-white"
+                      className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600"
                     >
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
@@ -841,8 +838,8 @@ export const LandingPage: React.FC = () => {
 
               {/* Error Alert */}
               {errorMessage && (
-                <div className="p-3 rounded-xl bg-red-500/20 border border-red-500/40 flex items-start gap-2 text-xs text-red-200">
-                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                <div className="p-3 rounded-xl bg-red-50 border border-red-200 flex items-start gap-2 text-xs text-red-700 font-medium">
+                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
                   <span>{errorMessage}</span>
                 </div>
               )}
@@ -851,7 +848,7 @@ export const LandingPage: React.FC = () => {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-cyan-500 via-indigo-600 to-brand-primary text-white font-black text-sm shadow-lg shadow-cyan-500/25 hover:shadow-cyan-500/40 hover:scale-[1.01] active:scale-[0.99] transition-all duration-150 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full py-3.5 px-4 rounded-xl bg-brand-primary hover:bg-brand-primary/95 text-white font-black text-sm shadow-md shadow-brand-primary/25 hover:shadow-lg hover:shadow-brand-primary/35 hover:scale-[1.01] active:scale-[0.99] transition-all duration-150 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isLoading ? (
                   <>
@@ -872,7 +869,7 @@ export const LandingPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => navigate('/login?role=student&signup=true')}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-400 hover:text-cyan-300 hover:underline transition-colors"
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-brand-primary hover:underline transition-colors"
                   >
                     <UserPlus className="w-3.5 h-3.5" />
                     New here? Create a Student Account
@@ -884,7 +881,7 @@ export const LandingPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => navigate('/login?role=faculty&signup=true')}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-purple-400 hover:text-purple-300 hover:underline transition-colors"
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-brand-primary hover:underline transition-colors"
                   >
                     <UserPlus className="w-3.5 h-3.5" />
                     New Faculty Member? Register Here
@@ -922,22 +919,22 @@ export const LandingPage: React.FC = () => {
           />
 
           {/* Modal Card */}
-          <div className="relative z-10 w-full max-w-sm bg-slate-900/95 border border-white/15 rounded-2xl shadow-2xl p-6 backdrop-blur-xl">
+          <div className="relative z-10 w-full max-w-sm bg-white border border-slate-200 rounded-2xl shadow-2xl p-6">
             {/* Header */}
             <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center">
-                  <Lock className="w-4 h-4 text-purple-400" />
+                <div className="w-9 h-9 rounded-xl bg-brand-soft border border-brand-primary/20 flex items-center justify-center">
+                  <Lock className="w-4 h-4 text-brand-primary" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-black text-white">Reset Password</h3>
-                  <p className="text-[10px] text-slate-400">{selectedRole?.id === 'student' ? 'Student Account Recovery' : 'Faculty Account Recovery'}</p>
+                  <h3 className="text-sm font-black text-slate-900">Reset Password</h3>
+                  <p className="text-[10px] text-slate-500">{selectedRole?.id === 'student' ? 'Student Account Recovery' : 'Faculty Account Recovery'}</p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setShowForgotModal(false)}
-                className="text-slate-400 hover:text-white transition-colors"
+                className="text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -947,9 +944,9 @@ export const LandingPage: React.FC = () => {
             <div className="flex items-center gap-1.5 mb-5">
               {(['email', 'otp', 'success'] as const).map((step, i) => (
                 <div key={step} className="flex items-center gap-1.5 flex-1">
-                  <div className={`h-1 flex-1 rounded-full transition-all ${
+                  <div className={`h-1.5 flex-1 rounded-full transition-all ${
                     forgotStep === 'success' || (forgotStep === 'otp' && i < 2) || (forgotStep === 'email' && i < 1)
-                      ? 'bg-purple-500' : 'bg-white/15'
+                      ? 'bg-brand-primary' : 'bg-slate-100'
                   }`} />
                 </div>
               ))}
@@ -957,14 +954,14 @@ export const LandingPage: React.FC = () => {
 
             {/* Error / Success alerts */}
             {forgotError && (
-              <div className="flex items-start gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/30 mb-4 text-xs text-red-300">
-                <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <div className="flex items-start gap-2 p-3 rounded-xl bg-red-50 border border-red-200 mb-4 text-xs text-red-700 font-medium">
+                <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0 text-red-500" />
                 <span>{forgotError}</span>
               </div>
             )}
             {forgotSuccess && forgotStep !== 'success' && (
-              <div className="flex items-start gap-2 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 mb-4 text-xs text-emerald-300">
-                <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <div className="flex items-start gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-200 mb-4 text-xs text-emerald-700 font-medium">
+                <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0 text-emerald-600" />
                 <span>{forgotSuccess}</span>
               </div>
             )}
@@ -972,9 +969,9 @@ export const LandingPage: React.FC = () => {
             {/* Step 1 — Email */}
             {forgotStep === 'email' && (
               <form onSubmit={handleSendOtp} className="space-y-4">
-                <p className="text-xs text-slate-400">Enter your registered email. We'll send a 6-digit OTP to your inbox.</p>
+                <p className="text-xs text-slate-500">Enter your registered email. We'll send a 6-digit OTP to your inbox.</p>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-200 mb-1.5">{selectedRole?.id === 'student' ? 'Student Email' : 'Faculty Email'}</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">{selectedRole?.id === 'student' ? 'Student Email' : 'Faculty Email'}</label>
                   <div className="relative">
                     <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
                     <input
@@ -982,7 +979,7 @@ export const LandingPage: React.FC = () => {
                       value={forgotEmail}
                       onChange={e => setForgotEmail(e.target.value)}
                       placeholder={selectedRole?.id === 'student' ? 'e.g. 23091a3201@rgmcet.edu.in' : 'yourname@rgmcet.edu.in'}
-                      className="w-full pl-10 pr-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-slate-400 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-purple-400/50"
+                      className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
                       required
                     />
                   </div>
@@ -990,7 +987,7 @@ export const LandingPage: React.FC = () => {
                 <button
                   type="submit"
                   disabled={forgotLoading}
-                  className="w-full py-3 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-60 text-white text-sm font-bold transition-all flex items-center justify-center gap-2"
+                  className="w-full py-3 rounded-xl bg-brand-primary hover:bg-brand-primary/95 disabled:opacity-60 text-white text-sm font-bold shadow-md shadow-brand-primary/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   {forgotLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
                   {forgotLoading ? 'Sending OTP...' : 'Send OTP'}
@@ -1001,21 +998,21 @@ export const LandingPage: React.FC = () => {
             {/* Step 2 — OTP + New Password */}
             {forgotStep === 'otp' && (
               <form onSubmit={handleConfirmReset} className="space-y-4">
-                <p className="text-xs text-slate-400">Enter the 6-digit code sent to <span className="text-purple-300 font-semibold">{forgotEmail}</span> and choose a new password.</p>
+                <p className="text-xs text-slate-500">Enter the 6-digit code sent to <span className="text-brand-primary font-bold">{forgotEmail}</span> and choose a new password.</p>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-200 mb-1.5">OTP Code</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">OTP Code</label>
                   <input
                     type="text"
                     value={forgotOtp}
                     onChange={e => setForgotOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
                     placeholder="6-digit code"
                     maxLength={6}
-                    className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-slate-400 text-sm font-mono tracking-[0.3em] text-center focus:outline-none focus:ring-2 focus:ring-purple-400/50"
+                    className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-sm font-mono tracking-[0.3em] text-center focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-200 mb-1.5">New Password</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">New Password</label>
                   <div className="relative">
                     <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
                     <input
@@ -1023,16 +1020,16 @@ export const LandingPage: React.FC = () => {
                       value={forgotNewPassword}
                       onChange={e => setForgotNewPassword(e.target.value)}
                       placeholder="Min. 8 characters"
-                      className="w-full pl-10 pr-10 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-slate-400 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-purple-400/50"
+                      className="w-full pl-10 pr-10 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
                       required
                     />
-                    <button type="button" onClick={() => setShowForgotNewPw(p => !p)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white">
+                    <button type="button" onClick={() => setShowForgotNewPw(p => !p)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
                       {showForgotNewPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-200 mb-1.5">Confirm Password</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">Confirm Password</label>
                   <div className="relative">
                     <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
                     <input
@@ -1040,7 +1037,7 @@ export const LandingPage: React.FC = () => {
                       value={forgotConfirmPassword}
                       onChange={e => setForgotConfirmPassword(e.target.value)}
                       placeholder="Re-enter new password"
-                      className="w-full pl-10 pr-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-slate-400 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-purple-400/50"
+                      className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
                       required
                     />
                   </div>
@@ -1049,14 +1046,14 @@ export const LandingPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => { setForgotStep('email'); setForgotError(null); setForgotSuccess(null); }}
-                    className="flex-1 py-3 rounded-xl bg-white/10 hover:bg-white/15 text-slate-300 text-sm font-bold transition-all"
+                    className="flex-1 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold transition-all cursor-pointer"
                   >
                     ← Back
                   </button>
                   <button
                     type="submit"
                     disabled={forgotLoading}
-                    className="flex-1 py-3 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-60 text-white text-sm font-bold transition-all flex items-center justify-center gap-2"
+                    className="flex-1 py-3 rounded-xl bg-brand-primary hover:bg-brand-primary/95 disabled:opacity-60 text-white text-sm font-bold shadow-md shadow-brand-primary/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
                     {forgotLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                     {forgotLoading ? 'Resetting...' : 'Reset Password'}
@@ -1068,17 +1065,17 @@ export const LandingPage: React.FC = () => {
             {/* Step 3 — Success */}
             {forgotStep === 'success' && (
               <div className="text-center space-y-4">
-                <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center mx-auto">
-                  <CheckCircle2 className="w-7 h-7 text-emerald-400" />
+                <div className="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-center mx-auto">
+                  <CheckCircle2 className="w-7 h-7 text-emerald-600" />
                 </div>
                 <div>
-                  <p className="text-sm font-bold text-white mb-1">Password Reset!</p>
-                  <p className="text-xs text-slate-400">You can now log in with your new password.</p>
+                  <p className="text-sm font-bold text-slate-900 mb-1">Password Reset!</p>
+                  <p className="text-xs text-slate-500">You can now log in with your new password.</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => { setShowForgotModal(false); setForgotStep('email'); }}
-                  className="w-full py-3 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-sm font-bold transition-all"
+                  className="w-full py-3 rounded-xl bg-brand-primary hover:bg-brand-primary/95 text-white text-sm font-bold transition-all cursor-pointer shadow-md shadow-brand-primary/20"
                 >
                   Back to Login
                 </button>
