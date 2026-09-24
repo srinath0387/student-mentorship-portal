@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, ShieldCheck, Tag } from 'lucide-react';
+import { Plus, ShieldCheck, Tag, Trash2, Loader2 } from 'lucide-react';
 import { TechSkill } from '../../../types';
 import { api } from '../../../lib/api';
 import { useAuth } from '../../../context/AuthContext';
@@ -32,6 +32,7 @@ export const TechSkillsTab: React.FC<TechSkillsTabProps> = ({ skills, readOnly =
   const [categoryInput, setCategoryInput] = useState<string>('AI/Agentic');
   const [ratingInput, setRatingInput] = useState<number>(4);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const { user } = useAuth();
   const activeRollNo = user?.rollNumber || '';
 
@@ -54,6 +55,23 @@ export const TechSkillsTab: React.FC<TechSkillsTabProps> = ({ skills, readOnly =
       alert('Failed to add skill: ' + e.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDeleteSkill = async (skill: TechSkill) => {
+    if (readOnly) return;
+    const targetId = skill.id || skill.specific_tool;
+    if (!targetId || !activeRollNo) return;
+    if (!window.confirm(`Delete "${skill.specific_tool}"? This cannot be undone.`)) return;
+
+    setDeletingId(targetId);
+    try {
+      await api.deleteTechSkill(activeRollNo, targetId);
+      onRefresh();
+    } catch (e: any) {
+      alert('Failed to delete skill: ' + e.message);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -126,35 +144,57 @@ export const TechSkillsTab: React.FC<TechSkillsTabProps> = ({ skills, readOnly =
                 </span>
               </h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                {catSkills.map((skill) => (
-                  <div
-                    key={skill.id || skill.specific_tool}
-                    className="p-4 rounded-xl border border-borderLine bg-background flex flex-col justify-between"
-                  >
-                    <div className="flex items-start justify-between">
-                      <h5 className="text-sm font-bold text-textPrimary">{skill.specific_tool}</h5>
-                      {skill.verified && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-success-soft text-success shrink-0">
-                          <ShieldCheck className="w-3 h-3" />
-                          Verified
-                        </span>
-                      )}
-                    </div>
+                {catSkills.map((skill) => {
+                  const targetId = skill.id || skill.specific_tool;
+                  const isDeleting = deletingId === targetId;
 
-                    <div className="mt-3">
-                      <div className="flex justify-between items-center text-xs text-textSecondary mb-1">
-                        <span>Self Rating</span>
-                        <span className="font-bold text-brand-primary">{skill.self_rating} / 5</span>
+                  return (
+                    <div
+                      key={targetId}
+                      className="p-4 rounded-xl border border-borderLine bg-background flex flex-col justify-between"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <h5 className="text-sm font-bold text-textPrimary truncate">{skill.specific_tool}</h5>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {skill.verified && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-success-soft text-success shrink-0">
+                              <ShieldCheck className="w-3 h-3" />
+                              Verified
+                            </span>
+                          )}
+                          {!readOnly && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSkill(skill)}
+                              disabled={isDeleting}
+                              className="p-1.5 rounded-lg text-textSecondary hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors disabled:opacity-50"
+                              title={`Delete ${skill.specific_tool}`}
+                            >
+                              {isDeleting ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-red-500" />
+                              ) : (
+                                <Trash2 className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      <div className="w-full bg-borderLine h-2 rounded-full overflow-hidden">
-                        <div
-                          className="bg-brand-primary h-full rounded-full"
-                          style={{ width: `${(skill.self_rating / 5) * 100}%` }}
-                        />
+
+                      <div className="mt-3">
+                        <div className="flex justify-between items-center text-xs text-textSecondary mb-1">
+                          <span>Self Rating</span>
+                          <span className="font-bold text-brand-primary">{skill.self_rating} / 5</span>
+                        </div>
+                        <div className="w-full bg-borderLine h-2 rounded-full overflow-hidden">
+                          <div
+                            className="bg-brand-primary h-full rounded-full transition-all"
+                            style={{ width: `${(skill.self_rating / 5) * 100}%` }}
+                          />
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ))}

@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate, useSearchParams, useLocation, useParams, Navigate } from 'react-router-dom';
 import { ShieldCheck, UserCheck, Lock, CheckCircle2, XCircle, Loader2, Sparkles, Eye, EyeOff, ArrowLeft, KeyRound, Mail } from 'lucide-react';
-import { studentSignUpSchema, facultySignUpSchema, loginSchema, adminLoginSchema, TIER1_SUPER_ADMIN_EMAILS, StudentSignUpInput, FacultySignUpInput, LoginInput, DEPARTMENT_CODE_MAP, VALID_DEPARTMENT_NAMES, getDeptCodeFromRollNumber, getDeptFromRollNumber, REGISTRATION_NUMBER_REGEX } from '../../lib/validation/auth';
+import { studentSignUpSchema, facultySignUpSchema, loginSchema, adminLoginSchema, TIER1_SUPER_ADMIN_EMAILS, StudentSignUpInput, FacultySignUpInput, LoginInput, DEPARTMENT_CODE_MAP, VALID_DEPARTMENT_NAMES, getDeptCodeFromRollNumber, getDeptFromRollNumber, REGISTRATION_NUMBER_REGEX, isStudentEmail } from '../../lib/validation/auth';
 import { api } from '../../lib/api';
 import { cognitoSignUp, cognitoSignIn, cognitoSignOut, isCognitoConfigError, cognitoForgotPassword, cognitoConfirmPassword } from '../../lib/cognitoAuth';
 import { useAuth } from '../../context/AuthContext';
@@ -909,6 +909,10 @@ export const AuthPage: React.FC = () => {
 
       // Step 3: Extract DB profile info (using pre-fetched DB user if available)
       if (activeTab === 'student') {
+        if (!isStudentEmail(data.email)) {
+          throw new Error('This appears to be a faculty or staff email. Please use the Faculty tab to log in.');
+        }
+
         const rollFromEmail = data.email.includes('@') ? data.email.split('@')[0].toUpperCase() : data.email.toUpperCase();
         let student = preFetchedDbUser;
         if (!student) {
@@ -961,6 +965,18 @@ export const AuthPage: React.FC = () => {
         // Department is always taken from the student's DB record / roll number — no manual selection needed
         login(data.email, 'student', rollNo, displayName, jwtToken, studentDept);
       } else if (activeTab === 'faculty') {
+        // Prevent students from logging in as faculty
+        if (isStudentEmail(data.email)) {
+          throw new Error('This is a student email. Please use the "Student" tab to log in.');
+        }
+
+        // Verify account is not a student in DB
+        let studentCheck: any = null;
+        try { studentCheck = await api.getStudentByEmail(data.email); } catch { /* silent */ }
+        if (studentCheck) {
+          throw new Error('This account belongs to a student. Please use the "Student" tab to log in.');
+        }
+
         let faculty = await api.getFacultyByEmail(data.email).catch((err: any) => {
           if (err?.message && (err.message.includes('blocked'))) {
             throw err; // Only block for explicitly blocked accounts
@@ -968,31 +984,23 @@ export const AuthPage: React.FC = () => {
           return null;
         });
 
-        // If Cognito auth succeeded but faculty not yet in DB — auto-create the record
+        // Fallback: check if valid in faculty_credentials table via adminLogin
         if (!faculty) {
-          const facId = `FAC_${data.email.split('@')[0].toUpperCase()}`;
-          const facDeptForCreate = loginDept || 'CSE (Data Science)';
           try {
-            await api.createFaculty({
-              faculty_id: facId,
-              name: data.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-              email: data.email,
-              department: facDeptForCreate,
-              role: 'mentor',
-            });
-            faculty = await api.getFacultyByEmail(data.email).catch(() => null);
-          } catch (_) {}
+            const facCheck = await api.adminLogin(data.email, data.password, loginDept);
+            if (facCheck.valid && facCheck.role === 'faculty') {
+              faculty = {
+                faculty_id: facCheck.faculty_id || `FAC_${data.email.split('@')[0].toUpperCase()}`,
+                name: facCheck.name || data.email.split('@')[0],
+                department: facCheck.department || loginDept || 'CSE (Data Science)',
+                role: 'mentor',
+              };
+            }
+          } catch { /* silent */ }
+        }
 
-          // If still null after create attempt, allow login with minimal profile
-          if (!faculty) {
-            faculty = {
-              faculty_id: facId,
-              name: data.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
-              email: data.email,
-              department: facDeptForCreate,
-              role: 'mentor',
-            };
-          }
+        if (!faculty) {
+          throw new Error('Faculty profile not found. Please verify your credentials or contact the administrator.');
         }
 
         if (loginDept && faculty.department !== loginDept) {

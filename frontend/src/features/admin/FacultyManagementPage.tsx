@@ -40,7 +40,8 @@ export default function FacultyManagementPage() {
   const { user } = useAuth();
   const qc = useQueryClient();
 
-  const isSuperAdmin = user?.isSuperAdmin === true || user?.department === 'All' || user?.department === '*' || !user?.department;
+  const isAdmin = user?.role === 'admin';
+  const isSuperAdmin = isAdmin && (user?.isSuperAdmin === true || user?.department === 'All' || user?.department === '*' || !user?.department);
   const [selectedDept, setSelectedDept] = useState<string>(
     isSuperAdmin ? 'All' : normalizeDepartmentName(user?.department || 'CSE')
   );
@@ -199,7 +200,9 @@ export default function FacultyManagementPage() {
             <Users className="w-3.5 h-3.5" />
             <span>Faculty Portal</span>
           </div>
-          <h1 className="text-xl font-extrabold text-textPrimary">Faculty Management</h1>
+          <h1 className="text-xl font-extrabold text-textPrimary">
+            {user?.role === 'hod' || user?.role === 'coordinator' ? 'Faculty Directory & 360°' : 'Faculty Management'}
+          </h1>
           <p className="mt-0.5 text-xs text-textSecondary">
             {faculty.length} faculty member{faculty.length !== 1 ? 's' : ''} {selectedDept !== 'All' ? `(${selectedDept})` : ''} — select a row to view assigned mentees
           </p>
@@ -230,40 +233,44 @@ export default function FacultyManagementPage() {
             </div>
           )}
 
-          {/* Smart Auto-Link & Merge Button */}
-          <button
-            id="smart-auto-merge-btn"
-            onClick={() => autoMergeMut.mutate()}
-            disabled={autoMergeMut.isPending}
-            title="Scan and auto-merge duplicate unlinked CSV records into real registered faculty accounts using AI fuzzy name matching"
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-purple-500/40 bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 text-xs font-bold hover:bg-purple-600 hover:text-white transition-colors disabled:opacity-60 shadow-xs"
-          >
-            <Sparkles className={`w-3.5 h-3.5 ${autoMergeMut.isPending ? 'animate-spin text-purple-400' : 'text-purple-600 dark:text-purple-400'}`} />
-            <span>{autoMergeMut.isPending ? 'Auto-Merging…' : '✨ Smart Auto-Link & Merge'}</span>
-          </button>
+          {isAdmin && (
+            <>
+              {/* Smart Auto-Link & Merge Button */}
+              <button
+                id="smart-auto-merge-btn"
+                onClick={() => autoMergeMut.mutate()}
+                disabled={autoMergeMut.isPending}
+                title="Scan and auto-merge duplicate unlinked CSV records into real registered faculty accounts using AI fuzzy name matching"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-purple-500/40 bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 text-xs font-bold hover:bg-purple-600 hover:text-white transition-colors disabled:opacity-60 shadow-xs"
+              >
+                <Sparkles className={`w-3.5 h-3.5 ${autoMergeMut.isPending ? 'animate-spin text-purple-400' : 'text-purple-600 dark:text-purple-400'}`} />
+                <span>{autoMergeMut.isPending ? 'Auto-Merging…' : '✨ Smart Auto-Link & Merge'}</span>
+              </button>
 
-          {/* Sync button: reconciles mentor_assignments ↔ students.faculty_mentor_id */}
-          <button
-            id="sync-mentor-assignments-btn"
-            onClick={() => syncMut.mutate()}
-            disabled={syncMut.isPending}
-            title="Reconcile mentor_assignments table with students.faculty_mentor_id"
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-brand-primary/40 bg-brand-soft text-brand-primary text-xs font-bold hover:bg-brand-primary hover:text-white transition-colors disabled:opacity-60"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${syncMut.isPending ? 'animate-spin' : ''}`} />
-            <span>{syncMut.isPending ? 'Syncing…' : 'Sync Assignments'}</span>
-          </button>
-          <button
-            onClick={() => setShowBlocked(p => !p)}
-            className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border text-xs font-bold transition-colors ${
-              showBlocked
-                ? 'bg-alert border-alert text-white'
-                : 'bg-surface border-alert/50 text-alert hover:bg-alert-soft'
-            }`}
-          >
-            <ShieldAlert className="w-3.5 h-3.5" />
-            <span>{showBlocked ? 'Hide' : 'Show'} Blocked Emails</span>
-          </button>
+              {/* Sync button: reconciles mentor_assignments ↔ students.faculty_mentor_id */}
+              <button
+                id="sync-mentor-assignments-btn"
+                onClick={() => syncMut.mutate()}
+                disabled={syncMut.isPending}
+                title="Reconcile mentor_assignments table with students.faculty_mentor_id"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-brand-primary/40 bg-brand-soft text-brand-primary text-xs font-bold hover:bg-brand-primary hover:text-white transition-colors disabled:opacity-60"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${syncMut.isPending ? 'animate-spin' : ''}`} />
+                <span>{syncMut.isPending ? 'Syncing…' : 'Sync Assignments'}</span>
+              </button>
+              <button
+                onClick={() => setShowBlocked(p => !p)}
+                className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border text-xs font-bold transition-colors ${
+                  showBlocked
+                    ? 'bg-alert border-alert text-white'
+                    : 'bg-surface border-alert/50 text-alert hover:bg-alert-soft'
+                }`}
+              >
+                <ShieldAlert className="w-3.5 h-3.5" />
+                <span>{showBlocked ? 'Hide' : 'Show'} Blocked Emails</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -485,55 +492,59 @@ export default function FacultyManagementPage() {
                       >
                         <Eye className="w-3 h-3" /> Profile
                       </button>
-                      <button
-                        onClick={() => { setRenameId(f.faculty_id); setRenameValue(f.name); }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-borderLine bg-surface text-textSecondary text-xs font-semibold hover:bg-background transition-colors"
-                      >
-                        <Pencil className="w-3 h-3" /> Rename
-                      </button>
-                      <button
-                        onClick={() => { setChangeDeptId(f.faculty_id); setChangeDeptValue(f.department || 'CSE'); }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-purple-400/40 bg-surface text-purple-600 dark:text-purple-400 text-xs font-semibold hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors"
-                        title="Transfer / Change Department"
-                      >
-                        <Building className="w-3 h-3" /> Change Dept
-                      </button>
-                      <button
-                        onClick={() => { setLinkEmailId(f.faculty_id); setLinkEmailValue(f.email || ''); }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-sky-400/40 bg-surface text-sky-600 dark:text-sky-400 text-xs font-semibold hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-colors"
-                      >
-                        <Mail className="w-3 h-3" /> {isLinked ? 'Update Email' : 'Link Email'}
-                      </button>
-                      {!isLinked && (
-                        <button
-                          onClick={() => { setMergeSourceFac(f); setMergeTargetFacId(''); }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-purple-500/40 bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-xs font-semibold hover:bg-purple-600 hover:text-white transition-colors"
-                          title="Merge this unlinked placeholder into a registered faculty account"
-                        >
-                          <GitMerge className="w-3 h-3" /> Merge Record
-                        </button>
-                      )}
-                      {isDeleting ? (
+                      {isAdmin && (
                         <>
                           <button
-                            onClick={() => deleteMut.mutate(f.faculty_id)}
-                            disabled={deleteMut.isPending}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-alert text-white text-xs font-bold disabled:opacity-60"
+                            onClick={() => { setRenameId(f.faculty_id); setRenameValue(f.name); }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-borderLine bg-surface text-textSecondary text-xs font-semibold hover:bg-background transition-colors"
                           >
-                            <AlertTriangle className="w-3 h-3" /> {deleteMut.isPending ? 'Deleting...' : 'Confirm Delete'}
+                            <Pencil className="w-3 h-3" /> Rename
                           </button>
                           <button
-                            onClick={() => setDeleteConfirm(null)}
-                            className="px-2 py-1 rounded-lg bg-background text-textSecondary text-xs border border-borderLine"
-                          >Cancel</button>
+                            onClick={() => { setChangeDeptId(f.faculty_id); setChangeDeptValue(f.department || 'CSE'); }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-purple-400/40 bg-surface text-purple-600 dark:text-purple-400 text-xs font-semibold hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors"
+                            title="Transfer / Change Department"
+                          >
+                            <Building className="w-3 h-3" /> Change Dept
+                          </button>
+                          <button
+                            onClick={() => { setLinkEmailId(f.faculty_id); setLinkEmailValue(f.email || ''); }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-sky-400/40 bg-surface text-sky-600 dark:text-sky-400 text-xs font-semibold hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-colors"
+                          >
+                            <Mail className="w-3 h-3" /> {isLinked ? 'Update Email' : 'Link Email'}
+                          </button>
+                          {!isLinked && (
+                            <button
+                              onClick={() => { setMergeSourceFac(f); setMergeTargetFacId(''); }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-purple-500/40 bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-xs font-semibold hover:bg-purple-600 hover:text-white transition-colors"
+                              title="Merge this unlinked placeholder into a registered faculty account"
+                            >
+                              <GitMerge className="w-3 h-3" /> Merge Record
+                            </button>
+                          )}
+                          {isDeleting ? (
+                            <>
+                              <button
+                                onClick={() => deleteMut.mutate(f.faculty_id)}
+                                disabled={deleteMut.isPending}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-alert text-white text-xs font-bold disabled:opacity-60"
+                              >
+                                <AlertTriangle className="w-3 h-3" /> {deleteMut.isPending ? 'Deleting...' : 'Confirm Delete'}
+                              </button>
+                              <button
+                                onClick={() => setDeleteConfirm(null)}
+                                className="px-2 py-1 rounded-lg bg-background text-textSecondary text-xs border border-borderLine"
+                              >Cancel</button>
+                            </>
+                          ) : (
+                            <button
+                              onClick={() => setDeleteConfirm(f.faculty_id)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-alert/40 bg-surface text-alert text-xs font-semibold hover:bg-alert-soft transition-colors"
+                            >
+                              <Trash2 className="w-3 h-3" /> Delete
+                            </button>
+                          )}
                         </>
-                      ) : (
-                        <button
-                          onClick={() => setDeleteConfirm(f.faculty_id)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-alert/40 bg-surface text-alert text-xs font-semibold hover:bg-alert-soft transition-colors"
-                        >
-                          <Trash2 className="w-3 h-3" /> Delete
-                        </button>
                       )}
                     </div>
 

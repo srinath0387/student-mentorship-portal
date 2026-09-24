@@ -69,7 +69,7 @@ export const api = {
     }
   },
   // Admin, HOD, Coordinator & Oversight Login — credentials validated server-side (never stored in frontend)
-  adminLogin: async (email: string, password: string, department?: string): Promise<{ valid: boolean; role?: string; isSuperAdmin?: boolean; department?: string; name?: string; email?: string; error?: string }> => {
+  adminLogin: async (email: string, password: string, department?: string): Promise<{ valid: boolean; role?: string; isSuperAdmin?: boolean; department?: string; name?: string; email?: string; faculty_id?: string; error?: string }> => {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s max
@@ -203,6 +203,12 @@ export const api = {
     return fetchWithAuth(`/students/${id}/tech-skills`, {
       method: 'POST',
       body: JSON.stringify(data),
+    });
+  },
+
+  deleteTechSkill: async (id: string, skillId: string): Promise<TechSkill[]> => {
+    return fetchWithAuth(`/students/${id}/tech-skills/${encodeURIComponent(skillId)}`, {
+      method: 'DELETE',
     });
   },
 

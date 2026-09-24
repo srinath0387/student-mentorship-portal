@@ -28,7 +28,7 @@ import { UserRole } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../lib/api';
 import { cognitoForgotPassword, cognitoConfirmPassword } from '../../lib/cognitoAuth';
-import { VALID_DEPARTMENT_NAMES, getDeptFromRollNumber, RGMCET_EMAIL_REGEX } from '../../lib/validation/auth';
+import { VALID_DEPARTMENT_NAMES, getDeptFromRollNumber, RGMCET_EMAIL_REGEX, isStudentEmail } from '../../lib/validation/auth';
 
 interface RoleOption {
   id: UserRole;
@@ -315,6 +315,11 @@ export const LandingPage: React.FC = () => {
             throw new Error('Please enter a valid @rgmcet.edu.in email address.');
           }
 
+          // Guard: Reject faculty/staff emails attempting student login
+          if (!isStudentEmail(emailInput)) {
+            throw new Error('This appears to be a faculty or staff email. Please select your official role (Faculty, HOD, Admin) to log in.');
+          }
+
           // Use backend AdminInitiateAuth — works for ALL users regardless of Cognito username format
           const tokens = await api.cognitoSignInViaBackend(emailInput, trimmedPass);
           const rollFromEmail = emailInput.split('@')[0].toUpperCase();
@@ -329,7 +334,7 @@ export const LandingPage: React.FC = () => {
 
           const studentName = student?.name || rollFromEmail;
           const studentRoll = student?.roll_number || rollFromEmail;
-          const studentDept = student?.department || dept || 'CSE (Data Science)';
+          const studentDept = student?.department || (dept !== 'Unknown' ? dept : 'CSE (Data Science)');
 
           login(emailInput, 'student', studentRoll, studentName, tokens.idToken, studentDept);
           await registerSession(emailInput, 'student');
@@ -343,10 +348,34 @@ export const LandingPage: React.FC = () => {
         if (!trimmedId) throw new Error('Please enter the Student Roll Number.');
         if (!trimmedPass) throw new Error('Please enter your Password.');
 
-        const rollUpper = trimmedId.toUpperCase();
-        const dept = getDeptFromRollNumber(rollUpper);
-        login(`parent_${rollUpper.toLowerCase()}@rgmcet.edu.in`, 'parent', rollUpper, `Parent of ${rollUpper}`, undefined, dept);
-        await registerSession(`parent_${rollUpper.toLowerCase()}`, 'parent');
+        const rollUpper = (trimmedId.includes('@') ? trimmedId.split('@')[0] : trimmedId).toUpperCase();
+
+        if (!isStudentEmail(rollUpper)) {
+          throw new Error('Please enter a valid student roll number (e.g. 23091A3252).');
+        }
+
+        // Parent password must match student roll number (case-insensitive)
+        if (trimmedPass.toUpperCase() !== rollUpper) {
+          throw new Error('Incorrect password. For parent access, enter the student roll number.');
+        }
+
+        // Verify student exists in institutional database
+        let student: any = null;
+        try { student = await api.getStudentProfile(rollUpper); } catch { /* silent */ }
+        if (!student) {
+          try { student = await api.getStudentByEmail(`${rollUpper.toLowerCase()}@rgmcet.edu.in`); } catch { /* silent */ }
+        }
+
+        if (!student) {
+          throw new Error(`Student record (${rollUpper}) not found. Please verify the roll number.`);
+        }
+
+        const wardName = student.name || `Student (${rollUpper})`;
+        const wardDept = student.department || getDeptFromRollNumber(rollUpper) || 'CSE (Data Science)';
+        const roll = student.roll_number || rollUpper;
+
+        login(`parent_${roll.toLowerCase()}@rgmcet.edu.in`, 'parent', roll, `Parent of ${wardName}`, undefined, wardDept);
+        await registerSession(`parent_${roll.toLowerCase()}`, 'parent');
         navigate('/dashboard');
         return;
       }
@@ -356,14 +385,51 @@ export const LandingPage: React.FC = () => {
         if (!trimmedId) throw new Error('Please enter your official email address.');
         if (!trimmedPass) throw new Error('Please enter your password.');
 
+        // Prevent students from logging in as faculty
+        if (isStudentEmail(trimmedId)) {
+          throw new Error('This is a student email. Please select the "Student" role from the dropdown to log in.');
+        }
+
+        const emailLower = trimmedId.toLowerCase();
+        if (!emailLower.endsWith('@rgmcet.edu.in')) {
+          throw new Error('Please enter a valid @rgmcet.edu.in official faculty email address.');
+        }
+
         try {
-          const tokens = await api.cognitoSignInViaBackend(trimmedId, trimmedPass);
+          const tokens = await api.cognitoSignInViaBackend(emailLower, trimmedPass);
+
+          // Check if this account is actually registered as a student in the DB
+          let studentCheck: any = null;
+          try { studentCheck = await api.getStudentByEmail(emailLower); } catch { /* silent */ }
+          if (studentCheck) {
+            throw new Error('This account belongs to a student. Please select the "Student" role to log in.');
+          }
+
           let faculty: any = null;
-          try { faculty = await api.getFacultyByEmail(trimmedId); } catch { /* silent */ }
+          try { faculty = await api.getFacultyByEmail(emailLower); } catch { /* silent */ }
+
+          // Fallback: check if valid in faculty_credentials table via adminLogin
+          if (!faculty) {
+            try {
+              const facCheck = await api.adminLogin(emailLower, trimmedPass, selectedDept);
+              if (facCheck.valid && facCheck.role === 'faculty') {
+                faculty = {
+                  faculty_id: facCheck.faculty_id || `FAC_${emailLower.split('@')[0].toUpperCase()}`,
+                  name: facCheck.name || emailLower.split('@')[0],
+                  department: facCheck.department || selectedDept,
+                };
+              }
+            } catch { /* silent */ }
+          }
+
+          if (!faculty) {
+            throw new Error('Faculty profile not found. Please verify your credentials or contact the administrator.');
+          }
+
           const facDept = faculty?.department || selectedDept;
-          const facName = faculty?.name || trimmedId.split('@')[0];
-          login(trimmedId, 'faculty', faculty?.faculty_id, facName, tokens.idToken, facDept);
-          await registerSession(trimmedId, 'faculty');
+          const facName = faculty?.name || emailLower.split('@')[0];
+          login(emailLower, 'faculty', faculty?.faculty_id, facName, tokens.idToken, facDept);
+          await registerSession(emailLower, 'faculty');
           navigate('/faculty/dashboard');
           return;
         } catch (facErr: any) {
@@ -379,11 +445,31 @@ export const LandingPage: React.FC = () => {
       if (!trimmedId) throw new Error('Please enter your official email address.');
       if (!trimmedPass) throw new Error('Please enter your password.');
 
+      // Prevent students from logging in as HOD/Admin/Coordinator
+      if (isStudentEmail(trimmedId)) {
+        throw new Error('This is a student email. Please select the "Student" role from the dropdown to log in.');
+      }
+
       const adminRes = await api.adminLogin(trimmedId, trimmedPass, selectedDept);
       if (adminRes.valid) {
         const assignedRole = (adminRes.role as UserRole) || selectedRole.id;
         const isSuperAdmin = Boolean(adminRes.isSuperAdmin);
         const assignedDept = adminRes.department || selectedDept;
+
+        // Role authorization check: ensure the account has permissions for the selected role
+        if (selectedRole.id === 'hod' && assignedRole !== 'hod' && !isSuperAdmin) {
+          throw new Error('Access denied. This account does not have Head of Department (HOD) privileges.');
+        }
+        if (selectedRole.id === 'admin' && assignedRole !== 'admin' && !isSuperAdmin) {
+          throw new Error('Access denied. This account does not have Administrator privileges.');
+        }
+        if (selectedRole.id === 'coordinator' && assignedRole !== 'coordinator' && !isSuperAdmin) {
+          throw new Error('Access denied. This account does not have Coordinator privileges.');
+        }
+        if (['director', 'principal', 'management', 'program_chair'].includes(selectedRole.id) &&
+            !['director', 'principal', 'management', 'program_chair', 'admin'].includes(assignedRole) && !isSuperAdmin) {
+          throw new Error(`Access denied. This account does not have ${selectedRole.title} privileges.`);
+        }
 
         login(adminRes.email || trimmedId, assignedRole, undefined, adminRes.name || assignedRole.toUpperCase(), undefined, assignedDept, isSuperAdmin);
         await registerSession(adminRes.email || trimmedId, assignedRole);

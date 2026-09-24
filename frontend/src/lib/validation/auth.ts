@@ -7,6 +7,16 @@ import { z } from 'zod';
 export const REGISTRATION_NUMBER_REGEX = /^(\d{4}[15]A(01|02|03|04|05|32|33|34|37)[0-9A-Za-z]{2}|\d{4}1E00[0-9A-Za-z]{2}|\d{4}1F00[0-9A-Za-z]{2})$/i;
 export const RGMCET_EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@rgmcet\.edu\.in$/i;
 
+/** Check if an email or identifier belongs to a student (roll-number-based local part) */
+export function isStudentEmail(emailOrId: string): boolean {
+  if (!emailOrId) return false;
+  const local = (emailOrId || '').split('@')[0].trim();
+  if (REGISTRATION_NUMBER_REGEX.test(local)) return true;
+  if (/^\d{2}[0-9a-zA-Z]{4,10}$/i.test(local)) return true;
+  if (/^\d/.test(local)) return true;
+  return false;
+}
+
 // ── Department Code Map ─────────────────────────────────────────────────────
 export const DEPARTMENT_CODE_MAP: Record<string, string> = {
   '01': 'Civil',

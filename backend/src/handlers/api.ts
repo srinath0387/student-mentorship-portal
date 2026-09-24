@@ -487,8 +487,10 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
         return res.status(401).json({ valid: false, error: 'Invalid email or password.' });
       }
 
-      // No DB row — auto-seed if it's any @rgmcet.edu.in email with default password faculty@2026
-      const isFacultyEmail = emailLower.endsWith('@rgmcet.edu.in') && password === 'faculty@2026';
+      // No DB row — auto-seed only if it's a genuine faculty @rgmcet.edu.in email (never a student roll number) with default password faculty@2026
+      const emailPrefix = emailLower.split('@')[0];
+      const isStudentRoll = /^\d{2}[0-9a-z]{4,10}$/i.test(emailPrefix) || /^\d/.test(emailPrefix);
+      const isFacultyEmail = emailLower.endsWith('@rgmcet.edu.in') && !isStudentRoll && password === 'faculty@2026';
       if (isFacultyEmail) {
         // Look up the faculty profile to get department
         let resolvedFacDept = department || 'CSE (Data Science)';
@@ -3442,6 +3444,42 @@ app.post('/students/:id/tech-skills', requireOwnerOrRole('id', 'faculty', 'hod',
   }
 });
 
+app.delete('/students/:id/tech-skills/:skillId', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const studentId = req.params.id.toUpperCase();
+    const skillId = req.params.skillId;
+
+    if (db.isMock) {
+      const existing = db.mockStore.techSkills.get(studentId) || [];
+      const updated = existing.filter((s: any) => s.id !== skillId && s.specific_tool !== skillId);
+      db.mockStore.techSkills.set(studentId, updated);
+      return res.json({ message: 'Tech skill deleted', skills: updated });
+    }
+
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(skillId);
+    if (isUuid) {
+      await db.query(
+        'DELETE FROM tech_skills WHERE id = $1 AND student_id = $2',
+        [skillId, studentId]
+      );
+    } else {
+      await db.query(
+        'DELETE FROM tech_skills WHERE specific_tool = $1 AND student_id = $2',
+        [skillId, studentId]
+      );
+    }
+
+    const result = await db.query(
+      'SELECT * FROM tech_skills WHERE student_id = $1 ORDER BY skill_category, specific_tool',
+      [studentId]
+    );
+    res.json({ message: 'Tech skill deleted', skills: result.rows });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 // ============================================================================
 // Helper to extract clean S3 key from a full S3 URL or partial path
 function extractS3Key(urlOrKey: string | null | undefined): string | null {
@@ -3958,6 +3996,11 @@ app.post('/faculty', async (req: Request, res: Response) => {
       return res.status(201).json({ message: 'Faculty registered successfully', faculty: newFaculty });
     }
 
+    const localPrefix = cleanEmail.split('@')[0].trim();
+    if (/^\d{2}[0-9a-z]{4,10}$/i.test(localPrefix) || /^\d/.test(localPrefix)) {
+      return res.status(400).json({ error: 'Cannot register student email as faculty.' });
+    }
+
     // If faculty is being registered or updated, ensure email is removed from blocked_emails
     await db.query('DELETE FROM blocked_emails WHERE LOWER(email) = $1', [cleanEmail]).catch(() => {});
 
@@ -4090,6 +4133,11 @@ app.post('/faculty', async (req: Request, res: Response) => {
 app.get('/faculty/by-email/:email', async (req: Request, res: Response) => {
   try {
     const email = req.params.email.toLowerCase().trim();
+    const local = email.split('@')[0].trim();
+    if (/^\d{2}[0-9a-z]{4,10}$/i.test(local) || /^\d/.test(local)) {
+      return res.status(404).json({ error: 'Faculty profile not found' });
+    }
+
     if (db.isMock) {
       return res.json({ faculty_id: 'FAC001', name: 'Dr. M. V. Ramana', email, department: 'CSE', role: 'mentor' });
     }
@@ -5108,7 +5156,7 @@ app.get('/faculty/blocked', requireRole('admin'), async (_req: Request, res: Res
 
 // GET /faculty/:id/mentees-detail — Full mentee list for one faculty (for admin/HOD directory)
 // Unions mentor_assignments + students.faculty_mentor_id to avoid missing mentees
-app.get('/faculty/:id/mentees-detail', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+app.get('/faculty/:id/mentees-detail', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const facId = req.params.id.toUpperCase();
     if (db.isMock) return res.json([]);
@@ -5219,8 +5267,8 @@ app.delete('/mentor-assignments/:facultyId/:rollNumber', requireRole('admin'), a
   }
 });
 
-// POST /faculty/:facultyId/mentees — Admin manually assigns one or more students to a faculty mentor
-app.post('/faculty/:facultyId/mentees', requireRole('admin'), async (req: Request, res: Response) => {
+// POST /faculty/:facultyId/mentees — Admin or HOD manually assigns one or more students to a faculty mentor
+app.post('/faculty/:facultyId/mentees', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const facId = req.params.facultyId.toUpperCase();
     const rawRolls: any[] = Array.isArray(req.body?.rolls)
