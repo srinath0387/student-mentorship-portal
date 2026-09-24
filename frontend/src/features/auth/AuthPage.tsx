@@ -70,7 +70,7 @@ export const AuthPage: React.FC = () => {
   if (!activeTab) {
     return <Navigate to="/" replace />;
   }
-  const [isSignUp, setIsSignUp] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(() => searchParams.get('signup') === 'true');
   const [loginDept, setLoginDept] = useState<string>('CSE (Data Science)');
   const [regNoStatus, setRegNoStatus] = useState<{ loading: boolean; available?: boolean; message?: string }>({ loading: false });
   const [emailStatus, setEmailStatus] = useState<{ loading: boolean; available?: boolean; message?: string }>({ loading: false });
@@ -1077,7 +1077,7 @@ export const AuthPage: React.FC = () => {
       )}
 
       <div className="mt-2 sm:mt-3 sm:mx-auto sm:w-full sm:max-w-lg">
-        <div className="bg-surface py-4 sm:py-5 px-5 sm:px-8 shadow-md border border-borderLine rounded-2xl">
+        <div className="bg-white dark:bg-surface py-4 sm:py-5 px-5 sm:px-8 shadow-xl border border-gray-100 dark:border-borderLine rounded-2xl">
           {/* Inline Error Banner */}
           {errorMessage && (
             <div className="mb-4 flex items-start gap-3 bg-red-950/60 border border-red-500/50 rounded-xl px-3.5 py-2.5 text-xs animate-pulse-once">

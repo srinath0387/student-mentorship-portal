@@ -19,6 +19,7 @@ import {
   Award, 
   AlertCircle,
   Loader2,
+  UserPlus,
   X
 } from 'lucide-react';
 import { AuthAnimated3DBackground } from './AuthAnimated3DBackground';
@@ -26,8 +27,8 @@ import { Footer } from '../../components/layout/Footer';
 import { UserRole } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../lib/api';
-import { cognitoSignIn, isCognitoConfigError, cognitoForgotPassword, cognitoConfirmPassword } from '../../lib/cognitoAuth';
-import { VALID_DEPARTMENT_NAMES, getDeptFromRollNumber } from '../../lib/validation/auth';
+import { cognitoForgotPassword, cognitoConfirmPassword } from '../../lib/cognitoAuth';
+import { VALID_DEPARTMENT_NAMES, getDeptFromRollNumber, RGMCET_EMAIL_REGEX } from '../../lib/validation/auth';
 
 interface RoleOption {
   id: UserRole;
@@ -305,31 +306,39 @@ export const LandingPage: React.FC = () => {
           }
           throw new Error(res.error || 'Invalid fresher credentials.');
         } else {
-          // Regular 2nd-4th Year Student
-          if (!trimmedId) throw new Error('Please enter your Roll Number.');
+          // Regular 2nd-4th Year Student — email-based login via backend AdminInitiateAuth
+          if (!trimmedId) throw new Error('Please enter your college email (e.g. 23091a3227@rgmcet.edu.in).');
           if (!trimmedPass) throw new Error('Please enter your Password.');
 
-          const rollUpper = trimmedId.toUpperCase();
-          const email = `${rollUpper.toLowerCase()}@rgmcet.edu.in`;
+          // Accept either email or raw roll number — auto-convert roll to email
+          const emailInput = trimmedId.includes('@')
+            ? trimmedId.toLowerCase()
+            : `${trimmedId.toLowerCase()}@rgmcet.edu.in`;
 
-          try {
-            const cognitoRes = await cognitoSignIn(email, trimmedPass);
-            const dept = getDeptFromRollNumber(rollUpper);
-            login(email, 'student', rollUpper, rollUpper, cognitoRes.idToken, dept);
-            await registerSession(email, 'student');
-            navigate('/dashboard');
-            return;
-          } catch (cognitoErr: any) {
-            if (isCognitoConfigError(cognitoErr)) {
-              // Dev/Fallback mock student login
-              const dept = getDeptFromRollNumber(rollUpper);
-              login(email, 'student', rollUpper, rollUpper, undefined, dept);
-              await registerSession(email, 'student');
-              navigate('/dashboard');
-              return;
-            }
-            throw cognitoErr;
+          if (!RGMCET_EMAIL_REGEX.test(emailInput)) {
+            throw new Error('Please enter a valid @rgmcet.edu.in email address.');
           }
+
+          // Use backend AdminInitiateAuth — works for ALL users regardless of Cognito username format
+          const tokens = await api.cognitoSignInViaBackend(emailInput, trimmedPass);
+          const rollFromEmail = emailInput.split('@')[0].toUpperCase();
+          const dept = getDeptFromRollNumber(rollFromEmail);
+
+          // Fetch DB profile for name
+          let student: any = null;
+          try { student = await api.getStudentByEmail(emailInput); } catch { /* silent */ }
+          if (!student) {
+            try { student = await api.getStudentProfile(rollFromEmail); } catch { /* silent */ }
+          }
+
+          const studentName = student?.name || rollFromEmail;
+          const studentRoll = student?.roll_number || rollFromEmail;
+          const studentDept = student?.department || dept || 'CSE (Data Science)';
+
+          login(emailInput, 'student', studentRoll, studentName, tokens.idToken, studentDept);
+          await registerSession(emailInput, 'student');
+          navigate('/dashboard');
+          return;
         }
       }
 
@@ -346,32 +355,27 @@ export const LandingPage: React.FC = () => {
         return;
       }
 
-      // ── 3. Faculty Login — Cognito first (existing accounts), adminLogin fallback ──
+      // ── 3. Faculty Login — backend AdminInitiateAuth (resolves UUID usernames) ──
       if (selectedRole.id === 'faculty') {
         if (!trimmedId) throw new Error('Please enter your official email address.');
         if (!trimmedPass) throw new Error('Please enter your password.');
 
         try {
-          const cognitoRes = await cognitoSignIn(trimmedId, trimmedPass);
-          login(trimmedId, 'faculty', undefined, trimmedId.split('@')[0], cognitoRes.idToken, selectedDept);
+          const tokens = await api.cognitoSignInViaBackend(trimmedId, trimmedPass);
+          let faculty: any = null;
+          try { faculty = await api.getFacultyByEmail(trimmedId); } catch { /* silent */ }
+          const facDept = faculty?.department || selectedDept;
+          const facName = faculty?.name || trimmedId.split('@')[0];
+          login(trimmedId, 'faculty', faculty?.faculty_id, facName, tokens.idToken, facDept);
           await registerSession(trimmedId, 'faculty');
           navigate('/faculty/dashboard');
           return;
-        } catch (cognitoErr: any) {
-          if (isCognitoConfigError(cognitoErr)) {
-            // Dev/local fallback — try adminLogin (checks faculty_credentials / default password)
-            const adminRes = await api.adminLogin(trimmedId, trimmedPass, selectedDept);
-            if (adminRes.valid) {
-              const assignedDept = adminRes.department || selectedDept;
-              login(adminRes.email || trimmedId, 'faculty', undefined, adminRes.name || trimmedId.split('@')[0], undefined, assignedDept);
-              await registerSession(adminRes.email || trimmedId, 'faculty');
-              navigate('/faculty/dashboard');
-              return;
-            }
-            throw new Error(adminRes.error || 'Invalid credentials.');
+        } catch (facErr: any) {
+          const msg = facErr?.message || '';
+          if (msg.includes('Incorrect username or password') || msg.includes('NotAuthorizedException')) {
+            throw new Error('Incorrect email or password. Please check your credentials.');
           }
-          // Cognito is configured but credentials were wrong
-          throw new Error('Invalid email or password. Use the password you registered with.');
+          throw new Error(msg || 'Authentication failed. Please verify your credentials.');
         }
       }
 
@@ -486,9 +490,9 @@ export const LandingPage: React.FC = () => {
 
             {/* Dropdown Menu Modal */}
             {isDropdownOpen && (
-              <div className="absolute top-full inset-x-0 mt-2 bg-slate-950/95 backdrop-blur-2xl border border-white/20 rounded-2xl shadow-2xl z-50 overflow-hidden max-h-[380px] flex flex-col animate-in fade-in zoom-in-95 duration-150">
+              <div className="absolute top-full inset-x-0 mt-2 bg-slate-950/95 backdrop-blur-2xl border border-white/20 rounded-2xl shadow-2xl z-50 overflow-hidden max-h-[400px] flex flex-col animate-in fade-in zoom-in-95 duration-150">
                 {/* Typeahead Search Input */}
-                <div className="p-3 border-b border-white/10 bg-slate-900/90 sticky top-0 z-10 flex items-center gap-2">
+                <div className="p-3 border-b border-white/10 bg-slate-900/90 shrink-0 z-10 flex items-center gap-2">
                   <Search className="w-4 h-4 text-cyan-400 shrink-0 ml-1" />
                   <input
                     ref={searchInputRef}
@@ -506,7 +510,7 @@ export const LandingPage: React.FC = () => {
                 </div>
 
                 {/* Role List with Categories */}
-                <div className="overflow-y-auto p-2 space-y-3">
+                <div className="overflow-y-auto flex-1 min-h-0 p-2 space-y-3">
                   {/* Category 1: Staff & Student Logins */}
                   {staffStudentRoles.length > 0 && (
                     <div>
@@ -644,26 +648,26 @@ export const LandingPage: React.FC = () => {
               <div>
                 <label className="block text-xs font-semibold text-slate-200 mb-1.5">
                   {selectedRole.id === 'student' 
-                    ? (studentYearMode === 'fresher' ? 'Admission ID / Username / Mobile' : 'Student Roll Number')
+                    ? (studentYearMode === 'fresher' ? 'Admission ID / Username / Mobile' : 'College Email (@rgmcet.edu.in)')
                     : selectedRole.id === 'parent' 
                       ? 'Student Roll Number / Registered Mobile'
                       : 'Official Email Address'}
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                    {selectedRole.id === 'student' || selectedRole.id === 'parent' ? (
+                    {selectedRole.id === 'parent' ? (
                       <User className="w-4 h-4" />
                     ) : (
                       <Mail className="w-4 h-4" />
                     )}
                   </div>
                   <input
-                    type="text"
+                    type={selectedRole.id === 'student' && studentYearMode === 'regular' ? 'email' : 'text'}
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
                     placeholder={
                       selectedRole.id === 'student' 
-                        ? (studentYearMode === 'fresher' ? 'e.g. 24091A0501 or 9876543210' : 'e.g. 21091A3201')
+                        ? (studentYearMode === 'fresher' ? 'e.g. 24091A0501 or 9876543210' : 'e.g. 23091a3227@rgmcet.edu.in')
                         : selectedRole.id === 'parent'
                           ? 'e.g. 21091A3201'
                           : selectedRole.defaultEmail || 'name@rgmcet.edu.in'
@@ -671,6 +675,11 @@ export const LandingPage: React.FC = () => {
                     className="w-full pl-10 pr-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-slate-400 text-xs sm:text-sm font-medium focus:outline-none focus:ring-2 focus:ring-cyan-400/50"
                   />
                 </div>
+                {selectedRole.id === 'student' && studentYearMode === 'regular' && (
+                  <p className="text-[10px] text-slate-400 mt-1 ml-1">
+                    Enter your college email — same as your roll number (e.g. <span className="text-cyan-400 font-mono">23091a3227@rgmcet.edu.in</span>)
+                  </p>
+                )}
               </div>
 
               {/* Department Selector (for HOD, Admin, or Faculty) */}
@@ -727,7 +736,7 @@ export const LandingPage: React.FC = () => {
                     {selectedRole.id === 'student' && (
                       <button
                         type="button"
-                        onClick={() => navigate('/login?role=student&forgot=true')}
+                        onClick={openForgotModal}
                         className="text-[11px] text-cyan-400 hover:underline font-semibold"
                       >
                         Forgot password?
@@ -791,6 +800,32 @@ export const LandingPage: React.FC = () => {
                   </>
                 )}
               </button>
+
+              {/* Registration Links */}
+              {selectedRole.id === 'student' && studentYearMode === 'regular' && (
+                <div className="text-center pt-1">
+                  <button
+                    type="button"
+                    onClick={() => navigate('/login?role=student&signup=true')}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-400 hover:text-cyan-300 hover:underline transition-colors"
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    New here? Create a Student Account
+                  </button>
+                </div>
+              )}
+              {selectedRole.id === 'faculty' && (
+                <div className="text-center pt-1">
+                  <button
+                    type="button"
+                    onClick={() => navigate('/login?role=faculty&signup=true')}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-purple-400 hover:text-purple-300 hover:underline transition-colors"
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    New Faculty Member? Register Here
+                  </button>
+                </div>
+              )}
             </form>
           )}
         </div>
@@ -831,7 +866,7 @@ export const LandingPage: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-sm font-black text-white">Reset Password</h3>
-                  <p className="text-[10px] text-slate-400">Faculty Account Recovery</p>
+                  <p className="text-[10px] text-slate-400">{selectedRole?.id === 'student' ? 'Student Account Recovery' : 'Faculty Account Recovery'}</p>
                 </div>
               </div>
               <button
@@ -872,16 +907,16 @@ export const LandingPage: React.FC = () => {
             {/* Step 1 — Email */}
             {forgotStep === 'email' && (
               <form onSubmit={handleSendOtp} className="space-y-4">
-                <p className="text-xs text-slate-400">Enter your official faculty email. We'll send a 6-digit OTP via Cognito.</p>
+                <p className="text-xs text-slate-400">Enter your registered email. We'll send a 6-digit OTP to your inbox.</p>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-200 mb-1.5">Faculty Email</label>
+                  <label className="block text-xs font-semibold text-slate-200 mb-1.5">{selectedRole?.id === 'student' ? 'Student Email' : 'Faculty Email'}</label>
                   <div className="relative">
                     <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
                     <input
                       type="email"
                       value={forgotEmail}
                       onChange={e => setForgotEmail(e.target.value)}
-                      placeholder="yourname@rgmcet.edu.in"
+                      placeholder={selectedRole?.id === 'student' ? 'e.g. 23091a3201@rgmcet.edu.in' : 'yourname@rgmcet.edu.in'}
                       className="w-full pl-10 pr-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-slate-400 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-purple-400/50"
                       required
                     />
