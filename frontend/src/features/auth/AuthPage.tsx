@@ -716,8 +716,12 @@ export const AuthPage: React.FC = () => {
       }
 
       // Step 1: Run Cognito authentication & DB profile lookup in parallel for fast response
+      // We use the BACKEND /auth/cognito-signin (AdminInitiateAuth) as primary because:
+      // - Some users' Cognito username is a UUID (created before email-alias migration)
+      // - Client-side cognitoSignIn passes email as Username → fails for UUID-username users
+      // - AdminInitiateAuth resolves email aliases server-side → works for ALL users
       const [cognitoRes, dbRes] = await Promise.allSettled([
-        cognitoSignIn(data.email, data.password),
+        api.cognitoSignInViaBackend(data.email, data.password),
         activeTab === 'student'
           ? api.getStudentByEmail(data.email)
           : api.getFacultyByEmail(data.email).catch(() => null),

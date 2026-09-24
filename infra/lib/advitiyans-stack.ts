@@ -245,6 +245,7 @@ export class AdvitiyansStack extends cdk.Stack {
         DB_SECRET_ARN: dbSecret.secretArn,
         DB_SSL: 'true',
         COGNITO_USER_POOL_ID: userPool.userPoolId,
+        COGNITO_CLIENT_ID: userPoolClient.userPoolClientId,
         UPLOADS_BUCKET_NAME: uploadsBucket.bucketName,
         USE_MOCK: 'false',
         // Admin/HOD credentials — sourced from GitHub Secrets, never hardcoded in frontend

@@ -8,7 +8,7 @@ import { db } from '../db';
 import { calculateEmployabilityScore } from '../services/employability';
 import { runCodingProfileCronSync, fetchLeetCodeStatsDirect, fetchGitHubStatsDirect, fetchEduSkillsStatsDirect, cleanEduSkillsHandle } from '../services/cronSync';
 import { cachedFetch } from '../services/platformCache';
-import { deleteCognitoUsers, deleteAllCognitoUsers, updateCognitoUserPassword, adminCreateCognitoUser } from '../services/cognitoService';
+import { deleteCognitoUsers, deleteAllCognitoUsers, updateCognitoUserPassword, adminCreateCognitoUser, adminSignIn } from '../services/cognitoService';
 import { calculateFacultyNameSimilarity, isEmailNameMatch, mergeFacultyRecordsInDb } from '../services/facultyMatching';
 import { syncStudentCredlyCertifications } from '../services/credlySync';
 import {
@@ -1296,6 +1296,57 @@ app.post('/auth/verify-student-password', async (req: Request, res: Response) =>
     return res.json({ valid: false });
   } catch (err: any) {
     res.status(500).json({ valid: false, error: err.message });
+  }
+});
+
+// ============================================================================
+// Auth: Server-side Cognito Sign-In
+// ============================================================================
+// POST /auth/cognito-signin — Signs in via AdminInitiateAuth (server-side)
+//
+// WHY THIS EXISTS:
+// The client-side amazon-cognito-identity-js SDK passes email as Username.
+// In this pool some users were created with a UUID username (pre email-alias
+// migration). For those users, passing email as Username fails with:
+//   "User does not exist."
+// even though the Cognito account is CONFIRMED and valid.
+//
+// AdminInitiateAuth resolves the email alias on the AWS server side and works
+// for ALL users regardless of their internal Cognito username format.
+//
+// Returns: { idToken, accessToken, refreshToken } on success
+// Errors:  { error: 'Incorrect username or password.' } on bad credentials
+//          { error: '...' } on other Cognito errors
+// ============================================================================
+app.post('/auth/cognito-signin', async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: 'email and password are required' });
+    }
+
+    const tokens = await adminSignIn(String(email).trim().toLowerCase(), String(password));
+    if (!tokens) {
+      return res.status(401).json({ error: 'Authentication challenge required. Please contact support.' });
+    }
+
+    return res.json(tokens);
+  } catch (err: any) {
+    const errName  = err.name  || '';
+    const errMsg   = err.message || 'Authentication failed';
+
+    if (errName === 'NotAuthorizedException') {
+      return res.status(401).json({ error: 'Incorrect username or password.' });
+    }
+    if (errName === 'UserNotFoundException') {
+      return res.status(401).json({ error: 'No account found for this email.' });
+    }
+    if (errName === 'UserNotConfirmedException') {
+      return res.status(401).json({ error: 'Account not confirmed. Please complete the verification step.' });
+    }
+
+    console.error('[Auth] /auth/cognito-signin error:', errName, errMsg);
+    return res.status(500).json({ error: 'Authentication service error. Please try again.' });
   }
 });
 

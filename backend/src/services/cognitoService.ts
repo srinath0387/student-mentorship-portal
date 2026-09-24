@@ -1,4 +1,4 @@
-import { CognitoIdentityProviderClient, AdminDeleteUserCommand, ListUsersCommand, AdminSetUserPasswordCommand } from '@aws-sdk/client-cognito-identity-provider';
+import { CognitoIdentityProviderClient, AdminDeleteUserCommand, ListUsersCommand, AdminSetUserPasswordCommand, AdminInitiateAuthCommand, AdminCreateUserCommand } from '@aws-sdk/client-cognito-identity-provider';
 import { db } from '../db';
 
 const cognitoClient = new CognitoIdentityProviderClient({
@@ -278,5 +278,63 @@ export async function adminCreateCognitoUser(params: {
     }
     console.warn(`[Cognito] adminCreateCognitoUser failed for ${email}:`, err.message);
     return 'failed';
+  }
+}
+
+/**
+ * Server-side Cognito sign-in using ADMIN_USER_PASSWORD_AUTH flow.
+ *
+ * WHY THIS EXISTS:
+ * Client-side cognitoSignIn (amazon-cognito-identity-js) looks up users by
+ * Cognito Username. In pools where users were created with a UUID username
+ * (pre email-alias migration), passing the email as Username fails with
+ * "User does not exist." even though the account exists.
+ *
+ * AdminInitiateAuth resolves the email alias on the AWS server side and works
+ * regardless of how the user's Username was originally set.
+ *
+ * Returns { idToken, accessToken, refreshToken } on success, null on failure.
+ */
+export async function adminSignIn(email: string, password: string): Promise<{
+  idToken: string;
+  accessToken: string;
+  refreshToken: string;
+} | null> {
+  const userPoolId = process.env.COGNITO_USER_POOL_ID;
+  const clientId   = process.env.COGNITO_CLIENT_ID;
+
+  if (!userPoolId || !clientId) {
+    console.warn('[Cognito] Missing COGNITO_USER_POOL_ID or COGNITO_CLIENT_ID env vars');
+    return null;
+  }
+
+  try {
+    const result = await cognitoClient.send(
+      new AdminInitiateAuthCommand({
+        UserPoolId: userPoolId,
+        ClientId:   clientId,
+        AuthFlow:   'ADMIN_USER_PASSWORD_AUTH',
+        AuthParameters: {
+          USERNAME: email.trim().toLowerCase(),
+          PASSWORD: password,
+        },
+      })
+    );
+
+    const tokens = result.AuthenticationResult;
+    if (!tokens?.IdToken || !tokens.AccessToken || !tokens.RefreshToken) {
+      // Challenge required (e.g. NEW_PASSWORD_REQUIRED) — not handled here
+      console.warn('[Cognito] adminSignIn returned challenge:', result.ChallengeName);
+      return null;
+    }
+
+    return {
+      idToken:      tokens.IdToken,
+      accessToken:  tokens.AccessToken,
+      refreshToken: tokens.RefreshToken,
+    };
+  } catch (err: any) {
+    // Bubble up specific errors so callers can handle them
+    throw err;
   }
 }

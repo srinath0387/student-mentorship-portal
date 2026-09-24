@@ -342,6 +342,21 @@ export const api = {
     });
   },
 
+  // Server-side Cognito sign-in via AdminInitiateAuth.
+  // Fixes "User does not exist." for users whose Cognito Username is a UUID
+  // (created pre-email-alias migration). AdminInitiateAuth resolves the email
+  // alias server-side and works for ALL users regardless of username format.
+  cognitoSignInViaBackend: async (email: string, password: string): Promise<{
+    idToken: string;
+    accessToken: string;
+    refreshToken: string;
+  }> => {
+    return fetchWithAuth('/auth/cognito-signin', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+  },
+
   // Link email to faculty record (admin)
   patchFacultyEmail: async (facultyId: string, email: string): Promise<any> => {
     return fetchWithAuth(`/faculty/${facultyId}/email`, {
