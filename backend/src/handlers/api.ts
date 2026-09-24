@@ -1,4 +1,6 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
+import { globalErrorHandler } from '../lib/errors';
+import { logger } from '../lib/logger';
 import cors from 'cors';
 import serverless from 'serverless-http';
 import { db } from '../db';
@@ -11780,6 +11782,18 @@ app.put('/internships/:id/verify', requireRole('faculty', 'hod', 'admin', 'super
     res.status(500).json({ error: err.message });
   }
 });
+
+// ============================================================================
+// Centralized Error Handler — Phase 0.6
+// MUST be the LAST middleware registered.
+// Catches all errors thrown in route handlers (including next(err) calls).
+// ============================================================================
+app.use(globalErrorHandler);
+
+// Request logger for local development
+if (process.env.NODE_ENV !== 'production' && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  logger.info('RGM ManageBAC API server initialised (development mode)');
+}
 
 export const handler = serverless(app);
 export default app;

@@ -5,9 +5,54 @@
   "main": "dist/handlers/api.js",
   "scripts": {
     "build": "tsc && esbuild src/handlers/api.ts --bundle --platform=node --target=node20 --outfile=dist/handlers/api.js --external:pg-native && esbuild src/handlers/cognito-pre-signup.ts --bundle --platform=node --target=node20 --outfile=dist/handlers/cognito-pre-signup.js",
-    "test": "echo \"Error: no test specified\" && exit 0",
+    "test": "jest --passWithNoTests",
+    "test:smoke": "jest --testPathPattern=tests/smoke --passWithNoTests",
+    "test:unit": "jest --testPathPattern=tests/unit --passWithNoTests",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
     "start": "ts-node src/local.ts",
     "db:init": "ts-node src/scripts/init-db.ts"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "roots": [
+      "<rootDir>/tests"
+    ],
+    "testMatch": [
+      "**/*.test.ts"
+    ],
+    "moduleNameMapper": {
+      "^../db$": "<rootDir>/tests/__mocks__/db.ts",
+      "^../db/index$": "<rootDir>/tests/__mocks__/db.ts"
+    },
+    "collectCoverageFrom": [
+      "src/**/*.ts",
+      "!src/handlers/api.ts",
+      "!src/local.ts",
+      "!src/scripts/**"
+    ],
+    "coverageThreshold": {
+      "global": {
+        "statements": 50,
+        "branches": 40,
+        "functions": 50,
+        "lines": 50
+      }
+    },
+    "transform": {
+      "^.+\\.tsx?$": [
+        "ts-jest",
+        {
+          "tsconfig": {
+            "module": "commonjs"
+          }
+        }
+      ]
+    },
+    "setupFiles": [
+      "<rootDir>/tests/setup.ts"
+    ]
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.1110.0",
@@ -30,9 +75,14 @@
     "@types/aws-lambda": "^8.10.136",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.14",
     "@types/node": "^20.11.24",
     "@types/pg": "^8.11.2",
+    "@types/supertest": "^6.0.3",
     "esbuild": "^0.28.1",
+    "jest": "^29.7.0",
+    "supertest": "^6.3.4",
+    "ts-jest": "^29.4.13",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }
