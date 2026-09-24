@@ -17,8 +17,6 @@ import {
   Users, 
   Briefcase, 
   Award, 
-  Calendar, 
-  KeyRound,
   AlertCircle,
   Loader2,
   X

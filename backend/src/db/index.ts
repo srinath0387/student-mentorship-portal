@@ -420,7 +420,12 @@ async function ensureSchema(p: Pool) {
       ('admincs@rgmcet.edu.in', 'CS Admin', 'admin@2026', 'CSE (CS)', 'System'),
       ('adminmca@rgmcet.edu.in', 'MCA Admin', 'admin@2026', 'MCA', 'System'),
       ('adminmba@rgmcet.edu.in', 'MBA Admin', 'admin@2026', 'MBA', 'System'),
-      ('coordinator@rgmcet.edu.in', '1st Year Coordinator', 'coordinator@2026', 'All', 'System')
+      ('coordinator@rgmcet.edu.in', '1st Year Coordinator', 'coordinator@2026', 'All', 'System'),
+      ('director@rgmcet.edu.in', 'Director', 'director@2026', '*', 'System'),
+      ('principal@rgmcet.edu.in', 'Principal', 'principal@2026', '*', 'System'),
+      ('management@rgmcet.edu.in', 'Management Board', 'management@2026', '*', 'System'),
+      ('chaircse@rgmcet.edu.in', 'Program Chair (CSE Allied)', 'chair@2026', 'CSE_ALLIED', 'System'),
+      ('programchair@rgmcet.edu.in', 'Program Chair (CSE Allied)', 'chair@2026', 'CSE_ALLIED', 'System')
      ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, password = EXCLUDED.password;`,
 
     // Migration: add 1st year fresher admission and migration columns to students table
