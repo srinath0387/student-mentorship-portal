@@ -68,6 +68,24 @@ export function getDeptCodeFromName(deptName: string): string | undefined {
   return Object.entries(DEPARTMENT_CODE_MAP).find(([, name]) => name === deptName)?.[0];
 }
 
+/** Infer department from official faculty email address pattern */
+export function inferDepartmentFromEmail(email?: string, fallback: string = 'CSE'): string {
+  if (!email) return fallback;
+  const clean = email.toLowerCase().trim();
+  if (clean.includes('cseds') || clean.includes('datascience')) return 'CSE (Data Science)';
+  if (clean.includes('cseaiml') || clean.includes('aiml')) return 'CSE (AI & ML)';
+  if (clean.includes('csecs') || clean.includes('cyber')) return 'CSE (CS)';
+  if (clean.includes('csebs') || clean.includes('business')) return 'CSE (BS)';
+  if (clean.includes('ece')) return 'ECE';
+  if (clean.includes('eee')) return 'EEE';
+  if (clean.includes('civil') || clean.includes('ce@')) return 'Civil';
+  if (clean.includes('mech') || clean.includes('me@')) return 'Mechanical';
+  if (clean.includes('mca')) return 'MCA';
+  if (clean.includes('mba')) return 'MBA';
+  if (clean.includes('cse')) return 'CSE';
+  return fallback;
+}
+
 export const registrationNumberSchema = z.string()
   .trim()
   .regex(REGISTRATION_NUMBER_REGEX, {

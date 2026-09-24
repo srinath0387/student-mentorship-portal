@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { Search, Mail, Pencil, Link, Trash2, AlertTriangle, Users, Check, X, ShieldAlert, UserCheck, RefreshCw, UserPlus, Eye, Filter, Building, Sparkles, Wand2, GitMerge } from 'lucide-react';
@@ -46,6 +46,19 @@ export default function FacultyManagementPage() {
     isSuperAdmin ? 'All' : normalizeDepartmentName(user?.department || 'CSE')
   );
 
+  // Sync selectedDept whenever user session finishes hydrating
+  useEffect(() => {
+    if (user?.department && !isSuperAdmin) {
+      setSelectedDept(normalizeDepartmentName(user.department));
+    }
+  }, [user?.department, isSuperAdmin]);
+
+  // For non-super admins (HOD, Coordinator, Dept Admin), lock strictly to their department.
+  // Super Admin can freely switch departments via dropdown.
+  const effectiveDept = isSuperAdmin
+    ? selectedDept
+    : (user?.department ? normalizeDepartmentName(user.department) : selectedDept);
+
   const [selectedFaculty, setSelectedFaculty] = useState<FacultyRow | null>(null);
   const [inspectingFaculty, setInspectingFaculty] = useState<FacultyRow | null>(null);
   const [showAddMenteeModal, setShowAddMenteeModal] = useState(false);
@@ -70,8 +83,8 @@ export default function FacultyManagementPage() {
   } | null>(null);
 
   const { data: faculty = [], isLoading: facLoading } = useQuery<FacultyRow[]>({
-    queryKey: ['adminFaculty', selectedDept],
-    queryFn: () => api.getAllFaculty(selectedDept === 'All' ? undefined : selectedDept),
+    queryKey: ['adminFaculty', effectiveDept],
+    queryFn: () => api.getAllFaculty(effectiveDept === 'All' || !effectiveDept ? undefined : effectiveDept),
   });
 
   const { data: mentees = [], isLoading: menteesLoading } = useQuery<MenteeRow[]>({
@@ -204,7 +217,7 @@ export default function FacultyManagementPage() {
             {user?.role === 'hod' || user?.role === 'coordinator' ? 'Faculty Directory & 360°' : 'Faculty Management'}
           </h1>
           <p className="mt-0.5 text-xs text-textSecondary">
-            {faculty.length} faculty member{faculty.length !== 1 ? 's' : ''} {selectedDept !== 'All' ? `(${selectedDept})` : ''} — select a row to view assigned mentees
+            {faculty.length} faculty member{faculty.length !== 1 ? 's' : ''} {effectiveDept !== 'All' ? `(${effectiveDept})` : ''} — select a row to view assigned mentees
           </p>
         </div>
         <div className="flex gap-2 flex-wrap items-center">
@@ -229,7 +242,7 @@ export default function FacultyManagementPage() {
           ) : (
             <div className="flex items-center gap-1.5 bg-brand-soft border border-brand-primary/30 rounded-xl px-3.5 py-2 text-xs font-bold text-brand-primary">
               <Users className="w-3.5 h-3.5" />
-              <span>Dept: {user?.department || selectedDept}</span>
+              <span>Dept: {effectiveDept || user?.department}</span>
             </div>
           )}
 

@@ -27,6 +27,7 @@ import {
   getDeptCodeFromRollNumber,
   getDeptCodeFromName,
   isLateralEntry,
+  inferDepartmentFromEmail,
 } from '../lib/validation';
 import { extractAuth, requireAuth, requireRole, requireOwnerOrRole } from '../lib/authMiddleware';
 import { compareAndUpgradePassword, hashPassword, BCRYPT_ROUNDS } from '../services/passwordService';
@@ -419,7 +420,7 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
           });
           if (isMatch) {
             let roleName = 'admin';
-            let assignedDept = adminRow.department || department || 'CSE (Data Science)';
+            let assignedDept = adminRow.department || department || inferDepartmentFromEmail(adminRow.email, 'CSE');
             if (emailLower === 'coordinator@rgmcet.edu.in' || adminRow.department === 'Coordinator') {
               roleName = 'coordinator';
               assignedDept = 'All';
@@ -479,7 +480,7 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
           await db.query('UPDATE faculty_credentials SET password = $1, updated_at = NOW() WHERE LOWER(email) = $2', [newHash, emailLower]);
         });
         if (isMatch) {
-          const assignedDept = facRow.department || department || 'CSE (Data Science)';
+          const assignedDept = facRow.department || department || inferDepartmentFromEmail(facRow.email, 'CSE');
           return res.json({ valid: true, role: 'faculty', department: assignedDept, email: facRow.email, faculty_id: facRow.faculty_id });
         }
         // Email matched but password wrong — reject immediately
@@ -493,7 +494,7 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
       const isFacultyEmail = emailLower.endsWith('@rgmcet.edu.in') && !isStudentRoll && password === 'faculty@2026';
       if (isFacultyEmail) {
         // Look up the faculty profile to get department
-        let resolvedFacDept = department || 'CSE (Data Science)';
+        let resolvedFacDept = department || inferDepartmentFromEmail(emailLower, 'CSE');
         let resolvedFacId: string | null = null;
         try {
           const facProfile = await db.query(
@@ -4161,13 +4162,13 @@ app.get('/faculty/by-email/:email', async (req: Request, res: Response) => {
       const u = userMatch.rows[0];
       const facId = u.faculty_id || `FAC_${email.split('@')[0].toUpperCase()}`;
       const facName = u.name || 'Faculty Member';
-      const facDept = u.department || 'CSE (Data Science)';
+      const facDept = u.department || inferDepartmentFromEmail(email, 'CSE');
       const facRole = u.role || 'mentor';
 
       await db.query(
         `INSERT INTO faculty (faculty_id, name, email, department, role)
          VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (faculty_id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name, department = EXCLUDED.department`,
+         ON CONFLICT (faculty_id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name, department = COALESCE(NULLIF(faculty.department, ''), EXCLUDED.department)`,
         [facId, facName, email, facDept, facRole]
       ).catch(() => {});
 
@@ -4181,12 +4182,12 @@ app.get('/faculty/by-email/:email', async (req: Request, res: Response) => {
       const a = allotMatch.rows[0];
       const facId = `FAC_${email.split('@')[0].toUpperCase()}`;
       const facName = a.faculty_name || 'Faculty Member';
-      const facDept = a.department || 'CSE (Data Science)';
+      const facDept = a.department || inferDepartmentFromEmail(email, 'CSE');
 
       await db.query(
         `INSERT INTO faculty (faculty_id, name, email, department, role)
          VALUES ($1, $2, $3, $4, 'mentor')
-         ON CONFLICT (faculty_id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name, department = EXCLUDED.department`,
+         ON CONFLICT (faculty_id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name, department = COALESCE(NULLIF(faculty.department, ''), EXCLUDED.department)`,
         [facId, facName, email, facDept]
       ).catch(() => {});
 
@@ -4631,6 +4632,11 @@ app.get('/faculty', requireRole('admin', 'hod', 'coordinator', 'faculty'), async
       WHERE LOWER(REPLACE(department, ' ', '')) IN ('ece', 'electronics');
       UPDATE faculty SET department = 'CSE' 
       WHERE LOWER(REPLACE(department, ' ', '')) IN ('cse', 'computerscience');
+      UPDATE faculty SET department = 'Administration' WHERE faculty_id = 'FAC_ADMIN';
+      UPDATE faculty SET department = 'CSE' 
+      WHERE LOWER(email) LIKE '%cse@rgmcet.edu.in' 
+        AND LOWER(email) NOT LIKE '%cseds@%' 
+        AND department = 'CSE (Data Science)';
     `).catch(() => {});
 
     if (db.isMock) {
@@ -4759,8 +4765,8 @@ app.post('/faculty/smart-auto-merge', requireRole('admin'), async (req: Request,
             await db.query(
               `INSERT INTO faculty (faculty_id, name, email, department, role)
                VALUES ($1, $2, $3, $4, $5)
-               ON CONFLICT (faculty_id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name`,
-              [targetFacId, user.name || unlinked.name, user.email.toLowerCase().trim(), user.department || unlinked.department || 'CSE (Data Science)', user.role || 'mentor']
+               ON CONFLICT (faculty_id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name, department = COALESCE(NULLIF(faculty.department, ''), EXCLUDED.department)`,
+              [targetFacId, user.name || unlinked.name, user.email.toLowerCase().trim(), user.department || unlinked.department || inferDepartmentFromEmail(user.email, 'CSE'), user.role || 'mentor']
             ).catch(() => {});
 
             bestMatch = {
