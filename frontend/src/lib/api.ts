@@ -150,8 +150,8 @@ export const api = {
       return { valid: true }; // network errors: be lenient, don't kick out
     }
   },
-  // Admin & HOD Login — credentials validated server-side (never stored in frontend)
-  adminLogin: async (email: string, password: string, department?: string): Promise<{ valid: boolean; role?: 'admin' | 'hod'; isSuperAdmin?: boolean; department?: string; error?: string }> => {
+  // Admin, HOD, Coordinator & Oversight Login — credentials validated server-side (never stored in frontend)
+  adminLogin: async (email: string, password: string, department?: string): Promise<{ valid: boolean; role?: string; isSuperAdmin?: boolean; department?: string; name?: string; email?: string; error?: string }> => {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s max
@@ -1350,16 +1350,33 @@ export const api = {
   },
 
   // Certification Search & Credly Sync
-  getCertificationsSummary: async (): Promise<any[]> => {
-    return fetchWithAuth('/certifications/summary');
+  getCertificationsSummary: async (params?: { department?: string; year?: string; section?: string; issuer?: string }): Promise<any[]> => {
+    const sp = new URLSearchParams();
+    if (params?.department) sp.append('department', params.department);
+    if (params?.year) sp.append('year', params.year);
+    if (params?.section) sp.append('section', params.section);
+    if (params?.issuer) sp.append('issuer', params.issuer);
+    const qs = sp.toString();
+    return fetchWithAuth(`/certifications/summary${qs ? `?${qs}` : ''}`);
   },
 
-  searchCertifications: async (query: string): Promise<any[]> => {
-    return fetchWithAuth(`/certifications/search?q=${encodeURIComponent(query)}`);
+  searchCertifications: async (query: string, params?: { department?: string; year?: string; section?: string }): Promise<any[]> => {
+    const sp = new URLSearchParams();
+    sp.append('q', query);
+    if (params?.department) sp.append('department', params.department);
+    if (params?.year) sp.append('year', params.year);
+    if (params?.section) sp.append('section', params.section);
+    return fetchWithAuth(`/certifications/search?${sp.toString()}`);
   },
 
-  getCertifiedStudents: async (certName: string): Promise<any[]> => {
-    return fetchWithAuth(`/certifications/students?cert_name=${encodeURIComponent(certName)}`);
+  getCertifiedStudents: async (certName: string, params?: { department?: string; year?: string; section?: string; search?: string }): Promise<any[]> => {
+    const sp = new URLSearchParams();
+    sp.append('cert_name', certName);
+    if (params?.department) sp.append('department', params.department);
+    if (params?.year) sp.append('year', params.year);
+    if (params?.section) sp.append('section', params.section);
+    if (params?.search) sp.append('search', params.search);
+    return fetchWithAuth(`/certifications/students?${sp.toString()}`);
   },
 
   syncCredlyCertifications: async (data: { roll_number?: string; credly_profile_url?: string }): Promise<any> => {

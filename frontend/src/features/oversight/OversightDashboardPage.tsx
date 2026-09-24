@@ -45,9 +45,9 @@ export const OversightDashboardPage: React.FC = () => {
   const effectiveDept = selectedDept === 'All' ? undefined : selectedDept;
 
   // Fetch summary stats
-  const { data: deptSummary = [] } = useQuery({
-    queryKey: ['oversightDeptSummary', effectiveDept],
-    queryFn: () => api.getDepartmentSummary().catch(() => []),
+  const { data: hodAnalytics = null } = useQuery({
+    queryKey: ['oversightHodAnalytics', effectiveDept],
+    queryFn: () => api.getHodAnalytics(effectiveDept).catch(() => null),
   });
 
   const { data: certSummary = [] } = useQuery({
@@ -55,21 +55,18 @@ export const OversightDashboardPage: React.FC = () => {
     queryFn: () => api.getCertificationsSummary(effectiveDept ? { department: effectiveDept } : undefined).catch(() => []),
   });
 
-  const { data: attendanceStats = null } = useQuery({
-    queryKey: ['oversightAttendanceOverview', effectiveDept],
-    queryFn: () => api.getAttendanceMasterStats(effectiveDept).catch(() => null),
+  const { data: placementSummary = null } = useQuery({
+    queryKey: ['oversightPlacementSummary', effectiveDept],
+    queryFn: () => api.getPlacementSummary(effectiveDept).catch(() => null),
   });
 
   // Calculate high level totals
   const totalStudents = useMemo(() => {
-    if (Array.isArray(deptSummary) && deptSummary.length > 0) {
-      const filtered = isProgramChair 
-        ? deptSummary.filter((d: any) => CSE_ALLIED_DEPTS.some(cad => cad.toLowerCase() === (d.department || '').toLowerCase()))
-        : deptSummary;
-      return filtered.reduce((acc: number, curr: any) => acc + Number(curr.total_students || curr.student_count || 0), 0);
+    if (hodAnalytics?.total_students) {
+      return Number(hodAnalytics.total_students);
     }
     return isProgramChair ? 1850 : 5420;
-  }, [deptSummary, isProgramChair]);
+  }, [hodAnalytics, isProgramChair]);
 
   const totalCertCount = useMemo(() => {
     if (Array.isArray(certSummary)) {
