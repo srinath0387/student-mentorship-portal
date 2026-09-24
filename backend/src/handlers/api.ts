@@ -3,6 +3,7 @@ import { globalErrorHandler } from '../lib/errors';
 import { logger } from '../lib/logger';
 import cors from 'cors';
 import serverless from 'serverless-http';
+import routes from '../routes';
 import { db } from '../db';
 import { calculateEmployabilityScore } from '../services/employability';
 import { runCodingProfileCronSync, fetchLeetCodeStatsDirect, fetchGitHubStatsDirect, fetchEduSkillsStatsDirect, cleanEduSkillsHandle } from '../services/cronSync';
@@ -56,17 +57,12 @@ if (fs.existsSync(publicDir)) {
 }
 
 // ============================================================================
-// Health Check
+// Phase 3: Domain Router Registry
+// All structured routes (health, auth, students, faculty, attendance, etc.)
+// are now registered via routes/index.ts -> individual domain router files.
+// The legacy handlers below remain until Phase 4 migration is complete.
 // ============================================================================
-app.get('/health', async (_req: Request, res: Response) => {
-  const dbHealth = await db.healthCheck();
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    service: 'advitiyans-api',
-    database: dbHealth,
-  });
-});
+app.use('/', routes);
 
 // ONE-TIME: Clean up coding_profiles handles stored as full URLs
 // Protected by ADMIN_SECRET header — must be set in Lambda environment variables.
