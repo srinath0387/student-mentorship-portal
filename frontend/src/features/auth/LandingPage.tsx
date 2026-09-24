@@ -623,14 +623,6 @@ export const LandingPage: React.FC = () => {
                 </div>
               )}
 
-              {/* Oversight Notice Banner */}
-              {selectedRole.category === 'oversight' && (
-                <div className="p-3 rounded-xl bg-indigo-950/60 border border-indigo-500/30 flex items-center gap-2 text-xs text-indigo-200">
-                  <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0" />
-                  <span>Executive Oversight Access &bull; Full data visibility with view-only protection</span>
-                </div>
-              )}
-
               {/* Identifier Input Field */}
               <div>
                 <label className="block text-xs font-semibold text-slate-200 mb-1.5">
