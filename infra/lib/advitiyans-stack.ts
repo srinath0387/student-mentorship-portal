@@ -272,6 +272,12 @@ export class AdvitiyansStack extends cdk.Stack {
         'cognito-idp:AdminGetUser',
         'cognito-idp:AdminDisableUser',
         'cognito-idp:ListUsers',
+        // Required for server-side sign-in (POST /auth/cognito-signin)
+        'cognito-idp:AdminInitiateAuth',
+        // Required for password sync and account healing
+        'cognito-idp:AdminSetUserPassword',
+        // Required for creating Cognito accounts for DB-only students
+        'cognito-idp:AdminCreateUser',
       ],
       resources: [userPool.userPoolArn],
     }));
