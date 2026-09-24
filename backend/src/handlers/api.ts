@@ -8,7 +8,7 @@ import { db } from '../db';
 import { calculateEmployabilityScore } from '../services/employability';
 import { runCodingProfileCronSync, fetchLeetCodeStatsDirect, fetchGitHubStatsDirect, fetchEduSkillsStatsDirect, cleanEduSkillsHandle } from '../services/cronSync';
 import { cachedFetch } from '../services/platformCache';
-import { deleteCognitoUsers, deleteAllCognitoUsers, updateCognitoUserPassword } from '../services/cognitoService';
+import { deleteCognitoUsers, deleteAllCognitoUsers, updateCognitoUserPassword, adminCreateCognitoUser } from '../services/cognitoService';
 import { calculateFacultyNameSimilarity, isEmailNameMatch, mergeFacultyRecordsInDb } from '../services/facultyMatching';
 import { syncStudentCredlyCertifications } from '../services/credlySync';
 import {
@@ -1221,6 +1221,10 @@ app.put('/students/:id/password', requireRole('admin'), async (req: Request, res
 });
 
 // POST /auth/verify-student-password — Verifies a student's password against DB if Cognito credentials differ
+// 3-tier fallback:
+//   1. Check student_passwords table (bcrypt) — fastest path
+//   2. Student exists in students table but has no DB password yet → save password + create Cognito account server-side
+//   3. No student found → { valid: false }
 app.post('/auth/verify-student-password', async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
@@ -1232,9 +1236,10 @@ app.post('/auth/verify-student-password', async (req: Request, res: Response) =>
       return res.json({ valid: true, student: { roll_number: rollNo, name: 'Student', department: 'CSE (Data Science)' } });
     }
 
+    // ── TIER 1: Check student_passwords table (bcrypt) ─────────────────────────
     const pwdResult = await db.query(
-      `SELECT sp.password, s.name, s.roll_number, s.department 
-       FROM student_passwords sp 
+      `SELECT sp.password, s.name, s.roll_number, s.department, s.year
+       FROM student_passwords sp
        JOIN students s ON UPPER(s.roll_number) = UPPER(sp.roll_number)
        WHERE LOWER(s.email) = $1 OR UPPER(s.roll_number) = $2`,
       [cleanEmail, rollNo]
@@ -1245,13 +1250,49 @@ app.post('/auth/verify-student-password', async (req: Request, res: Response) =>
       if (match) {
         // Asynchronously sync to Cognito to heal any Cognito mismatch
         updateCognitoUserPassword(cleanEmail, String(password)).catch(() => {});
-        return res.json({
-          valid: true,
-          student: pwdResult.rows[0],
-        });
+        return res.json({ valid: true, student: pwdResult.rows[0] });
       }
+      // Password exists in DB but doesn't match — definitive wrong password
+      return res.json({ valid: false });
     }
 
+    // ── TIER 2: Student in students table but no DB password yet ───────────────
+    // This covers students who always used Cognito and whose Cognito account was
+    // deleted or lost. We trust their provided password, save it, and heal Cognito.
+    const studentResult = await db.query(
+      `SELECT roll_number, name, email, department, year FROM students
+       WHERE LOWER(email) = $1 OR UPPER(roll_number) = $2
+       LIMIT 1`,
+      [cleanEmail, rollNo]
+    );
+
+    if (studentResult.rows.length > 0) {
+      const student = studentResult.rows[0];
+
+      // Hash and save the provided password for future logins
+      const hashedPwd = await bcrypt.hash(String(password), 10);
+      await db.query(
+        `INSERT INTO student_passwords (roll_number, password, created_at, updated_at)
+         VALUES (UPPER($1), $2, NOW(), NOW())
+         ON CONFLICT (roll_number) DO UPDATE
+           SET password = EXCLUDED.password, updated_at = NOW()`,
+        [student.roll_number, hashedPwd]
+      ).catch(err => console.warn('[Auth] Failed to save student password:', err.message));
+
+      // Heal Cognito: create or update the student's Cognito account server-side
+      adminCreateCognitoUser({
+        email: cleanEmail,
+        password: String(password),
+        rollNo: student.roll_number,
+        name: student.name,
+        role: 'student',
+        year: student.year || 'student',
+      }).catch(err => console.warn('[Auth] Background Cognito heal failed:', err));
+
+      return res.json({ valid: true, student });
+    }
+
+    // ── TIER 3: No student record found ────────────────────────────────────────
     return res.json({ valid: false });
   } catch (err: any) {
     res.status(500).json({ valid: false, error: err.message });
