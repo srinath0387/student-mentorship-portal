@@ -490,9 +490,9 @@ export const LandingPage: React.FC = () => {
 
             {/* Dropdown Menu Modal */}
             {isDropdownOpen && (
-              <div className="absolute top-full inset-x-0 mt-2 bg-slate-950/95 backdrop-blur-2xl border border-white/20 rounded-2xl shadow-2xl z-50 overflow-hidden max-h-[380px] flex flex-col animate-in fade-in zoom-in-95 duration-150">
+              <div className="absolute top-full inset-x-0 mt-2 bg-slate-950/95 backdrop-blur-2xl border border-white/20 rounded-2xl shadow-2xl z-50 overflow-hidden max-h-[400px] flex flex-col animate-in fade-in zoom-in-95 duration-150">
                 {/* Typeahead Search Input */}
-                <div className="p-3 border-b border-white/10 bg-slate-900/90 sticky top-0 z-10 flex items-center gap-2">
+                <div className="p-3 border-b border-white/10 bg-slate-900/90 shrink-0 z-10 flex items-center gap-2">
                   <Search className="w-4 h-4 text-cyan-400 shrink-0 ml-1" />
                   <input
                     ref={searchInputRef}
@@ -510,7 +510,7 @@ export const LandingPage: React.FC = () => {
                 </div>
 
                 {/* Role List with Categories */}
-                <div className="overflow-y-auto p-2 space-y-3">
+                <div className="overflow-y-auto flex-1 min-h-0 p-2 space-y-3">
                   {/* Category 1: Staff & Student Logins */}
                   {staffStudentRoles.length > 0 && (
                     <div>
@@ -736,7 +736,7 @@ export const LandingPage: React.FC = () => {
                     {selectedRole.id === 'student' && (
                       <button
                         type="button"
-                        onClick={() => navigate('/login?role=student&forgot=true')}
+                        onClick={openForgotModal}
                         className="text-[11px] text-cyan-400 hover:underline font-semibold"
                       >
                         Forgot password?
@@ -866,7 +866,7 @@ export const LandingPage: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-sm font-black text-white">Reset Password</h3>
-                  <p className="text-[10px] text-slate-400">Faculty Account Recovery</p>
+                  <p className="text-[10px] text-slate-400">{selectedRole?.id === 'student' ? 'Student Account Recovery' : 'Faculty Account Recovery'}</p>
                 </div>
               </div>
               <button
@@ -907,16 +907,16 @@ export const LandingPage: React.FC = () => {
             {/* Step 1 — Email */}
             {forgotStep === 'email' && (
               <form onSubmit={handleSendOtp} className="space-y-4">
-                <p className="text-xs text-slate-400">Enter your official faculty email. We'll send a 6-digit OTP via Cognito.</p>
+                <p className="text-xs text-slate-400">Enter your registered email. We'll send a 6-digit OTP to your inbox.</p>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-200 mb-1.5">Faculty Email</label>
+                  <label className="block text-xs font-semibold text-slate-200 mb-1.5">{selectedRole?.id === 'student' ? 'Student Email' : 'Faculty Email'}</label>
                   <div className="relative">
                     <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
                     <input
                       type="email"
                       value={forgotEmail}
                       onChange={e => setForgotEmail(e.target.value)}
-                      placeholder="yourname@rgmcet.edu.in"
+                      placeholder={selectedRole?.id === 'student' ? 'e.g. 23091a3201@rgmcet.edu.in' : 'yourname@rgmcet.edu.in'}
                       className="w-full pl-10 pr-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-slate-400 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-purple-400/50"
                       required
                     />
