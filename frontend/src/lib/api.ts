@@ -9,99 +9,17 @@ import {
   PlacementProfile,
   ScoreBreakdown,
 } from '../types';
-import { getIdToken } from './cognitoAuth';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://caam6j4dbh.execute-api.ap-south-1.amazonaws.com/prod';
+/**
+ * Phase 5: fetchWithAuth and API_BASE_URL now live in lib/apiClient.ts.
+ * Imported here so the api object below continues to work unchanged.
+ * All components that import from 'lib/api.ts' are unaffected.
+ */
+import { fetchWithAuth, API_BASE_URL } from './apiClient';
+export { API_BASE_URL };
 
-async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
-  // ── Token resolution priority ──────────────────────────────────────────────
-  // 1. sessionStorage JWT (tab-isolated, set on login)
-  // 2. Cognito session (student/faculty real JWT — only if no sessionStorage token)
-  //
-  // IMPORTANT: Never fall through to Cognito if we already have a token in
-  // sessionStorage. Admin/HOD use demo_token_admin_... stored in sessionStorage.
-  // Cognito's shared localStorage may still hold a student's JWT from a previous
-  // login on the same browser — using it would override admin's role to "student".
-  // ─────────────────────────────────────────────────────────────────────────────
 
-  // Check sessionStorage first — it's tab-isolated and authoritative
-  const sessionToken = sessionStorage.getItem('advitiyans_jwt_token');
 
-  let token: string | null = sessionToken;
-
-  let userEmail = '';
-  let userRole = '';
-  try {
-    const savedUser = sessionStorage.getItem('advitiyans_auth_user');
-    if (savedUser) {
-      const parsed = JSON.parse(savedUser);
-      userEmail = parsed.email || '';
-      userRole = parsed.role || '';
-    }
-  } catch { /* ignore */ }
-
-  // Only fall back to Cognito if sessionStorage has nothing (fresh page load for students)
-  if (!token) {
-    // HOD/Admin/Coordinator use demo tokens — Cognito would return null or a wrong-role token.
-    // Reconstruct the demo token directly from the saved user rather than hitting Cognito.
-    if ((userRole === 'hod' || userRole === 'admin' || userRole === 'coordinator') && userEmail) {
-      token = `demo_token_${userRole}_${encodeURIComponent(userEmail)}_${Date.now()}`;
-      // Restore it to sessionStorage so subsequent requests don't need to reconstruct
-      sessionStorage.setItem('advitiyans_jwt_token', token);
-    } else {
-      try {
-        token = await getIdToken();
-      } catch { /* ignore */ }
-    }
-  }
-
-  const headers = {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(userEmail ? { 'X-Caller-Email': userEmail } : {}),
-    ...options.headers,
-  };
-
-  try {
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-      ...options,
-      headers,
-    });
-    if (!response.ok) {
-      let errMsg = `HTTP ${response.status}: ${response.statusText || 'Request failed'}`;
-      try {
-        const text = await response.text();
-        if (text) {
-          try {
-            const parsed = JSON.parse(text);
-            errMsg = parsed.message || parsed.error || errMsg;
-          } catch {
-            errMsg = text.length > 200 ? text.substring(0, 200) + '...' : text;
-          }
-        }
-      } catch {
-        /* ignore text parse error */
-      }
-      if (response.status === 401) {
-        // If not already on auth/login page, clear stale token and trigger clean re-login
-        if (typeof window !== 'undefined' && !window.location.hash.includes('login') && !window.location.hash.includes('landing') && window.location.hash !== '#/' && window.location.hash !== '') {
-          sessionStorage.removeItem('advitiyans_jwt_token');
-          window.dispatchEvent(new CustomEvent('auth:session_expired'));
-        }
-        errMsg = 'Your session has expired. Please log in again.';
-      } else if (response.status === 413) {
-        errMsg = 'File size is too large (exceeds server limit). Please upload a file smaller than 4.5 MB.';
-      } else if (response.status === 403) {
-        errMsg = 'Permission denied. Please ensure you are logged in as Admin or HOD.';
-      }
-      throw new Error(errMsg);
-    }
-    return await response.json();
-  } catch (err) {
-    console.warn(`[API] Network call to ${endpoint} failed, utilizing local fallback state.`);
-    throw err;
-  }
-}
 
 export const api = {
   // Auth Availability
