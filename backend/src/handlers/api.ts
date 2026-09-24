@@ -454,11 +454,27 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
             await db.query('UPDATE admin_accounts SET password = $1, updated_at = NOW() WHERE LOWER(email) = $2', [newHash, emailLower]);
           });
           if (isMatch) {
-            const isCoordinator = emailLower === 'coordinator@rgmcet.edu.in' || adminRow.department === 'Coordinator';
-            const assignedDept = adminRow.department || department || (isCoordinator ? 'All' : 'CSE (Data Science)');
+            let roleName = 'admin';
+            let assignedDept = adminRow.department || department || 'CSE (Data Science)';
+            if (emailLower === 'coordinator@rgmcet.edu.in' || adminRow.department === 'Coordinator') {
+              roleName = 'coordinator';
+              assignedDept = 'All';
+            } else if (emailLower === 'director@rgmcet.edu.in') {
+              roleName = 'director';
+              assignedDept = '*';
+            } else if (emailLower === 'principal@rgmcet.edu.in') {
+              roleName = 'principal';
+              assignedDept = '*';
+            } else if (emailLower === 'management@rgmcet.edu.in') {
+              roleName = 'management';
+              assignedDept = '*';
+            } else if (emailLower === 'chaircse@rgmcet.edu.in' || emailLower === 'programchair@rgmcet.edu.in') {
+              roleName = 'program_chair';
+              assignedDept = 'CSE_ALLIED';
+            }
             return res.json({
               valid: true,
-              role: isCoordinator ? 'coordinator' : 'admin',
+              role: roleName,
               isSuperAdmin: false,
               department: assignedDept,
               email: adminRow.email,
@@ -466,6 +482,20 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
           }
           await new Promise(resolve => setTimeout(resolve, 600));
           return res.status(401).json({ valid: false, error: 'Invalid email or password.' });
+        }
+
+        // Direct pattern fallback for oversight accounts
+        if (emailLower === 'director@rgmcet.edu.in' && password === 'director@2026') {
+          return res.json({ valid: true, role: 'director', department: '*', email: emailLower });
+        }
+        if (emailLower === 'principal@rgmcet.edu.in' && password === 'principal@2026') {
+          return res.json({ valid: true, role: 'principal', department: '*', email: emailLower });
+        }
+        if (emailLower === 'management@rgmcet.edu.in' && password === 'management@2026') {
+          return res.json({ valid: true, role: 'management', department: '*', email: emailLower });
+        }
+        if ((emailLower === 'programchair@rgmcet.edu.in' || emailLower === 'chaircse@rgmcet.edu.in') && (password === 'chair@2026' || password === 'hod@2026')) {
+          return res.json({ valid: true, role: 'program_chair', department: 'CSE_ALLIED', email: emailLower });
         }
       } catch {
         // Table may not exist on first cold-start; fall through

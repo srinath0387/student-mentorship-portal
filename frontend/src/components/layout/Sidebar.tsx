@@ -158,8 +158,23 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
     },
   ];
 
+  const oversightNavGroups: NavGroup[] = [
+    {
+      title: 'INSTITUTIONAL OVERSIGHT',
+      items: [
+        { label: 'Executive Dashboard', path: '/oversight/dashboard', icon: LayoutDashboard },
+        { label: 'Academic & CGPA', path: '/admin/dashboard?tab=performance', icon: Award },
+        { label: 'Attendance Analytics', path: '/admin/dashboard?tab=attendance', icon: CalendarCheck },
+        { label: 'Student Directory', path: '/admin/dashboard?tab=students', icon: Users },
+        { label: 'Faculty & Mentors', path: '/admin/dashboard?tab=faculty', icon: ShieldCheck },
+        { label: 'Coding Leaderboard', path: '/coding-analytics', icon: BarChart2 },
+      ],
+    },
+  ];
+
   const activeNavGroups =
-    role === 'coordinator' ? coordinatorNavGroups
+    ['director', 'principal', 'management', 'program_chair'].includes(role || '') ? oversightNavGroups
+    : role === 'coordinator' ? coordinatorNavGroups
     : role === 'admin' ? adminNavGroups
     : role === 'faculty' ? facultyNavGroups
     : role === 'hod' ? hodNavGroups
@@ -207,7 +222,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
             ].join(' ')}
           >
             <p className="text-sm font-extrabold tracking-tight text-textPrimary whitespace-nowrap">
-              RGM <span className="text-brand-primary font-black">EDU</span><span className="text-textPrimary font-semibold tracking-wide" style={{ fontFamily: "'Kalam', cursive" }}>flow</span>
+              RGM <span className="text-brand-primary font-black">Manage</span><span className="text-textPrimary font-bold tracking-wide">BAC</span>
             </p>
             <p className="text-[9px] font-semibold text-textMuted uppercase tracking-widest whitespace-nowrap -mt-0.5">
               Institutional Platform
