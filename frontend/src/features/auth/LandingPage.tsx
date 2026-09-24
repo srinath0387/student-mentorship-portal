@@ -283,7 +283,6 @@ export const LandingPage: React.FC = () => {
         navigate('/dashboard');
         return;
       }
-      }
 
       // ── 3. Faculty Login — Cognito first (existing accounts), adminLogin fallback ──
       if (selectedRole.id === 'faculty') {
