@@ -743,13 +743,9 @@ export const AuthPage: React.FC = () => {
           throw new Error('Incorrect password. Please check your credentials and try again.');
         }
 
-        if (isCognitoConfigError(cognitoErr)) {
-          // SECURITY: Do NOT bypass auth on Cognito configuration errors.
-          // Granting access without password verification is a critical auth bypass.
-          console.warn('[Cognito Config Notice]:', msg);
-          throw new Error('Authentication service is temporarily unavailable. Please try again in a moment or contact support.');
-        }
-
+        // ── Order matters: handle known user-not-found FIRST before config error check ──
+        // UserNotFoundException: "User does not exist." contains the word "does not exist"
+        // which would otherwise be caught by isCognitoConfigError → blocking new student auto-register.
         if (msg.includes('User does not exist') || msg.includes('UserNotFoundException')) {
           let dbUser: any = preFetchedDbUser;
 
@@ -828,6 +824,11 @@ export const AuthPage: React.FC = () => {
             throw new Error(signMsg || 'Invalid email or password. Please check your credentials and try again.');
           }
         } else {
+          // ── Check for real Cognito infrastructure errors (misconfiguration) ──
+          if (isCognitoConfigError(cognitoErr)) {
+            console.warn('[Cognito Config Notice]:', msg);
+            throw new Error('Authentication service is temporarily unavailable. Please try again in a moment or contact support.');
+          }
           let dbUser: any = preFetchedDbUser;
           if (!dbUser) {
             if (activeTab === 'student') {
