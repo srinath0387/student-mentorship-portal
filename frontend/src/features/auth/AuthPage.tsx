@@ -815,18 +815,53 @@ export const AuthPage: React.FC = () => {
             jwtToken = authResult.idToken;
           } catch (autoSignUpErr: any) {
             const signMsg = autoSignUpErr.message || '';
+
             if (signMsg.includes('UsernameExistsException') || signMsg.includes('already exists') || signMsg.includes('User already exists')) {
-              throw new Error('Incorrect password. Please check your credentials and try again.');
+              // Student already exists in Cognito with a different password.
+              // Try signing in directly with the provided credentials.
+              try {
+                const authResult = await cognitoSignIn(data.email, data.password);
+                jwtToken = authResult.idToken;
+              } catch {
+                // Cognito signin also failed — verify against DB password
+                if (activeTab === 'student') {
+                  const serverAuth = await api.verifyStudentPassword(data.email, data.password).catch(() => null);
+                  if (serverAuth?.valid && serverAuth?.student) {
+                    // DB password valid — allow login without Cognito JWT
+                    const stu = serverAuth.student;
+                    rollNo = stu.roll_number;
+                    displayName = stu.name;
+                    const studentDept = stu.department || (rollNo ? getDeptFromRollNumber(rollNo) : 'CSE (Data Science)');
+                    login(data.email, 'student', rollNo, displayName, undefined, studentDept);
+                    registerSession(data.email, 'student');
+                    navigate('/dashboard');
+                    return;
+                  }
+                }
+                throw new Error('Incorrect password. Please check your credentials and try again.');
+              }
+            } else if (signMsg.includes('Password') || signMsg.includes('policy')) {
+              throw new Error(`Password does not meet requirements: ${signMsg}`);
+            } else {
+              // Any other Cognito signup failure (infrastructure error, pool misconfiguration,
+              // "User does not exist." from pool edge cases, etc.)
+              // Securely fall back to DB password verification — never show raw Cognito errors.
+              console.warn('[Cognito SignUp Notice]:', signMsg);
+              if (activeTab === 'student') {
+                const serverAuth = await api.verifyStudentPassword(data.email, data.password).catch(() => null);
+                if (serverAuth?.valid && serverAuth?.student) {
+                  const stu = serverAuth.student;
+                  rollNo = stu.roll_number;
+                  displayName = stu.name;
+                  const studentDept = stu.department || (rollNo ? getDeptFromRollNumber(rollNo) : 'CSE (Data Science)');
+                  login(data.email, 'student', rollNo, displayName, undefined, studentDept);
+                  registerSession(data.email, 'student');
+                  navigate('/dashboard');
+                  return;
+                }
+              }
+              throw new Error('Unable to sign in. Please check your credentials or contact support.');
             }
-            if (signMsg.includes('Password') || signMsg.includes('policy')) {
-              throw new Error(`Password requirement: ${signMsg}`);
-            }
-            if (isCognitoConfigError(autoSignUpErr)) {
-              // SECURITY: Do NOT bypass auth on Cognito config errors in the signup path either
-              console.warn('[Cognito Config Notice]:', signMsg);
-              throw new Error('Authentication service is temporarily unavailable. Please try again in a moment.');
-            }
-            throw new Error(signMsg || 'Invalid email or password. Please check your credentials and try again.');
           }
         } else {
           // ── Check for real Cognito infrastructure errors (misconfiguration) ──
