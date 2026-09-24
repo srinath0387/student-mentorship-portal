@@ -177,6 +177,19 @@ export class AdvitiyansStack extends cdk.Stack {
         reg_no: new cognito.StringAttribute({ mutable: true }),
         year: new cognito.StringAttribute({ mutable: true }),
       },
+      // ── Password Reset OTP Email Template ──
+      userVerification: {
+        emailSubject: 'OTP for RGM ManageBAC – Your One-Time Password',
+        emailBody:
+          'Dear Faculty,\n\n' +
+          'You requested a password reset for your RGM ManageBAC account ({username}).\n\n' +
+          'Your One-Time Password (OTP) is:\n\n' +
+          '{####}\n\n' +
+          'This OTP is valid for 1 hour. Do not share it with anyone.\n\n' +
+          'If you did not request this, please ignore this email.\n\n' +
+          'Regards,\nRGM ManageBAC System\nRGM College of Engineering & Technology',
+        emailStyle: cognito.VerificationEmailStyle.CODE,
+      },
       lambdaTriggers: {
         preSignUp: preSignUpLambda,
       },
