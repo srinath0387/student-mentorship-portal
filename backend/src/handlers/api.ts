@@ -28,46 +28,12 @@ import {
   isLateralEntry,
 } from '../lib/validation';
 import { extractAuth, requireAuth, requireRole, requireOwnerOrRole } from '../lib/authMiddleware';
+import { compareAndUpgradePassword, hashPassword, BCRYPT_ROUNDS } from '../services/passwordService';
 import bcrypt from 'bcryptjs';
 
-const BCRYPT_ROUNDS = 10;
 
-/**
- * Compare entered plaintext password against stored password (which might be bcrypt hash or legacy plaintext).
- * If it matches as legacy plaintext, optionally upgrades the stored password to a bcrypt hash in the database.
- */
-async function compareAndUpgradePassword(
-  entered: string,
-  stored: string,
-  upgradeCallback?: (newHash: string) => Promise<void>
-): Promise<boolean> {
-  if (!entered || !stored) return false;
-
-  let isMatch = false;
-  const isBcrypt = stored.startsWith('$2a$') || stored.startsWith('$2b$') || stored.startsWith('$2y$');
-
-  if (isBcrypt) {
-    try {
-      isMatch = await bcrypt.compare(entered, stored);
-    } catch {
-      isMatch = false;
-    }
-  } else {
-    // Legacy plaintext match
-    isMatch = (entered === stored);
-    // If matched, seamlessly upgrade to bcrypt in the background
-    if (isMatch && upgradeCallback) {
-      try {
-        const newHash = await bcrypt.hash(entered, BCRYPT_ROUNDS);
-        await upgradeCallback(newHash);
-      } catch (upgradeErr: any) {
-        console.warn('[Bcrypt Upgrade Notice]:', upgradeErr.message);
-      }
-    }
-  }
-
-  return isMatch;
-}
+// compareAndUpgradePassword and BCRYPT_ROUNDS now live in services/passwordService.ts
+// (Phase 1.1 extraction)
 
 const app = express();
 app.use(cors());
