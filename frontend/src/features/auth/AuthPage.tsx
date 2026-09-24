@@ -98,7 +98,7 @@ export const AuthPage: React.FC = () => {
   const [isSettingUp, setIsSettingUp] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
 
-  const { login, registerSession, sessionKickedOut } = useAuth();
+  const { login, registerSession, sessionKickedOut, markLoggingIn, stopLoggingIn } = useAuth();
 
   // Student Sign Up Form
   const {
@@ -590,6 +590,11 @@ export const AuthPage: React.FC = () => {
 
   const onLogin = async (data: LoginInput) => {
     setErrorMessage(null);
+    // ── Guard against redirect-to-home flash ──────────────────────────────────
+    // Calling markLoggingIn() sets isLoading=true immediately in AuthContext so
+    // MainLayout's auth guard does NOT fire while React is committing the new
+    // user state from login(). Cleared automatically when login() resolves.
+    markLoggingIn();
     try {
       let jwtToken: string | undefined;
       let rollNo = '';
@@ -977,6 +982,8 @@ export const AuthPage: React.FC = () => {
         navigate('/dashboard');
       }
     } catch (err: any) {
+      // Clear the loading guard so the user can try again
+      stopLoggingIn();
       setErrorMessage(err.message || 'Login failed. Please check your credentials and try again.');
     }
   };
