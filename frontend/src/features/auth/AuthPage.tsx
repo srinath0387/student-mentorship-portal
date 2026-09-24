@@ -70,7 +70,7 @@ export const AuthPage: React.FC = () => {
   if (!activeTab) {
     return <Navigate to="/" replace />;
   }
-  const [isSignUp, setIsSignUp] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(() => searchParams.get('signup') === 'true');
   const [loginDept, setLoginDept] = useState<string>('CSE (Data Science)');
   const [regNoStatus, setRegNoStatus] = useState<{ loading: boolean; available?: boolean; message?: string }>({ loading: false });
   const [emailStatus, setEmailStatus] = useState<{ loading: boolean; available?: boolean; message?: string }>({ loading: false });
