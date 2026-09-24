@@ -11439,9 +11439,9 @@ app.delete('/subjects/master/:id', requireRole('admin', 'hod', 'coordinator'), a
  * Groups case-insensitively and supports department, year, section, and issuer filters.
  */
 // Helper: build robust role & branch-code department SQL filter for students
-function buildCertDeptFilter(role?: string, dept?: string, paramStartIndex = 1) {
-  if (role !== 'hod' || !dept || dept === '*' || dept === 'All') {
-    return { sql: '', params: [] as any[] };
+function buildCertDeptFilter(dept?: string, paramStartIndex = 1): { condition: string; params: any[] } {
+  if (!dept || dept === '*' || dept === 'All') {
+    return { condition: '1=1', params: [] };
   }
   const d = dept.toLowerCase().trim();
   let code = '';
@@ -11471,7 +11471,7 @@ function buildCertDeptFilter(role?: string, dept?: string, paramStartIndex = 1) 
   } else if (code === '05') {
     cond = `(
       SUBSTRING(s.roll_number, 7, 2) = '05'
-      OR LOWER(REPLACE(COALESCE(s.department, ''), ' ', '')) = 'cse'
+      OR LOWER(TRIM(COALESCE(s.department, ''))) = 'cse'
       OR LOWER(REPLACE(COALESCE(s.department, ''), ' ', '')) = LOWER(REPLACE($${paramStartIndex}, ' ', ''))
     )
     AND SUBSTRING(s.roll_number, 7, 2) NOT IN ('32', '33', '34', '37')
@@ -11523,10 +11523,11 @@ function buildCertDeptFilter(role?: string, dept?: string, paramStartIndex = 1) 
   } else {
     cond = `(
       LOWER(REPLACE(COALESCE(s.department, ''), ' ', '')) = LOWER(REPLACE($${paramStartIndex}, ' ', ''))
+      OR LOWER(COALESCE(s.department, '')) ILIKE '%' || LOWER(REPLACE($${paramStartIndex}, ' ', '')) || '%'
     )`;
   }
 
-  return { sql: `AND ${cond}`, params };
+  return { condition: cond, params };
 }
 
 // Dedicated self-healing table setup for certification catalogs & student certifications
@@ -11610,11 +11611,9 @@ app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'f
     const params: any[] = [];
 
     if (deptToUse && deptToUse !== 'All') {
-      params.push(deptToUse);
-      whereClauses.push(`(
-        LOWER(REPLACE(s.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($${params.length}, ' ', '')) || '%'
-        OR LOWER(REPLACE($${params.length}, ' ', '')) ILIKE '%' || LOWER(REPLACE(s.department, ' ', '')) || '%'
-      )`);
+      const deptFilter = buildCertDeptFilter(deptToUse, params.length + 1);
+      params.push(...deptFilter.params);
+      whereClauses.push(deptFilter.condition);
     }
 
     if (filterYear && filterYear !== 'All') {
@@ -11650,19 +11649,23 @@ app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'f
           AND NOT EXISTS (
             SELECT 1 FROM student_certifications sc2 
             WHERE UPPER(TRIM(sc2.roll_number)) = UPPER(TRIM(c.student_id))
-              AND LOWER(TRIM(sc2.certificate_name)) = LOWER(TRIM(c.title))
+              AND LOWER(TRIM(REGEXP_REPLACE(sc2.certificate_name, '\\s+', ' ', 'g'))) = LOWER(TRIM(REGEXP_REPLACE(c.title, '\\s+', ' ', 'g')))
           )
       ),
       cert_student_counts AS (
         SELECT 
-          uc.certificate_name AS display_name,
-          LOWER(TRIM(uc.certificate_name)) AS canonical_name,
-          COALESCE(MAX(NULLIF(uc.issuer, '')), 'Certification') AS issuer,
+          MAX(uc.certificate_name) AS display_name,
+          LOWER(TRIM(REGEXP_REPLACE(uc.certificate_name, '\\s+', ' ', 'g'))) AS canonical_name,
+          COALESCE(
+            MAX(CASE WHEN UPPER(TRIM(uc.issuer)) NOT IN ('OTHER', 'UNKNOWN', 'CERTIFICATION', '') THEN uc.issuer END),
+            MAX(uc.issuer),
+            'Certification'
+          ) AS issuer,
           COUNT(DISTINCT uc.roll_number) AS student_count
         FROM unified_certs uc
         JOIN students s ON UPPER(TRIM(s.roll_number)) = uc.roll_number
         WHERE ${whereClauses.join(' AND ')}
-        GROUP BY 1, 2
+        GROUP BY LOWER(TRIM(REGEXP_REPLACE(uc.certificate_name, '\\s+', ' ', 'g')))
       ),
       -- Merge student cert data with catalog: student counts first, then catalog-only rows
       merged AS (
@@ -11672,7 +11675,7 @@ app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'f
           COALESCE(csc.issuer, cat.issuer, 'Certification') AS issuer,
           COALESCE(csc.student_count, 0) AS student_count
         FROM cert_student_counts csc
-        LEFT JOIN certification_catalogs cat ON LOWER(TRIM(cat.display_name)) = LOWER(TRIM(csc.display_name))
+        LEFT JOIN certification_catalogs cat ON LOWER(TRIM(REGEXP_REPLACE(cat.display_name, '\\s+', ' ', 'g'))) = csc.canonical_name
         UNION ALL
         SELECT
           cat.display_name,
@@ -11682,11 +11685,12 @@ app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'f
         FROM certification_catalogs cat
         WHERE NOT EXISTS (
           SELECT 1 FROM cert_student_counts csc
-          WHERE LOWER(TRIM(csc.display_name)) = LOWER(TRIM(cat.display_name))
+          WHERE csc.canonical_name = LOWER(TRIM(REGEXP_REPLACE(cat.display_name, '\\s+', ' ', 'g')))
         )
       )
       SELECT display_name, canonical_name, issuer, student_count
-      FROM merged      ORDER BY student_count DESC, display_name ASC
+      FROM merged
+      ORDER BY student_count DESC, display_name ASC
       LIMIT 24
     `;
 
@@ -11728,11 +11732,9 @@ app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'fa
     const params: any[] = [`%${query}%`];
 
     if (deptToUse && deptToUse !== 'All') {
-      params.push(deptToUse);
-      whereClauses.push(`(
-        LOWER(REPLACE(s.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($${params.length}, ' ', '')) || '%'
-        OR LOWER(REPLACE($${params.length}, ' ', '')) ILIKE '%' || LOWER(REPLACE(s.department, ' ', '')) || '%'
-      )`);
+      const deptFilter = buildCertDeptFilter(deptToUse, params.length + 1);
+      params.push(...deptFilter.params);
+      whereClauses.push(deptFilter.condition);
     }
 
     if (filterYear && filterYear !== 'All') {
@@ -11763,19 +11765,23 @@ app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'fa
           AND NOT EXISTS (
             SELECT 1 FROM student_certifications sc2 
             WHERE UPPER(TRIM(sc2.roll_number)) = UPPER(TRIM(c.student_id))
-              AND LOWER(TRIM(sc2.certificate_name)) = LOWER(TRIM(c.title))
+              AND LOWER(TRIM(REGEXP_REPLACE(sc2.certificate_name, '\\s+', ' ', 'g'))) = LOWER(TRIM(REGEXP_REPLACE(c.title, '\\s+', ' ', 'g')))
           )
       ),
       cert_student_counts AS (
         SELECT 
-          uc.certificate_name AS display_name,
-          LOWER(TRIM(uc.certificate_name)) AS canonical_name,
-          COALESCE(MAX(NULLIF(uc.issuer, '')), 'Certification') AS issuer,
+          MAX(uc.certificate_name) AS display_name,
+          LOWER(TRIM(REGEXP_REPLACE(uc.certificate_name, '\\s+', ' ', 'g'))) AS canonical_name,
+          COALESCE(
+            MAX(CASE WHEN UPPER(TRIM(uc.issuer)) NOT IN ('OTHER', 'UNKNOWN', 'CERTIFICATION', '') THEN uc.issuer END),
+            MAX(uc.issuer),
+            'Certification'
+          ) AS issuer,
           COUNT(DISTINCT uc.roll_number) AS student_count
         FROM unified_certs uc
         JOIN students s ON UPPER(TRIM(s.roll_number)) = uc.roll_number
         WHERE ${whereClauses.join(' AND ')}
-        GROUP BY 1, 2
+        GROUP BY LOWER(TRIM(REGEXP_REPLACE(uc.certificate_name, '\\s+', ' ', 'g')))
       ),
       merged AS (
         SELECT
@@ -11784,18 +11790,19 @@ app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'fa
           COALESCE(csc.issuer, cat.issuer, 'Certification') AS issuer,
           COALESCE(csc.student_count, 0) AS student_count
         FROM cert_student_counts csc
-        LEFT JOIN certification_catalogs cat ON LOWER(TRIM(cat.display_name)) = LOWER(TRIM(csc.display_name))
+        LEFT JOIN certification_catalogs cat ON LOWER(TRIM(REGEXP_REPLACE(cat.display_name, '\\s+', ' ', 'g'))) = csc.canonical_name
         UNION ALL
         SELECT cat.display_name, cat.canonical_name, cat.issuer, 0
         FROM certification_catalogs cat
         WHERE NOT EXISTS (
           SELECT 1 FROM cert_student_counts csc
-          WHERE LOWER(TRIM(csc.display_name)) = LOWER(TRIM(cat.display_name))
+          WHERE csc.canonical_name = LOWER(TRIM(REGEXP_REPLACE(cat.display_name, '\\s+', ' ', 'g')))
         )
       )
       SELECT display_name, canonical_name, issuer, student_count
       FROM merged
-      WHERE display_name ILIKE $1 OR issuer ILIKE $1      ORDER BY student_count DESC, display_name ASC
+      WHERE display_name ILIKE $1 OR issuer ILIKE $1
+      ORDER BY student_count DESC, display_name ASC
       LIMIT 15
     `;
 
@@ -11841,11 +11848,9 @@ app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', '
     const params: any[] = [certName, `%${certName}%`];
 
     if (deptToUse && deptToUse !== 'All') {
-      params.push(deptToUse);
-      whereClauses.push(`(
-        LOWER(REPLACE(s.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($${params.length}, ' ', '')) || '%'
-        OR LOWER(REPLACE($${params.length}, ' ', '')) ILIKE '%' || LOWER(REPLACE(s.department, ' ', '')) || '%'
-      )`);
+      const deptFilter = buildCertDeptFilter(deptToUse, params.length + 1);
+      params.push(...deptFilter.params);
+      whereClauses.push(deptFilter.condition);
     }
 
     if (filterYear && filterYear !== 'All') {
@@ -11893,7 +11898,7 @@ app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', '
           AND NOT EXISTS (
             SELECT 1 FROM student_certifications sc2 
             WHERE UPPER(TRIM(sc2.roll_number)) = UPPER(TRIM(c.student_id))
-              AND LOWER(TRIM(sc2.certificate_name)) = LOWER(TRIM(c.title))
+              AND LOWER(TRIM(REGEXP_REPLACE(sc2.certificate_name, '\\s+', ' ', 'g'))) = LOWER(TRIM(REGEXP_REPLACE(c.title, '\\s+', ' ', 'g')))
           )
       )
       SELECT DISTINCT ON (s.roll_number)
@@ -11911,8 +11916,9 @@ app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', '
         uc.source,
         uc.verification_status
       FROM unified_certs uc
-      JOIN students s ON s.roll_number = uc.roll_number
-      WHERE ${whereClauses.join(' AND ')}      ORDER BY s.roll_number ASC
+      JOIN students s ON UPPER(TRIM(s.roll_number)) = uc.roll_number
+      WHERE ${whereClauses.join(' AND ')}
+      ORDER BY s.roll_number ASC
     `;
 
     const result = await db.query(studentsQuery, params);
@@ -11923,10 +11929,6 @@ app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', '
   }
 });
 
-/**
- * POST /certifications/credly/sync
- * Sync Credly profile badges for a student
- */
 app.post('/certifications/credly/sync', requireAuth, async (req: Request, res: Response) => {
   try {
     const rollNumber = (req.auth?.role === 'student' ? req.auth.regNo : req.body.roll_number)?.trim().toUpperCase();
