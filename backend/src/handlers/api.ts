@@ -481,7 +481,12 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
         });
         if (isMatch) {
           const assignedDept = facRow.department || department || inferDepartmentFromEmail(facRow.email, 'CSE');
-          return res.json({ valid: true, role: 'faculty', department: assignedDept, email: facRow.email, faculty_id: facRow.faculty_id });
+          let facName: string | null = null;
+          try {
+            const p = await db.query('SELECT name FROM faculty WHERE LOWER(email) = $1 LIMIT 1', [emailLower]);
+            facName = p.rows[0]?.name || null;
+          } catch { /* ignore */ }
+          return res.json({ valid: true, role: 'faculty', department: assignedDept, email: facRow.email, faculty_id: facRow.faculty_id, name: facName });
         }
         // Email matched but password wrong — reject immediately
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -493,17 +498,19 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
       const isStudentRoll = /^\d{2}[0-9a-z]{4,10}$/i.test(emailPrefix) || /^\d/.test(emailPrefix);
       const isFacultyEmail = emailLower.endsWith('@rgmcet.edu.in') && !isStudentRoll && password === 'faculty@2026';
       if (isFacultyEmail) {
-        // Look up the faculty profile to get department
+        // Look up the faculty profile to get department and name
         let resolvedFacDept = department || inferDepartmentFromEmail(emailLower, 'CSE');
         let resolvedFacId: string | null = null;
+        let resolvedFacName: string | null = null;
         try {
           const facProfile = await db.query(
-            'SELECT faculty_id, department FROM faculty WHERE LOWER(email) = $1 LIMIT 1',
+            'SELECT faculty_id, department, name FROM faculty WHERE LOWER(email) = $1 LIMIT 1',
             [emailLower]
           );
           if (facProfile.rows.length > 0) {
             resolvedFacDept = facProfile.rows[0].department || resolvedFacDept;
             resolvedFacId = facProfile.rows[0].faculty_id || null;
+            resolvedFacName = facProfile.rows[0].name || null;
           }
         } catch { /* ignore */ }
         // Auto-seed the credentials row
@@ -515,7 +522,7 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
             [emailLower, 'faculty@2026', resolvedFacDept, resolvedFacId]
           );
         } catch { /* ignore seed errors */ }
-        return res.json({ valid: true, role: 'faculty', department: resolvedFacDept, email: emailLower, faculty_id: resolvedFacId });
+        return res.json({ valid: true, role: 'faculty', department: resolvedFacDept, email: emailLower, faculty_id: resolvedFacId, name: resolvedFacName });
       }
     } catch {
       // Fall through

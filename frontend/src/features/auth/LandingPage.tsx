@@ -389,10 +389,16 @@ export const LandingPage: React.FC = () => {
           throw new Error('Please enter a valid @rgmcet.edu.in official faculty email address.');
         }
 
+        // 1. Attempt Cognito sign-in first (for accounts created in Cognito)
+        let cognitoTokens: any = null;
         try {
-          const tokens = await api.cognitoSignInViaBackend(emailLower, trimmedPass);
+          cognitoTokens = await api.cognitoSignInViaBackend(emailLower, trimmedPass);
+        } catch (cognitoErr: any) {
+          console.warn('[Faculty Auth] Cognito sign-in notice:', cognitoErr?.message || cognitoErr);
+        }
 
-          // Check if this account is actually registered as a student in the DB
+        // 2. If Cognito succeeded, resolve profile and login
+        if (cognitoTokens?.idToken) {
           let studentCheck: any = null;
           try { studentCheck = await api.getStudentByEmail(emailLower); } catch { /* silent */ }
           if (studentCheck) {
@@ -402,37 +408,35 @@ export const LandingPage: React.FC = () => {
           let faculty: any = null;
           try { faculty = await api.getFacultyByEmail(emailLower); } catch { /* silent */ }
 
-          // Fallback: check if valid in faculty_credentials table via adminLogin
-          if (!faculty) {
-            try {
-              const facCheck = await api.adminLogin(emailLower, trimmedPass, selectedDept);
-              if (facCheck.valid && facCheck.role === 'faculty') {
-                faculty = {
-                  faculty_id: facCheck.faculty_id || `FAC_${emailLower.split('@')[0].toUpperCase()}`,
-                  name: facCheck.name || emailLower.split('@')[0],
-                  department: facCheck.department || selectedDept,
-                };
-              }
-            } catch { /* silent */ }
-          }
-
-          if (!faculty) {
-            throw new Error('Faculty profile not found. Please verify your credentials or contact the administrator.');
-          }
-
           const facDept = faculty?.department || selectedDept;
           const facName = faculty?.name || emailLower.split('@')[0];
-          login(emailLower, 'faculty', faculty?.faculty_id, facName, tokens.idToken, facDept);
+          login(emailLower, 'faculty', faculty?.faculty_id, facName, cognitoTokens.idToken, facDept);
           await registerSession(emailLower, 'faculty');
           navigate('/faculty/dashboard');
           return;
-        } catch (facErr: any) {
-          const msg = facErr?.message || '';
-          if (msg.includes('Incorrect username or password') || msg.includes('NotAuthorizedException')) {
-            throw new Error('Incorrect email or password. Please check your credentials.');
-          }
-          throw new Error(msg || 'Authentication failed. Please verify your credentials.');
         }
+
+        // 3. Fallback: Authenticate against institutional DB (faculty_credentials & faculty directory)
+        try {
+          const adminRes = await api.adminLogin(emailLower, trimmedPass, selectedDept);
+          if (adminRes.valid && (adminRes.role === 'faculty' || adminRes.role === 'hod')) {
+            const assignedDept = adminRes.department || selectedDept;
+            const facName = adminRes.name || emailLower.split('@')[0];
+            login(adminRes.email || emailLower, 'faculty', adminRes.faculty_id, facName, undefined, assignedDept);
+            await registerSession(adminRes.email || emailLower, 'faculty');
+            navigate('/faculty/dashboard');
+            return;
+          }
+        } catch { /* proceed to helpful error message */ }
+
+        // 4. Both Cognito and DB rejected: provide clear guidance based on profile existence
+        let facultyRecord: any = null;
+        try { facultyRecord = await api.getFacultyByEmail(emailLower); } catch { /* silent */ }
+        if (facultyRecord) {
+          throw new Error('Incorrect password. If this is your first time logging in, try the default password (faculty@2026) or use "Forgot password?" to set a new one.');
+        }
+
+        throw new Error('No faculty account found for this email. Please verify your official email or contact the administrator.');
       }
 
       // ── 4. HOD / Coordinator / Admin / Oversight Roles ──

@@ -94,17 +94,20 @@ export async function fetchWithAuth(
       }
 
       if (response.status === 401) {
-        if (
-          typeof window !== 'undefined' &&
-          !window.location.hash.includes('login') &&
-          !window.location.hash.includes('landing') &&
-          window.location.hash !== '#/' &&
-          window.location.hash !== ''
-        ) {
-          sessionStorage.removeItem('advitiyans_jwt_token');
-          window.dispatchEvent(new CustomEvent('auth:session_expired'));
+        const isAuthEndpoint = endpoint.startsWith('/auth/');
+        if (!isAuthEndpoint) {
+          if (
+            typeof window !== 'undefined' &&
+            !window.location.hash.includes('login') &&
+            !window.location.hash.includes('landing') &&
+            window.location.hash !== '#/' &&
+            window.location.hash !== ''
+          ) {
+            sessionStorage.removeItem('advitiyans_jwt_token');
+            window.dispatchEvent(new CustomEvent('auth:session_expired'));
+          }
+          errMsg = 'Your session has expired. Please log in again.';
         }
-        errMsg = 'Your session has expired. Please log in again.';
       } else if (response.status === 413) {
         errMsg =
           'File size is too large (exceeds server limit). Please upload a file smaller than 4.5 MB.';
