@@ -575,11 +575,11 @@ export const LandingPage: React.FC = () => {
       </div>
 
       {/* ── Main Unified Login Container ── */}
-      <main className="z-10 relative flex-1 max-w-md w-full mx-auto px-4 py-1.5 sm:py-2 flex flex-col justify-center items-center my-auto min-h-0">
-        <div className="w-full bg-white border border-slate-200/90 rounded-2xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl shadow-black/30 relative">
+      <main className="z-10 relative flex-1 max-w-xl w-full mx-auto px-4 py-2 sm:py-3 flex flex-col justify-center items-center my-auto min-h-0">
+        <div className="w-full bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-black/25 relative">
           {/* ── Searchable / Typeahead Role Selector Dropdown ── */}
-          <div className="relative mb-3 sm:mb-3.5" ref={dropdownRef}>
-            <label className="block text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-slate-500 mb-1.5">
+          <div className="relative mb-4 sm:mb-5" ref={dropdownRef}>
+            <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500 mb-1.5">
               Select Your Role to Login
             </label>
 
@@ -589,26 +589,26 @@ export const LandingPage: React.FC = () => {
                 setIsDropdownOpen(!isDropdownOpen);
                 setTimeout(() => searchInputRef.current?.focus(), 50);
               }}
-              className="w-full flex items-center justify-between p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-slate-50 hover:bg-slate-100/80 border border-slate-200 text-left transition-all group focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
+              className="w-full flex items-center justify-between p-3.5 sm:p-4 rounded-2xl bg-slate-50 hover:bg-slate-100/80 border border-slate-200 text-left transition-all group focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
             >
-              <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <div className="flex items-center gap-3 min-w-0">
                 {selectedRole ? (
                   <>
-                    <div className={`w-8 h-8 rounded-lg sm:rounded-xl flex items-center justify-center shrink-0 border ${selectedRole.accentColor}`}>
-                      <selectedRole.icon className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${selectedRole.accentColor}`}>
+                      <selectedRole.icon className="w-5 h-5" />
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs sm:text-sm font-extrabold text-slate-900 truncate">{selectedRole.title}</span>
+                        <span className="text-sm font-extrabold text-slate-900 truncate">{selectedRole.title}</span>
                       </div>
-                      <p className="text-[10px] sm:text-[11px] text-slate-500 truncate">{selectedRole.description}</p>
+                      <p className="text-[11px] text-slate-500 truncate">{selectedRole.description}</p>
                     </div>
                   </>
                 ) : (
-                  <span className="text-xs sm:text-sm text-slate-400 font-semibold">Choose your role...</span>
+                  <span className="text-sm text-slate-400 font-semibold">Choose your role...</span>
                 )}
               </div>
-              <ChevronDown className={`w-4 h-4 sm:w-5 sm:h-5 text-slate-400 shrink-0 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180 text-brand-primary' : ''}`} />
+              <ChevronDown className={`w-5 h-5 text-slate-400 shrink-0 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180 text-brand-primary' : ''}`} />
             </button>
 
             {/* Dropdown Menu Modal */}
@@ -720,17 +720,17 @@ export const LandingPage: React.FC = () => {
 
           {/* ── Dynamic Form Fields for Selected Role ── */}
           {selectedRole && (
-            <form onSubmit={handleLoginSubmit} className="space-y-2.5 sm:space-y-3">
+            <form onSubmit={handleLoginSubmit} className="space-y-3.5 sm:space-y-4">
               {/* Student Segment Toggle */}
               {selectedRole.id === 'student' && (
-                <div className="flex rounded-xl bg-slate-100 p-0.5 sm:p-1 border border-slate-200">
+                <div className="flex rounded-xl bg-slate-100 p-1 border border-slate-200">
                   <button
                     type="button"
                     onClick={() => {
                       setStudentYearMode('regular');
                       setErrorMessage(null);
                     }}
-                    className={`flex-1 py-1 sm:py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
                       studentYearMode === 'regular'
                         ? 'bg-brand-primary text-white shadow-sm'
                         : 'text-slate-600 hover:text-slate-900'
@@ -744,7 +744,7 @@ export const LandingPage: React.FC = () => {
                       setStudentYearMode('fresher');
                       setErrorMessage(null);
                     }}
-                    className={`flex-1 py-1 sm:py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
                       studentYearMode === 'fresher'
                         ? 'bg-brand-primary text-white shadow-sm'
                         : 'text-slate-600 hover:text-slate-900'
@@ -757,7 +757,7 @@ export const LandingPage: React.FC = () => {
 
               {/* Identifier Input Field */}
               <div>
-                <label className="block text-[11px] sm:text-xs font-bold text-slate-700 mb-1">
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
                   {selectedRole.id === 'student' 
                     ? (studentYearMode === 'fresher' ? 'Admission ID / Username / Mobile' : 'College Email (@rgmcet.edu.in)')
                     : selectedRole.id === 'parent' 
@@ -765,11 +765,11 @@ export const LandingPage: React.FC = () => {
                       : 'Official Email Address'}
                 </label>
                 <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                     {selectedRole.id === 'parent' ? (
-                      <User className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      <User className="w-4 h-4" />
                     ) : (
-                      <Mail className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      <Mail className="w-4 h-4" />
                     )}
                   </div>
                   <input
@@ -778,32 +778,27 @@ export const LandingPage: React.FC = () => {
                     onChange={(e) => setIdentifier(e.target.value)}
                     placeholder={
                       selectedRole.id === 'student' 
-                        ? (studentYearMode === 'fresher' ? 'e.g. 24091A0501 or 9876543210' : 'e.g. 23091a3227@rgmcet.edu.in')
-                        : selectedRole.id === 'parent'
-                          ? 'e.g. 21091A3201'
+                        ? (studentYearMode === 'fresher' ? 'Admission ID / Username / Mobile' : 'yourname@rgmcet.edu.in')
+                        : selectedRole.id === 'parent' 
+                          ? 'Student Roll Number'
                           : 'yourname@rgmcet.edu.in'
                     }
-                    className="w-full pl-9 pr-3.5 py-2 sm:py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-xs sm:text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
+                    className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-xs sm:text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
                   />
                 </div>
-                {selectedRole.id === 'student' && studentYearMode === 'regular' && (
-                  <p className="text-[10px] text-slate-500 mt-0.5 ml-0.5">
-                    Enter your college email — same as your roll number (e.g. <span className="text-brand-primary font-mono font-semibold">23091a3227@rgmcet.edu.in</span>)
-                  </p>
-                )}
               </div>
 
               {/* Department Selector (for HOD, Admin, or Faculty) */}
               {(selectedRole.id === 'hod' || selectedRole.id === 'admin' || selectedRole.id === 'faculty') && (
                 <div>
-                  <label className="block text-[11px] sm:text-xs font-bold text-slate-700 mb-1">
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
                     Department
                   </label>
                   <select
                     value={selectedDept}
                     onChange={(e) => setSelectedDept(e.target.value)}
                     aria-label="Department Selection"
-                    className="w-full px-3 py-2 sm:py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-xs sm:text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary cursor-pointer transition-all"
+                    className="w-full px-3.5 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-xs sm:text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary cursor-pointer transition-all"
                   >
                     {VALID_DEPARTMENT_NAMES.map(dept => (
                       <option key={dept} value={dept}>{dept}</option>
@@ -815,8 +810,8 @@ export const LandingPage: React.FC = () => {
               {/* Password or DOB Field */}
               {selectedRole.id === 'student' && studentYearMode === 'fresher' ? (
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[11px] sm:text-xs font-bold text-slate-700">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-bold text-slate-700">
                       Date of Birth (DOB) or Password
                     </label>
                   </div>
@@ -825,7 +820,7 @@ export const LandingPage: React.FC = () => {
                       type="date"
                       value={fresherDob}
                       onChange={(e) => setFresherDob(e.target.value)}
-                      className="w-full px-3 py-2 sm:py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
                     />
                     <div className="relative">
                       <input
@@ -833,22 +828,22 @@ export const LandingPage: React.FC = () => {
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         placeholder="Password (if set)"
-                        className="w-full px-3 py-2 sm:py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
                       />
                     </div>
                   </div>
                 </div>
               ) : (
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[11px] sm:text-xs font-bold text-slate-700">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-bold text-slate-700">
                       Password
                     </label>
                     {selectedRole.id === 'student' && (
                       <button
                         type="button"
                         onClick={openForgotModal}
-                        className="text-[10px] sm:text-[11px] text-brand-primary hover:underline font-bold cursor-pointer"
+                        className="text-[11px] text-brand-primary hover:underline font-bold cursor-pointer"
                       >
                         Forgot password?
                       </button>
@@ -857,29 +852,29 @@ export const LandingPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={openForgotModal}
-                        className="text-[10px] sm:text-[11px] text-brand-primary hover:underline font-bold cursor-pointer"
+                        className="text-[11px] text-brand-primary hover:underline font-bold cursor-pointer"
                       >
                         Forgot password?
                       </button>
                     )}
                   </div>
                   <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                      <Lock className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                      <Lock className="w-4 h-4" />
                     </div>
                     <input
                       type={showPassword ? 'text' : 'password'}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="Enter your password"
-                      className="w-full pl-9 pr-9 py-2 sm:py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-xs sm:text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
+                      className="w-full pl-10 pr-10 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-xs sm:text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+                      className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600"
                     >
-                      {showPassword ? <EyeOff className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Eye className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
                 </div>
@@ -887,8 +882,8 @@ export const LandingPage: React.FC = () => {
 
               {/* Error Alert */}
               {errorMessage && (
-                <div className="p-2 sm:p-2.5 rounded-xl bg-red-50 border border-red-200 flex items-start gap-2 text-[11px] text-red-700 font-medium">
-                  <AlertCircle className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />
+                <div className="p-2.5 sm:p-3 rounded-xl bg-red-50 border border-red-200 flex items-start gap-2 text-xs text-red-700 font-medium">
+                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
                   <span>{errorMessage}</span>
                 </div>
               )}
@@ -897,7 +892,7 @@ export const LandingPage: React.FC = () => {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full py-2.5 sm:py-3 px-4 rounded-xl bg-brand-primary hover:bg-brand-primary/95 text-white font-black text-xs sm:text-sm shadow-md shadow-brand-primary/25 hover:shadow-lg hover:shadow-brand-primary/35 hover:scale-[1.01] active:scale-[0.99] transition-all duration-150 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full py-3.5 px-4 rounded-xl bg-brand-primary hover:bg-brand-primary/95 text-white font-black text-sm shadow-md shadow-brand-primary/25 hover:shadow-lg hover:shadow-brand-primary/35 hover:scale-[1.01] active:scale-[0.99] transition-all duration-150 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isLoading ? (
                   <>
@@ -914,11 +909,11 @@ export const LandingPage: React.FC = () => {
 
               {/* Registration Links */}
               {selectedRole.id === 'student' && studentYearMode === 'regular' && (
-                <div className="text-center pt-0.5">
+                <div className="text-center pt-1">
                   <button
                     type="button"
                     onClick={() => navigate('/login?role=student&signup=true')}
-                    className="inline-flex items-center gap-1.5 text-[11px] sm:text-xs font-bold text-brand-primary hover:underline transition-colors"
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-brand-primary hover:underline transition-colors"
                   >
                     <UserPlus className="w-3.5 h-3.5" />
                     New here? Create a Student Account
@@ -926,11 +921,11 @@ export const LandingPage: React.FC = () => {
                 </div>
               )}
               {selectedRole.id === 'faculty' && (
-                <div className="text-center pt-0.5">
+                <div className="text-center pt-1">
                   <button
                     type="button"
                     onClick={() => navigate('/login?role=faculty&signup=true')}
-                    className="inline-flex items-center gap-1.5 text-[11px] sm:text-xs font-bold text-brand-primary hover:underline transition-colors"
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-brand-primary hover:underline transition-colors"
                   >
                     <UserPlus className="w-3.5 h-3.5" />
                     New Faculty Member? Register Here
@@ -1016,7 +1011,7 @@ export const LandingPage: React.FC = () => {
                       type="email"
                       value={forgotEmail}
                       onChange={e => setForgotEmail(e.target.value)}
-                      placeholder={selectedRole?.id === 'student' ? 'e.g. 23091a3201@rgmcet.edu.in' : 'yourname@rgmcet.edu.in'}
+                      placeholder="yourname@rgmcet.edu.in"
                       className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
                       required
                     />
