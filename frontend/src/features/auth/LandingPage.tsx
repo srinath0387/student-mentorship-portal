@@ -27,7 +27,7 @@ import { Footer } from '../../components/layout/Footer';
 import { UserRole } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../lib/api';
-import { cognitoForgotPassword, cognitoConfirmPassword } from '../../lib/cognitoAuth';
+import { cognitoSignIn, cognitoForgotPassword, cognitoConfirmPassword } from '../../lib/cognitoAuth';
 import { VALID_DEPARTMENT_NAMES, getDeptFromRollNumber, RGMCET_EMAIL_REGEX, isStudentEmail } from '../../lib/validation/auth';
 
 interface RoleOption {
@@ -404,7 +404,93 @@ export const LandingPage: React.FC = () => {
         return;
       }
 
-      // ── 3. Faculty / HOD / Coordinator / Admin / Oversight Roles ──
+      // ── 3. Faculty Login — authenticate directly via Cognito (accounts & passwords stored in Cognito) ──
+      if (selectedRole.id === 'faculty') {
+        if (!trimmedId) throw new Error('Please enter your official email address.');
+        if (!trimmedPass) throw new Error('Please enter your password.');
+
+        // Prevent students from logging in as faculty
+        if (isStudentEmail(trimmedId)) {
+          throw new Error('This is a student email. Please select the "Student" role from the dropdown to log in.');
+        }
+
+        const emailLower = trimmedId.toLowerCase();
+        if (!emailLower.endsWith('@rgmcet.edu.in')) {
+          throw new Error('Please enter a valid @rgmcet.edu.in official faculty email address.');
+        }
+
+        try {
+          // Direct Cognito Authentication (try backend AdminInitiateAuth first, fallback to client-side cognitoSignIn)
+          let tokens: { idToken?: string } | null = null;
+          try {
+            tokens = await api.cognitoSignInViaBackend(emailLower, trimmedPass);
+          } catch (backendErr: any) {
+            const bMsg = backendErr?.message || '';
+            // If explicit bad credentials or user not found, also verify client SDK to ensure reliable auth
+            try {
+              tokens = await cognitoSignIn(emailLower, trimmedPass);
+            } catch (clientErr: any) {
+              const cMsg = clientErr?.message || bMsg;
+              if (cMsg.includes('Incorrect username or password') || cMsg.includes('NotAuthorizedException') || cMsg.includes('Incorrect email or password')) {
+                throw new Error('Incorrect email or password. Please check your credentials.');
+              }
+              if (cMsg.includes('User does not exist') || cMsg.includes('UserNotFoundException') || cMsg.includes('No account found')) {
+                throw new Error('No faculty account found for this email. Please register first.');
+              }
+              throw new Error(cMsg || 'Authentication failed. Please verify your credentials.');
+            }
+          }
+
+          // Check if this account is actually registered as a student in the DB
+          let studentCheck: any = null;
+          try { studentCheck = await api.getStudentByEmail(emailLower); } catch { /* silent */ }
+          if (studentCheck) {
+            throw new Error('This account belongs to a student. Please select the "Student" role to log in.');
+          }
+
+          let faculty: any = null;
+          try { faculty = await api.getFacultyByEmail(emailLower); } catch { /* silent */ }
+
+          // Auto-resolve or create profile if not present in faculty DB table yet (never block a valid Cognito faculty)
+          if (!faculty) {
+            const facId = `FAC_${emailLower.split('@')[0].toUpperCase()}`;
+            const facName = emailLower.split('@')[0]
+              .replace(/[._]/g, ' ')
+              .replace(/\b\w/g, (c: string) => c.toUpperCase());
+            const facDeptNew = selectedDept || 'CSE (Data Science)';
+            try {
+              await api.createFaculty({
+                faculty_id: facId,
+                name: facName,
+                email: emailLower,
+                department: facDeptNew,
+                role: 'mentor',
+              });
+              faculty = { faculty_id: facId, name: facName, email: emailLower, department: facDeptNew, role: 'mentor' };
+            } catch {
+              faculty = { faculty_id: facId, name: facName, email: emailLower, department: facDeptNew, role: 'mentor' };
+            }
+          }
+
+          const facDept = faculty?.department || selectedDept || 'CSE (Data Science)';
+          const facName = faculty?.name || emailLower.split('@')[0];
+          login(emailLower, 'faculty', faculty?.faculty_id, facName, tokens?.idToken, facDept);
+          await registerSession(emailLower, 'faculty');
+          navigate('/faculty/dashboard');
+          return;
+        } catch (facErr: any) {
+          const msg = facErr?.message || '';
+          if (msg.includes('Incorrect username or password') || msg.includes('NotAuthorizedException') || msg.includes('Incorrect email or password')) {
+            throw new Error('Incorrect email or password. Please check your credentials.');
+          }
+          if (msg.includes('User does not exist') || msg.includes('UserNotFoundException') || msg.includes('No account found')) {
+            throw new Error('No faculty account found for this email. Please register first.');
+          }
+          throw new Error(msg || 'Authentication failed. Please verify your credentials.');
+        }
+      }
+
+      // ── 4. HOD / Coordinator / Admin / Oversight Roles ──
       if (!trimmedId) throw new Error('Please enter your official email address.');
       if (!trimmedPass) throw new Error('Please enter your password.');
 

@@ -984,23 +984,25 @@ export const AuthPage: React.FC = () => {
           return null;
         });
 
-        // Fallback: check if valid in faculty_credentials table via adminLogin
+        // If faculty profile doesn't exist in DB yet, auto-create/initialize it so authenticated Cognito users can proceed
         if (!faculty) {
+          const facId = `FAC_${data.email.split('@')[0].toUpperCase()}`;
+          const facName = data.email.split('@')[0]
+            .replace(/[._]/g, ' ')
+            .replace(/\b\w/g, (c: string) => c.toUpperCase());
+          const facDeptNew = loginDept || 'CSE (Data Science)';
           try {
-            const facCheck = await api.adminLogin(data.email, data.password, loginDept);
-            if (facCheck.valid && facCheck.role === 'faculty') {
-              faculty = {
-                faculty_id: facCheck.faculty_id || `FAC_${data.email.split('@')[0].toUpperCase()}`,
-                name: facCheck.name || data.email.split('@')[0],
-                department: facCheck.department || loginDept || 'CSE (Data Science)',
-                role: 'mentor',
-              };
-            }
-          } catch { /* silent */ }
-        }
-
-        if (!faculty) {
-          throw new Error('Faculty profile not found. Please verify your credentials or contact the administrator.');
+            await api.createFaculty({
+              faculty_id: facId,
+              name: facName,
+              email: data.email,
+              department: facDeptNew,
+              role: 'mentor',
+            });
+            faculty = { faculty_id: facId, name: facName, email: data.email, department: facDeptNew, role: 'mentor' };
+          } catch {
+            faculty = { faculty_id: facId, name: facName, email: data.email, department: facDeptNew, role: 'mentor' };
+          }
         }
 
         if (loginDept && faculty.department !== loginDept) {
