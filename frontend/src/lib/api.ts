@@ -363,6 +363,14 @@ export const api = {
     });
   },
 
+  // Auto-provisions an existing DB faculty member into Cognito User Pool for password reset/OTP
+  provisionCognitoFaculty: async (email: string): Promise<{ success: boolean; error?: string }> => {
+    return fetchWithAuth('/auth/provision-faculty', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  },
+
   // Link email to faculty record (admin)
   patchFacultyEmail: async (facultyId: string, email: string): Promise<any> => {
     return fetchWithAuth(`/faculty/${facultyId}/email`, {

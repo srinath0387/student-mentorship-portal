@@ -486,6 +486,14 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
             const p = await db.query('SELECT name FROM faculty WHERE LOWER(email) = $1 LIMIT 1', [emailLower]);
             facName = p.rows[0]?.name || null;
           } catch { /* ignore */ }
+          adminCreateCognitoUser({
+            email: emailLower,
+            password: String(password),
+            rollNo: facRow.faculty_id || `FAC_${emailLower.split('@')[0].toUpperCase()}`,
+            name: facName || undefined,
+            role: 'faculty',
+            year: 'Faculty',
+          }).catch(() => {});
           return res.json({ valid: true, role: 'faculty', department: assignedDept, email: facRow.email, faculty_id: facRow.faculty_id, name: facName });
         }
         // Email matched but password wrong — reject immediately
@@ -522,6 +530,14 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
             [emailLower, 'faculty@2026', resolvedFacDept, resolvedFacId]
           );
         } catch { /* ignore seed errors */ }
+        adminCreateCognitoUser({
+          email: emailLower,
+          password: 'faculty@2026',
+          rollNo: resolvedFacId || `FAC_${emailLower.split('@')[0].toUpperCase()}`,
+          name: resolvedFacName || undefined,
+          role: 'faculty',
+          year: 'Faculty',
+        }).catch(() => {});
         return res.json({ valid: true, role: 'faculty', department: resolvedFacDept, email: emailLower, faculty_id: resolvedFacId, name: resolvedFacName });
       }
     } catch {
@@ -1357,6 +1373,72 @@ app.post('/auth/cognito-signin', async (req: Request, res: Response) => {
 
     console.error('[Auth] /auth/cognito-signin error:', errName, errMsg);
     return res.status(500).json({ error: 'Authentication service error. Please try again.' });
+  }
+});
+
+// ============================================================================
+// POST /auth/provision-faculty — Provisions a faculty member into Cognito User Pool
+// Enables OTP-based forgot password & self-service reset for existing DB faculty.
+// ============================================================================
+app.post('/auth/provision-faculty', async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ success: false, error: 'Email is required' });
+    }
+    const cleanEmail = String(email).trim().toLowerCase();
+
+    if (!cleanEmail.endsWith('@rgmcet.edu.in')) {
+      return res.status(400).json({ success: false, error: 'Must be an official @rgmcet.edu.in email' });
+    }
+
+    // Check if faculty exists in the DB directory or credentials
+    let faculty: any = null;
+    try {
+      const facRes = await db.query(
+        'SELECT faculty_id, name, department, email FROM faculty WHERE LOWER(email) = $1 LIMIT 1',
+        [cleanEmail]
+      );
+      if (facRes.rows.length > 0) {
+        faculty = facRes.rows[0];
+      }
+    } catch { /* ignore */ }
+
+    if (!faculty) {
+      try {
+        const credRes = await db.query(
+          'SELECT faculty_id, department, email FROM faculty_credentials WHERE LOWER(email) = $1 LIMIT 1',
+          [cleanEmail]
+        );
+        if (credRes.rows.length > 0) {
+          faculty = credRes.rows[0];
+        }
+      } catch { /* ignore */ }
+    }
+
+    if (!faculty) {
+      return res.status(404).json({ success: false, error: 'Faculty account not found in institutional records.' });
+    }
+
+    const facId = faculty.faculty_id || `FAC_${cleanEmail.split('@')[0].toUpperCase()}`;
+    const facName = faculty.name || cleanEmail.split('@')[0];
+
+    // Auto-create in Cognito with a temporary password (will be overwritten by user's OTP reset)
+    const tempPass = `RgmFac@${Date.now()}!`;
+    const result = await adminCreateCognitoUser({
+      email: cleanEmail,
+      password: tempPass,
+      rollNo: facId,
+      name: facName,
+      role: 'faculty',
+      year: 'Faculty',
+    });
+
+    console.log(`[Cognito Provision] Result for faculty ${cleanEmail}:`, result);
+    return res.json({ success: true, status: result });
+  } catch (err: any) {
+    console.error('[Cognito Provision] Error for faculty:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 

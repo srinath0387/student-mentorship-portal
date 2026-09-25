@@ -239,7 +239,28 @@ export const LandingPage: React.FC = () => {
       setForgotStep('otp');
       setForgotSuccess(`OTP sent to ${email}. Check your inbox & spam folder.`);
     } catch (err: any) {
-      setForgotError(err?.message || 'Failed to send OTP. Please check your email and try again.');
+      const msg = err?.message || '';
+      // If user does not exist in Cognito User Pool, auto-provision from DB faculty directory
+      if (
+        msg.includes('Username/client id combination not found') ||
+        msg.includes('UserNotFoundException') ||
+        msg.includes('does not exist')
+      ) {
+        try {
+          const syncRes = await api.provisionCognitoFaculty(email);
+          if (syncRes.success) {
+            // Account now provisioned in Cognito — retry sending OTP
+            await cognitoForgotPassword(email);
+            setForgotStep('otp');
+            setForgotSuccess(`OTP sent to ${email}. Check your inbox & spam folder.`);
+            return;
+          }
+        } catch { /* proceed to user-friendly message */ }
+
+        setForgotError('No faculty record found for this email in college records. Please verify your address or contact the administrator.');
+        return;
+      }
+      setForgotError(msg || 'Failed to send OTP. Please check your email and try again.');
     } finally {
       setForgotLoading(false);
     }
