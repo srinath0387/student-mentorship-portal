@@ -778,7 +778,7 @@ export const LandingPage: React.FC = () => {
                     onChange={(e) => setIdentifier(e.target.value)}
                     placeholder={
                       selectedRole.id === 'student' 
-                        ? (studentYearMode === 'fresher' ? 'Admission ID / Username / Mobile' : 'yourname@rgmcet.edu.in')
+                        ? (studentYearMode === 'fresher' ? 'Admission ID / Username / Mobile' : 'yourmail@rgmcet.edu.in')
                         : selectedRole.id === 'parent' 
                           ? 'Student Roll Number'
                           : 'yourname@rgmcet.edu.in'
@@ -1011,7 +1011,7 @@ export const LandingPage: React.FC = () => {
                       type="email"
                       value={forgotEmail}
                       onChange={e => setForgotEmail(e.target.value)}
-                      placeholder="yourname@rgmcet.edu.in"
+                      placeholder={selectedRole?.id === 'student' ? 'yourmail@rgmcet.edu.in' : 'yourname@rgmcet.edu.in'}
                       className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
                       required
                     />
