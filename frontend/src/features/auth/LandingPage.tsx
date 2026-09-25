@@ -208,14 +208,8 @@ export const LandingPage: React.FC = () => {
     setRoleSearch('');
     setErrorMessage(null);
 
-    // Set default hints or reset fields
-    if (role.id === 'hod') {
-      setIdentifier('hcse@rgmcet.edu.in');
-    } else if (role.defaultEmail) {
-      setIdentifier(role.defaultEmail);
-    } else {
-      setIdentifier('');
-    }
+    // Always start blank — don't pre-fill credentials
+    setIdentifier('');
     setPassword('');
   };
 
@@ -732,7 +726,7 @@ export const LandingPage: React.FC = () => {
                         ? (studentYearMode === 'fresher' ? 'e.g. 24091A0501 or 9876543210' : 'e.g. 23091a3227@rgmcet.edu.in')
                         : selectedRole.id === 'parent'
                           ? 'e.g. 21091A3201'
-                          : selectedRole.defaultEmail || 'name@rgmcet.edu.in'
+                          : 'yourname@rgmcet.edu.in'
                     }
                     className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-xs sm:text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
                   />
