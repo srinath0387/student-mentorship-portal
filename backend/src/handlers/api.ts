@@ -501,11 +501,19 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
         return res.status(401).json({ valid: false, error: 'Invalid email or password.' });
       }
 
-      // No DB row — auto-seed only if it's a genuine faculty @rgmcet.edu.in email (never a student roll number) with default password faculty@2026
+      // No DB row in faculty_credentials — check if authenticated via Cognito or using default password
       const emailPrefix = emailLower.split('@')[0];
       const isStudentRoll = /^\d{2}[0-9a-z]{4,10}$/i.test(emailPrefix) || /^\d/.test(emailPrefix);
-      const isFacultyEmail = emailLower.endsWith('@rgmcet.edu.in') && !isStudentRoll && password === 'faculty@2026';
+      const isFacultyEmail = emailLower.endsWith('@rgmcet.edu.in') && !isStudentRoll;
+
       if (isFacultyEmail) {
+        let isCognitoValid = false;
+        try {
+          const cognitoTokens = await adminSignIn(emailLower, password);
+          if (cognitoTokens?.idToken) isCognitoValid = true;
+        } catch { /* not in cognito or wrong cognito password */ }
+
+        if (isCognitoValid || password === 'faculty@2026') {
         // Look up the faculty profile to get department and name
         let resolvedFacDept = department || inferDepartmentFromEmail(emailLower, 'CSE');
         let resolvedFacId: string | null = null;
@@ -538,7 +546,8 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
           role: 'faculty',
           year: 'Faculty',
         }).catch(() => {});
-        return res.json({ valid: true, role: 'faculty', department: resolvedFacDept, email: emailLower, faculty_id: resolvedFacId, name: resolvedFacName });
+          return res.json({ valid: true, role: 'faculty', department: resolvedFacDept, email: emailLower, faculty_id: resolvedFacId, name: resolvedFacName });
+        }
       }
     } catch {
       // Fall through
