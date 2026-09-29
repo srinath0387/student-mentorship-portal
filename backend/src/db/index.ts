@@ -318,6 +318,7 @@ async function ensureSchema(p: Pool) {
 
     // Create unique index on department for hod_credentials
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_hod_dept ON hod_credentials(LOWER(department)) WHERE department IS NOT NULL;`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_hod_email ON hod_credentials(LOWER(email));`,
 
     // Seed/upsert official HOD credentials — keyed on EMAIL so it always works even if IDs differ.
     // Email format: h<short_dept>@rgmcet.edu.in, Password: hod@2026

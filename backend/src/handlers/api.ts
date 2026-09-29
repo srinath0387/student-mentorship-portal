@@ -476,9 +476,22 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
         if (hodDbResult.rows.length > 0) {
           const hodRow = hodDbResult.rows[0];
           const stored = hodRow.password;
-          const isMatch = await compareAndUpgradePassword(password, stored, async (newHash) => {
+          let isMatch = await compareAndUpgradePassword(password, stored, async (newHash) => {
             await db.query('UPDATE hod_credentials SET password = $1, updated_at = NOW() WHERE LOWER(email) = $2', [newHash, emailLower]);
           });
+
+          // Also verify through Cognito (e.g. after password updates in Cognito)
+          if (!isMatch) {
+            try {
+              const cognitoTokens = await adminSignIn(emailLower, password);
+              if (cognitoTokens?.idToken) {
+                isMatch = true;
+                const newHash = await bcrypt.hash(password, 10);
+                await db.query('UPDATE hod_credentials SET password = $1, updated_at = NOW() WHERE LOWER(email) = $2', [newHash, emailLower]);
+              }
+            } catch { /* not valid in cognito */ }
+          }
+
           if (isMatch) {
             const assignedDept = hodRow.department || department || 'CSE (Data Science)';
             return res.json({ valid: true, role: 'hod', department: assignedDept, email: hodRow.email });
@@ -499,16 +512,30 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
         const isFyCoord = emailLower === 'fycoordinator@rgmcet.edu.in';
         const resolvedDept = isFyCoord ? '1st Year' : (matchHod ? hodDeptMap[matchHod[1]] : null);
 
-        if (resolvedDept && password === 'hod@2026') {
-          // Auto-seed the missing row so next login hits the DB path
+        if (resolvedDept) {
+          let isCognitoValid = false;
           try {
-            await db.query(
-              `INSERT INTO hod_credentials (email, password, department) VALUES ($1, $2, $3)
-               ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, updated_at = NOW()`,
-              [emailLower, 'hod@2026', resolvedDept]
-            );
-          } catch { /* ignore seed errors */ }
-          return res.json({ valid: true, role: 'hod', department: resolvedDept, email: emailLower });
+            const cognitoTokens = await adminSignIn(emailLower, password);
+            if (cognitoTokens?.idToken) isCognitoValid = true;
+          } catch { /* not valid in cognito */ }
+
+          if (isCognitoValid || password === 'hod@2026') {
+            // Auto-seed the missing row so next login hits the DB path
+            try {
+              const hashToStore = await bcrypt.hash(password, 10);
+              const up = await db.query(
+                `UPDATE hod_credentials SET password = $1, department = $2, updated_at = NOW() WHERE LOWER(email) = $3`,
+                [hashToStore, resolvedDept, emailLower]
+              );
+              if ((up.rowCount ?? 0) === 0) {
+                await db.query(
+                  `INSERT INTO hod_credentials (email, password, department) VALUES ($1, $2, $3)`,
+                  [emailLower, hashToStore, resolvedDept]
+                );
+              }
+            } catch { /* ignore seed errors */ }
+            return res.json({ valid: true, role: 'hod', department: resolvedDept, email: emailLower });
+          }
         }
       } catch {
         // Fall through
@@ -927,14 +954,39 @@ app.put('/auth/hod-credentials', requireRole('hod', 'admin'), async (req: Reques
     const currentEmail    = existing.rows[0]?.email    || hodEmailEnv || `hod.${targetDept.toLowerCase().replace(/[^a-z]/g, '')}@rgmcet.edu.in`;
     const currentPassword = existing.rows[0]?.password || hodPassEnv || 'hod@2026';
 
-    const updatedEmail    = new_email    || currentEmail;
-    const updatedPassword = new_password || currentPassword;
+    const updatedEmail    = (new_email ? new_email.trim().toLowerCase() : currentEmail).toLowerCase();
+    const rawNewPassword  = new_password ? String(new_password) : null;
+    const updatedPassword = rawNewPassword ? await bcrypt.hash(rawNewPassword, 10) : currentPassword;
 
-    await db.query(`
-      INSERT INTO hod_credentials (email, password, department, updated_at)
-      VALUES (LOWER($1), $2, $3, NOW())
-      ON CONFLICT (LOWER(department)) DO UPDATE SET email = EXCLUDED.email, password = EXCLUDED.password, updated_at = NOW()
-    `, [updatedEmail, updatedPassword, targetDept]);
+    // Direct UPDATE first, fallback to INSERT if no row exists for this department
+    const updateRes = await db.query(
+      `UPDATE hod_credentials SET email = LOWER($1), password = $2, updated_at = NOW() WHERE LOWER(department) = LOWER($3)`,
+      [updatedEmail, updatedPassword, targetDept]
+    );
+    if ((updateRes.rowCount ?? 0) === 0) {
+      await db.query(
+        `INSERT INTO hod_credentials (email, password, department, updated_at) VALUES (LOWER($1), $2, $3, NOW())`,
+        [updatedEmail, updatedPassword, targetDept]
+      );
+    }
+
+    // Sync new password to Cognito so authentication verifies through Cognito
+    if (rawNewPassword) {
+      try {
+        const cognitoUpdated = await updateCognitoUserPassword(updatedEmail, rawNewPassword);
+        if (!cognitoUpdated) {
+          await adminCreateCognitoUser({
+            email: updatedEmail,
+            password: rawNewPassword,
+            rollNo: updatedEmail.split('@')[0],
+            role: 'hod',
+            name: `HOD (${targetDept})`,
+          }).catch(() => {});
+        }
+      } catch (cogErr: any) {
+        console.warn('[Cognito] Failed to sync HOD password to Cognito:', cogErr.message);
+      }
+    }
 
     return res.json({ success: true, message: `HOD credentials updated successfully for ${targetDept}.`, email: updatedEmail, department: targetDept });
   } catch (err: any) {
@@ -945,11 +997,12 @@ app.put('/auth/hod-credentials', requireRole('hod', 'admin'), async (req: Reques
 // POST /auth/hod-credentials/admin-reset — Admin resets HOD credentials (no verification needed)
 app.post('/auth/hod-credentials/admin-reset', requireRole('admin'), async (req: Request, res: Response) => {
   try {
-    const { new_email, new_password } = req.body;
+    const { new_email, new_password, department } = req.body;
     if (!new_email && !new_password) {
       return res.status(400).json({ error: 'Provide at least new_email or new_password' });
     }
 
+    const targetDept = department || 'CSE (Data Science)';
     const hodEmailEnv = process.env.HOD_MASTER_EMAIL || null;
     const hodPassEnv  = process.env.HOD_MASTER_PASS  || null;
 
@@ -957,18 +1010,45 @@ app.post('/auth/hod-credentials/admin-reset', requireRole('admin'), async (req: 
       return res.json({ success: true, message: 'Mock mode: HOD credentials reset.', email: new_email || hodEmailEnv || '' });
     }
 
-    const existing = await db.query('SELECT email, password FROM hod_credentials WHERE id = 1').catch(() => ({ rows: [] }));
+    const existing = await db.query(
+      'SELECT email, password FROM hod_credentials WHERE LOWER(department) = LOWER($1) OR LOWER(email) = LOWER($2) LIMIT 1',
+      [targetDept, new_email || '']
+    ).catch(() => ({ rows: [] }));
+
     const currentEmail    = existing.rows[0]?.email    || hodEmailEnv || '';
     const currentPassword = existing.rows[0]?.password || hodPassEnv || '';
 
-    const updatedEmail    = new_email    || currentEmail;
-    const updatedPassword = new_password || currentPassword;
+    const updatedEmail    = (new_email ? new_email.trim().toLowerCase() : currentEmail).toLowerCase();
+    const rawNewPassword  = new_password ? String(new_password) : null;
+    const updatedPassword = rawNewPassword ? await bcrypt.hash(rawNewPassword, 10) : currentPassword;
 
-    await db.query(`
-      INSERT INTO hod_credentials (id, email, password, updated_at)
-      VALUES (1, $1, $2, NOW())
-      ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, password = EXCLUDED.password, updated_at = NOW()
-    `, [updatedEmail, updatedPassword]);
+    const updateRes = await db.query(
+      `UPDATE hod_credentials SET email = LOWER($1), password = $2, updated_at = NOW() WHERE LOWER(department) = LOWER($3)`,
+      [updatedEmail, updatedPassword, targetDept]
+    );
+    if ((updateRes.rowCount ?? 0) === 0) {
+      await db.query(
+        `INSERT INTO hod_credentials (email, password, department, updated_at) VALUES (LOWER($1), $2, $3, NOW())`,
+        [updatedEmail, updatedPassword, targetDept]
+      );
+    }
+
+    if (rawNewPassword && updatedEmail) {
+      try {
+        const cognitoUpdated = await updateCognitoUserPassword(updatedEmail, rawNewPassword);
+        if (!cognitoUpdated) {
+          await adminCreateCognitoUser({
+            email: updatedEmail,
+            password: rawNewPassword,
+            rollNo: updatedEmail.split('@')[0],
+            role: 'hod',
+            name: `HOD (${targetDept})`,
+          }).catch(() => {});
+        }
+      } catch (cogErr: any) {
+        console.warn('[Cognito] Failed to sync HOD password to Cognito:', cogErr.message);
+      }
+    }
 
     return res.json({ success: true, message: 'HOD credentials reset by admin.', email: updatedEmail });
   } catch (err: any) {
