@@ -499,6 +499,12 @@ export const api = {
     return fetchWithAuth(`/reports/placement-summary${q}`);
   },
 
+  // Institutional Oversight: Real-time Executive Intelligence Metrics
+  getExecutiveMetrics: async (dept?: string): Promise<import('../types').ExecutiveMetricsResponse> => {
+    const q = dept ? `?department=${encodeURIComponent(dept)}` : '';
+    return fetchWithAuth(`/oversight/executive-metrics${q}`);
+  },
+
   bulkImportStudents: async (students: any[]) => {
     return fetchWithAuth(`/students/bulk-import`, {
       method: 'POST',

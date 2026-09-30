@@ -608,3 +608,91 @@ export interface StudentPermissionRecord {
   approved_at?: string;
   created_at: string;
 }
+
+// ── MODULE 6: Institutional Oversight Executive Analytics ────────────────────
+export interface ExecutiveDepartmentMetrics {
+  department: string;
+  student_count: number;
+  students_by_year: { year1: number; year2: number; year3: number; year4: number };
+  faculty_count: number;
+  professors: number;
+  associate_professors: number;
+  assistant_professors: number;
+  other_faculty: number;
+  doctorates: number;
+  doctorate_percentage: number;
+  sfr: number;
+  sfr_status: 'compliant' | 'warning' | 'critical';
+  avg_attendance: number;
+  below_75_attendance_count: number;
+  total_publications: number;
+  publications_by_year: Record<string, number>;
+  publications_by_category: {
+    journals: number;
+    conferences: number;
+    book_chapters: number;
+    patents: number;
+  };
+  patents: { filed: number; published: number; granted: number };
+  student_certifications: {
+    total: number;
+    certified_students: number;
+    penetration_rate: number;
+    aws: number;
+    nptel: number;
+    azure: number;
+    oracle: number;
+    gcp: number;
+  };
+  faculty_fdp_count: number;
+  mentorship_coverage_rate: number;
+  placement_rate: number;
+  avg_ctc_lpa: number;
+  highest_ctc_lpa: number;
+  coding_problems_solved: number;
+  higher_studies_count: number;
+}
+
+export interface ExecutiveAnomalyAlert {
+  id: string;
+  level: 'warning' | 'critical' | 'info';
+  category: 'SFR' | 'Attendance' | 'Doctorates' | 'Mentorship' | 'FDP';
+  department?: string;
+  title: string;
+  message: string;
+  metric: string;
+  benchmark: string;
+}
+
+export interface ExecutiveMetricsResponse {
+  scope: string;
+  allowed_departments: string[];
+  totals: {
+    total_students: number;
+    total_faculty: number;
+    overall_sfr: number;
+    cadre_ratio: string;
+    total_professors: number;
+    total_associate_professors: number;
+    total_assistant_professors: number;
+    total_doctorates: number;
+    doctorate_percentage: number;
+    total_publications: number;
+    total_patents: number;
+    total_student_certs: number;
+    avg_certification_penetration: number;
+    total_faculty_fdps: number;
+    overall_attendance_rate: number;
+    students_at_risk_attendance: number;
+    overall_placement_rate: number;
+    highest_package_lpa: number;
+    avg_package_lpa: number;
+    naac_readiness_score: number;
+    total_coding_problems: number;
+    total_higher_studies: number;
+  };
+  publications_trend: Record<string, number>;
+  anomalies: ExecutiveAnomalyAlert[];
+  departments: ExecutiveDepartmentMetrics[];
+}
+
