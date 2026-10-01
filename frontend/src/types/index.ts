@@ -581,6 +581,34 @@ export interface AcademicCalendarEntry {
   created_at?: string;
 }
 
+// ── MODULE 5: Student Permissions (On-Duty / Leaves) ────────────────────────
+export type StudentPermissionType =
+  | 'Attending Workshop'
+  | 'Conference'
+  | 'Industry Visit'
+  | 'Hackathon'
+  | 'Others';
+
+export interface StudentPermissionRecord {
+  id: string;
+  roll_number: string;
+  student_name: string;
+  department: string;
+  section: string;
+  year: string;
+  permission_type: StudentPermissionType;
+  from_date: string;
+  to_date: string;
+  num_days: number;
+  reason: string;
+  proof_url: string;
+  status: LeaveStatus;
+  hod_remarks?: string;
+  approved_by?: string;
+  approved_at?: string;
+  created_at: string;
+}
+
 // ── MODULE 6: Institutional Oversight Executive Analytics ────────────────────
 
 export interface ExecutiveDepartmentMetrics {
