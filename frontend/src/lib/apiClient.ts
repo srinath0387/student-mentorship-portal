@@ -50,7 +50,7 @@ export async function fetchWithAuth(
 
   if (!token) {
     if (
-      (userRole === 'hod' || userRole === 'admin' || userRole === 'coordinator') &&
+      ['hod', 'admin', 'coordinator', 'director', 'principal', 'management', 'program_chair'].includes(userRole) &&
       userEmail
     ) {
       token = `demo_token_${userRole}_${encodeURIComponent(userEmail)}_${Date.now()}`;

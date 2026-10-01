@@ -156,7 +156,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
 
             // Ensure JWT token exists for admin/HOD/coordinator, or silently refresh Cognito JWT for student/faculty.
-            if (savedUser.role === 'admin' || savedUser.role === 'hod' || savedUser.role === 'coordinator') {
+            if (['admin', 'hod', 'coordinator', 'director', 'principal', 'management', 'program_chair'].includes(savedUser.role)) {
               if (!sessionStorage.getItem(JWT_TOKEN_KEY)) {
                 sessionStorage.setItem(JWT_TOKEN_KEY, `demo_token_${savedUser.role}_${encodeURIComponent(savedUser.email)}_${Date.now()}`);
               }
