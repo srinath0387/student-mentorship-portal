@@ -4676,12 +4676,13 @@ app.get('/faculty/mentees/by-email/:email', async (req: Request, res: Response) 
   }
 });
 
-// GET /faculty — List all faculty with mentee counts (admin/HOD/coordinator/faculty view, scoped by department or all)
-app.get('/faculty', requireRole('admin', 'hod', 'coordinator', 'faculty'), async (req: Request, res: Response) => {
+// GET /faculty — List all faculty with mentee counts (admin/HOD/coordinator/faculty/oversight view, scoped by department or all)
+app.get('/faculty', requireRole('admin', 'hod', 'coordinator', 'faculty', 'director', 'principal', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
-    const isSuper = req.auth?.isSuperAdmin === true || callerDept === '*' || callerDept === 'All' || callerRole === 'coordinator';
+    const isOversight = ['director', 'principal', 'management', 'program_chair'].includes(callerRole || '');
+    const isSuper = req.auth?.isSuperAdmin === true || callerDept === '*' || callerDept === 'All' || callerRole === 'coordinator' || isOversight;
     const reqDept = req.query.department ? String(req.query.department) : undefined;
 
     let targetDept: string | undefined;
@@ -6112,16 +6113,17 @@ app.get('/oversight/executive-metrics', requireRole('director', 'principal', 'ma
       entry.fdpCount += fdpList.length;
     }
 
-    // 4. Student Certifications
+    // 4. Student Certifications — full provider breakdown including Cisco & others
     const certRes = await db.query(`
       SELECT s.department,
              COUNT(c.id) as total_certs,
              COUNT(DISTINCT c.student_id) as certified_students,
-             COUNT(c.id) FILTER (WHERE c.provider ILIKE '%aws%') as aws_certs,
-             COUNT(c.id) FILTER (WHERE c.provider ILIKE '%nptel%' OR c.provider ILIKE '%swayam%') as nptel_certs,
-             COUNT(c.id) FILTER (WHERE c.provider ILIKE '%azure%' OR c.provider ILIKE '%microsoft%') as azure_certs,
-             COUNT(c.id) FILTER (WHERE c.provider ILIKE '%oracle%') as oracle_certs,
-             COUNT(c.id) FILTER (WHERE c.provider ILIKE '%google%') as gcp_certs
+             COUNT(c.id) FILTER (WHERE LOWER(c.provider) LIKE '%aws%' OR LOWER(c.provider) LIKE '%amazon%') as aws_certs,
+             COUNT(c.id) FILTER (WHERE LOWER(c.provider) LIKE '%nptel%' OR LOWER(c.provider) LIKE '%swayam%') as nptel_certs,
+             COUNT(c.id) FILTER (WHERE LOWER(c.provider) LIKE '%azure%' OR LOWER(c.provider) LIKE '%microsoft%') as azure_certs,
+             COUNT(c.id) FILTER (WHERE LOWER(c.provider) LIKE '%oracle%') as oracle_certs,
+             COUNT(c.id) FILTER (WHERE LOWER(c.provider) LIKE '%google%' OR LOWER(c.provider) LIKE '%gcp%') as gcp_certs,
+             COUNT(c.id) FILTER (WHERE LOWER(c.provider) LIKE '%cisco%') as cisco_certs
       FROM students s
       JOIN certifications c ON s.roll_number = c.student_id
       GROUP BY s.department
@@ -6129,16 +6131,20 @@ app.get('/oversight/executive-metrics', requireRole('director', 'principal', 'ma
 
     const certMap = new Map<string, any>();
     for (const r of certRes.rows) {
+      const total = parseInt(r.total_certs || '0');
+      const aws = parseInt(r.aws_certs || '0');
+      const nptel = parseInt(r.nptel_certs || '0');
+      const azure = parseInt(r.azure_certs || '0');
+      const oracle = parseInt(r.oracle_certs || '0');
+      const gcp = parseInt(r.gcp_certs || '0');
+      const cisco = parseInt(r.cisco_certs || '0');
       certMap.set(r.department, {
-        total: parseInt(r.total_certs || '0'),
-        certified: parseInt(r.certified_students || '0'),
-        aws: parseInt(r.aws_certs || '0'),
-        nptel: parseInt(r.nptel_certs || '0'),
-        azure: parseInt(r.azure_certs || '0'),
-        oracle: parseInt(r.oracle_certs || '0'),
-        gcp: parseInt(r.gcp_certs || '0'),
+        total, certified: parseInt(r.certified_students || '0'),
+        aws, nptel, azure, oracle, gcp, cisco,
+        other: Math.max(0, total - aws - nptel - azure - oracle - gcp - cisco),
       });
     }
+
 
     // 5. Placements
     const placeRes = await db.query(`
@@ -6171,81 +6177,66 @@ app.get('/oversight/executive-metrics', requireRole('director', 'principal', 'ma
         patents: { filed: 0, published: 0, granted: 0 },
         fdpCount: 0,
       };
-      const cert = certMap.get(dept) || { total: 0, certified: 0, aws: 0, nptel: 0, azure: 0, oracle: 0, gcp: 0 };
+      const cert = certMap.get(dept) || { total: 0, certified: 0, aws: 0, nptel: 0, azure: 0, oracle: 0, gcp: 0, cisco: 0, other: 0 };
       const place = placeMap.get(dept) || { placed: 0, maxLpa: 0, avgLpa: 0 };
 
-      // Sensible baseline fallbacks if live DB has partial data
-      const studentCount = stu.total || 140;
-      const facultyCount = fac.total || 8;
-      const professors = fac.profs || Math.max(1, Math.floor(facultyCount * 0.15));
-      const assocProfs = fac.assoc || Math.max(1, Math.floor(facultyCount * 0.25));
-      const asstProfs = fac.asst || Math.max(1, facultyCount - professors - assocProfs);
-      const doctorates = fac.doctorates || Math.max(1, Math.floor(facultyCount * 0.35));
-      const sfr = parseFloat((studentCount / (facultyCount || 1)).toFixed(1));
-      const sfr_status = sfr <= 20 ? 'compliant' : sfr <= 25 ? 'warning' : 'critical';
+      // Pure real-time — zero fabricated fallbacks
+      const studentCount = stu.total;
+      const facultyCount = fac.total;
+      const professors = fac.profs;
+      const assocProfs = fac.assoc;
+      const asstProfs = fac.asst;
+      const doctorates = fac.doctorates;
+      const sfr = facultyCount > 0 ? parseFloat((studentCount / facultyCount).toFixed(1)) : 0;
+      const sfr_status: 'compliant' | 'warning' | 'critical' =
+        sfr === 0 ? 'compliant' : sfr <= 20 ? 'compliant' : sfr <= 25 ? 'warning' : 'critical';
 
-      const totalPubs = pub.total || 12;
-      const pubByYear = Object.keys(pub.byYear).length > 0 ? pub.byYear : {
-        '2026': Math.floor(totalPubs * 0.25),
-        '2025': Math.floor(totalPubs * 0.40),
-        '2024': Math.floor(totalPubs * 0.25),
-        '2023': Math.floor(totalPubs * 0.10),
-      };
-
-      const certTotal = cert.total || Math.floor(studentCount * 0.65);
-      const certifiedStudents = cert.certified || Math.floor(studentCount * 0.52);
-      const certPenetration = Math.min(100, Math.round((certifiedStudents / (studentCount || 1)) * 100));
+      const certPenetration = studentCount > 0
+        ? Math.min(100, Math.round((cert.certified / studentCount) * 100))
+        : 0;
+      const placementRate = studentCount > 0
+        ? Math.min(100, Math.round((place.placed / studentCount) * 100))
+        : 0;
 
       return {
         department: dept,
         student_count: studentCount,
-        students_by_year: {
-          year1: stu.y1 || Math.floor(studentCount * 0.28),
-          year2: stu.y2 || Math.floor(studentCount * 0.26),
-          year3: stu.y3 || Math.floor(studentCount * 0.24),
-          year4: stu.y4 || Math.floor(studentCount * 0.22),
-        },
+        students_by_year: { year1: stu.y1, year2: stu.y2, year3: stu.y3, year4: stu.y4 },
         faculty_count: facultyCount,
         professors,
         associate_professors: assocProfs,
         assistant_professors: asstProfs,
         other_faculty: Math.max(0, facultyCount - (professors + assocProfs + asstProfs)),
         doctorates,
-        doctorate_percentage: Math.round((doctorates / (facultyCount || 1)) * 100),
+        doctorate_percentage: facultyCount > 0 ? Math.round((doctorates / facultyCount) * 100) : 0,
         sfr,
         sfr_status,
-        avg_attendance: 88.2,
-        below_75_attendance_count: Math.floor(studentCount * 0.07),
-        total_publications: totalPubs,
-        publications_by_year: pubByYear,
-        publications_by_category: {
-          journals: pub.byCat.journals || Math.floor(totalPubs * 0.6),
-          conferences: pub.byCat.conferences || Math.floor(totalPubs * 0.3),
-          book_chapters: pub.byCat.book_chapters || Math.floor(totalPubs * 0.08),
-          patents: pub.byCat.patents || Math.max(1, Math.floor(totalPubs * 0.02)),
-        },
-        patents: {
-          filed: pub.patents.filed || 1,
-          published: pub.patents.published || 1,
-          granted: pub.patents.granted || 0,
-        },
+        avg_attendance: 0,
+        below_75_attendance_count: 0,
+        total_publications: pub.total,
+        publications_by_year: pub.byYear,
+        publications_by_category: pub.byCat,
+        patents: pub.patents,
         student_certifications: {
-          total: certTotal,
-          certified_students: certifiedStudents,
+          total: cert.total,
+          certified_students: cert.certified,
           penetration_rate: certPenetration,
-          aws: cert.aws || Math.floor(certTotal * 0.25),
-          nptel: cert.nptel || Math.floor(certTotal * 0.35),
-          azure: cert.azure || Math.floor(certTotal * 0.15),
-          oracle: cert.oracle || Math.floor(certTotal * 0.10),
-          gcp: cert.gcp || Math.floor(certTotal * 0.05),
+          aws: cert.aws,
+          nptel: cert.nptel,
+          azure: cert.azure,
+          oracle: cert.oracle,
+          gcp: cert.gcp,
+          cisco: cert.cisco,
+          other: cert.other,
         },
-        faculty_fdp_count: pub.fdpCount || facultyCount * 2,
-        mentorship_coverage_rate: 100,
-        placement_rate: place.placed ? Math.min(100, Math.round((place.placed / (studentCount * 0.25 || 1)) * 100)) : 83.5,
-        avg_ctc_lpa: place.avgLpa || 5.8,
-        highest_ctc_lpa: place.maxLpa || 14.5,
-        coding_problems_solved: studentCount * 42,
-        higher_studies_count: Math.floor(studentCount * 0.11),
+        faculty_fdp_count: pub.fdpCount,
+        mentorship_coverage_rate: 0,
+        placement_rate: placementRate,
+        placed_count: place.placed,
+        avg_ctc_lpa: place.avgLpa,
+        highest_ctc_lpa: place.maxLpa,
+        coding_problems_solved: 0,
+        higher_studies_count: 0,
       };
     });
 
@@ -6259,11 +6250,16 @@ app.get('/oversight/executive-metrics', requireRole('director', 'principal', 'ma
     const totalPubs = deptResults.reduce((acc, d) => acc + d.total_publications, 0);
     const totalStudentCerts = deptResults.reduce((acc, d) => acc + d.student_certifications.total, 0);
     const totalPatents = deptResults.reduce((acc, d) => acc + d.patents.filed + d.patents.granted, 0);
+    const totalPlaced = deptResults.reduce((acc, d) => acc + (d.placed_count || 0), 0);
+    const allLpas = deptResults.map(d => d.highest_ctc_lpa).filter((v: number) => v > 0);
+    const allAvgLpas = deptResults.map(d => d.avg_ctc_lpa).filter((v: number) => v > 0);
 
-    const overallSfr = parseFloat((totalStudents / (totalFaculty || 1)).toFixed(1));
-    const cadreRatio = `1 : ${(totalAssoc / (totalProfs || 1)).toFixed(1)} : ${(totalAsst / (totalProfs || 1)).toFixed(1)}`;
+    const overallSfr = totalFaculty > 0 ? parseFloat((totalStudents / totalFaculty).toFixed(1)) : 0;
+    const cadreRatio = totalProfs > 0
+      ? `1 : ${(totalAssoc / totalProfs).toFixed(1)} : ${(totalAsst / totalProfs).toFixed(1)}`
+      : 'N/A';
 
-    // Publication trends by year
+    // Publication trends by year — real aggregated
     const globalTrend: Record<string, number> = {};
     for (const d of deptResults) {
       for (const [yr, cnt] of Object.entries(d.publications_by_year as Record<string, number>)) {
@@ -6271,10 +6267,10 @@ app.get('/oversight/executive-metrics', requireRole('director', 'principal', 'ma
       }
     }
 
-    // Dynamic executive anomaly warnings
+    // Dynamic executive anomaly warnings — only fire on real data
     const anomalies: any[] = [];
     for (const d of deptResults) {
-      if (d.sfr > 22) {
+      if (d.sfr > 22 && d.sfr > 0) {
         anomalies.push({
           id: `sfr-${d.department}`,
           level: 'warning',
@@ -6286,7 +6282,7 @@ app.get('/oversight/executive-metrics', requireRole('director', 'principal', 'ma
           benchmark: '≤ 1:20',
         });
       }
-      if (d.doctorate_percentage < 30) {
+      if (d.faculty_count > 0 && d.doctorate_percentage < 30) {
         anomalies.push({
           id: `phd-${d.department}`,
           level: 'info',
@@ -6312,25 +6308,111 @@ app.get('/oversight/executive-metrics', requireRole('director', 'principal', 'ma
         total_associate_professors: totalAssoc,
         total_assistant_professors: totalAsst,
         total_doctorates: totalDocs,
-        doctorate_percentage: Math.round((totalDocs / (totalFaculty || 1)) * 100),
+        doctorate_percentage: totalFaculty > 0 ? Math.round((totalDocs / totalFaculty) * 100) : 0,
         total_publications: totalPubs,
         total_patents: totalPatents,
         total_student_certs: totalStudentCerts,
-        avg_certification_penetration: Math.round(deptResults.reduce((a, b) => a + b.student_certifications.penetration_rate, 0) / (deptResults.length || 1)),
+        avg_certification_penetration: deptResults.length > 0
+          ? Math.round(deptResults.reduce((a, b) => a + b.student_certifications.penetration_rate, 0) / deptResults.length)
+          : 0,
         total_faculty_fdps: deptResults.reduce((a, b) => a + b.faculty_fdp_count, 0),
-        overall_attendance_rate: 88.4,
-        students_at_risk_attendance: deptResults.reduce((a, b) => a + b.below_75_attendance_count, 0),
-        overall_placement_rate: 85.2,
-        highest_package_lpa: Math.max(...deptResults.map(d => d.highest_ctc_lpa)),
-        avg_package_lpa: 6.4,
-        naac_readiness_score: 92,
-        total_coding_problems: deptResults.reduce((a, b) => a + b.coding_problems_solved, 0),
-        total_higher_studies: deptResults.reduce((a, b) => a + b.higher_studies_count, 0),
+        overall_attendance_rate: 0,
+        students_at_risk_attendance: 0,
+        overall_placement_rate: totalStudents > 0 ? Math.round((totalPlaced / totalStudents) * 100) : 0,
+        highest_package_lpa: allLpas.length > 0 ? Math.max(...allLpas) : 0,
+        avg_package_lpa: allAvgLpas.length > 0
+          ? parseFloat((allAvgLpas.reduce((a: number, b: number) => a + b, 0) / allAvgLpas.length).toFixed(2))
+          : 0,
+        naac_readiness_score: 0,
+        total_coding_problems: 0,
+        total_higher_studies: 0,
+        total_placed_students: totalPlaced,
       },
       publications_trend: globalTrend,
       anomalies,
       departments: deptResults,
     });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// Institutional Oversight: Faculty by Cadre — Real profile drill-down
+// GET /oversight/faculty-by-cadre?department=CSE&cadre=associate
+// ============================================================================
+app.get('/oversight/faculty-by-cadre', requireRole('director', 'principal', 'management', 'program_chair', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const dept = req.query.department ? String(req.query.department).trim() : 'All';
+    const cadre = req.query.cadre ? String(req.query.cadre).trim().toLowerCase() : 'all';
+
+    const result = await db.query(`
+      SELECT
+        f.faculty_id,
+        f.name,
+        f.email,
+        f.department,
+        f.role,
+        COALESCE(p.personal->>'designation', '') as designation,
+        COALESCE(p.personal->>'phone', '') as phone,
+        COALESCE(p.personal->>'photo_url', '') as photo_url,
+        COALESCE(p.education->>'highest_qualification', '') as highest_qualification,
+        COALESCE(p.education->>'specialization', '') as specialization,
+        COALESCE(p.education->>'university', '') as university,
+        COALESCE(p.education->>'year_of_completion', '') as phd_year,
+        jsonb_array_length(COALESCE(p.publications, '[]'::jsonb)) as publications_count,
+        jsonb_array_length(COALESCE(p.certifications, '[]'::jsonb)) as fdps_count,
+        COALESCE(p.domains, '[]'::jsonb) as domains,
+        jsonb_array_length(COALESCE(p.activities, '[]'::jsonb)) as activities_count
+      FROM faculty f
+      LEFT JOIN faculty_full_profiles p ON LOWER(f.email) = LOWER(p.email)
+      WHERE ($1 = 'All' OR f.department = $1)
+      ORDER BY f.department, f.name ASC
+    `, [dept]).catch(() => ({ rows: [] }));
+
+    // Apply cadre filter
+    let rows = result.rows;
+    if (cadre !== 'all') {
+      rows = rows.filter((r: any) => {
+        const desig = (r.designation || '').toLowerCase();
+        const qual = (r.highest_qualification || '').toLowerCase();
+        if (cadre === 'professors') {
+          return desig.includes('professor') && !desig.includes('associate') && !desig.includes('assistant');
+        } else if (cadre === 'associate') {
+          return desig.includes('associate');
+        } else if (cadre === 'assistant') {
+          return desig.includes('assistant');
+        } else if (cadre === 'doctorates') {
+          return qual.includes('ph') && (qual.includes('d') || qual.includes('doctor'));
+        }
+        return true;
+      });
+    }
+
+    const faculty = rows.map((r: any) => {
+      const q = (r.highest_qualification || '').toLowerCase();
+      return {
+        faculty_id: r.faculty_id,
+        name: r.name,
+        email: r.email,
+        department: r.department,
+        role: r.role,
+        designation: r.designation || 'Faculty',
+        phone: r.phone || '',
+        photo_url: r.photo_url || '',
+        highest_qualification: r.highest_qualification || '',
+        specialization: r.specialization || '',
+        university: r.university || '',
+        phd_year: r.phd_year || '',
+        is_phd: q.includes('ph') && (q.includes('d') || q.includes('doctor')),
+        publications_count: parseInt(r.publications_count || '0'),
+        fdps_count: parseInt(r.fdps_count || '0'),
+        activities_count: parseInt(r.activities_count || '0'),
+        domains: Array.isArray(r.domains) ? r.domains : [],
+      };
+    });
+
+    return res.json({ department: dept, cadre, total: faculty.length, faculty });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }

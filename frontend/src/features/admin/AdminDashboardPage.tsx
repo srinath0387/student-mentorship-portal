@@ -87,6 +87,7 @@ export const AdminDashboardPage: React.FC = () => {
   // Detect super admin + tier level from user email
   const isSuperAdmin = user?.role === 'admin' && SUPER_ADMIN_EMAILS.includes(user?.email ?? '');
   const isTier1A = user?.role === 'admin' && TIER1A_EMAILS.includes(user?.email ?? '');
+  const isOversight = ['director', 'principal', 'management', 'program_chair'].includes(user?.role ?? '');
 
   // HOD Credentials panel state
   const [hodDept, setHodDept] = useState(user?.isSuperAdmin ? 'CSE (Data Science)' : (user?.department || 'CSE (Data Science)'));
@@ -104,7 +105,7 @@ export const AdminDashboardPage: React.FC = () => {
   const [sectionFilter, setSectionFilter] = useState('');
   const [yearFilter, setYearFilter] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState<string>(
-    user?.isSuperAdmin ? 'All' : (user?.department || 'CSE (Data Science)')
+    (user?.isSuperAdmin || isOversight) ? 'All' : (user?.department || 'CSE (Data Science)')
   );
   const [showAddModal, setShowAddModal] = useState(false);
   const [showBulkImportModal, setShowBulkImportModal] = useState(false);

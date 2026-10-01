@@ -581,35 +581,8 @@ export interface AcademicCalendarEntry {
   created_at?: string;
 }
 
-// ── MODULE 5: Student Permissions (On-Duty / Leaves) ────────────────────────
-export type StudentPermissionType =
-  | 'Attending Workshop'
-  | 'Conference'
-  | 'Industry Visit'
-  | 'Hackathon'
-  | 'Others';
-
-export interface StudentPermissionRecord {
-  id: string;
-  roll_number: string;
-  student_name: string;
-  department: string;
-  section: string;
-  year: string;
-  permission_type: StudentPermissionType;
-  from_date: string;
-  to_date: string;
-  num_days: number;
-  reason: string;
-  proof_url: string;
-  status: LeaveStatus;
-  hod_remarks?: string;
-  approved_by?: string;
-  approved_at?: string;
-  created_at: string;
-}
-
 // ── MODULE 6: Institutional Oversight Executive Analytics ────────────────────
+
 export interface ExecutiveDepartmentMetrics {
   department: string;
   student_count: number;
@@ -643,10 +616,13 @@ export interface ExecutiveDepartmentMetrics {
     azure: number;
     oracle: number;
     gcp: number;
+    cisco: number;
+    other: number;
   };
   faculty_fdp_count: number;
   mentorship_coverage_rate: number;
   placement_rate: number;
+  placed_count: number;
   avg_ctc_lpa: number;
   highest_ctc_lpa: number;
   coding_problems_solved: number;
@@ -690,9 +666,36 @@ export interface ExecutiveMetricsResponse {
     naac_readiness_score: number;
     total_coding_problems: number;
     total_higher_studies: number;
+    total_placed_students: number;
   };
   publications_trend: Record<string, number>;
   anomalies: ExecutiveAnomalyAlert[];
   departments: ExecutiveDepartmentMetrics[];
 }
 
+export interface OversightFacultyProfile {
+  faculty_id: string;
+  name: string;
+  email: string;
+  department: string;
+  role: string;
+  designation: string;
+  phone: string;
+  photo_url: string;
+  highest_qualification: string;
+  specialization: string;
+  university: string;
+  phd_year: string;
+  is_phd: boolean;
+  publications_count: number;
+  fdps_count: number;
+  activities_count: number;
+  domains: string[];
+}
+
+export interface FacultyByCadreResponse {
+  department: string;
+  cadre: string;
+  total: number;
+  faculty: OversightFacultyProfile[];
+}

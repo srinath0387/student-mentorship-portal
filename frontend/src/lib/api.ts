@@ -505,6 +505,13 @@ export const api = {
     return fetchWithAuth(`/oversight/executive-metrics${q}`);
   },
 
+  // Institutional Oversight: Faculty Profiles by Department & Cadre
+  getFacultyByCadre: async (department: string = 'All', cadre: string = 'all'): Promise<import('../types').FacultyByCadreResponse> => {
+    const params = new URLSearchParams({ department, cadre });
+    return fetchWithAuth(`/oversight/faculty-by-cadre?${params.toString()}`);
+  },
+
+
   bulkImportStudents: async (students: any[]) => {
     return fetchWithAuth(`/students/bulk-import`, {
       method: 'POST',

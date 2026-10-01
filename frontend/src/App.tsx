@@ -225,13 +225,13 @@ export const App: React.FC = () => {
                 <Route path="/hod/dashboard" element={<HodDashboardPage />} />
               </Route>
 
-              {/* Faculty Directory & Management: Admin, HOD, Coordinator */}
-              <Route element={<ProtectedRoute allowedRoles={['admin', 'hod', 'coordinator']} />}>
+              {/* Faculty Directory & Management: Admin, HOD, Coordinator & Oversight Roles */}
+              <Route element={<ProtectedRoute allowedRoles={['admin', 'hod', 'coordinator', 'director', 'principal', 'management', 'program_chair']} />}>
                 <Route path="/admin/faculty" element={<FacultyManagementPage />} />
               </Route>
 
-              {/* Admin-only routes */}
-              <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
+              {/* Admin & Oversight Dashboard routes */}
+              <Route element={<ProtectedRoute allowedRoles={['admin', 'director', 'principal', 'management', 'program_chair']} />}>
                 <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
               </Route>
 
