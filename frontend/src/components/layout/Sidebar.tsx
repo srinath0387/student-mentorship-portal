@@ -118,6 +118,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
     {
       title: 'HOD PORTAL',
       items: [
+        { label: 'Power BI Dashboard', path: '/hod/dashboard?tab=powerbi', icon: BarChart2 },
         { label: 'Department Overview', path: '/hod/dashboard?tab=overview', icon: Building2 },
         { label: 'Leave & OD Approvals', path: '/hod/dashboard?tab=leaves', icon: ShieldCheck },
         { label: 'Attendance Tracker', path: '/hod/dashboard?tab=attendance', icon: CalendarCheck },

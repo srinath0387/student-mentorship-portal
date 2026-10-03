@@ -5857,10 +5857,13 @@ app.get('/reports/hod-analytics', async (req: Request, res: Response) => {
 // Institutional Oversight: Executive Intelligence Command Center Metrics
 // Real-time departmental metrics for Director, Principal, Management & Program Chair
 // ============================================================================
-app.get('/oversight/executive-metrics', requireRole('director', 'principal', 'management', 'program_chair', 'admin'), async (req: Request, res: Response) => {
+app.get('/oversight/executive-metrics', requireRole('director', 'principal', 'management', 'program_chair', 'admin', 'hod'), async (req: Request, res: Response) => {
   try {
     const userRole = req.auth?.role;
     const isProgramChair = userRole === 'program_chair';
+    const isHod = userRole === 'hod';
+    const hodDept = req.auth?.department;
+
     const cseAlliedDepts = ['CSE', 'CSE (AI & ML)', 'CSE (Data Science)', 'CSE (BS)', 'CSE (CS)'];
     const allInstituteDepts = [
       'Civil', 'EEE', 'Mechanical', 'ECE', 'CSE',
@@ -5868,9 +5871,19 @@ app.get('/oversight/executive-metrics', requireRole('director', 'principal', 'ma
       'MCA', 'MBA', 'Mathematics', 'English', 'Physics', 'Chemistry', '1st Year'
     ];
 
-    const allowedDepts = isProgramChair ? cseAlliedDepts : allInstituteDepts;
+    let allowedDepts: string[];
+    if (isHod && hodDept) {
+      allowedDepts = [hodDept];
+    } else if (isProgramChair) {
+      allowedDepts = cseAlliedDepts;
+    } else {
+      allowedDepts = allInstituteDepts;
+    }
+
     const requestedDept = req.query.department ? String(req.query.department).trim() : 'All';
-    const activeDepts = (requestedDept !== 'All' && allowedDepts.includes(requestedDept))
+    const activeDepts = (isHod && hodDept)
+      ? [hodDept]
+      : (requestedDept !== 'All' && allowedDepts.includes(requestedDept))
       ? [requestedDept]
       : allowedDepts;
 
@@ -6341,9 +6354,11 @@ app.get('/oversight/executive-metrics', requireRole('director', 'principal', 'ma
 // Institutional Oversight: Faculty by Cadre — Real profile drill-down
 // GET /oversight/faculty-by-cadre?department=CSE&cadre=associate
 // ============================================================================
-app.get('/oversight/faculty-by-cadre', requireRole('director', 'principal', 'management', 'program_chair', 'admin'), async (req: Request, res: Response) => {
+app.get('/oversight/faculty-by-cadre', requireRole('director', 'principal', 'management', 'program_chair', 'admin', 'hod'), async (req: Request, res: Response) => {
   try {
-    const dept = req.query.department ? String(req.query.department).trim() : 'All';
+    // HOD: lock to their own department
+    let dept = req.query.department ? String(req.query.department).trim() : 'All';
+    if (req.auth?.role === 'hod' && req.auth?.department) dept = req.auth.department;
     const cadre = req.query.cadre ? String(req.query.cadre).trim().toLowerCase() : 'all';
 
     const result = await db.query(`
@@ -6422,9 +6437,11 @@ app.get('/oversight/faculty-by-cadre', requireRole('director', 'principal', 'man
 // Institutional Oversight: Publications by Year & Department — Drill-Down
 // GET /oversight/publications?department=All&year=2026&category=all&search=...
 // ============================================================================
-app.get('/oversight/publications', requireRole('director', 'principal', 'management', 'program_chair', 'admin'), async (req: Request, res: Response) => {
+app.get('/oversight/publications', requireRole('director', 'principal', 'management', 'program_chair', 'admin', 'hod'), async (req: Request, res: Response) => {
   try {
-    const dept = req.query.department ? String(req.query.department).trim() : 'All';
+    // HOD: lock to their own department
+    let dept = req.query.department ? String(req.query.department).trim() : 'All';
+    if (req.auth?.role === 'hod' && req.auth?.department) dept = req.auth.department;
     const year = req.query.year ? String(req.query.year).trim() : 'All';
     const category = req.query.category ? String(req.query.category).trim().toLowerCase() : 'all';
     const search = req.query.search ? String(req.query.search).trim().toLowerCase() : '';
