@@ -727,3 +727,28 @@ export interface FacultyByCadreResponse {
   total: number;
   faculty: OversightFacultyProfile[];
 }
+
+export interface OversightPublication {
+  id: string;
+  title: string;
+  journal_name: string;
+  category: string;
+  year: number;
+  doi_link?: string;
+  co_authors?: string;
+  document_url?: string;
+  faculty_id?: string;
+  faculty_name: string;
+  faculty_email: string;
+  department: string;
+  designation: string;
+  photo_url?: string;
+}
+
+export interface PublicationsResponse {
+  department: string;
+  year: string;
+  category: string;
+  total: number;
+  publications: OversightPublication[];
+}

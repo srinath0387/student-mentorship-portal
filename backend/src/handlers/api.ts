@@ -6419,6 +6419,104 @@ app.get('/oversight/faculty-by-cadre', requireRole('director', 'principal', 'man
 });
 
 // ============================================================================
+// Institutional Oversight: Publications by Year & Department — Drill-Down
+// GET /oversight/publications?department=All&year=2026&category=all&search=...
+// ============================================================================
+app.get('/oversight/publications', requireRole('director', 'principal', 'management', 'program_chair', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const dept = req.query.department ? String(req.query.department).trim() : 'All';
+    const year = req.query.year ? String(req.query.year).trim() : 'All';
+    const category = req.query.category ? String(req.query.category).trim().toLowerCase() : 'all';
+    const search = req.query.search ? String(req.query.search).trim().toLowerCase() : '';
+
+    let deptClause = '';
+    const queryParams: any[] = [];
+
+    if (dept === 'CSE_ALLIED' || dept === 'cse_allied') {
+      deptClause = `WHERE f.department IN ('CSE', 'CSE (Data Science)', 'CSE (AI & ML)', 'CSE (BS)', 'CSE (CS)') AND p.publications IS NOT NULL`;
+    } else if (dept !== 'All' && dept !== 'all') {
+      queryParams.push(dept);
+      deptClause = `WHERE f.department = $1 AND p.publications IS NOT NULL`;
+    } else {
+      deptClause = `WHERE p.publications IS NOT NULL`;
+    }
+
+    const result = await db.query(`
+      SELECT
+        f.faculty_id,
+        f.name as faculty_name,
+        f.email as faculty_email,
+        f.department,
+        COALESCE(p.personal->>'designation', '') as designation,
+        COALESCE(p.personal->>'photo_url', '') as photo_url,
+        p.publications
+      FROM faculty f
+      JOIN faculty_full_profiles p ON LOWER(f.email) = LOWER(p.email)
+      ${deptClause}
+      ORDER BY f.department, f.name ASC
+    `, queryParams).catch(() => ({ rows: [] }));
+
+    const publications: any[] = [];
+    for (const r of result.rows) {
+      const pubs = Array.isArray(r.publications) ? r.publications : [];
+      for (const p of pubs) {
+        const pubYear = String(p.year || '');
+        if (year !== 'All' && year !== 'all' && pubYear !== year) continue;
+
+        const cat = (p.category || 'Journal').toLowerCase();
+        if (category !== 'all') {
+          if (category === 'journal' && !cat.includes('journal') && !cat.includes('sci') && !cat.includes('scopus')) continue;
+          if (category === 'conference' && !cat.includes('conference') && !cat.includes('ieee')) continue;
+          if (category === 'patent' && !cat.includes('patent')) continue;
+          if (category === 'book' && !cat.includes('book')) continue;
+        }
+
+        if (search) {
+          const title = (p.title || '').toLowerCase();
+          const journal = (p.journal_name || '').toLowerCase();
+          const author = (r.faculty_name || '').toLowerCase();
+          const coAuthors = (p.co_authors || '').toLowerCase();
+          const doi = (p.doi_link || '').toLowerCase();
+          if (!title.includes(search) && !journal.includes(search) && !author.includes(search) && !coAuthors.includes(search) && !doi.includes(search)) {
+            continue;
+          }
+        }
+
+        publications.push({
+          id: p.id || `pub_${Math.random().toString(36).slice(2, 9)}`,
+          title: p.title || 'Untitled Research Publication',
+          journal_name: p.journal_name || 'N/A',
+          category: p.category || 'Journal',
+          year: parseInt(pubYear) || (p.year ? Number(p.year) : 2026),
+          doi_link: p.doi_link || '',
+          co_authors: p.co_authors || '',
+          document_url: p.document_url || '',
+          faculty_id: r.faculty_id,
+          faculty_name: r.faculty_name,
+          faculty_email: r.faculty_email,
+          department: r.department,
+          designation: r.designation || 'Faculty',
+          photo_url: r.photo_url || '',
+        });
+      }
+    }
+
+    // Sort by year descending, then title ascending
+    publications.sort((a, b) => b.year - a.year || a.title.localeCompare(b.title));
+
+    return res.json({
+      department: dept,
+      year,
+      category,
+      total: publications.length,
+      publications,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
 // Reports: Department
 // ============================================================================
 app.get('/reports/department/:dept', async (req: Request, res: Response) => {

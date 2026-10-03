@@ -511,6 +511,12 @@ export const api = {
     return fetchWithAuth(`/oversight/faculty-by-cadre?${params.toString()}`);
   },
 
+  // Institutional Oversight: Research Publications by Year & Department
+  getPublications: async (department: string = 'All', year: string = 'All', category: string = 'all', search: string = ''): Promise<import('../types').PublicationsResponse> => {
+    const params = new URLSearchParams({ department, year, category, search });
+    return fetchWithAuth(`/oversight/publications?${params.toString()}`);
+  },
+
 
   bulkImportStudents: async (students: any[]) => {
     return fetchWithAuth(`/students/bulk-import`, {
