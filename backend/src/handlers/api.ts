@@ -4746,6 +4746,7 @@ app.get('/faculty/mentees/by-email/:email', async (req: Request, res: Response) 
          department,
          phone,
          photo_url,
+         linkedin_url,
          faculty_mentor_id,
          cgpa,
          leetcode_handle,
@@ -4767,6 +4768,7 @@ app.get('/faculty/mentees/by-email/:email', async (req: Request, res: Response) 
            s.department,
            s.phone,
            s.photo_url,
+            s.linkedin_url,
            s.faculty_mentor_id,
            COALESCE(ROUND(AVG(a.semester_gpa), 2), 0.00) AS cgpa,
            MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN c.handle END) AS leetcode_handle,
@@ -4778,7 +4780,7 @@ app.get('/faculty/mentees/by-email/:email', async (req: Request, res: Response) 
          LEFT JOIN academics a ON a.student_id = s.roll_number
          LEFT JOIN coding_profiles c ON c.student_id = s.roll_number
          WHERE UPPER(ma.faculty_id) IN (${placeholders})
-         GROUP BY ma.roll_number, ma.faculty_id, ma.assigned_at, s.roll_number, s.name, s.email, s.year, s.batch, s.section, s.department, s.phone, s.photo_url, s.faculty_mentor_id
+         GROUP BY ma.roll_number, ma.faculty_id, ma.assigned_at, s.roll_number, s.name, s.email, s.year, s.batch, s.section, s.department, s.phone, s.photo_url, s.linkedin_url, s.faculty_mentor_id
 
          UNION
 
@@ -4796,6 +4798,7 @@ app.get('/faculty/mentees/by-email/:email', async (req: Request, res: Response) 
            s.department,
            s.phone,
            s.photo_url,
+            s.linkedin_url,
            s.faculty_mentor_id,
            COALESCE(ROUND(AVG(a.semester_gpa), 2), 0.00) AS cgpa,
            MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN c.handle END) AS leetcode_handle,
@@ -4807,7 +4810,7 @@ app.get('/faculty/mentees/by-email/:email', async (req: Request, res: Response) 
          LEFT JOIN coding_profiles c ON c.student_id = s.roll_number
          WHERE UPPER(s.faculty_mentor_id) IN (${placeholders})
            AND s.roll_number IS NOT NULL
-         GROUP BY s.roll_number, s.faculty_mentor_id, s.updated_at, s.name, s.email, s.year, s.batch, s.section, s.department, s.phone, s.photo_url
+         GROUP BY s.roll_number, s.faculty_mentor_id, s.updated_at, s.name, s.email, s.year, s.batch, s.section, s.department, s.phone, s.photo_url, s.linkedin_url
        ) combined
        ORDER BY roll_number, registered DESC`,
       matchingIds.map(id => id.toUpperCase())

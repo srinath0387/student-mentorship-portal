@@ -183,6 +183,14 @@ export const FacultyDashboardPage: React.FC = () => {
     enabled: Boolean(inspectMentee),
   });
 
+  // Fetch full student profile for inspected mentee — mentees list only has summary columns,
+  // so linkedin_url, address and other fields can be missing.
+  const { data: inspectFullProfile } = useQuery({
+    queryKey: ['inspectStudentProfile', menteeId],
+    queryFn: () => api.getStudentProfile(menteeId),
+    enabled: Boolean(inspectMentee) && Boolean(menteeId),
+  });
+
   const filteredMentees = mentees.filter((m) => {
       const q = searchQuery.toLowerCase();
     const matchesSearch = !q || m.name.toLowerCase().includes(q) || m.roll_number.toLowerCase().includes(q);
@@ -925,7 +933,7 @@ export const FacultyDashboardPage: React.FC = () => {
 
             {/* Inspect Tab Body */}
             <div>
-              {inspectTab === 'personal-info' && <PersonalInfoTab readOnly={true} student={inspectMentee} onRefresh={refetch} />}
+              {inspectTab === 'personal-info' && <PersonalInfoTab readOnly={true} student={inspectFullProfile ?? inspectMentee} onRefresh={refetch} />}
               {inspectTab === 'academics' && <AcademicsTab readOnly={true} academics={inspectAcademics} onRefresh={refetch} />}
               {inspectTab === 'coding-profiles' && (
                 <CodingProfilesTab
