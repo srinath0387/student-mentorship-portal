@@ -309,7 +309,7 @@ export const api = {
   },
 
   // Parse Conference / FDP Document (Image or PDF)
-  parseActivityDocument: async (payload: { file_data: string; file_name: string; file_type?: string }): Promise<any> => {
+  parseActivityDocument: async (payload: { file_data: string; file_name: string; file_type?: string; ocr_text?: string }): Promise<any> => {
     return fetchWithAuth('/faculty/parse-activity-document', {
       method: 'POST',
       body: JSON.stringify(payload),

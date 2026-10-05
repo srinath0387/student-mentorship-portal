@@ -16,6 +16,7 @@ export interface ParsedActivityDocument {
   file_name: string;
   file_size: number;
   confidence: number;
+  raw_ocr_text?: string;
 }
 
 /**
@@ -82,6 +83,104 @@ export function readFileAsDataUrl(file: File): Promise<string> {
 }
 
 /**
+ * Dynamically loads Tesseract.js from CDN if not already loaded in the window.
+ */
+let tesseractPromise: Promise<any> | null = null;
+function loadTesseract(): Promise<any> {
+  if (typeof window === 'undefined') return Promise.resolve(null);
+  if ((window as any).Tesseract) return Promise.resolve((window as any).Tesseract);
+  if (tesseractPromise) return tesseractPromise;
+
+  tesseractPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[src*="tesseract.min.js"]');
+    if (existing) {
+      existing.addEventListener('load', () => resolve((window as any).Tesseract));
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    script.async = true;
+    script.onload = () => resolve((window as any).Tesseract);
+    script.onerror = () => {
+      tesseractPromise = null;
+      reject(new Error('Failed to load OCR engine from CDN'));
+    };
+    document.head.appendChild(script);
+  });
+
+  return tesseractPromise;
+}
+
+/**
+ * Downscale image for fast OCR processing (keeps aspect ratio, max 1600px).
+ * Runs OCR in ~1.5s instead of ~10s while retaining sharp text.
+ */
+async function downscaleImageForOcr(file: File): Promise<string | File> {
+  if (typeof window === 'undefined') return file;
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const maxDim = 1600;
+      let { width, height } = img;
+      if (width <= maxDim && height <= maxDim) {
+        resolve(file);
+        return;
+      }
+      if (width > height) {
+        height = Math.round((height * maxDim) / width);
+        width = maxDim;
+      } else {
+        width = Math.round((width * maxDim) / height);
+        height = maxDim;
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.88));
+      } else {
+        resolve(file);
+      }
+    };
+    img.onerror = () => resolve(file);
+    img.src = url;
+  });
+}
+
+/**
+ * Executes OCR on an image file in the browser with progress callbacks.
+ */
+export async function performClientOcr(
+  file: File,
+  onProgress?: (pct: number, stage: string) => void
+): Promise<string> {
+  try {
+    onProgress?.(30, 'Loading OCR engine...');
+    const Tesseract = await loadTesseract();
+    if (!Tesseract) return '';
+
+    onProgress?.(45, 'Optimizing certificate image...');
+    const processedTarget = await downscaleImageForOcr(file);
+
+    onProgress?.(60, 'Recognizing certificate text...');
+    const worker = await Tesseract.createWorker('eng');
+    const result = await worker.recognize(processedTarget);
+    const text = result?.data?.text || '';
+    await worker.terminate();
+
+    onProgress?.(85, 'Extracting activity details...');
+    return text;
+  } catch (err) {
+    console.warn('OCR processing skipped or timed out, relying on document metadata:', err);
+    return '';
+  }
+}
+
+/**
  * Extracts raw ASCII text from PDF binary string
  */
 function extractAsciiFromPdfBinary(binaryStr: string): string {
@@ -114,15 +213,16 @@ function extractAsciiFromPdfBinary(binaryStr: string): string {
  * Parses raw text & filename to extract structured conference / FDP attributes
  */
 export function parseActivityText(rawText: string, fileName: string): Omit<ParsedActivityDocument, 'document_url' | 'file_name' | 'file_size'> {
-  const text = `${rawText} ${fileName}`.replace(/[_\-\/\\]/g, ' ');
+  const cleanRaw = (rawText || '').replace(/[\r\n\t]+/g, ' ');
+  const text = `${cleanRaw} ${fileName}`.replace(/[_\-\/\\]/g, ' ');
 
   // 1. Activity Type
   let type: ActivityType = 'FDP';
-  if (/conference|symposium|ic[a-z]{2,5}|proceedings/i.test(text)) {
+  if (/conference|symposium|ic[a-z]{2,5}|proceedings|conclave/i.test(text)) {
     type = 'Conference';
-  } else if (/workshop|hands[\s-]?on|bootcamp|skill|training/i.test(text) && !/faculty development|fdp/i.test(text)) {
+  } else if (/workshop|hands[\s-]?on|bootcamp|skill|training|sttp/i.test(text) && !/faculty development|fdp/i.test(text)) {
     type = 'Workshop';
-  } else if (/fdp|faculty development|atal|pedagogy|teacher/i.test(text)) {
+  } else if (/fdp|faculty development|atal|pedagogy|teacher|instructional/i.test(text)) {
     type = 'FDP';
   }
 
@@ -130,7 +230,7 @@ export function parseActivityText(rawText: string, fileName: string): Omit<Parse
   let level: ActivityLevel = 'National';
   if (/international|ieee|acm|springer|elsevier|global|world/i.test(text)) {
     level = 'International';
-  } else if (/state level|state/i.test(text) && !/united states/i.test(text)) {
+  } else if (/state level|state government|apsche/i.test(text) && !/united states/i.test(text)) {
     level = 'State';
   } else {
     level = 'National';
@@ -138,12 +238,12 @@ export function parseActivityText(rawText: string, fileName: string): Omit<Parse
 
   // 3. Role: Attended vs Organized
   let role_type: 'Attended' | 'Organized' = 'Attended';
-  if (/convenor|co-convenor|coordinator|co-coordinator|organized by me|organizing secretary|resource person|chair|keynote speaker/i.test(text)) {
+  if (/convenor|co-convenor|coordinator|co-coordinator|organized by me|organizing secretary|resource person|chair|keynote speaker|session chair/i.test(text)) {
     role_type = 'Organized';
   }
 
   // 4. Organizer
-  let organizer = 'RGMCET';
+  let organizer = 'Department of CSE, RGMCET';
   const orgPatterns: [RegExp, string][] = [
     [/aicte|atal/i, 'AICTE Training and Learning (ATAL) Academy'],
     [/nitttr/i, 'NITTTR (National Institute of Technical Teachers Training & Research)'],
@@ -180,51 +280,68 @@ export function parseActivityText(rawText: string, fileName: string): Omit<Parse
   let toDate = fromDate;
   let parsedDays = 1;
 
-  // Pattern A: "14th to 18th July 2024" or "14th - 18th July 2024" or "14 - 18 July 2024"
-  const rangeWithMonthRegex = /(\d{1,2})(?:st|nd|rd|th)?\s*(?:to|-)\s*(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\s+(\d{4})/i;
-  const matchRange = text.match(rangeWithMonthRegex);
+  // Pattern 1: "14th to 18th July 2024" or "14th - 18th July 2024" or "14 - 18 July 2024"
+  const p1 = /(\d{1,2})(?:st|nd|rd|th)?\s*(?:to|-|–|—)\s*(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})[,\s]+(\d{4})/i;
+  // Pattern 2: "14th July to 18th July 2024" or "14 July - 18 July 2024"
+  const p2 = /(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\s*(?:to|-|–|—)\s*(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})[,\s]+(\d{4})/i;
+  // Pattern 3: "July 14 to July 18, 2024" or "July 14-18, 2024"
+  const p3 = /([A-Za-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?\s*(?:to|-|–|—)\s*(?:[A-Za-z]{3,9}\s*)?(\d{1,2})(?:st|nd|rd|th)?[,\s]+(\d{4})/i;
+  // Pattern 4: "14-07-2024 to 18-07-2024" or "14/07/2024 - 18/07/2024" or "14.07.2024 to 18.07.2024"
+  const p4 = /(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})\s*(?:to|-|–|—)\s*(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/i;
+  // Pattern 5: Single Date "15th July 2024" or "July 15, 2024"
+  const p5 = /(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})[,\s]+(\d{4})/i;
+  const p5b = /([A-Za-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?[,\s]+(\d{4})/i;
+  // Pattern 6: Single Numeric Date "15-07-2024" or "15/07/2024"
+  const p6 = /(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/i;
 
-  // Pattern B: "July 14 to July 18, 2024" or "July 14-18, 2024"
-  const monthFirstRangeRegex = /([A-Za-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?\s*(?:to|-)\s*(?:[A-Za-z]{3,9}\s*)?(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})/i;
-  const matchMonthFirst = text.match(monthFirstRangeRegex);
+  const m2 = text.match(p2);
+  const m1 = text.match(p1);
+  const m3 = text.match(p3);
+  const m4 = text.match(p4);
 
-  // Pattern C: "14-07-2024 to 18-07-2024" or "14/07/2024 - 18/07/2024"
-  const numRangeRegex = /(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})\s*(?:to|-)\s*(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/i;
-  const matchNumRange = text.match(numRangeRegex);
-
-  // Pattern D: Explicit duration like "5 Days", "5-day", "One Week"
-  const explicitDurationRegex = /(\d{1,2})\s*(?:day|days|day's)/i;
-  const matchExplicitDays = text.match(explicitDurationRegex);
-
-  if (matchRange) {
-    const startDay = parseInt(matchRange[1], 10);
-    const endDay = parseInt(matchRange[2], 10);
-    const month = monthNameToNum(matchRange[3]);
-    const year = parseInt(matchRange[4], 10);
-    fromDate = formatIsoDate(year, month, startDay);
-    toDate = formatIsoDate(year, month, endDay);
-    parsedDays = calculateDaysBetween(fromDate, toDate);
-  } else if (matchMonthFirst) {
-    const month = monthNameToNum(matchMonthFirst[1]);
-    const startDay = parseInt(matchMonthFirst[2], 10);
-    const endDay = parseInt(matchMonthFirst[3], 10);
-    const year = parseInt(matchMonthFirst[4], 10);
-    fromDate = formatIsoDate(year, month, startDay);
-    toDate = formatIsoDate(year, month, endDay);
-    parsedDays = calculateDaysBetween(fromDate, toDate);
-  } else if (matchNumRange) {
-    fromDate = formatIsoDate(matchNumRange[3], matchNumRange[2], matchNumRange[1]);
-    toDate = formatIsoDate(matchNumRange[6], matchNumRange[5], matchNumRange[4]);
-    parsedDays = calculateDaysBetween(fromDate, toDate);
+  if (m2) {
+    const sDay = parseInt(m2[1], 10);
+    const sMon = monthNameToNum(m2[2]);
+    const eDay = parseInt(m2[3], 10);
+    const eMon = monthNameToNum(m2[4]);
+    const yr = parseInt(m2[5], 10);
+    fromDate = formatIsoDate(yr, sMon, sDay);
+    toDate = formatIsoDate(yr, eMon, eDay);
+  } else if (m1) {
+    const sDay = parseInt(m1[1], 10);
+    const eDay = parseInt(m1[2], 10);
+    const mon = monthNameToNum(m1[3]);
+    const yr = parseInt(m1[4], 10);
+    fromDate = formatIsoDate(yr, mon, sDay);
+    toDate = formatIsoDate(yr, mon, eDay);
+  } else if (m3) {
+    const mon = monthNameToNum(m3[1]);
+    const sDay = parseInt(m3[2], 10);
+    const eDay = parseInt(m3[3], 10);
+    const yr = parseInt(m3[4], 10);
+    fromDate = formatIsoDate(yr, mon, sDay);
+    toDate = formatIsoDate(yr, mon, eDay);
+  } else if (m4) {
+    fromDate = formatIsoDate(m4[3], m4[2], m4[1]);
+    toDate = formatIsoDate(m4[6], m4[5], m4[4]);
   } else {
-    // Look for any single date: e.g. "15th July 2024" or "2024-07-15"
-    const singleDateRegex = /(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\s+(\d{4})/i;
-    const matchSingle = text.match(singleDateRegex);
-    if (matchSingle) {
-      const day = parseInt(matchSingle[1], 10);
-      const month = monthNameToNum(matchSingle[2]);
-      const year = parseInt(matchSingle[3], 10);
-      fromDate = formatIsoDate(year, month, day);
+    const sm5 = text.match(p5);
+    const sm5b = text.match(p5b);
+    const sm6 = text.match(p6);
+    if (sm5) {
+      const day = parseInt(sm5[1], 10);
+      const mon = monthNameToNum(sm5[2]);
+      const yr = parseInt(sm5[3], 10);
+      fromDate = formatIsoDate(yr, mon, day);
+      toDate = fromDate;
+    } else if (sm5b) {
+      const mon = monthNameToNum(sm5b[1]);
+      const day = parseInt(sm5b[2], 10);
+      const yr = parseInt(sm5b[3], 10);
+      fromDate = formatIsoDate(yr, mon, day);
+      toDate = fromDate;
+    } else if (sm6) {
+      fromDate = formatIsoDate(sm6[3], sm6[2], sm6[1]);
       toDate = fromDate;
     } else {
       const yearOnlyMatch = text.match(/\b(202[0-9])\b/);
@@ -235,47 +352,48 @@ export function parseActivityText(rawText: string, fileName: string): Omit<Parse
     }
   }
 
-  // If explicit duration like "5 Days FDP" or "One Week" was mentioned
-  if (matchExplicitDays) {
-    parsedDays = parseInt(matchExplicitDays[1], 10);
-    // If toDate was equal to fromDate, adjust toDate accordingly
-    if (fromDate === toDate && parsedDays > 1) {
-      const d = new Date(fromDate);
-      d.setDate(d.getDate() + (parsedDays - 1));
-      toDate = d.toISOString().split('T')[0];
-    }
+  // Explicit Duration detection (e.g. "5 Days", "5-Day", "One Week")
+  const explicitDurationMatch = text.match(/(\d{1,2})\s*(?:day|days|day's|days')/i);
+  if (explicitDurationMatch) {
+    parsedDays = parseInt(explicitDurationMatch[1], 10);
   } else if (/one\s*week/i.test(text)) {
     parsedDays = 5;
-    if (fromDate === toDate) {
-      const d = new Date(fromDate);
-      d.setDate(d.getDate() + 4);
-      toDate = d.toISOString().split('T')[0];
-    }
   } else if (/two\s*weeks/i.test(text)) {
     parsedDays = 10;
-    if (fromDate === toDate) {
+  }
+
+  // Adjust dates vs days
+  const dStart = new Date(fromDate);
+  const dEnd = new Date(toDate);
+  if (!isNaN(dStart.getTime()) && !isNaN(dEnd.getTime()) && dEnd >= dStart) {
+    const diffDays = Math.round((dEnd.getTime() - dStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    if (diffDays > 1) {
+      parsedDays = diffDays;
+    } else if (parsedDays > 1 && fromDate === toDate) {
       const d = new Date(fromDate);
-      d.setDate(d.getDate() + 9);
+      d.setDate(d.getDate() + (parsedDays - 1));
       toDate = d.toISOString().split('T')[0];
     }
   }
 
   // 6. Title Extraction
-  const cleanFileName = fileName.replace(/\.[^/.]+$/, '').replace(/[_\-\.]/g, ' ').trim();
   let title = '';
+  const quotedTopic = text.match(/(?:titled|topic|on)\s+["“]([^"”\n\r]{8,120}?)["”]/i);
+  const progTopic = text.match(/(?:FDP|Programme|Program|Workshop|Conference|Course|Symposium)\s+on\s+([^,\n\r]{8,120}?)(\s+(?:held|organized|conducted|from|during|at|by)|\.|\,|$)/i);
+  const partTopic = text.match(/participated in\s+(?:the\s+)?(?:one week |5-day )?([^,\n\r]{8,120}?)(\s+(?:held|organized|conducted|from|during|at|by)|\.|\,|$)/i);
 
-  // Look for topic phrases in raw text:
-  const topicRegex = /(?:titled|topic|on)\s+["']?([^"'\n\r]{10,120}?)["']?(?:\s+(?:held|organized|during|from|at|\.|\,|$))/i;
-  const matchTopic = rawText.match(topicRegex);
-  if (matchTopic && matchTopic[1].trim().length > 8) {
-    title = matchTopic[1].trim();
-  } else if (cleanFileName.length > 8) {
-    title = cleanFileName;
+  if (quotedTopic && quotedTopic[1].trim().length > 5) {
+    title = quotedTopic[1].trim();
+  } else if (progTopic && progTopic[1].trim().length > 5) {
+    title = progTopic[1].trim();
+  } else if (partTopic && partTopic[1].trim().length > 5) {
+    title = partTopic[1].trim();
   } else {
-    title = `${type} on Advanced Technologies in Computer Science`;
+    const cleanFileName = fileName.replace(/\.[^/.]+$/, '').replace(/[_\-\.]/g, ' ').trim();
+    title = cleanFileName.length > 8 ? cleanFileName : `${type} on Advanced Computing & Emerging Technologies`;
   }
 
-  // Ensure title includes helpful prefix if missing
+  title = title.replace(/\s+/g, ' ').trim();
   if (title.length < 50 && !new RegExp(type, 'i').test(title)) {
     title = `${type === 'FDP' ? 'Faculty Development Programme' : type} on ${title}`;
   }
@@ -293,22 +411,34 @@ export function parseActivityText(rawText: string, fileName: string): Omit<Parse
     to_date: toDate,
     no_of_days: parsedDays,
     academic_year,
-    confidence: 0.92,
+    confidence: cleanRaw.length > 30 ? 0.95 : 0.75,
+    raw_ocr_text: cleanRaw,
   };
 }
 
 /**
- * Main parser entry point: reads file, extracts text / metadata, and returns ParsedActivityDocument
+ * Main parser entry point: reads file, extracts text / OCR, and returns ParsedActivityDocument
  */
-export async function parseUploadedActivityFile(file: File): Promise<ParsedActivityDocument> {
+export async function parseUploadedActivityFile(
+  file: File,
+  onProgress?: (pct: number, stage: string) => void
+): Promise<ParsedActivityDocument> {
+  onProgress?.(15, 'Reading file...');
   const dataUrl = await readFileAsDataUrl(file);
   let rawText = '';
 
   const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+  const isImage = file.type.startsWith('image/') || /\.(png|jpe?g|webp|bmp|gif)$/i.test(file.name);
 
-  if (isPdf) {
+  if (isImage) {
     try {
-      // Decode dataUrl base64 to binary string for quick text inspection
+      rawText = await performClientOcr(file, onProgress);
+    } catch {
+      rawText = '';
+    }
+  } else if (isPdf) {
+    try {
+      onProgress?.(40, 'Scanning PDF structure...');
       const base64Data = dataUrl.split(',')[1];
       if (base64Data) {
         const binaryStr = atob(base64Data);
@@ -319,6 +449,7 @@ export async function parseUploadedActivityFile(file: File): Promise<ParsedActiv
     }
   }
 
+  onProgress?.(85, 'Analyzing extracted content...');
   const parsed = parseActivityText(rawText, file.name);
 
   return {

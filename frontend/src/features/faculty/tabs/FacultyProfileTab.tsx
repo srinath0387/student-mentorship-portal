@@ -139,6 +139,7 @@ export const FacultyProfileTab: React.FC = () => {
   const [editingActivityId, setEditingActivityId] = useState<string | null>(null);
   const [isParsingActivity, setIsParsingActivity] = useState(false);
   const [activityParsingProgress, setActivityParsingProgress] = useState(0);
+  const [activityParsingStatus, setActivityParsingStatus] = useState('Analyzing document...');
   const [inspectingActivityDoc, setInspectingActivityDoc] = useState<{
     title: string;
     url: string;
@@ -421,23 +422,24 @@ export const FacultyProfileTab: React.FC = () => {
     }
 
     setIsParsingActivity(true);
-    setActivityParsingProgress(20);
-
-    const timer = setInterval(() => {
-      setActivityParsingProgress((prev) => (prev >= 85 ? 85 : prev + 20));
-    }, 200);
+    setActivityParsingProgress(15);
+    setActivityParsingStatus('Reading uploaded file...');
 
     try {
-      // 1. Client-side rapid document parsing
-      const parsedClient = await parseUploadedActivityFile(file);
-      setActivityParsingProgress(90);
+      // 1. Client-side rapid document parsing (with Tesseract OCR for images)
+      const parsedClient = await parseUploadedActivityFile(file, (pct, stage) => {
+        setActivityParsingProgress(pct);
+        setActivityParsingStatus(stage);
+      });
 
-      // 2. Optional backend refinement call
+      // 2. Backend refinement call (decompressing PDF streams or refining OCR text)
       try {
+        setActivityParsingStatus('Extracting details with backend engine...');
         const backendRes = await api.parseActivityDocument({
           file_data: parsedClient.document_url,
           file_name: file.name,
           file_type: file.type,
+          ocr_text: parsedClient.raw_ocr_text,
         });
         if (backendRes?.parsed) {
           const bp = backendRes.parsed;
@@ -455,8 +457,8 @@ export const FacultyProfileTab: React.FC = () => {
         // Client parser result is already complete
       }
 
-      clearInterval(timer);
       setActivityParsingProgress(100);
+      setActivityParsingStatus('Extraction complete!');
 
       setNewActivity({
         title: parsedClient.title,
@@ -472,13 +474,13 @@ export const FacultyProfileTab: React.FC = () => {
         file_name: parsedClient.file_name,
       });
     } catch (err: any) {
-      clearInterval(timer);
       console.error('Error parsing activity file:', err);
     } finally {
       setTimeout(() => {
         setIsParsingActivity(false);
         setActivityParsingProgress(0);
-      }, 400);
+        setActivityParsingStatus('Analyzing document...');
+      }, 500);
     }
   };
 
@@ -1805,7 +1807,7 @@ export const FacultyProfileTab: React.FC = () => {
                 <div className="p-4 rounded-xl border border-sky-300 dark:border-sky-800 bg-sky-50/50 dark:bg-sky-950/30 text-center space-y-2">
                   <div className="flex items-center justify-center gap-2 text-xs font-bold text-sky-700 dark:text-sky-300">
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Scanning document &amp; extracting details... {activityParsingProgress}%</span>
+                    <span>{activityParsingStatus || 'Scanning document & extracting details...'} {activityParsingProgress}%</span>
                   </div>
                   <div className="w-full bg-sky-200 dark:bg-sky-900 h-2 rounded-full overflow-hidden">
                     <div

@@ -1,4 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
+import zlib from 'zlib';
 import { globalErrorHandler } from '../lib/errors';
 import { logger } from '../lib/logger';
 import cors from 'cors';
@@ -4503,27 +4504,114 @@ app.put('/faculty/full-profile/:email', async (req: Request, res: Response) => {
   }
 });
 
+// Helper to extract clean text from PDF buffers by decompressing FlateDecode streams
+function extractTextFromPdfBuffer(pdfBuffer: Buffer): string {
+  const extractedChunks: string[] = [];
+
+  const pullTextFromDecoded = (decompressed: string) => {
+    // 1. (text) Tj or TD or Td
+    const tjMatches = decompressed.match(/\(([^()]{1,250})\)\s*T[jdD]/g);
+    if (tjMatches) {
+      for (const m of tjMatches) {
+        const t = m.replace(/^[(\s]+|[)\sTjdD]+$/g, '').replace(/\\([()\\])/g, '$1').trim();
+        if (t.length > 0) extractedChunks.push(t);
+      }
+    }
+
+    // 2. [(...)-100(...)] TJ arrays
+    const tjArrayMatches = decompressed.match(/\[([\s\S]*?)\]\s*TJ/g);
+    if (tjArrayMatches) {
+      for (const block of tjArrayMatches) {
+        const innerStrings = block.match(/\(([^()]*?)\)/g);
+        if (innerStrings) {
+          const combinedWord = innerStrings
+            .map(s => s.slice(1, -1).replace(/\\([()\\])/g, '$1'))
+            .join('');
+          if (combinedWord.trim().length > 0) extractedChunks.push(combinedWord.trim());
+        }
+      }
+    }
+
+    // 3. ' (text) or " (text)
+    const quoteMatches = decompressed.match(/['"]\s*\(([^()]{1,250})\)/g);
+    if (quoteMatches) {
+      for (const q of quoteMatches) {
+        const t = q.replace(/^['"\s(]+|\)$/g, '').replace(/\\([()\\])/g, '$1').trim();
+        if (t.length > 0) extractedChunks.push(t);
+      }
+    }
+  };
+
+  const streamStartTag = Buffer.from('stream');
+  const streamEndTag = Buffer.from('endstream');
+
+  let pos = 0;
+  while (pos < pdfBuffer.length) {
+    const startIdx = pdfBuffer.indexOf(streamStartTag, pos);
+    if (startIdx === -1) break;
+
+    let contentStart = startIdx + 6;
+    if (pdfBuffer[contentStart] === 0x0d && pdfBuffer[contentStart + 1] === 0x0a) {
+      contentStart += 2;
+    } else if (pdfBuffer[contentStart] === 0x0a || pdfBuffer[contentStart] === 0x0d) {
+      contentStart += 1;
+    }
+
+    const endIdx = pdfBuffer.indexOf(streamEndTag, contentStart);
+    if (endIdx === -1) break;
+
+    let contentEnd = endIdx;
+    while (contentEnd > contentStart && (pdfBuffer[contentEnd - 1] === 0x0a || pdfBuffer[contentEnd - 1] === 0x0d)) {
+      contentEnd--;
+    }
+
+    const streamSlice = pdfBuffer.subarray(contentStart, contentEnd);
+    pos = endIdx + 9;
+
+    try {
+      const inflated = zlib.inflateSync(streamSlice);
+      pullTextFromDecoded(inflated.toString('latin1'));
+    } catch {
+      try {
+        const rawInflated = zlib.inflateRawSync(streamSlice);
+        pullTextFromDecoded(rawInflated.toString('latin1'));
+      } catch {
+        pullTextFromDecoded(streamSlice.toString('latin1'));
+      }
+    }
+  }
+
+  // Also check metadata /Title (xyz)
+  const rawLatin = pdfBuffer.toString('latin1');
+  const metaTitles = rawLatin.match(/\/Title\s*\(([^()]{3,150})\)/gi);
+  if (metaTitles) {
+    for (const mt of metaTitles) {
+      extractedChunks.push(mt.replace(/^\/Title\s*\(|\)$/gi, '').trim());
+    }
+  }
+
+  return extractedChunks.join(' ');
+}
+
 // POST /faculty/parse-activity-document — Auto-parses uploaded Conference/FDP/Workshop documents (Images/PDFs)
 app.post('/faculty/parse-activity-document', async (req: Request, res: Response) => {
   try {
-    const { file_data, file_name, file_type } = req.body || {};
+    const { file_data, file_name, file_type, ocr_text } = req.body || {};
     const fileName = String(file_name || 'document.pdf');
-    let extractedText = '';
+    let extractedText = String(ocr_text || '').trim();
 
-    // If PDF base64 is provided, attempt quick ASCII/operator text extraction
+    // If PDF base64 is provided and we don't already have deep OCR text, decompress PDF streams
     if (file_data && typeof file_data === 'string' && (file_type === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf'))) {
       try {
         const parts = file_data.split(',');
         const rawBase64 = parts[1] || parts[0];
         const buffer = Buffer.from(rawBase64, 'base64');
-        const textStr = buffer.toString('latin1');
-        // Extract text in parentheses
-        const matches = textStr.match(/\(([^()]{2,120})\)\s*T[jd]/g);
-        if (matches && matches.length > 0) {
-          extractedText = matches.map(m => m.replace(/^[(\s]+|[)\sTjd]+$/g, '')).join(' ');
+        const pdfText = extractTextFromPdfBuffer(buffer);
+        if (pdfText && pdfText.length > 10) {
+          extractedText = `${extractedText} ${pdfText}`.trim();
         }
       } catch (e) {
-        // Fallback to filename parsing
+        // Fallback to existing extractedText / filename
       }
     }
 
@@ -4531,9 +4619,9 @@ app.post('/faculty/parse-activity-document', async (req: Request, res: Response)
 
     // 1. Detect Type
     let type = 'FDP';
-    if (/conference|symposium|ic[a-z]{2,5}|proceedings/i.test(fullCorpus)) {
+    if (/conference|symposium|ic[a-z]{2,5}|proceedings|conclave/i.test(fullCorpus)) {
       type = 'Conference';
-    } else if (/workshop|hands[\s-]?on|bootcamp|training|seminar/i.test(fullCorpus) && !/faculty development|fdp/i.test(fullCorpus)) {
+    } else if (/workshop|hands[\s-]?on|bootcamp|training|seminar|sttp/i.test(fullCorpus) && !/faculty development|fdp/i.test(fullCorpus)) {
       type = 'Workshop';
     } else if (/fdp|faculty development|atal|pedagogy|teacher/i.test(fullCorpus)) {
       type = 'FDP';
@@ -4543,13 +4631,13 @@ app.post('/faculty/parse-activity-document', async (req: Request, res: Response)
     let level = 'National';
     if (/international|ieee|acm|springer|elsevier|global|world/i.test(fullCorpus)) {
       level = 'International';
-    } else if (/state level|state/i.test(fullCorpus) && !/united states/i.test(fullCorpus)) {
+    } else if (/state level|state government|apsche/i.test(fullCorpus) && !/united states/i.test(fullCorpus)) {
       level = 'State';
     }
 
     // 3. Detect Role
     let role_type = 'Attended';
-    if (/convenor|co-convenor|coordinator|co-coordinator|organized by me|organizing secretary|resource person|chair|keynote speaker/i.test(fullCorpus)) {
+    if (/convenor|co-convenor|coordinator|co-coordinator|organized by me|organizing secretary|resource person|chair|keynote speaker|session chair/i.test(fullCorpus)) {
       role_type = 'Organized';
     }
 
@@ -4591,38 +4679,107 @@ app.post('/faculty/parse-activity-document', async (req: Request, res: Response)
     let no_of_days = 1;
 
     const monthMap: Record<string, string> = {
-      jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
-      jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12'
+      jan: '01', january: '01',
+      feb: '02', february: '02',
+      mar: '03', march: '03',
+      apr: '04', april: '04',
+      may: '05',
+      jun: '06', june: '06',
+      jul: '07', july: '07',
+      aug: '08', august: '08',
+      sep: '09', sept: '09', september: '09',
+      oct: '10', october: '10',
+      nov: '11', november: '11',
+      dec: '12', december: '12',
     };
 
-    // Date range pattern e.g. "14th to 18th July 2024"
-    const rangeRegex = /(\d{1,2})(?:st|nd|rd|th)?\s*(?:to|-)\s*(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\s+(\d{4})/i;
-    const matchRange = fullCorpus.match(rangeRegex);
+    const formatIso = (yr: string | number, mo: string | number, dy: string | number) => {
+      const y = String(yr).padStart(4, '20');
+      const m = String(mo).padStart(2, '0');
+      const d = String(dy).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    };
 
-    if (matchRange) {
-      const sDay = String(matchRange[1]).padStart(2, '0');
-      const eDay = String(matchRange[2]).padStart(2, '0');
-      const mon = monthMap[matchRange[3].toLowerCase().slice(0, 3)] || '07';
-      const yr = matchRange[4];
-      from_date = `${yr}-${mon}-${sDay}`;
-      to_date = `${yr}-${mon}-${eDay}`;
-      const dStart = new Date(from_date);
-      const dEnd = new Date(to_date);
-      if (!isNaN(dStart.getTime()) && !isNaN(dEnd.getTime()) && dEnd >= dStart) {
-        no_of_days = Math.round((dEnd.getTime() - dStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-      }
+    // Range Pattern 1: "14th to 18th July 2024" or "14th - 18th July 2024" or "14 - 18 July 2024"
+    const p1 = /(\d{1,2})(?:st|nd|rd|th)?\s*(?:to|-|–|—)\s*(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})[,\s]+(\d{4})/i;
+    // Range Pattern 2: "14th July to 18th July 2024" or "14 July - 18 July 2024"
+    const p2 = /(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\s*(?:to|-|–|—)\s*(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})[,\s]+(\d{4})/i;
+    // Range Pattern 3: "July 14 to July 18, 2024" or "July 14-18, 2024"
+    const p3 = /([A-Za-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?\s*(?:to|-|–|—)\s*(?:[A-Za-z]{3,9}\s*)?(\d{1,2})(?:st|nd|rd|th)?[,\s]+(\d{4})/i;
+    // Range Pattern 4: "14-07-2024 to 18-07-2024" or "14/07/2024 - 18/07/2024" or "14.07.2024 to 18.07.2024"
+    const p4 = /(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})\s*(?:to|-|–|—)\s*(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/i;
+    // Single Date Patterns
+    const p5 = /(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})[,\s]+(\d{4})/i;
+    const p5b = /([A-Za-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?[,\s]+(\d{4})/i;
+    const p6 = /(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/i;
+
+    const m2 = fullCorpus.match(p2);
+    const m1 = fullCorpus.match(p1);
+    const m3 = fullCorpus.match(p3);
+    const m4 = fullCorpus.match(p4);
+
+    if (m2) {
+      const sDay = m2[1];
+      const sMon = monthMap[m2[2].toLowerCase()] || '07';
+      const eDay = m2[3];
+      const eMon = monthMap[m2[4].toLowerCase()] || sMon;
+      const yr = m2[5];
+      from_date = formatIso(yr, sMon, sDay);
+      to_date = formatIso(yr, eMon, eDay);
+    } else if (m1) {
+      const sDay = m1[1];
+      const eDay = m1[2];
+      const mon = monthMap[m1[3].toLowerCase()] || '07';
+      const yr = m1[4];
+      from_date = formatIso(yr, mon, sDay);
+      to_date = formatIso(yr, mon, eDay);
+    } else if (m3) {
+      const mon = monthMap[m3[1].toLowerCase()] || '07';
+      const sDay = m3[2];
+      const eDay = m3[3];
+      const yr = m3[4];
+      from_date = formatIso(yr, mon, sDay);
+      to_date = formatIso(yr, mon, eDay);
+    } else if (m4) {
+      from_date = formatIso(m4[3], m4[2], m4[1]);
+      to_date = formatIso(m4[6], m4[5], m4[4]);
     } else {
-      // Check explicit duration e.g. "5 Days"
-      const daysMatch = fullCorpus.match(/(\d{1,2})\s*(?:day|days|day's)/i);
-      if (daysMatch) {
-        no_of_days = parseInt(daysMatch[1], 10);
+      const sm5 = fullCorpus.match(p5);
+      const sm5b = fullCorpus.match(p5b);
+      const sm6 = fullCorpus.match(p6);
+      if (sm5) {
+        const mon = monthMap[sm5[2].toLowerCase()] || '07';
+        from_date = formatIso(sm5[3], mon, sm5[1]);
+        to_date = from_date;
+      } else if (sm5b) {
+        const mon = monthMap[sm5b[1].toLowerCase()] || '07';
+        from_date = formatIso(sm5b[3], mon, sm5b[2]);
+        to_date = from_date;
+      } else if (sm6) {
+        from_date = formatIso(sm6[3], sm6[2], sm6[1]);
+        to_date = from_date;
+      }
+    }
+
+    // Duration extraction
+    const daysMatch = fullCorpus.match(/(\d{1,2})\s*(?:day|days|day's|days')/i);
+    if (daysMatch) {
+      no_of_days = parseInt(daysMatch[1], 10);
+    } else if (/one\s*week/i.test(fullCorpus)) {
+      no_of_days = 5;
+    } else if (/two\s*weeks/i.test(fullCorpus)) {
+      no_of_days = 10;
+    }
+
+    const dStart = new Date(from_date);
+    const dEnd = new Date(to_date);
+    if (!isNaN(dStart.getTime()) && !isNaN(dEnd.getTime()) && dEnd >= dStart) {
+      const calcDays = Math.round((dEnd.getTime() - dStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      if (calcDays > 1) {
+        no_of_days = calcDays;
+      } else if (no_of_days > 1 && from_date === to_date) {
         const d = new Date(from_date);
         d.setDate(d.getDate() + (no_of_days - 1));
-        to_date = d.toISOString().split('T')[0];
-      } else if (/one\s*week/i.test(fullCorpus)) {
-        no_of_days = 5;
-        const d = new Date(from_date);
-        d.setDate(d.getDate() + 4);
         to_date = d.toISOString().split('T')[0];
       }
     }
@@ -4635,8 +4792,23 @@ app.post('/faculty/parse-activity-document', async (req: Request, res: Response)
     const academic_year = `${startYear}–${String(startYear + 1).slice(-2)}`;
 
     // 7. Title Extraction
-    const cleanFileName = fileName.replace(/\.[^/.]+$/, '').replace(/[_\-\.]/g, ' ').trim();
-    let title = cleanFileName.length > 8 ? cleanFileName : `${type} on Advanced Computing & Emerging Technologies`;
+    let title = '';
+    const quotedTopic = fullCorpus.match(/(?:titled|topic|on)\s+["“]([^"”\n\r]{8,120}?)["”]/i);
+    const progTopic = fullCorpus.match(/(?:FDP|Programme|Program|Workshop|Conference|Course|Symposium)\s+on\s+([^,\n\r]{8,120}?)(\s+(?:held|organized|conducted|from|during|at|by)|\.|\,|$)/i);
+    const partTopic = fullCorpus.match(/participated in\s+(?:the\s+)?(?:one week |5-day )?([^,\n\r]{8,120}?)(\s+(?:held|organized|conducted|from|during|at|by)|\.|\,|$)/i);
+
+    if (quotedTopic && quotedTopic[1].trim().length > 5) {
+      title = quotedTopic[1].trim();
+    } else if (progTopic && progTopic[1].trim().length > 5) {
+      title = progTopic[1].trim();
+    } else if (partTopic && partTopic[1].trim().length > 5) {
+      title = partTopic[1].trim();
+    } else {
+      const cleanFileName = fileName.replace(/\.[^/.]+$/, '').replace(/[_\-\.]/g, ' ').trim();
+      title = cleanFileName.length > 8 ? cleanFileName : `${type} on Advanced Computing & Emerging Technologies`;
+    }
+
+    title = title.replace(/\s+/g, ' ').trim();
     if (title.length < 50 && !new RegExp(type, 'i').test(title)) {
       title = `${type === 'FDP' ? 'Faculty Development Programme' : type} on ${title}`;
     }
