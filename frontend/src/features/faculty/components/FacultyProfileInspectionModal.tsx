@@ -19,6 +19,7 @@ import {
   ExternalLink,
   ShieldCheck,
   CheckCircle2,
+  Eye,
 } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { FacultyFullProfile, FacultyPersonalDetails, FacultyEducation } from '../../../types';
@@ -60,6 +61,7 @@ export const FacultyProfileInspectionModal: React.FC<Props> = ({ faculty, onClos
   const [selectedDept, setSelectedDept] = useState(faculty?.department || 'CSE');
   const [isSavingDept, setIsSavingDept] = useState(false);
   const [deptSaveMsg, setDeptSaveMsg] = useState('');
+  const [inspectingDoc, setInspectingDoc] = useState<{ title: string; url: string; fileName?: string } | null>(null);
 
   const { data: profile, isLoading } = useQuery<FacultyFullProfile>({
     queryKey: ['facultyFullProfile', email],
@@ -353,19 +355,57 @@ export const FacultyProfileInspectionModal: React.FC<Props> = ({ faculty, onClos
                 <span>Conferences, Workshops &amp; FDPs ({activities.length})</span>
               </h3>
               {activities.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {activities.map((a) => (
-                    <div key={a.id} className="p-2.5 rounded-lg bg-surface border border-borderLine text-xs space-y-1">
-                      <div className="flex justify-between items-start gap-1">
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300">
-                          {a.type} &bull; {a.level}
-                        </span>
-                        <span className="text-[10px] text-sky-600 font-bold">{a.academic_year}</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {activities.map((a) => {
+                    const startDate = a.from_date || a.date;
+                    const endDate = a.to_date || a.date;
+                    const isRange = startDate && endDate && startDate !== endDate;
+                    const daysCount = a.no_of_days || 1;
+
+                    return (
+                      <div key={a.id} className="p-3 rounded-xl bg-surface border border-borderLine text-xs space-y-2 flex flex-col justify-between">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap justify-between items-start gap-1">
+                            <div className="flex items-center gap-1">
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300">
+                                {a.type} &bull; {a.level}
+                              </span>
+                              {a.role_type && (
+                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                                  a.role_type === 'Organized'
+                                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                    : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                }`}>
+                                  {a.role_type}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-sky-600 font-bold">{a.academic_year}</span>
+                          </div>
+                          <p className="font-bold text-textPrimary line-clamp-2">{a.title}</p>
+                          <p className="text-[11px] text-textSecondary"><span className="font-medium">Organizer:</span> {a.organizer}</p>
+                        </div>
+
+                        <div className="pt-2 border-t border-borderLine/50 flex items-center justify-between text-[10px]">
+                          <span className="text-textSecondary">
+                            {isRange ? `${startDate} to ${endDate}` : startDate}
+                            {daysCount > 0 && <span className="ml-1 font-bold text-sky-600">({daysCount} {daysCount === 1 ? 'day' : 'days'})</span>}
+                          </span>
+                          {a.document_url ? (
+                            <button
+                              type="button"
+                              onClick={() => setInspectingDoc({ title: a.title, url: a.document_url!, fileName: a.file_name })}
+                              className="text-brand-primary font-bold hover:underline inline-flex items-center gap-1"
+                            >
+                              <Eye className="w-3 h-3" /> View Doc
+                            </button>
+                          ) : (
+                            <span className="text-textMuted italic text-[9px]">No doc</span>
+                          )}
+                        </div>
                       </div>
-                      <p className="font-bold text-textPrimary line-clamp-1">{a.title}</p>
-                      <p className="text-[11px] text-textSecondary">Organizer: {a.organizer} ({a.date})</p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <p className="text-xs text-textSecondary italic">No conferences or FDPs recorded yet.</p>
@@ -451,6 +491,58 @@ export const FacultyProfileInspectionModal: React.FC<Props> = ({ faculty, onClos
           </div>
         )}
       </div>
+
+      {/* ── Document Lightbox Previewer Modal ── */}
+      {inspectingDoc && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-surface border border-borderLine rounded-2xl max-w-4xl w-full max-h-[90vh] shadow-2xl flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-borderLine bg-surface-2">
+              <div>
+                <h3 className="font-bold text-sm text-textPrimary truncate max-w-md">
+                  {inspectingDoc.title}
+                </h3>
+                {inspectingDoc.fileName && (
+                  <p className="text-[11px] text-textSecondary">{inspectingDoc.fileName}</p>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={inspectingDoc.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1 text-xs font-bold rounded-lg bg-brand-primary text-white hover:bg-brand-primary/90 inline-flex items-center gap-1.5 transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> Open in New Tab
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setInspectingDoc(null)}
+                  className="p-1.5 rounded-lg text-textMuted hover:text-textPrimary hover:bg-surface transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 p-4 overflow-auto flex items-center justify-center bg-black/5 dark:bg-black/30">
+              {inspectingDoc.url.startsWith('data:application/pdf') ||
+              inspectingDoc.fileName?.toLowerCase().endsWith('.pdf') ? (
+                <iframe
+                  src={inspectingDoc.url}
+                  title="Document Preview"
+                  className="w-full h-[70vh] rounded-xl border border-borderLine bg-white"
+                />
+              ) : (
+                <img
+                  src={inspectingDoc.url}
+                  alt={inspectingDoc.title}
+                  className="max-h-[70vh] max-w-full object-contain rounded-xl shadow-md"
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

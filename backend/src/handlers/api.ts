@@ -4503,6 +4503,164 @@ app.put('/faculty/full-profile/:email', async (req: Request, res: Response) => {
   }
 });
 
+// POST /faculty/parse-activity-document — Auto-parses uploaded Conference/FDP/Workshop documents (Images/PDFs)
+app.post('/faculty/parse-activity-document', async (req: Request, res: Response) => {
+  try {
+    const { file_data, file_name, file_type } = req.body || {};
+    const fileName = String(file_name || 'document.pdf');
+    let extractedText = '';
+
+    // If PDF base64 is provided, attempt quick ASCII/operator text extraction
+    if (file_data && typeof file_data === 'string' && (file_type === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf'))) {
+      try {
+        const parts = file_data.split(',');
+        const rawBase64 = parts[1] || parts[0];
+        const buffer = Buffer.from(rawBase64, 'base64');
+        const textStr = buffer.toString('latin1');
+        // Extract text in parentheses
+        const matches = textStr.match(/\(([^()]{2,120})\)\s*T[jd]/g);
+        if (matches && matches.length > 0) {
+          extractedText = matches.map(m => m.replace(/^[(\s]+|[)\sTjd]+$/g, '')).join(' ');
+        }
+      } catch (e) {
+        // Fallback to filename parsing
+      }
+    }
+
+    const fullCorpus = `${extractedText} ${fileName}`.replace(/[_\-\/\\]/g, ' ');
+
+    // 1. Detect Type
+    let type = 'FDP';
+    if (/conference|symposium|ic[a-z]{2,5}|proceedings/i.test(fullCorpus)) {
+      type = 'Conference';
+    } else if (/workshop|hands[\s-]?on|bootcamp|training|seminar/i.test(fullCorpus) && !/faculty development|fdp/i.test(fullCorpus)) {
+      type = 'Workshop';
+    } else if (/fdp|faculty development|atal|pedagogy|teacher/i.test(fullCorpus)) {
+      type = 'FDP';
+    }
+
+    // 2. Detect Level
+    let level = 'National';
+    if (/international|ieee|acm|springer|elsevier|global|world/i.test(fullCorpus)) {
+      level = 'International';
+    } else if (/state level|state/i.test(fullCorpus) && !/united states/i.test(fullCorpus)) {
+      level = 'State';
+    }
+
+    // 3. Detect Role
+    let role_type = 'Attended';
+    if (/convenor|co-convenor|coordinator|co-coordinator|organized by me|organizing secretary|resource person|chair|keynote speaker/i.test(fullCorpus)) {
+      role_type = 'Organized';
+    }
+
+    // 4. Detect Organizer
+    let organizer = 'Department of CSE, RGMCET';
+    const orgPatterns: [RegExp, string][] = [
+      [/aicte|atal/i, 'AICTE Training and Learning (ATAL) Academy'],
+      [/nitttr/i, 'NITTTR (National Institute of Technical Teachers Training & Research)'],
+      [/iit\s+madras/i, 'IIT Madras'],
+      [/iit\s+bombay/i, 'IIT Bombay'],
+      [/iit\s+delhi/i, 'IIT Delhi'],
+      [/iit\s+hyderabad/i, 'IIT Hyderabad'],
+      [/iit\s+kharagpur/i, 'IIT Kharagpur'],
+      [/nit\s+warangal/i, 'NIT Warangal'],
+      [/nit\s+calicut/i, 'NIT Calicut'],
+      [/nit\s+trichy/i, 'NIT Trichy'],
+      [/nit\s+surathkal/i, 'NIT Surathkal'],
+      [/ieee\s+hyderabad/i, 'IEEE Hyderabad Section'],
+      [/ieee/i, 'IEEE Student Branch & Technical Chapters'],
+      [/csi|computer\s+society\s+of\s+india/i, 'Computer Society of India (CSI)'],
+      [/iste/i, 'Indian Society for Technical Education (ISTE)'],
+      [/infosys|springboard/i, 'Infosys Springboard'],
+      [/rgmcet|rajeev\s+gandhi/i, 'Department of CSE, RGMCET'],
+      [/jntua|jntu\s+anantapur/i, 'JNTUA Ananthapuramu'],
+      [/jntuh|jntu\s+hyderabad/i, 'JNTUH Hyderabad'],
+    ];
+
+    for (const [re, name] of orgPatterns) {
+      if (re.test(fullCorpus)) {
+        organizer = name;
+        break;
+      }
+    }
+
+    // 5. Date & Duration calculation
+    const today = new Date();
+    let from_date = today.toISOString().split('T')[0];
+    let to_date = from_date;
+    let no_of_days = 1;
+
+    const monthMap: Record<string, string> = {
+      jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+      jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12'
+    };
+
+    // Date range pattern e.g. "14th to 18th July 2024"
+    const rangeRegex = /(\d{1,2})(?:st|nd|rd|th)?\s*(?:to|-)\s*(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\s+(\d{4})/i;
+    const matchRange = fullCorpus.match(rangeRegex);
+
+    if (matchRange) {
+      const sDay = String(matchRange[1]).padStart(2, '0');
+      const eDay = String(matchRange[2]).padStart(2, '0');
+      const mon = monthMap[matchRange[3].toLowerCase().slice(0, 3)] || '07';
+      const yr = matchRange[4];
+      from_date = `${yr}-${mon}-${sDay}`;
+      to_date = `${yr}-${mon}-${eDay}`;
+      const dStart = new Date(from_date);
+      const dEnd = new Date(to_date);
+      if (!isNaN(dStart.getTime()) && !isNaN(dEnd.getTime()) && dEnd >= dStart) {
+        no_of_days = Math.round((dEnd.getTime() - dStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      }
+    } else {
+      // Check explicit duration e.g. "5 Days"
+      const daysMatch = fullCorpus.match(/(\d{1,2})\s*(?:day|days|day's)/i);
+      if (daysMatch) {
+        no_of_days = parseInt(daysMatch[1], 10);
+        const d = new Date(from_date);
+        d.setDate(d.getDate() + (no_of_days - 1));
+        to_date = d.toISOString().split('T')[0];
+      } else if (/one\s*week/i.test(fullCorpus)) {
+        no_of_days = 5;
+        const d = new Date(from_date);
+        d.setDate(d.getDate() + 4);
+        to_date = d.toISOString().split('T')[0];
+      }
+    }
+
+    // 6. Calculate Academic Year based on June–May cycle
+    const dateObj = new Date(from_date);
+    const y = dateObj.getFullYear();
+    const m = dateObj.getMonth() + 1;
+    const startYear = m >= 6 ? y : y - 1;
+    const academic_year = `${startYear}–${String(startYear + 1).slice(-2)}`;
+
+    // 7. Title Extraction
+    const cleanFileName = fileName.replace(/\.[^/.]+$/, '').replace(/[_\-\.]/g, ' ').trim();
+    let title = cleanFileName.length > 8 ? cleanFileName : `${type} on Advanced Computing & Emerging Technologies`;
+    if (title.length < 50 && !new RegExp(type, 'i').test(title)) {
+      title = `${type === 'FDP' ? 'Faculty Development Programme' : type} on ${title}`;
+    }
+
+    res.json({
+      success: true,
+      parsed: {
+        title,
+        type,
+        role_type,
+        level,
+        organizer,
+        date: from_date,
+        from_date,
+        to_date,
+        no_of_days,
+        academic_year,
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /faculty/mentees/by-email/:email — Returns ALL mentees across ALL faculty records for this person
 // Solves the multi-record problem (e.g., HOD_CSEDS + FAC_BBHASKARARAO both belong to Bhaskara Rao)
 app.get('/faculty/mentees/by-email/:email', async (req: Request, res: Response) => {

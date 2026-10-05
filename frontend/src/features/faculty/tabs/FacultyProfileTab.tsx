@@ -27,6 +27,7 @@ import {
   Edit3,
   X,
   FileCheck,
+  Eye,
 } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { useAuth } from '../../../context/AuthContext';
@@ -47,6 +48,10 @@ import {
   calculateAcademicYear,
   calculateFacultyProfileCompletion,
 } from '../../../lib/facultyUtils';
+import {
+  calculateDaysBetween,
+  parseUploadedActivityFile,
+} from '../../../lib/activityDocumentParser';
 import { PillButton } from '../../../components/common/PillButton';
 import { formatExternalUrl } from '../../../lib/urlUtils';
 import { SubjectsHandledSection } from '../components/SubjectsHandledSection';
@@ -129,21 +134,41 @@ export const FacultyProfileTab: React.FC = () => {
     academic_year: '',
   });
 
-  // Activity Form Modal
+  // Activity Form Modal & Parsing State
   const [showActivityModal, setShowActivityModal] = useState(false);
+  const [editingActivityId, setEditingActivityId] = useState<string | null>(null);
   const [isParsingActivity, setIsParsingActivity] = useState(false);
+  const [activityParsingProgress, setActivityParsingProgress] = useState(0);
+  const [inspectingActivityDoc, setInspectingActivityDoc] = useState<{
+    title: string;
+    url: string;
+    fileName?: string;
+  } | null>(null);
+
   const [newActivity, setNewActivity] = useState<{
     title: string;
     type: ActivityType;
+    role_type: 'Attended' | 'Organized';
     organizer: string;
-    date: string;
+    from_date: string;
+    to_date: string;
+    no_of_days: number;
     level: ActivityLevel;
+    academic_year: string;
+    document_url?: string;
+    file_name?: string;
   }>({
     title: '',
-    type: 'Conference',
+    type: 'FDP',
+    role_type: 'Attended',
     organizer: '',
-    date: '',
+    from_date: '',
+    to_date: '',
+    no_of_days: 1,
     level: 'National',
+    academic_year: '',
+    document_url: '',
+    file_name: '',
   });
 
   // Publication Form Modal & Edit State
@@ -385,22 +410,189 @@ export const FacultyProfileTab: React.FC = () => {
     setCertifications((prev) => prev.filter((c) => c.id !== id));
   };
 
+  // Activity Document Auto-Parser (Image or PDF)
+  const handleActivityFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert('File size exceeds 5MB limit. Please select a smaller PDF or image.');
+      return;
+    }
+
+    setIsParsingActivity(true);
+    setActivityParsingProgress(20);
+
+    const timer = setInterval(() => {
+      setActivityParsingProgress((prev) => (prev >= 85 ? 85 : prev + 20));
+    }, 200);
+
+    try {
+      // 1. Client-side rapid document parsing
+      const parsedClient = await parseUploadedActivityFile(file);
+      setActivityParsingProgress(90);
+
+      // 2. Optional backend refinement call
+      try {
+        const backendRes = await api.parseActivityDocument({
+          file_data: parsedClient.document_url,
+          file_name: file.name,
+          file_type: file.type,
+        });
+        if (backendRes?.parsed) {
+          const bp = backendRes.parsed;
+          parsedClient.title = bp.title || parsedClient.title;
+          parsedClient.type = bp.type || parsedClient.type;
+          parsedClient.role_type = bp.role_type || parsedClient.role_type;
+          parsedClient.level = bp.level || parsedClient.level;
+          parsedClient.organizer = bp.organizer || parsedClient.organizer;
+          parsedClient.from_date = bp.from_date || parsedClient.from_date;
+          parsedClient.to_date = bp.to_date || parsedClient.to_date;
+          parsedClient.no_of_days = bp.no_of_days || parsedClient.no_of_days;
+          parsedClient.academic_year = bp.academic_year || parsedClient.academic_year;
+        }
+      } catch {
+        // Client parser result is already complete
+      }
+
+      clearInterval(timer);
+      setActivityParsingProgress(100);
+
+      setNewActivity({
+        title: parsedClient.title,
+        type: parsedClient.type,
+        role_type: parsedClient.role_type,
+        organizer: parsedClient.organizer,
+        from_date: parsedClient.from_date,
+        to_date: parsedClient.to_date,
+        no_of_days: parsedClient.no_of_days,
+        level: parsedClient.level,
+        academic_year: parsedClient.academic_year,
+        document_url: parsedClient.document_url,
+        file_name: parsedClient.file_name,
+      });
+    } catch (err: any) {
+      clearInterval(timer);
+      console.error('Error parsing activity file:', err);
+    } finally {
+      setTimeout(() => {
+        setIsParsingActivity(false);
+        setActivityParsingProgress(0);
+      }, 400);
+    }
+  };
+
+  // Helper when dates change to dynamically update days count and academic year
+  const handleDateChange = (field: 'from_date' | 'to_date', value: string) => {
+    setNewActivity((prev) => {
+      const from = field === 'from_date' ? value : prev.from_date;
+      const to = field === 'to_date' ? value : prev.to_date;
+      const days = calculateDaysBetween(from, to);
+      const ay = calculateAcademicYear(from || to);
+      return {
+        ...prev,
+        [field]: value,
+        no_of_days: days,
+        academic_year: ay,
+      };
+    });
+  };
+
+  const handleOpenAddActivity = () => {
+    setEditingActivityId(null);
+    const today = new Date().toISOString().split('T')[0];
+    setNewActivity({
+      title: '',
+      type: 'FDP',
+      role_type: 'Attended',
+      organizer: '',
+      from_date: today,
+      to_date: today,
+      no_of_days: 1,
+      level: 'National',
+      academic_year: calculateAcademicYear(today),
+      document_url: '',
+      file_name: '',
+    });
+    setShowActivityModal(true);
+  };
+
+  const handleOpenEditActivity = (a: FacultyActivityRecord) => {
+    setEditingActivityId(a.id);
+    const from = a.from_date || a.date || new Date().toISOString().split('T')[0];
+    const to = a.to_date || a.date || from;
+    const days = a.no_of_days || calculateDaysBetween(from, to);
+    setNewActivity({
+      title: a.title,
+      type: a.type,
+      role_type: a.role_type || 'Attended',
+      organizer: a.organizer,
+      from_date: from,
+      to_date: to,
+      no_of_days: days,
+      level: a.level,
+      academic_year: a.academic_year || calculateAcademicYear(from),
+      document_url: a.document_url || '',
+      file_name: a.file_name || '',
+    });
+    setShowActivityModal(true);
+  };
+
   // Activity Modal actions
   const handleAddActivity = () => {
-    if (!newActivity.title || !newActivity.organizer) return;
-    const dateStr = newActivity.date || new Date().toISOString().split('T')[0];
-    const record: FacultyActivityRecord = {
-      id: `ACT_${Date.now()}`,
-      title: newActivity.title,
-      type: newActivity.type,
-      organizer: newActivity.organizer,
-      date: dateStr,
-      level: newActivity.level,
-      academic_year: calculateAcademicYear(dateStr),
-    };
-    setActivities((prev) => [record, ...prev]);
+    if (!newActivity.title.trim() || !newActivity.organizer.trim()) {
+      alert('Please provide event Title and Organizer.');
+      return;
+    }
+
+    const fromDateStr = newActivity.from_date || new Date().toISOString().split('T')[0];
+    const toDateStr = newActivity.to_date || fromDateStr;
+    const days = newActivity.no_of_days || calculateDaysBetween(fromDateStr, toDateStr);
+    const acadYr = newActivity.academic_year || calculateAcademicYear(fromDateStr);
+
+    if (editingActivityId) {
+      setActivities((prev) =>
+        prev.map((a) =>
+          a.id === editingActivityId
+            ? {
+                ...a,
+                title: newActivity.title.trim(),
+                type: newActivity.type,
+                role_type: newActivity.role_type,
+                organizer: newActivity.organizer.trim(),
+                date: fromDateStr,
+                from_date: fromDateStr,
+                to_date: toDateStr,
+                no_of_days: days,
+                level: newActivity.level,
+                academic_year: acadYr,
+                document_url: newActivity.document_url || a.document_url,
+                file_name: newActivity.file_name || a.file_name,
+              }
+            : a
+        )
+      );
+    } else {
+      const record: FacultyActivityRecord = {
+        id: `ACT_${Date.now()}`,
+        title: newActivity.title.trim(),
+        type: newActivity.type,
+        role_type: newActivity.role_type,
+        organizer: newActivity.organizer.trim(),
+        date: fromDateStr,
+        from_date: fromDateStr,
+        to_date: toDateStr,
+        no_of_days: days,
+        level: newActivity.level,
+        academic_year: acadYr,
+        document_url: newActivity.document_url,
+        file_name: newActivity.file_name,
+      };
+      setActivities((prev) => [record, ...prev]);
+    }
+
     setShowActivityModal(false);
-    setNewActivity({ title: '', type: 'Conference', organizer: '', date: '', level: 'National' });
+    setEditingActivityId(null);
   };
 
   const handleDeleteActivity = (id: string) => {
@@ -1089,42 +1281,103 @@ export const FacultyProfileTab: React.FC = () => {
             </div>
           </div>
 
-          <PillButton variant="outline" size="sm" onClick={() => setShowActivityModal(true)} icon={<Plus className="w-4 h-4" />}>
+          <PillButton variant="outline" size="sm" onClick={handleOpenAddActivity} icon={<Plus className="w-4 h-4" />}>
             Add Conference / FDP
           </PillButton>
         </div>
 
         {activities.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {activities.map((a) => (
-              <div key={a.id} className="p-4 rounded-xl bg-surface-2 border border-borderLine flex flex-col justify-between">
-                <div className="space-y-1">
-                  <div className="flex justify-between items-start gap-2">
-                    <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-sky-100 dark:bg-sky-950/40 text-sky-700 dark:text-sky-400">
-                      {a.type} &bull; {a.level}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteActivity(a.id)}
-                      className="text-textMuted hover:text-alert p-1 transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                  <h4 className="text-xs font-bold text-textPrimary mt-1.5 line-clamp-2">{a.title}</h4>
-                  <p className="text-[11px] text-textSecondary">Organizer: {a.organizer}</p>
-                </div>
+            {activities.map((a) => {
+              const startDate = a.from_date || a.date;
+              const endDate = a.to_date || a.date;
+              const isRange = startDate && endDate && startDate !== endDate;
+              const daysCount = a.no_of_days || calculateDaysBetween(startDate, endDate);
 
-                <div className="flex items-center justify-between text-[10px] text-textSecondary pt-3 border-t border-borderLine/50 mt-2">
-                  <span>{a.date}</span>
-                  <span className="font-bold text-sky-600 dark:text-sky-400">{a.academic_year}</span>
+              return (
+                <div key={a.id} className="p-4 rounded-xl bg-surface-2 border border-borderLine flex flex-col justify-between hover:border-sky-500/40 transition-colors">
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-sky-100 dark:bg-sky-950/40 text-sky-700 dark:text-sky-400">
+                          {a.type} &bull; {a.level}
+                        </span>
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                          a.role_type === 'Organized'
+                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+                            : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+                        }`}>
+                          {a.role_type || 'Attended'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditActivity(a)}
+                          className="text-textMuted hover:text-brand-primary p-1 transition-colors"
+                          title="Edit activity entry"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteActivity(a.id)}
+                          className="text-textMuted hover:text-alert p-1 transition-colors"
+                          title="Delete activity"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <h4 className="text-xs font-bold text-textPrimary line-clamp-2">{a.title}</h4>
+                    <p className="text-[11px] text-textSecondary">
+                      <span className="font-semibold text-textPrimary">Organizer:</span> {a.organizer}
+                    </p>
+                  </div>
+
+                  <div className="pt-3 border-t border-borderLine/50 mt-3 space-y-2">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-textSecondary font-medium">
+                        {isRange ? `${startDate} to ${endDate}` : startDate}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800">
+                        ⏱️ {daysCount} {daysCount === 1 ? 'Day' : 'Days'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[10px] pt-1">
+                      <span className="font-bold text-sky-600 dark:text-sky-400">
+                        🎓 {a.academic_year}
+                      </span>
+                      {a.document_url ? (
+                        <button
+                          type="button"
+                          onClick={() => setInspectingActivityDoc({
+                            title: a.title,
+                            url: a.document_url!,
+                            fileName: a.file_name,
+                          })}
+                          className="inline-flex items-center gap-1 text-[10px] font-bold text-brand-primary hover:underline cursor-pointer"
+                        >
+                          <Eye className="w-3 h-3" /> View Document
+                        </button>
+                      ) : (
+                        <span className="text-textMuted text-[10px] italic">No document</span>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="p-6 rounded-xl bg-surface-2 border border-dashed border-borderLine text-center">
             <p className="text-xs font-semibold text-textSecondary">No conferences or FDPs recorded yet.</p>
+            <p className="text-[11px] text-textMuted mt-1">
+              Click &quot;Add Conference / FDP&quot; above to upload your certificate (PDF or Image) for automatic extraction of title, dates, and days.
+            </p>
           </div>
         )}
       </div>
@@ -1514,37 +1767,121 @@ export const FacultyProfileTab: React.FC = () => {
         </div>
       )}
 
-      {/* ── Modal: Add Activity (Conference / Workshop / FDP) ── */}
+      {/* ── Modal: Add / Edit Activity (Conference / Workshop / FDP) with Auto-Parsing ── */}
       {showActivityModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
-          <div className="bg-surface border border-borderLine rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn overflow-y-auto">
+          <div className="bg-surface border border-borderLine rounded-2xl p-6 max-w-xl w-full shadow-2xl space-y-4 my-8">
             <div className="flex items-center justify-between border-b border-borderLine pb-3">
               <div className="flex items-center gap-2 text-sky-600 dark:text-sky-400 font-bold">
                 <Briefcase className="w-5 h-5" />
-                <span className="text-sm">Add Conference / Workshop / FDP</span>
+                <span className="text-sm">
+                  {editingActivityId ? 'Edit Conference / Workshop / FDP' : 'Add Conference / Workshop / FDP'}
+                </span>
               </div>
               <button
                 type="button"
-                onClick={() => setShowActivityModal(false)}
+                onClick={() => {
+                  setShowActivityModal(false);
+                  setEditingActivityId(null);
+                }}
                 className="text-textMuted hover:text-textPrimary"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="space-y-3 text-xs">
+            {/* ── Document Auto-Parser Dropzone ── */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-textPrimary">
+                  Upload Certificate / Document <span className="text-textMuted text-[10px] font-normal">(PDF or Image)</span>
+                </label>
+                <span className="text-[10px] font-bold text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-950/60 px-2 py-0.5 rounded-full border border-sky-200 dark:border-sky-800">
+                  ✨ Auto-Parses Title, Dates &amp; Days
+                </span>
+              </div>
+
+              {isParsingActivity ? (
+                <div className="p-4 rounded-xl border border-sky-300 dark:border-sky-800 bg-sky-50/50 dark:bg-sky-950/30 text-center space-y-2">
+                  <div className="flex items-center justify-center gap-2 text-xs font-bold text-sky-700 dark:text-sky-300">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Scanning document &amp; extracting details... {activityParsingProgress}%</span>
+                  </div>
+                  <div className="w-full bg-sky-200 dark:bg-sky-900 h-2 rounded-full overflow-hidden">
+                    <div
+                      className="bg-sky-600 h-full transition-all duration-300 rounded-full"
+                      style={{ width: `${activityParsingProgress}%` }}
+                    />
+                  </div>
+                </div>
+              ) : newActivity.document_url ? (
+                <div className="p-3 rounded-xl border border-emerald-300 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/30 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <FileCheck className="w-5 h-5 text-emerald-600 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-emerald-900 dark:text-emerald-200 truncate">
+                        {newActivity.file_name || 'Document Attached'}
+                      </p>
+                      <p className="text-[10px] text-emerald-700 dark:text-emerald-400">
+                        Details auto-extracted. You can edit any field below.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setInspectingActivityDoc({
+                        title: newActivity.title || 'Document Preview',
+                        url: newActivity.document_url!,
+                        fileName: newActivity.file_name,
+                      })}
+                      className="text-xs font-bold text-emerald-700 hover:underline inline-flex items-center gap-1"
+                    >
+                      <Eye className="w-3.5 h-3.5" /> Preview
+                    </button>
+                    <label className="text-xs font-bold text-sky-600 hover:underline cursor-pointer">
+                      Replace
+                      <input
+                        type="file"
+                        accept=".pdf,image/*"
+                        onChange={handleActivityFileUpload}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                </div>
+              ) : (
+                <label className="border-2 border-dashed border-borderLine hover:border-sky-500/60 rounded-xl p-4 flex flex-col items-center justify-center gap-1.5 cursor-pointer bg-surface-2/40 hover:bg-surface-2 transition-colors text-center block">
+                  <Upload className="w-6 h-6 text-sky-600 dark:text-sky-400" />
+                  <p className="text-xs font-bold text-textPrimary">
+                    Click to browse or drag &amp; drop certificate
+                  </p>
+                  <p className="text-[10px] text-textMuted">
+                    Supports PDF, PNG, JPG, WEBP (Max 5MB)
+                  </p>
+                  <input
+                    type="file"
+                    accept=".pdf,image/*"
+                    onChange={handleActivityFileUpload}
+                    className="hidden"
+                  />
+                </label>
+              )}
+            </div>
+
+            <div className="space-y-3 text-xs pt-1">
               <div>
                 <label className="block font-semibold text-textPrimary mb-1">Title / Topic *</label>
                 <input
                   type="text"
-                  placeholder="e.g. International Conference on Computational Intelligence"
+                  placeholder="e.g. 5-Day National Level FDP on Generative AI and Deep Learning"
                   value={newActivity.title}
                   onChange={(e) => setNewActivity({ ...newActivity, title: e.target.value })}
                   className="w-full px-3 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block font-semibold text-textPrimary mb-1">Type *</label>
                   <select
@@ -1574,45 +1911,138 @@ export const FacultyProfileTab: React.FC = () => {
                     ))}
                   </select>
                 </div>
+
+                <div>
+                  <label className="block font-semibold text-textPrimary mb-1">Role *</label>
+                  <select
+                    value={newActivity.role_type}
+                    onChange={(e) => setNewActivity({ ...newActivity, role_type: e.target.value as 'Attended' | 'Organized' })}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary font-medium"
+                  >
+                    <option value="Attended">Attended (Participant)</option>
+                    <option value="Organized">Organized (Coordinator/Lead)</option>
+                  </select>
+                </div>
               </div>
 
               <div>
                 <label className="block font-semibold text-textPrimary mb-1">Organizer / Institution *</label>
                 <input
                   type="text"
-                  placeholder="e.g. IEEE Hyderabad Section / NIT Warangal"
+                  placeholder="e.g. AICTE ATAL / NIT Warangal / IIT Madras / RGMCET"
                   value={newActivity.organizer}
                   onChange={(e) => setNewActivity({ ...newActivity, organizer: e.target.value })}
                   className="w-full px-3 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-surface-2 p-3 rounded-xl border border-borderLine">
                 <div>
-                  <label className="block font-semibold text-textPrimary mb-1">Date *</label>
+                  <label className="block font-semibold text-textPrimary mb-1">From Date *</label>
                   <input
                     type="date"
-                    value={newActivity.date}
-                    onChange={(e) => setNewActivity({ ...newActivity, date: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                    value={newActivity.from_date}
+                    onChange={(e) => handleDateChange('from_date', e.target.value)}
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
                   />
                 </div>
+
+                <div>
+                  <label className="block font-semibold text-textPrimary mb-1">To Date *</label>
+                  <input
+                    type="date"
+                    value={newActivity.to_date}
+                    onChange={(e) => handleDateChange('to_date', e.target.value)}
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-textPrimary mb-1">Duration (Days)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={newActivity.no_of_days}
+                    onChange={(e) => setNewActivity({ ...newActivity, no_of_days: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary font-bold"
+                  />
+                </div>
+
                 <div>
                   <label className="block font-semibold text-textPrimary mb-1">Academic Year</label>
-                  <div className="px-3 py-2 text-sm rounded-lg bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 font-bold border border-sky-200 dark:border-sky-800">
-                    {calculateAcademicYear(newActivity.date)}
+                  <div className="px-2.5 py-1.5 text-xs rounded-lg bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 font-extrabold border border-sky-200 dark:border-sky-800 text-center">
+                    {newActivity.academic_year || calculateAcademicYear(newActivity.from_date)}
                   </div>
                 </div>
               </div>
             </div>
 
             <div className="flex justify-end gap-2 pt-3 border-t border-borderLine">
-              <PillButton variant="outline" size="sm" onClick={() => setShowActivityModal(false)}>
+              <PillButton
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setShowActivityModal(false);
+                  setEditingActivityId(null);
+                }}
+              >
                 Cancel
               </PillButton>
               <PillButton variant="primary" size="sm" onClick={handleAddActivity}>
-                Add Entry
+                {editingActivityId ? 'Update Entry' : 'Add Entry'}
               </PillButton>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Lightbox Document Previewer ── */}
+      {inspectingActivityDoc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-surface border border-borderLine rounded-2xl max-w-4xl w-full max-h-[90vh] shadow-2xl flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-borderLine bg-surface-2">
+              <div>
+                <h3 className="font-bold text-sm text-textPrimary truncate max-w-md">
+                  {inspectingActivityDoc.title}
+                </h3>
+                {inspectingActivityDoc.fileName && (
+                  <p className="text-[11px] text-textSecondary">{inspectingActivityDoc.fileName}</p>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={inspectingActivityDoc.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1 text-xs font-bold rounded-lg bg-brand-primary text-white hover:bg-brand-primary/90 inline-flex items-center gap-1.5 transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> Open in New Tab
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setInspectingActivityDoc(null)}
+                  className="p-1.5 rounded-lg text-textMuted hover:text-textPrimary hover:bg-surface transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 p-4 overflow-auto flex items-center justify-center bg-black/5 dark:bg-black/30">
+              {inspectingActivityDoc.url.startsWith('data:application/pdf') ||
+              inspectingActivityDoc.fileName?.toLowerCase().endsWith('.pdf') ? (
+                <iframe
+                  src={inspectingActivityDoc.url}
+                  title="Document Preview"
+                  className="w-full h-[70vh] rounded-xl border border-borderLine bg-white"
+                />
+              ) : (
+                <img
+                  src={inspectingActivityDoc.url}
+                  alt={inspectingActivityDoc.title}
+                  className="max-h-[70vh] max-w-full object-contain rounded-xl shadow-md"
+                />
+              )}
             </div>
           </div>
         </div>

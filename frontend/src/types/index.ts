@@ -260,11 +260,16 @@ export interface FacultyActivityRecord {
   id: string;
   title: string;
   type: ActivityType;
+  role_type?: 'Attended' | 'Organized';
   organizer: string;
   date: string; // YYYY-MM-DD
+  from_date?: string; // YYYY-MM-DD
+  to_date?: string; // YYYY-MM-DD
+  no_of_days?: number;
   level: ActivityLevel;
   academic_year: string; // e.g. "2024–25"
   document_url?: string;
+  file_name?: string;
 }
 
 export interface FacultyPublicationRecord {
