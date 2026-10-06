@@ -281,18 +281,18 @@ export function parseActivityText(rawText: string, fileName: string): Omit<Parse
   let parsedDays = 1;
 
   // Pattern 1: "14th to 18th July 2024" or "14th - 18th July 2024" or "14 - 18 July 2024"
-  const p1 = /(\d{1,2})(?:st|nd|rd|th)?\s*(?:to|-|–|—)\s*(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})[,\s]+(\d{4})/i;
-  // Pattern 2: "14th July to 18th July 2024" or "14 July - 18 July 2024"
-  const p2 = /(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\s*(?:to|-|–|—)\s*(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})[,\s]+(\d{4})/i;
-  // Pattern 3: "July 14 to July 18, 2024" or "July 14-18, 2024"
-  const p3 = /([A-Za-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?\s*(?:to|-|–|—)\s*(?:[A-Za-z]{3,9}\s*)?(\d{1,2})(?:st|nd|rd|th)?[,\s]+(\d{4})/i;
+  const p1 = /\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:to|-|–|—)\s*\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})[,\s]+(\d{4})\b/i;
+  // Pattern 2: "14th July 2024 to 18th July 2024" or "14th July to 18th July 2024" or "14 July - 18 July 2024"
+  const p2 = /\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})(?:[,\s]+(\d{4}))?\s*(?:to|-|–|—)\s*\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})[,\s]+(\d{4})\b/i;
+  // Pattern 3: "July 14, 2024 to July 18, 2024" or "July 14 to July 18, 2024" or "July 14-18, 2024"
+  const p3 = /([A-Za-z]{3,9})\s+\b(\d{1,2})(?:st|nd|rd|th)?(?:[,\s]+(\d{4}))?\s*(?:to|-|–|—)\s*(?:([A-Za-z]{3,9})\s*)?\b(\d{1,2})(?:st|nd|rd|th)?[,\s]+(\d{4})\b/i;
   // Pattern 4: "14-07-2024 to 18-07-2024" or "14/07/2024 - 18/07/2024" or "14.07.2024 to 18.07.2024"
-  const p4 = /(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})\s*(?:to|-|–|—)\s*(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/i;
+  const p4 = /\b(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})\s*(?:to|-|–|—)\s*\b(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})\b/i;
   // Pattern 5: Single Date "15th July 2024" or "July 15, 2024"
-  const p5 = /(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})[,\s]+(\d{4})/i;
-  const p5b = /([A-Za-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?[,\s]+(\d{4})/i;
+  const p5 = /\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})[,\s]+(\d{4})\b/i;
+  const p5b = /([A-Za-z]{3,9})\s+\b(\d{1,2})(?:st|nd|rd|th)?[,\s]+(\d{4})\b/i;
   // Pattern 6: Single Numeric Date "15-07-2024" or "15/07/2024"
-  const p6 = /(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/i;
+  const p6 = /\b(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})\b/i;
 
   const m2 = text.match(p2);
   const m1 = text.match(p1);
@@ -302,11 +302,12 @@ export function parseActivityText(rawText: string, fileName: string): Omit<Parse
   if (m2) {
     const sDay = parseInt(m2[1], 10);
     const sMon = monthNameToNum(m2[2]);
-    const eDay = parseInt(m2[3], 10);
-    const eMon = monthNameToNum(m2[4]);
-    const yr = parseInt(m2[5], 10);
-    fromDate = formatIsoDate(yr, sMon, sDay);
-    toDate = formatIsoDate(yr, eMon, eDay);
+    const sYr = m2[3] ? parseInt(m2[3], 10) : undefined;
+    const eDay = parseInt(m2[4], 10);
+    const eMon = monthNameToNum(m2[5]);
+    const eYr = parseInt(m2[6], 10);
+    fromDate = formatIsoDate(sYr || eYr, sMon, sDay);
+    toDate = formatIsoDate(eYr, eMon, eDay);
   } else if (m1) {
     const sDay = parseInt(m1[1], 10);
     const eDay = parseInt(m1[2], 10);
@@ -315,12 +316,14 @@ export function parseActivityText(rawText: string, fileName: string): Omit<Parse
     fromDate = formatIsoDate(yr, mon, sDay);
     toDate = formatIsoDate(yr, mon, eDay);
   } else if (m3) {
-    const mon = monthNameToNum(m3[1]);
+    const sMon = monthNameToNum(m3[1]);
     const sDay = parseInt(m3[2], 10);
-    const eDay = parseInt(m3[3], 10);
-    const yr = parseInt(m3[4], 10);
-    fromDate = formatIsoDate(yr, mon, sDay);
-    toDate = formatIsoDate(yr, mon, eDay);
+    const sYr = m3[3] ? parseInt(m3[3], 10) : undefined;
+    const eMon = m3[4] ? monthNameToNum(m3[4]) : sMon;
+    const eDay = parseInt(m3[5], 10);
+    const eYr = parseInt(m3[6], 10);
+    fromDate = formatIsoDate(sYr || eYr, sMon, sDay);
+    toDate = formatIsoDate(eYr, eMon, eDay);
   } else if (m4) {
     fromDate = formatIsoDate(m4[3], m4[2], m4[1]);
     toDate = formatIsoDate(m4[6], m4[5], m4[4]);
@@ -365,14 +368,21 @@ export function parseActivityText(rawText: string, fileName: string): Omit<Parse
   // Adjust dates vs days
   const dStart = new Date(fromDate);
   const dEnd = new Date(toDate);
-  if (!isNaN(dStart.getTime()) && !isNaN(dEnd.getTime()) && dEnd >= dStart) {
-    const diffDays = Math.round((dEnd.getTime() - dStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-    if (diffDays > 1) {
-      parsedDays = diffDays;
-    } else if (parsedDays > 1 && fromDate === toDate) {
-      const d = new Date(fromDate);
-      d.setDate(d.getDate() + (parsedDays - 1));
-      toDate = d.toISOString().split('T')[0];
+  if (!isNaN(dStart.getTime()) && !isNaN(dEnd.getTime())) {
+    // Swap if inverted (parsing artefact)
+    if (dEnd < dStart) {
+      [fromDate, toDate] = [toDate, fromDate];
+      const calcDays = Math.round((dStart.getTime() - dEnd.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      if (calcDays > 1) parsedDays = calcDays;
+    } else if (dEnd >= dStart) {
+      const diffDays = Math.round((dEnd.getTime() - dStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      if (diffDays > 1) {
+        parsedDays = diffDays;
+      } else if (parsedDays > 1 && fromDate === toDate) {
+        const d = new Date(fromDate);
+        d.setDate(d.getDate() + (parsedDays - 1));
+        toDate = d.toISOString().split('T')[0];
+      }
     }
   }
 

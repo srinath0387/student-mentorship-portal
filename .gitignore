@@ -43,4 +43,7 @@ Thumbs.db
 *.zip
 *.timestamp-*.mjs
 nat-id.txt
+venv_new/
+livestock_web/
+*.ipynb
 

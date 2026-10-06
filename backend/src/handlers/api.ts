@@ -4701,17 +4701,17 @@ app.post('/faculty/parse-activity-document', async (req: Request, res: Response)
     };
 
     // Range Pattern 1: "14th to 18th July 2024" or "14th - 18th July 2024" or "14 - 18 July 2024"
-    const p1 = /(\d{1,2})(?:st|nd|rd|th)?\s*(?:to|-|–|—)\s*(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})[,\s]+(\d{4})/i;
-    // Range Pattern 2: "14th July to 18th July 2024" or "14 July - 18 July 2024"
-    const p2 = /(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\s*(?:to|-|–|—)\s*(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})[,\s]+(\d{4})/i;
-    // Range Pattern 3: "July 14 to July 18, 2024" or "July 14-18, 2024"
-    const p3 = /([A-Za-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?\s*(?:to|-|–|—)\s*(?:[A-Za-z]{3,9}\s*)?(\d{1,2})(?:st|nd|rd|th)?[,\s]+(\d{4})/i;
+    const p1 = /\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:to|-|–|—)\s*\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})[,\s]+(\d{4})\b/i;
+    // Range Pattern 2: "14th July 2024 to 18th July 2024" or "14th July to 18th July 2024" or "14 July - 18 July 2024"
+    const p2 = /\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})(?:[,\s]+(\d{4}))?\s*(?:to|-|–|—)\s*\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})[,\s]+(\d{4})\b/i;
+    // Range Pattern 3: "July 14, 2024 to July 18, 2024" or "July 14 to July 18, 2024" or "July 14-18, 2024"
+    const p3 = /([A-Za-z]{3,9})\s+\b(\d{1,2})(?:st|nd|rd|th)?(?:[,\s]+(\d{4}))?\s*(?:to|-|–|—)\s*(?:([A-Za-z]{3,9})\s*)?\b(\d{1,2})(?:st|nd|rd|th)?[,\s]+(\d{4})\b/i;
     // Range Pattern 4: "14-07-2024 to 18-07-2024" or "14/07/2024 - 18/07/2024" or "14.07.2024 to 18.07.2024"
-    const p4 = /(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})\s*(?:to|-|–|—)\s*(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/i;
+    const p4 = /\b(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})\s*(?:to|-|–|—)\s*\b(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})\b/i;
     // Single Date Patterns
-    const p5 = /(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})[,\s]+(\d{4})/i;
-    const p5b = /([A-Za-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?[,\s]+(\d{4})/i;
-    const p6 = /(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/i;
+    const p5 = /\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})[,\s]+(\d{4})\b/i;
+    const p5b = /([A-Za-z]{3,9})\s+\b(\d{1,2})(?:st|nd|rd|th)?[,\s]+(\d{4})\b/i;
+    const p6 = /\b(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})\b/i;
 
     const m2 = fullCorpus.match(p2);
     const m1 = fullCorpus.match(p1);
@@ -4721,11 +4721,12 @@ app.post('/faculty/parse-activity-document', async (req: Request, res: Response)
     if (m2) {
       const sDay = m2[1];
       const sMon = monthMap[m2[2].toLowerCase()] || '07';
-      const eDay = m2[3];
-      const eMon = monthMap[m2[4].toLowerCase()] || sMon;
-      const yr = m2[5];
-      from_date = formatIso(yr, sMon, sDay);
-      to_date = formatIso(yr, eMon, eDay);
+      const sYr = m2[3];
+      const eDay = m2[4];
+      const eMon = monthMap[m2[5].toLowerCase()] || sMon;
+      const eYr = m2[6];
+      from_date = formatIso(sYr || eYr, sMon, sDay);
+      to_date = formatIso(eYr, eMon, eDay);
     } else if (m1) {
       const sDay = m1[1];
       const eDay = m1[2];
@@ -4734,12 +4735,14 @@ app.post('/faculty/parse-activity-document', async (req: Request, res: Response)
       from_date = formatIso(yr, mon, sDay);
       to_date = formatIso(yr, mon, eDay);
     } else if (m3) {
-      const mon = monthMap[m3[1].toLowerCase()] || '07';
+      const sMon = monthMap[m3[1].toLowerCase()] || '07';
       const sDay = m3[2];
-      const eDay = m3[3];
-      const yr = m3[4];
-      from_date = formatIso(yr, mon, sDay);
-      to_date = formatIso(yr, mon, eDay);
+      const sYr = m3[3];
+      const eMon = (m3[4] && monthMap[m3[4].toLowerCase()]) || sMon;
+      const eDay = m3[5];
+      const eYr = m3[6];
+      from_date = formatIso(sYr || eYr, sMon, sDay);
+      to_date = formatIso(eYr, eMon, eDay);
     } else if (m4) {
       from_date = formatIso(m4[3], m4[2], m4[1]);
       to_date = formatIso(m4[6], m4[5], m4[4]);
@@ -4773,14 +4776,21 @@ app.post('/faculty/parse-activity-document', async (req: Request, res: Response)
 
     const dStart = new Date(from_date);
     const dEnd = new Date(to_date);
-    if (!isNaN(dStart.getTime()) && !isNaN(dEnd.getTime()) && dEnd >= dStart) {
-      const calcDays = Math.round((dEnd.getTime() - dStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-      if (calcDays > 1) {
-        no_of_days = calcDays;
-      } else if (no_of_days > 1 && from_date === to_date) {
-        const d = new Date(from_date);
-        d.setDate(d.getDate() + (no_of_days - 1));
-        to_date = d.toISOString().split('T')[0];
+    if (!isNaN(dStart.getTime()) && !isNaN(dEnd.getTime())) {
+      // Swap if inverted (parsing artefact)
+      if (dEnd < dStart) {
+        [from_date, to_date] = [to_date, from_date];
+        const calcDays = Math.round((dStart.getTime() - dEnd.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+        if (calcDays > 1) no_of_days = calcDays;
+      } else if (dEnd >= dStart) {
+        const calcDays = Math.round((dEnd.getTime() - dStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+        if (calcDays > 1) {
+          no_of_days = calcDays;
+        } else if (no_of_days > 1 && from_date === to_date) {
+          const d = new Date(from_date);
+          d.setDate(d.getDate() + (no_of_days - 1));
+          to_date = d.toISOString().split('T')[0];
+        }
       }
     }
 
