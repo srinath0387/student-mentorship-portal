@@ -12089,6 +12089,7 @@ app.get('/hod/permissions/students', requireRole('hod', 'admin', 'faculty', 'coo
     await ensureLeaveAndSubjectsHandledTables();
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
+    const isSuperAdmin = Boolean(req.auth?.isSuperAdmin) || callerRole === 'super_admin' || !callerDept || callerDept === '*' || callerDept === 'All';
 
     let query = `SELECT * FROM student_permissions WHERE 1=1`;
     const params: any[] = [];
@@ -12096,9 +12097,40 @@ app.get('/hod/permissions/students', requireRole('hod', 'admin', 'faculty', 'coo
     // Coordinator exclusively supervises 1st Year (1-1 / 1-2) student permissions across all departments
     if (callerRole === 'coordinator') {
       query += ` AND (year = '1st Year' OR year ILIKE '1%')`;
-    } else if (callerRole === 'hod' && callerDept && callerDept !== '*') {
-      params.push(callerDept);
-      query += ` AND (LOWER(REPLACE(department, ' ', '')) ILIKE '%' || LOWER(REPLACE($1, ' ', '')) || '%' OR LOWER(REPLACE($1, ' ', '')) ILIKE '%' || LOWER(REPLACE(department, ' ', '')) || '%')`;
+    } else if (!isSuperAdmin && callerDept) {
+      // Department-specific admin or HOD: strict branch-code isolation via roll_number
+      const d = callerDept.toLowerCase().trim();
+      let branchFilter = '';
+
+      if (d.includes('data science') || d.includes('(ds)') || d === 'ds') {
+        branchFilter = `AND SUBSTRING(roll_number, 7, 2) = '32'`;
+      } else if (d.includes('ai') || d.includes('ml') || d.includes('aiml') || d.includes('ai & ml') || d.includes('ai and ml')) {
+        branchFilter = `AND SUBSTRING(roll_number, 7, 2) = '33'`;
+      } else if (d.includes('business') || d.includes('csbs') || d.includes('(bs)')) {
+        branchFilter = `AND SUBSTRING(roll_number, 7, 2) = '34'`;
+      } else if (d.includes('cyber') || d.includes('(cs)') || d.includes('csecys')) {
+        branchFilter = `AND SUBSTRING(roll_number, 7, 2) = '37'`;
+      } else if (d === 'cse' || d === 'computer science and engineering') {
+        branchFilter = `AND SUBSTRING(roll_number, 7, 2) = '05' AND SUBSTRING(roll_number, 7, 2) NOT IN ('32','33','34','37')`;
+      } else if (d.includes('ece') || d.includes('electronics and communication')) {
+        branchFilter = `AND SUBSTRING(roll_number, 7, 2) = '04'`;
+      } else if (d.includes('eee') || d.includes('electrical')) {
+        branchFilter = `AND SUBSTRING(roll_number, 7, 2) = '02'`;
+      } else if (d.includes('mech')) {
+        branchFilter = `AND SUBSTRING(roll_number, 7, 2) = '03'`;
+      } else if (d.includes('civil')) {
+        branchFilter = `AND SUBSTRING(roll_number, 7, 2) = '01'`;
+      } else if (d === 'mba' || d.includes('business admin')) {
+        branchFilter = `AND (SUBSTRING(roll_number, 5, 2) = '1E' OR roll_number ILIKE '%1E00%')`;
+      } else if (d === 'mca' || d.includes('computer app')) {
+        branchFilter = `AND (SUBSTRING(roll_number, 5, 2) = '1F' OR roll_number ILIKE '%1F00%')`;
+      } else {
+        // Fallback: match department string stored in student_permissions table
+        params.push(callerDept);
+        branchFilter = `AND (LOWER(REPLACE(department, ' ', '')) = LOWER(REPLACE($${params.length}, ' ', '')))`;
+      }
+
+      query += ` ${branchFilter}`;
     }
 
     query += ` ORDER BY created_at DESC`;
@@ -12612,10 +12644,10 @@ function buildCertDeptFilter(dept?: string, paramStartIndex = 1): { condition: s
   }
   const d = dept.toLowerCase().trim();
   let code = '';
-  if (d.includes('data science') || d.includes('(ds)') || d === 'ds' || d.includes('32')) code = '32';
-  else if (d.includes('ai') || d.includes('ml') || d.includes('33')) code = '33';
-  else if (d.includes('bs') || d.includes('business') || d.includes('34')) code = '34';
-  else if (d.includes('cyber') || d.includes('(cs)') || d.includes('37')) code = '37';
+  if (d.includes('data science') || d.includes('(ds)') || d === 'ds' || d.includes('32') || d.includes('cseds')) code = '32';
+  else if (d.includes('ai') || d.includes('ml') || d.includes('33') || d.includes('aiml')) code = '33';
+  else if (d.includes('bs') || d.includes('business') || d.includes('34') || d.includes('csbs')) code = '34';
+  else if (d.includes('cyber') || d.includes('(cs)') || d.includes('37') || d.includes('csecys')) code = '37';
   else if (d === 'cse' || d.includes('computer science') || d.includes('05')) code = '05';
   else if (d.includes('ece') || d.includes('electronics') || d.includes('04')) code = '04';
   else if (d.includes('eee') || d.includes('electrical') || d.includes('02')) code = '02';
@@ -12634,7 +12666,7 @@ function buildCertDeptFilter(dept?: string, paramStartIndex = 1): { condition: s
       OR LOWER(COALESCE(s.department, '')) ILIKE '%(ds)%'
       OR LOWER(TRIM(COALESCE(s.department, ''))) = 'ds'
       OR LOWER(REPLACE(COALESCE(s.department, ''), ' ', '')) = LOWER(REPLACE($${paramStartIndex}, ' ', ''))
-    ) AND SUBSTRING(s.roll_number, 7, 2) <> '05'`;
+    ) AND SUBSTRING(s.roll_number, 7, 2) NOT IN ('05', '33', '34', '37')`;
   } else if (code === '05') {
     cond = `(
       SUBSTRING(s.roll_number, 7, 2) = '05'
@@ -12651,23 +12683,26 @@ function buildCertDeptFilter(dept?: string, paramStartIndex = 1): { condition: s
   } else if (code === '33') {
     cond = `(
       SUBSTRING(s.roll_number, 7, 2) = '33'
-      OR LOWER(COALESCE(s.department, '')) ILIKE '%ai%'
-      OR LOWER(COALESCE(s.department, '')) ILIKE '%ml%'
+      OR LOWER(COALESCE(s.department, '')) ILIKE '%aiml%'
+      OR LOWER(COALESCE(s.department, '')) ILIKE '%ai & ml%'
+      OR LOWER(COALESCE(s.department, '')) ILIKE '%ai and ml%'
+      OR LOWER(COALESCE(s.department, '')) ILIKE '%artificial intelligence%'
+      OR LOWER(COALESCE(s.department, '')) ILIKE '%machine learning%'
       OR LOWER(REPLACE(COALESCE(s.department, ''), ' ', '')) = LOWER(REPLACE($${paramStartIndex}, ' ', ''))
-    )`;
+    ) AND SUBSTRING(s.roll_number, 7, 2) NOT IN ('05', '32', '34', '37')`;
   } else if (code === '34') {
     cond = `(
       SUBSTRING(s.roll_number, 7, 2) = '34'
       OR LOWER(COALESCE(s.department, '')) ILIKE '%business%'
       OR LOWER(COALESCE(s.department, '')) ILIKE '%csbs%'
       OR LOWER(REPLACE(COALESCE(s.department, ''), ' ', '')) = LOWER(REPLACE($${paramStartIndex}, ' ', ''))
-    )`;
+    ) AND SUBSTRING(s.roll_number, 7, 2) NOT IN ('05', '32', '33', '37')`;
   } else if (code === '37') {
     cond = `(
       SUBSTRING(s.roll_number, 7, 2) = '37'
       OR LOWER(COALESCE(s.department, '')) ILIKE '%cyber%'
       OR LOWER(REPLACE(COALESCE(s.department, ''), ' ', '')) = LOWER(REPLACE($${paramStartIndex}, ' ', ''))
-    )`;
+    ) AND SUBSTRING(s.roll_number, 7, 2) NOT IN ('05', '32', '33', '34')`;
   } else if (code === 'E00') {
     cond = `(
       SUBSTRING(s.roll_number, 5, 2) = '1E'
@@ -12763,6 +12798,7 @@ app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'f
     await ensureCertificationTables();
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
+    const isSuperAdmin = Boolean(req.auth?.isSuperAdmin) || callerRole === 'super_admin' || !callerDept || callerDept === '*' || callerDept === 'All';
 
     const filterDept = (req.query.department as string || '').trim();
     const filterYear = (req.query.year as string || '').trim();
@@ -12770,7 +12806,7 @@ app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'f
     const filterIssuer = (req.query.issuer as string || '').trim();
 
     let deptToUse = filterDept;
-    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+    if (!isSuperAdmin && callerDept) {
       deptToUse = callerDept;
     }
 
@@ -12879,6 +12915,7 @@ app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'fa
     const query = (req.query.q as string || '').trim();
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
+    const isSuperAdmin = Boolean(req.auth?.isSuperAdmin) || callerRole === 'super_admin' || !callerDept || callerDept === '*' || callerDept === 'All';
 
     const filterDept = (req.query.department as string || '').trim();
     const filterYear = (req.query.year as string || '').trim();
@@ -12889,7 +12926,7 @@ app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'fa
     }
 
     let deptToUse = filterDept;
-    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+    if (!isSuperAdmin && callerDept) {
       deptToUse = callerDept;
     }
 
@@ -12991,6 +13028,7 @@ app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', '
     const certName = (req.query.cert_name as string || '').trim();
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
+    const isSuperAdmin = Boolean(req.auth?.isSuperAdmin) || callerRole === 'super_admin' || !callerDept || callerDept === '*' || callerDept === 'All';
 
     const filterDept = (req.query.department as string || '').trim();
     const filterYear = (req.query.year as string || '').trim();
@@ -13002,7 +13040,7 @@ app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', '
     }
 
     let deptToUse = filterDept;
-    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+    if (!isSuperAdmin && callerDept) {
       deptToUse = callerDept;
     }
 
