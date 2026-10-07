@@ -1898,8 +1898,9 @@ app.get('/students', requireAuth, async (req: Request, res: Response) => {
       paramIndex += 2;
     }
     if (mentor_id && String(mentor_id) !== 'undefined' && String(mentor_id) !== 'null') {
-      conditions.push(`faculty_mentor_id = $${paramIndex++}`);
+      conditions.push(`(UPPER(s.faculty_mentor_id) = UPPER($${paramIndex}) OR EXISTS (SELECT 1 FROM mentor_assignments ma WHERE UPPER(ma.roll_number) = UPPER(s.roll_number) AND UPPER(ma.faculty_id) = UPPER($${paramIndex})))`);
       params.push(String(mentor_id));
+      paramIndex++;
     }
     if (search) {
       const q = `%${String(search).toLowerCase()}%`;
@@ -2545,15 +2546,19 @@ app.put('/students/:id', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), as
     // Recalculate CGPA from all semester records in academics table
     try {
       const acadRes = await db.query(
-        'SELECT semester_gpa FROM academics WHERE student_id = $1',
+        'SELECT semester_gpa FROM academics WHERE UPPER(student_id) = $1',
         [studentId]
       );
       if (acadRes.rows.length > 0) {
         const avgCgpa = acadRes.rows.reduce((sum: number, r: any) => sum + Number(r.semester_gpa), 0) / acadRes.rows.length;
+        const finalCgpa = Number(avgCgpa.toFixed(2));
         await db.query(
           'UPDATE students SET cgpa = $1 WHERE UPPER(roll_number) = $2',
-          [Number(avgCgpa.toFixed(2)), studentId]
+          [finalCgpa, studentId]
         );
+        if (result.rows[0]) {
+          result.rows[0].cgpa = finalCgpa;
+        }
       }
     } catch { /* ignore cgpa recalc errors */ }
 
