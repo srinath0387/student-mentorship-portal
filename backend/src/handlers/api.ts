@@ -1985,7 +1985,13 @@ app.post('/students', extractAuth, requireAuth, async (req: Request, res: Respon
       return res.status(201).json({ message: 'Student created successfully', student: newStudent });
     }
 
-    await db.query('ALTER TABLE students ADD COLUMN IF NOT EXISTS is_lateral_entry BOOLEAN DEFAULT FALSE;').catch(() => {});
+    await db.query(`
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS is_lateral_entry BOOLEAN DEFAULT FALSE;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_url TEXT;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_updated TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_url TEXT;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS resume_url TEXT;
+    `).catch(() => {});
 
     const result = await db.query(
       `INSERT INTO students (roll_number, name, email, year, phone, address, native_place, department, batch, section,
@@ -1993,13 +1999,25 @@ app.post('/students', extractAuth, requireAuth, async (req: Request, res: Respon
         faculty_mentor_id, photo_url, resume_url, linkedin_url, is_lateral_entry)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
        ON CONFLICT (roll_number) DO UPDATE SET
-         name = EXCLUDED.name,
-         email = EXCLUDED.email,
-         year = EXCLUDED.year,
-         department = EXCLUDED.department,
-         batch = EXCLUDED.batch,
-         section = EXCLUDED.section,
-         is_lateral_entry = EXCLUDED.is_lateral_entry,
+         name = COALESCE(EXCLUDED.name, students.name),
+         email = COALESCE(EXCLUDED.email, students.email),
+         year = COALESCE(EXCLUDED.year, students.year),
+         department = COALESCE(EXCLUDED.department, students.department),
+         batch = COALESCE(EXCLUDED.batch, students.batch),
+         section = COALESCE(EXCLUDED.section, students.section),
+         phone = COALESCE(EXCLUDED.phone, students.phone),
+         address = COALESCE(EXCLUDED.address, students.address),
+         native_place = COALESCE(EXCLUDED.native_place, students.native_place),
+         hostel_day_scholar = COALESCE(EXCLUDED.hostel_day_scholar, students.hostel_day_scholar),
+         driving_license = COALESCE(EXCLUDED.driving_license, students.driving_license),
+         passport = COALESCE(EXCLUDED.passport, students.passport),
+         relocation_willingness = COALESCE(EXCLUDED.relocation_willingness, students.relocation_willingness),
+         family_business = COALESCE(EXCLUDED.family_business, students.family_business),
+         financial_background = COALESCE(EXCLUDED.financial_background, students.financial_background),
+         photo_url = COALESCE(EXCLUDED.photo_url, students.photo_url),
+         resume_url = COALESCE(EXCLUDED.resume_url, students.resume_url),
+         linkedin_url = COALESCE(EXCLUDED.linkedin_url, students.linkedin_url),
+         is_lateral_entry = COALESCE(EXCLUDED.is_lateral_entry, students.is_lateral_entry),
          updated_at = CURRENT_TIMESTAMP
        RETURNING *`,
       [
@@ -2412,7 +2430,13 @@ app.get('/students/:id', requireAuth, async (req: Request, res: Response) => {
       return res.json(student);
     }
 
-    await db.query('ALTER TABLE students ADD COLUMN IF NOT EXISTS cgpa NUMERIC(4,2) DEFAULT 0.00;').catch(() => {});
+    await db.query(`
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS cgpa NUMERIC(4,2) DEFAULT 0.00;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_url TEXT;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_updated TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_url TEXT;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS resume_url TEXT;
+    `).catch(() => {});
 
     const result = await db.query(
       `SELECT s.*, COALESCE(ROUND(AVG(a.semester_gpa), 2), s.cgpa, 0.00) AS cgpa
@@ -2461,7 +2485,13 @@ app.put('/students/:id', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), as
       return res.json({ message: 'Profile updated successfully', student: updated });
     }
 
-    await db.query('ALTER TABLE students ADD COLUMN IF NOT EXISTS cgpa NUMERIC(4,2) DEFAULT 0.00;').catch(() => {});
+    await db.query(`
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS cgpa NUMERIC(4,2) DEFAULT 0.00;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_url TEXT;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_updated TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_url TEXT;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS resume_url TEXT;
+    `).catch(() => {});
 
     // Fetch existing student record to merge partial updates
     const existingRes = await db.query('SELECT * FROM students WHERE UPPER(roll_number) = $1', [studentId]);
@@ -4379,7 +4409,13 @@ const ensureFacultyProfileTable = async () => {
       domains JSONB DEFAULT '[]',
       updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     );
-  `);
+    ALTER TABLE faculty_full_profiles ADD COLUMN IF NOT EXISTS personal JSONB DEFAULT '{}';
+    ALTER TABLE faculty_full_profiles ADD COLUMN IF NOT EXISTS education JSONB DEFAULT '{}';
+    ALTER TABLE faculty_full_profiles ADD COLUMN IF NOT EXISTS certifications JSONB DEFAULT '[]';
+    ALTER TABLE faculty_full_profiles ADD COLUMN IF NOT EXISTS activities JSONB DEFAULT '[]';
+    ALTER TABLE faculty_full_profiles ADD COLUMN IF NOT EXISTS publications JSONB DEFAULT '[]';
+    ALTER TABLE faculty_full_profiles ADD COLUMN IF NOT EXISTS domains JSONB DEFAULT '[]';
+  `).catch(() => {});
 };
 
 app.get('/faculty/full-profile/:email', async (req: Request, res: Response) => {
@@ -5615,7 +5651,8 @@ app.get('/faculty/:id/mentees-detail', requireRole('admin', 'hod', 'coordinator'
          section,
          department,
          phone,
-         cgpa
+         cgpa,
+         linkedin_url
        FROM (
          -- Source 1: from mentor_assignments
          SELECT
@@ -5623,7 +5660,8 @@ app.get('/faculty/:id/mentees-detail', requireRole('admin', 'hod', 'coordinator'
            ma.faculty_id,
            ma.assigned_at,
            CASE WHEN s.roll_number IS NOT NULL THEN true ELSE false END AS registered,
-           s.name, s.email, s.year, s.batch, s.section, s.department, s.phone, s.cgpa
+           s.name, s.email, s.year, s.batch, s.section, s.department, s.phone, s.cgpa,
+           s.linkedin_url
          FROM mentor_assignments ma
          LEFT JOIN students s ON UPPER(s.roll_number) = UPPER(ma.roll_number)
          WHERE UPPER(ma.faculty_id) = $1
@@ -5636,7 +5674,8 @@ app.get('/faculty/:id/mentees-detail', requireRole('admin', 'hod', 'coordinator'
            s.faculty_mentor_id AS faculty_id,
            s.updated_at AS assigned_at,
            true AS registered,
-           s.name, s.email, s.year, s.batch, s.section, s.department, s.phone, s.cgpa
+           s.name, s.email, s.year, s.batch, s.section, s.department, s.phone, s.cgpa,
+           s.linkedin_url
          FROM students s
          WHERE UPPER(s.faculty_mentor_id) = $1
            AND s.roll_number IS NOT NULL

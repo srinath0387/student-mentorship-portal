@@ -189,6 +189,19 @@ async function ensureSchema(p: Pool) {
 
     // Migration: add is_lateral_entry column for existing DBs
     `ALTER TABLE students ADD COLUMN IF NOT EXISTS is_lateral_entry BOOLEAN DEFAULT FALSE;`,
+    `ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_url TEXT;`,
+    `ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_updated TIMESTAMP WITH TIME ZONE;`,
+    `ALTER TABLE students ADD COLUMN IF NOT EXISTS cgpa NUMERIC(4,2) DEFAULT 0.00;`,
+    `ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_url TEXT;`,
+    `ALTER TABLE students ADD COLUMN IF NOT EXISTS resume_url TEXT;`,
+
+    // Migration: ensure faculty_full_profiles has all jsonb columns
+    `ALTER TABLE faculty_full_profiles ADD COLUMN IF NOT EXISTS personal JSONB DEFAULT '{}';`,
+    `ALTER TABLE faculty_full_profiles ADD COLUMN IF NOT EXISTS education JSONB DEFAULT '{}';`,
+    `ALTER TABLE faculty_full_profiles ADD COLUMN IF NOT EXISTS certifications JSONB DEFAULT '[]';`,
+    `ALTER TABLE faculty_full_profiles ADD COLUMN IF NOT EXISTS activities JSONB DEFAULT '[]';`,
+    `ALTER TABLE faculty_full_profiles ADD COLUMN IF NOT EXISTS publications JSONB DEFAULT '[]';`,
+    `ALTER TABLE faculty_full_profiles ADD COLUMN IF NOT EXISTS domains JSONB DEFAULT '[]';`,
 
     // Migration: normalize legacy DS department names to 'CSE (Data Science)'
     `UPDATE students SET department = 'CSE (Data Science)' WHERE department IN ('CSE(Data Science)', 'Data Science', 'CSE (Data Science) ');`,
