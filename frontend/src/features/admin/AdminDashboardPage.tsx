@@ -279,6 +279,11 @@ export const AdminDashboardPage: React.FC = () => {
     new Map(students.map((s) => [s.roll_number.toUpperCase(), s])).values()
   );
 
+  const yearScopedStudents = useMemo(() => {
+    if (!yearFilter) return uniqueStudents;
+    return uniqueStudents.filter((s) => s.year === yearFilter);
+  }, [uniqueStudents, yearFilter]);
+
   const filteredStudents = uniqueStudents.filter((s) => {
     const q = searchQuery.toLowerCase();
     const matchesSearch = !q || s.name.toLowerCase().includes(q) || s.roll_number.toLowerCase().includes(q) || s.email.toLowerCase().includes(q);
@@ -793,6 +798,42 @@ export const AdminDashboardPage: React.FC = () => {
                 <option value="B">Section B</option>
                 <option value="C">Section C</option>
               </select>
+            </div>
+          </div>
+
+          {/* ── Sub-toolbar layout: Filter summary, Real-time Counts & Dynamic Actions ── */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-3 pb-3 mb-4 border-t border-borderLine">
+            {/* Left: Dynamic Badges & Real-time Count */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-semibold text-textSecondary">
+                Total Students:
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-brand-soft text-brand-primary border border-brand-primary/20">
+                <Users className="w-3.5 h-3.5" />
+                {yearFilter ? (
+                  <>
+                    <span className="font-extrabold">{yearScopedStudents.length}</span>
+                    <span>in {departmentFilter !== 'All' ? departmentFilter : 'All Depts'} · {yearFilter}</span>
+                    {sectionFilter && <span className="text-brand-primary/70">(Sec {sectionFilter}: {filteredStudents.length})</span>}
+                  </>
+                ) : (
+                  <>
+                    <span className="font-extrabold">{uniqueStudents.length}</span>
+                    <span>in {departmentFilter !== 'All' ? departmentFilter : 'All Departments'}</span>
+                    {sectionFilter && <span className="text-brand-primary/70">(Sec {sectionFilter}: {filteredStudents.length})</span>}
+                  </>
+                )}
+              </span>
+
+              {searchQuery && (
+                <span className="text-[11px] text-textMuted">
+                  (Found {filteredStudents.length} matching "{searchQuery}")
+                </span>
+              )}
+            </div>
+
+            {/* Right: Dynamic Delete Actions scoped to Year/Dept/Section */}
+            <div className="flex items-center gap-2 flex-wrap">
               {/* Section-wise delete — only when section filter is active */}
               {sectionFilter && (
                 <button
@@ -804,22 +845,30 @@ export const AdminDashboardPage: React.FC = () => {
                   className="px-3 py-1.5 text-xs font-bold rounded-lg border border-red-300 text-red-600 bg-red-50 hover:bg-red-100 transition-all flex items-center gap-1.5"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  Delete Section
+                  Delete Section ({filteredStudents.length})
                 </button>
               )}
-              {/* Delete All — department scoped */}
+
+              {/* Dynamic Delete All / Delete Year button */}
               <button
                 onClick={() => {
-                  const isScoped = departmentFilter && departmentFilter !== 'All';
-                  const label = isScoped
-                    ? `ALL ${uniqueStudents.length} students in ${departmentFilter}`
-                    : `ALL ${uniqueStudents.length} students across all departments`;
-                  openBulkDeleteModal('all', uniqueStudents.map(s => s.roll_number), label);
+                  const isScopedDept = departmentFilter && departmentFilter !== 'All';
+                  const targetStudents = yearFilter ? yearScopedStudents : uniqueStudents;
+                  const label = yearFilter
+                    ? `ALL ${targetStudents.length} students in ${isScopedDept ? departmentFilter : 'All Departments'} (${yearFilter})`
+                    : (isScopedDept
+                        ? `ALL ${targetStudents.length} students in ${departmentFilter}`
+                        : `ALL ${targetStudents.length} students across all departments`);
+                  openBulkDeleteModal('all', targetStudents.map(s => s.roll_number), label);
                 }}
                 className="px-3 py-1.5 text-xs font-bold rounded-lg border border-red-400 text-red-700 bg-red-50 hover:bg-red-600 hover:text-white transition-all flex items-center gap-1.5"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                {departmentFilter && departmentFilter !== 'All' ? `Delete All (${departmentFilter})` : 'Delete All'}
+                {yearFilter
+                  ? `Delete All (${departmentFilter !== 'All' ? departmentFilter : 'All'} - ${yearFilter}: ${yearScopedStudents.length})`
+                  : (departmentFilter && departmentFilter !== 'All'
+                      ? `Delete All (${departmentFilter}: ${uniqueStudents.length})`
+                      : `Delete All (${uniqueStudents.length})`)}
               </button>
             </div>
           </div>
