@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { VALID_DEPARTMENT_NAMES } from '../../lib/validation/auth';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -275,11 +275,11 @@ export const AdminDashboardPage: React.FC = () => {
     })
     .sort((a, b) => b.cgpa - a.cgpa);
 
-  const uniqueStudents = Array.from(
+  const uniqueStudents: StudentProfile[] = Array.from(
     new Map(students.map((s) => [s.roll_number.toUpperCase(), s])).values()
   );
 
-  const yearScopedStudents = useMemo(() => {
+  const yearScopedStudents: StudentProfile[] = useMemo(() => {
     if (!yearFilter) return uniqueStudents;
     return uniqueStudents.filter((s) => s.year === yearFilter);
   }, [uniqueStudents, yearFilter]);
@@ -859,7 +859,7 @@ export const AdminDashboardPage: React.FC = () => {
                     : (isScopedDept
                         ? `ALL ${targetStudents.length} students in ${departmentFilter}`
                         : `ALL ${targetStudents.length} students across all departments`);
-                  openBulkDeleteModal('all', targetStudents.map(s => s.roll_number), label);
+                  openBulkDeleteModal('all', targetStudents.map((s: any) => s.roll_number), label);
                 }}
                 className="px-3 py-1.5 text-xs font-bold rounded-lg border border-red-400 text-red-700 bg-red-50 hover:bg-red-600 hover:text-white transition-all flex items-center gap-1.5"
               >
