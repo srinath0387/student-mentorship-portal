@@ -29,7 +29,8 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   sessionKickedOut: boolean;
-  login: (email: string, role: UserRole, rollNumber?: string, name?: string, jwtToken?: string, department?: string, isSuperAdmin?: boolean) => void;
+  login: (email: string, role: UserRole, rollNumber?: string, name?: string, jwtToken?: string, department?: string, isSuperAdmin?: boolean, photoUrl?: string) => void;
+  updatePhotoUrl: (photoUrl: string) => void;
   logout: () => void;
   registerSession: (email: string, role: UserRole) => Promise<void>;
   /** Call before starting the async login flow to prevent redirect-to-home flash */
@@ -254,9 +255,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSessionKickedOut(false);
   };
 
+  const updatePhotoUrl = (photoUrl: string) => {
+    setUser((prev) => (prev ? { ...prev, photo_url: photoUrl } : prev));
+  };
+
   return (
     <AuthContext.Provider
-      value={{ user, role, isAuthenticated: Boolean(user), isLoading: isLoading || isLoggingIn, sessionKickedOut, login, logout, registerSession, markLoggingIn: () => setIsLoggingIn(true), stopLoggingIn: () => setIsLoggingIn(false) }}
+      value={{ user, role, isAuthenticated: Boolean(user), isLoading: isLoading || isLoggingIn, sessionKickedOut, login, logout, updatePhotoUrl, registerSession, markLoggingIn: () => setIsLoggingIn(true), stopLoggingIn: () => setIsLoggingIn(false) }}
     >
       {children}
     </AuthContext.Provider>

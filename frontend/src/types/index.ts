@@ -9,6 +9,7 @@ export interface User {
   department: string;
   isSuperAdmin?: boolean;
   isLateralEntry?: boolean;
+  photo_url?: string;
 }
 
 export interface StudentProfile {
@@ -232,6 +233,7 @@ export interface FacultyPersonalDetails {
   linkedin_url?: string;
   scopus_id?: string;
   orcid_id?: string;
+  photo_url?: string;
   joining_date?: string; // YYYY-MM-DD
   prior_experience_years?: number;
   prior_experience_months?: number;
@@ -757,3 +759,49 @@ export interface PublicationsResponse {
   total: number;
   publications: OversightPublication[];
 }
+
+export type BroadcastPriority = 'normal' | 'urgent' | 'action_required';
+export type BroadcastTargetRole = 'all' | 'students' | 'faculty' | 'mentees';
+
+export interface BroadcastNotification {
+  id: string;
+  sender_email: string;
+  sender_name: string;
+  sender_role: string;
+  sender_department?: string;
+  title: string;
+  message: string;
+  priority: BroadcastPriority;
+  target_role: BroadcastTargetRole;
+  target_department?: string;
+  target_mentor_id?: string;
+  popup_on_login: boolean;
+  expires_at?: string;
+  created_at: string;
+  is_read?: boolean;
+  is_popup_dismissed?: boolean;
+  popup_dismissed_at?: string;
+  read_at?: string;
+}
+
+export interface CreateBroadcastPayload {
+  title: string;
+  message: string;
+  priority?: BroadcastPriority;
+  target_role?: BroadcastTargetRole;
+  target_department?: string;
+  popup_on_login?: boolean;
+  sender_name?: string;
+  expires_at?: string;
+}
+
+export interface UnregisteredStudent {
+  roll_number: string;
+  department: string;
+  mentor_id: string;
+  mentor_name: string;
+  mentor_email: string;
+  mentor_department?: string;
+  assigned_at?: string;
+}
+

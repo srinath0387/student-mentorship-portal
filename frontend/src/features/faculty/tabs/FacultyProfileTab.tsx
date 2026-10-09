@@ -28,9 +28,11 @@ import {
   X,
   FileCheck,
   Eye,
+  Camera,
 } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { useAuth } from '../../../context/AuthContext';
+import { ProfilePhotoUploadModal } from '../../../components/common/ProfilePhotoUploadModal';
 import {
   FacultyFullProfile,
   BloodGroup,
@@ -90,6 +92,8 @@ export const FacultyProfileTab: React.FC = () => {
     queryFn: () => api.getFacultyFullProfile(email),
     enabled: Boolean(email),
   });
+
+  const [showPhotoModal, setShowPhotoModal] = useState(false);
 
   // Local form states
   const [department, setDepartment] = useState('CSE');
@@ -872,12 +876,40 @@ export const FacultyProfileTab: React.FC = () => {
       {/* ── 2. Section 1 & 2: Personal Details & Experience (Locked vs Editable) ── */}
       <div className="bg-surface border border-borderLine rounded-2xl p-6 shadow-xs space-y-6">
         <div className="flex items-center justify-between border-b border-borderLine pb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-brand-soft text-brand-primary flex items-center justify-center font-bold">
-              <User className="w-5 h-5" />
+          <div className="flex items-center gap-3.5">
+            <div className="relative shrink-0">
+              <div className="w-12 h-12 rounded-xl overflow-hidden bg-brand-soft text-brand-primary flex items-center justify-center font-bold border border-borderLine shadow-xs">
+                {profileData?.personal?.photo_url ? (
+                  <img
+                    src={profileData.personal.photo_url}
+                    alt={profileData?.personal?.name || 'Faculty'}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <User className="w-6 h-6" />
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPhotoModal(true)}
+                className="absolute -bottom-1 -right-1 p-1 rounded-md bg-surface border border-borderLine text-textMuted shadow-xs hover:text-textPrimary hover:border-brand-primary transition-all cursor-pointer"
+                title="Upload Profile Photo"
+              >
+                <Camera className="w-2.5 h-2.5" />
+              </button>
             </div>
             <div>
-              <h3 className="text-sm font-bold text-textPrimary">Personal Details & Experience</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-textPrimary">Personal Details & Experience</h3>
+                <button
+                  type="button"
+                  onClick={() => setShowPhotoModal(true)}
+                  className="text-[11px] font-semibold text-brand-primary hover:underline inline-flex items-center gap-1"
+                >
+                  <Camera className="w-3 h-3" />
+                  <span>{profileData?.personal?.photo_url ? 'Change Photo' : 'Upload Photo'}</span>
+                </button>
+              </div>
               <p className="text-xs text-textSecondary mt-0.5">
                 Official institution records and contact credentials
               </p>
@@ -2166,6 +2198,19 @@ export const FacultyProfileTab: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Profile Photo Upload Modal */}
+      <ProfilePhotoUploadModal
+        isOpen={showPhotoModal}
+        onClose={() => setShowPhotoModal(false)}
+        role="faculty"
+        userId={email}
+        userName={profileData?.personal?.name || user?.name || 'Faculty Member'}
+        currentPhotoUrl={profileData?.personal?.photo_url}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ['facultyFullProfile', email] });
+        }}
+      />
     </div>
   );
 };

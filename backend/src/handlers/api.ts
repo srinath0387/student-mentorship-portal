@@ -1,4 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import zlib from 'zlib';
 import { globalErrorHandler } from '../lib/errors';
 import { logger } from '../lib/logger';
@@ -1898,8 +1899,9 @@ app.get('/students', requireAuth, async (req: Request, res: Response) => {
       paramIndex += 2;
     }
     if (mentor_id && String(mentor_id) !== 'undefined' && String(mentor_id) !== 'null') {
-      conditions.push(`faculty_mentor_id = $${paramIndex++}`);
+      conditions.push(`(UPPER(s.faculty_mentor_id) = UPPER($${paramIndex}) OR EXISTS (SELECT 1 FROM mentor_assignments ma WHERE UPPER(ma.roll_number) = UPPER(s.roll_number) AND UPPER(ma.faculty_id) = UPPER($${paramIndex})))`);
       params.push(String(mentor_id));
+      paramIndex++;
     }
     if (search) {
       const q = `%${String(search).toLowerCase()}%`;
@@ -1985,7 +1987,13 @@ app.post('/students', extractAuth, requireAuth, async (req: Request, res: Respon
       return res.status(201).json({ message: 'Student created successfully', student: newStudent });
     }
 
-    await db.query('ALTER TABLE students ADD COLUMN IF NOT EXISTS is_lateral_entry BOOLEAN DEFAULT FALSE;').catch(() => {});
+    await db.query(`
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS is_lateral_entry BOOLEAN DEFAULT FALSE;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_url TEXT;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_updated TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_url TEXT;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS resume_url TEXT;
+    `).catch(() => {});
 
     const result = await db.query(
       `INSERT INTO students (roll_number, name, email, year, phone, address, native_place, department, batch, section,
@@ -1993,13 +2001,25 @@ app.post('/students', extractAuth, requireAuth, async (req: Request, res: Respon
         faculty_mentor_id, photo_url, resume_url, linkedin_url, is_lateral_entry)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
        ON CONFLICT (roll_number) DO UPDATE SET
-         name = EXCLUDED.name,
-         email = EXCLUDED.email,
-         year = EXCLUDED.year,
-         department = EXCLUDED.department,
-         batch = EXCLUDED.batch,
-         section = EXCLUDED.section,
-         is_lateral_entry = EXCLUDED.is_lateral_entry,
+         name = COALESCE(EXCLUDED.name, students.name),
+         email = COALESCE(EXCLUDED.email, students.email),
+         year = COALESCE(EXCLUDED.year, students.year),
+         department = COALESCE(EXCLUDED.department, students.department),
+         batch = COALESCE(EXCLUDED.batch, students.batch),
+         section = COALESCE(EXCLUDED.section, students.section),
+         phone = COALESCE(EXCLUDED.phone, students.phone),
+         address = COALESCE(EXCLUDED.address, students.address),
+         native_place = COALESCE(EXCLUDED.native_place, students.native_place),
+         hostel_day_scholar = COALESCE(EXCLUDED.hostel_day_scholar, students.hostel_day_scholar),
+         driving_license = COALESCE(EXCLUDED.driving_license, students.driving_license),
+         passport = COALESCE(EXCLUDED.passport, students.passport),
+         relocation_willingness = COALESCE(EXCLUDED.relocation_willingness, students.relocation_willingness),
+         family_business = COALESCE(EXCLUDED.family_business, students.family_business),
+         financial_background = COALESCE(EXCLUDED.financial_background, students.financial_background),
+         photo_url = COALESCE(EXCLUDED.photo_url, students.photo_url),
+         resume_url = COALESCE(EXCLUDED.resume_url, students.resume_url),
+         linkedin_url = COALESCE(EXCLUDED.linkedin_url, students.linkedin_url),
+         is_lateral_entry = COALESCE(EXCLUDED.is_lateral_entry, students.is_lateral_entry),
          updated_at = CURRENT_TIMESTAMP
        RETURNING *`,
       [
@@ -2401,6 +2421,7 @@ app.get('/students/mentor-lookup', requireRole('hod', 'admin'), async (req: Requ
   }
 });
 
+let studentColumnsEnsured = false;
 // GET /students/:id — Get Student Profile
 app.get('/students/:id', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -2412,7 +2433,16 @@ app.get('/students/:id', requireAuth, async (req: Request, res: Response) => {
       return res.json(student);
     }
 
-    await db.query('ALTER TABLE students ADD COLUMN IF NOT EXISTS cgpa NUMERIC(4,2) DEFAULT 0.00;').catch(() => {});
+    if (!studentColumnsEnsured) {
+      studentColumnsEnsured = true;
+      await db.query(`
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS cgpa NUMERIC(4,2) DEFAULT 0.00;
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_url TEXT;
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_updated TIMESTAMP WITH TIME ZONE;
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_url TEXT;
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS resume_url TEXT;
+      `).catch(() => {});
+    }
 
     const result = await db.query(
       `SELECT s.*, COALESCE(ROUND(AVG(a.semester_gpa), 2), s.cgpa, 0.00) AS cgpa
@@ -2461,7 +2491,13 @@ app.put('/students/:id', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), as
       return res.json({ message: 'Profile updated successfully', student: updated });
     }
 
-    await db.query('ALTER TABLE students ADD COLUMN IF NOT EXISTS cgpa NUMERIC(4,2) DEFAULT 0.00;').catch(() => {});
+    await db.query(`
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS cgpa NUMERIC(4,2) DEFAULT 0.00;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_url TEXT;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_updated TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_url TEXT;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS resume_url TEXT;
+    `).catch(() => {});
 
     // Fetch existing student record to merge partial updates
     const existingRes = await db.query('SELECT * FROM students WHERE UPPER(roll_number) = $1', [studentId]);
@@ -2515,15 +2551,19 @@ app.put('/students/:id', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), as
     // Recalculate CGPA from all semester records in academics table
     try {
       const acadRes = await db.query(
-        'SELECT semester_gpa FROM academics WHERE student_id = $1',
+        'SELECT semester_gpa FROM academics WHERE UPPER(student_id) = $1',
         [studentId]
       );
       if (acadRes.rows.length > 0) {
         const avgCgpa = acadRes.rows.reduce((sum: number, r: any) => sum + Number(r.semester_gpa), 0) / acadRes.rows.length;
+        const finalCgpa = Number(avgCgpa.toFixed(2));
         await db.query(
           'UPDATE students SET cgpa = $1 WHERE UPPER(roll_number) = $2',
-          [Number(avgCgpa.toFixed(2)), studentId]
+          [finalCgpa, studentId]
         );
+        if (result.rows[0]) {
+          result.rows[0].cgpa = finalCgpa;
+        }
       }
     } catch { /* ignore cgpa recalc errors */ }
 
@@ -4365,8 +4405,10 @@ app.get('/faculty/by-email/:email', async (req: Request, res: Response) => {
 // ============================================================================
 // Faculty Full Profile (Personal, Education, Certs, Activities, Publications, Domains)
 // ============================================================================
+let facultyProfileTableEnsured = false;
 const ensureFacultyProfileTable = async () => {
-  if (db.isMock) return;
+  if (db.isMock || facultyProfileTableEnsured) return;
+  facultyProfileTableEnsured = true;
   await db.query(`
     CREATE TABLE IF NOT EXISTS faculty_full_profiles (
       email TEXT PRIMARY KEY,
@@ -4379,7 +4421,13 @@ const ensureFacultyProfileTable = async () => {
       domains JSONB DEFAULT '[]',
       updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     );
-  `);
+    ALTER TABLE faculty_full_profiles ADD COLUMN IF NOT EXISTS personal JSONB DEFAULT '{}';
+    ALTER TABLE faculty_full_profiles ADD COLUMN IF NOT EXISTS education JSONB DEFAULT '{}';
+    ALTER TABLE faculty_full_profiles ADD COLUMN IF NOT EXISTS certifications JSONB DEFAULT '[]';
+    ALTER TABLE faculty_full_profiles ADD COLUMN IF NOT EXISTS activities JSONB DEFAULT '[]';
+    ALTER TABLE faculty_full_profiles ADD COLUMN IF NOT EXISTS publications JSONB DEFAULT '[]';
+    ALTER TABLE faculty_full_profiles ADD COLUMN IF NOT EXISTS domains JSONB DEFAULT '[]';
+  `).catch(() => {});
 };
 
 app.get('/faculty/full-profile/:email', async (req: Request, res: Response) => {
@@ -5615,7 +5663,8 @@ app.get('/faculty/:id/mentees-detail', requireRole('admin', 'hod', 'coordinator'
          section,
          department,
          phone,
-         cgpa
+         cgpa,
+         linkedin_url
        FROM (
          -- Source 1: from mentor_assignments
          SELECT
@@ -5623,7 +5672,8 @@ app.get('/faculty/:id/mentees-detail', requireRole('admin', 'hod', 'coordinator'
            ma.faculty_id,
            ma.assigned_at,
            CASE WHEN s.roll_number IS NOT NULL THEN true ELSE false END AS registered,
-           s.name, s.email, s.year, s.batch, s.section, s.department, s.phone, s.cgpa
+           s.name, s.email, s.year, s.batch, s.section, s.department, s.phone, s.cgpa,
+           s.linkedin_url
          FROM mentor_assignments ma
          LEFT JOIN students s ON UPPER(s.roll_number) = UPPER(ma.roll_number)
          WHERE UPPER(ma.faculty_id) = $1
@@ -5636,7 +5686,8 @@ app.get('/faculty/:id/mentees-detail', requireRole('admin', 'hod', 'coordinator'
            s.faculty_mentor_id AS faculty_id,
            s.updated_at AS assigned_at,
            true AS registered,
-           s.name, s.email, s.year, s.batch, s.section, s.department, s.phone, s.cgpa
+           s.name, s.email, s.year, s.batch, s.section, s.department, s.phone, s.cgpa,
+           s.linkedin_url
          FROM students s
          WHERE UPPER(s.faculty_mentor_id) = $1
            AND s.roll_number IS NOT NULL
@@ -13295,6 +13346,585 @@ app.put('/internships/:id/verify', requireRole('faculty', 'hod', 'admin', 'super
     res.json(updateRes.rows[0]);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// Broadcast Notifications & Login Notice Engine
+// ============================================================================
+let broadcastTablesEnsured = false;
+const ensureBroadcastTables = async () => {
+  if (db.isMock || broadcastTablesEnsured) return;
+  broadcastTablesEnsured = true;
+  try {
+    await db.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`).catch(() => {});
+    await db.query(`CREATE EXTENSION IF NOT EXISTS "pgcrypto";`).catch(() => {});
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS broadcast_notifications (
+        id VARCHAR(64) PRIMARY KEY,
+        sender_email VARCHAR(150) NOT NULL,
+        sender_name VARCHAR(150) NOT NULL,
+        sender_role VARCHAR(50) NOT NULL,
+        sender_department VARCHAR(100),
+        title VARCHAR(255) NOT NULL,
+        message TEXT NOT NULL,
+        priority VARCHAR(20) DEFAULT 'normal',
+        target_role VARCHAR(50) NOT NULL,
+        target_department VARCHAR(100) DEFAULT 'ALL',
+        target_mentor_id VARCHAR(50),
+        popup_on_login BOOLEAN DEFAULT TRUE,
+        expires_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `).catch(() => {});
+
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS broadcast_user_status (
+        id VARCHAR(64) PRIMARY KEY,
+        notification_id VARCHAR(64) NOT NULL,
+        user_identifier VARCHAR(150) NOT NULL,
+        popup_dismissed_at TIMESTAMPTZ,
+        read_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(notification_id, user_identifier)
+      );
+    `).catch(() => {});
+
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_broadcast_target ON broadcast_notifications(target_role, target_department, created_at DESC);`).catch(() => {});
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_broadcast_user ON broadcast_user_status(user_identifier);`).catch(() => {});
+  } catch (err: any) {
+    console.warn('[Broadcast] ensure tables notice:', err.message);
+  }
+};
+
+// POST /notifications/broadcast — Post a targeted broadcast announcement
+app.post('/notifications/broadcast', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureBroadcastTables();
+    const senderEmail = (req.auth?.email || '').toLowerCase().trim();
+    const senderRole = req.auth?.role || '';
+    const senderDept = req.auth?.department || '';
+    const isSuperAdmin = Boolean(req.auth?.isSuperAdmin);
+
+    if (senderRole === 'student') {
+      return res.status(403).json({ error: 'Students cannot send broadcast announcements.' });
+    }
+
+    const {
+      title,
+      message,
+      priority = 'normal',
+      target_role = 'all',
+      target_department = 'ALL',
+      popup_on_login = true,
+      sender_name,
+      expires_at,
+    } = req.body;
+
+    if (!title || !title.trim() || !message || !message.trim()) {
+      return res.status(400).json({ error: 'Title and message are required.' });
+    }
+
+    let finalTargetRole = target_role;
+    let finalTargetDept = target_department;
+    let finalTargetMentorId: string | null = null;
+
+    // Role-specific enforcement:
+    if (senderRole === 'hod') {
+      finalTargetDept = senderDept || target_department;
+      if (!['all', 'students', 'faculty'].includes(finalTargetRole)) {
+        finalTargetRole = 'all';
+      }
+    } else if (senderRole === 'faculty') {
+      finalTargetRole = 'mentees';
+      finalTargetDept = senderDept || 'ALL';
+      const facRes = await db.query('SELECT faculty_id FROM faculty WHERE LOWER(email) = LOWER($1) LIMIT 1', [senderEmail]);
+      finalTargetMentorId = facRes.rows[0]?.faculty_id || req.auth?.regNo || null;
+    } else if (['director', 'principal', 'management', 'program_chair'].includes(senderRole)) {
+      finalTargetDept = target_department || 'ALL';
+      if (!['all', 'students', 'faculty'].includes(finalTargetRole)) {
+        finalTargetRole = 'all';
+      }
+    } else if (senderRole === 'admin') {
+      if (!isSuperAdmin && senderDept) {
+        finalTargetDept = senderDept;
+      } else {
+        finalTargetDept = target_department || 'ALL';
+      }
+    }
+
+    const displayName = sender_name || req.auth?.name || req.auth?.email?.split('@')[0] || 'Authority';
+    const notifId = crypto.randomUUID();
+
+    const insertRes = await db.query(
+      `INSERT INTO broadcast_notifications 
+       (id, sender_email, sender_name, sender_role, sender_department, title, message, priority, target_role, target_department, target_mentor_id, popup_on_login, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       RETURNING *`,
+      [
+        notifId,
+        senderEmail,
+        displayName,
+        senderRole,
+        senderDept,
+        title.trim(),
+        message.trim(),
+        priority,
+        finalTargetRole,
+        finalTargetDept,
+        finalTargetMentorId,
+        Boolean(popup_on_login),
+        expires_at || null,
+      ]
+    );
+
+    console.log('[Broadcast Posted]:', { id: notifId, senderEmail, role: finalTargetRole, dept: finalTargetDept });
+    res.status(201).json(insertRes.rows[0]);
+  } catch (err: any) {
+    console.error('[POST /notifications/broadcast Error]:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Helper to determine student's mentor ID
+const getStudentMentorId = async (regNo: string, email: string): Promise<string | null> => {
+  try {
+    const res = await db.query(
+      `SELECT faculty_mentor_id FROM students WHERE UPPER(roll_number) = UPPER($1) OR LOWER(email) = LOWER($2) LIMIT 1`,
+      [regNo, email]
+    );
+    return res.rows[0]?.faculty_mentor_id || null;
+  } catch {
+    return null;
+  }
+};
+
+// Helper to generate comprehensive department aliases and variations
+const getDepartmentAliases = (rawDept: string): string[] => {
+  const aliases = new Set<string>(['all', '*', '']);
+  if (!rawDept) return Array.from(aliases);
+
+  const trimmed = rawDept.toLowerCase().trim();
+  const cleaned = trimmed.replace(/[^a-z0-9]/g, '');
+  aliases.add(trimmed);
+  aliases.add(cleaned);
+
+  if (cleaned.includes('cseds') || cleaned.includes('datascience') || cleaned === '32') {
+    ['cse (data science)', 'cse(ds)', 'cse-ds', 'cse ds', 'cseds', 'data science', 'csedatascience', '32'].forEach((a) => aliases.add(a));
+  } else if (cleaned.includes('aiml') || cleaned.includes('ai') || cleaned === '33') {
+    ['cse (ai & ml)', 'cse(ai&ml)', 'cse-aiml', 'cse aiml', 'cseaiml', 'ai & ml', 'aiml', '33'].forEach((a) => aliases.add(a));
+  } else if (cleaned.includes('csebs') || cleaned.includes('business') || cleaned === '34') {
+    ['cse (bs)', 'cse & bs', 'cse-bs', 'csebs', '34'].forEach((a) => aliases.add(a));
+  } else if (cleaned.includes('csecs') || cleaned.includes('cyber') || cleaned === '37') {
+    ['cse (cs)', 'cse-cs', 'csecs', '37'].forEach((a) => aliases.add(a));
+  } else if (cleaned === 'cse' || cleaned === '05' || cleaned.includes('computerscience')) {
+    ['cse', 'computer science', 'computer science and engineering', '05'].forEach((a) => aliases.add(a));
+  } else if (cleaned === 'ece' || cleaned === '04' || cleaned.includes('electronics')) {
+    ['ece', 'electronics', '04'].forEach((a) => aliases.add(a));
+  } else if (cleaned === 'eee' || cleaned === '02' || cleaned.includes('electrical')) {
+    ['eee', 'electrical', '02'].forEach((a) => aliases.add(a));
+  } else if (cleaned === 'me' || cleaned === '03' || cleaned.includes('mech')) {
+    ['me', 'mech', 'mechanical', '03'].forEach((a) => aliases.add(a));
+  } else if (cleaned === 'ce' || cleaned === '01' || cleaned.includes('civil')) {
+    ['ce', 'civil', '01'].forEach((a) => aliases.add(a));
+  } else if (cleaned.includes('mca')) {
+    ['mca'].forEach((a) => aliases.add(a));
+  } else if (cleaned.includes('mba')) {
+    ['mba'].forEach((a) => aliases.add(a));
+  }
+
+  return Array.from(aliases);
+};
+
+// Filter helper to determine if a notice matches the recipient
+const isNoticeForRecipient = (
+  b: any,
+  userRole: string,
+  deptAliases: string[],
+  mentorId: string | null
+): boolean => {
+  const tRole = (b.target_role || 'all').toLowerCase();
+  const isStudent = userRole === 'student';
+  const isFaculty = ['faculty', 'mentor', 'coordinator'].includes(userRole);
+
+  if (tRole === 'students' && !isStudent) return false;
+  if (tRole === 'faculty' && !isFaculty) return false;
+  if (tRole === 'mentees') {
+    if (!isStudent) return false;
+    if (!mentorId || !b.target_mentor_id) return false;
+    if (mentorId.trim().toUpperCase() !== b.target_mentor_id.trim().toUpperCase()) return false;
+  }
+
+  const tDept = (b.target_department || 'ALL').trim();
+  if (!tDept || tDept.toUpperCase() === 'ALL' || tDept === '*') {
+    return true;
+  }
+
+  const tCleaned = tDept.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return deptAliases.some((alias) => {
+    if (!alias) return false;
+    const aLower = alias.toLowerCase().trim();
+    const aCleaned = aLower.replace(/[^a-z0-9]/g, '');
+    return aLower === tDept.toLowerCase() || aCleaned === tCleaned;
+  });
+};
+
+// GET /notifications/my — Get announcements targeted to the current authenticated user
+app.get('/notifications/my', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureBroadcastTables();
+    const userEmail = (req.auth?.email || '').toLowerCase().trim();
+    const userRole = (req.auth?.role || 'student').toLowerCase();
+    const userRegNo = req.auth?.regNo || '';
+    let userDept = req.auth?.department || '';
+    const userIdentifier = userRole === 'student' ? (userRegNo || userEmail) : userEmail;
+
+    // Resolve user's department directly from DB if missing from auth token
+    if (!userDept && (userRole === 'faculty' || userRole === 'mentor')) {
+      const fCheck = await db.query('SELECT department FROM faculty WHERE LOWER(email) = LOWER($1) LIMIT 1', [userEmail]).catch(() => ({ rows: [] }));
+      if (fCheck.rows.length > 0 && fCheck.rows[0].department) {
+        userDept = fCheck.rows[0].department;
+      }
+    }
+    if (!userDept && userRole === 'student') {
+      const sCheck = await db.query('SELECT department FROM students WHERE UPPER(roll_number) = UPPER($1) OR LOWER(email) = LOWER($2) LIMIT 1', [userRegNo, userEmail]).catch(() => ({ rows: [] }));
+      if (sCheck.rows.length > 0 && sCheck.rows[0].department) {
+        userDept = sCheck.rows[0].department;
+      }
+    }
+
+    let mentorId: string | null = null;
+    if (userRole === 'student') {
+      mentorId = await getStudentMentorId(userRegNo, userEmail);
+    }
+
+    const deptAliases = getDepartmentAliases(userDept);
+
+    const query = `
+      SELECT b.*,
+             s.popup_dismissed_at,
+             s.read_at,
+             CASE WHEN s.read_at IS NOT NULL THEN true ELSE false END AS is_read,
+             CASE WHEN s.popup_dismissed_at IS NOT NULL THEN true ELSE false END AS is_popup_dismissed
+      FROM broadcast_notifications b
+      LEFT JOIN broadcast_user_status s
+        ON s.notification_id = b.id AND s.user_identifier = $1
+      WHERE (b.expires_at IS NULL OR b.expires_at > CURRENT_TIMESTAMP)
+      ORDER BY b.created_at DESC
+      LIMIT 100
+    `;
+
+    const result = await db.query(query, [userIdentifier]);
+    const filtered = result.rows.filter((b) => isNoticeForRecipient(b, userRole, deptAliases, mentorId));
+
+    res.json(filtered.slice(0, 50));
+  } catch (err: any) {
+    console.error('[GET /notifications/my Error]:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /notifications/pending-popup — Get pending un-dismissed login notice popup(s)
+app.get('/notifications/pending-popup', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureBroadcastTables();
+    const userEmail = (req.auth?.email || '').toLowerCase().trim();
+    const userRole = (req.auth?.role || 'student').toLowerCase();
+    const userRegNo = req.auth?.regNo || '';
+    let userDept = req.auth?.department || '';
+    const userIdentifier = userRole === 'student' ? (userRegNo || userEmail) : userEmail;
+
+    if (!userDept && (userRole === 'faculty' || userRole === 'mentor')) {
+      const fCheck = await db.query('SELECT department FROM faculty WHERE LOWER(email) = LOWER($1) LIMIT 1', [userEmail]).catch(() => ({ rows: [] }));
+      if (fCheck.rows.length > 0 && fCheck.rows[0].department) {
+        userDept = fCheck.rows[0].department;
+      }
+    }
+    if (!userDept && userRole === 'student') {
+      const sCheck = await db.query('SELECT department FROM students WHERE UPPER(roll_number) = UPPER($1) OR LOWER(email) = LOWER($2) LIMIT 1', [userRegNo, userEmail]).catch(() => ({ rows: [] }));
+      if (sCheck.rows.length > 0 && sCheck.rows[0].department) {
+        userDept = sCheck.rows[0].department;
+      }
+    }
+
+    let mentorId: string | null = null;
+    if (userRole === 'student') {
+      mentorId = await getStudentMentorId(userRegNo, userEmail);
+    }
+
+    const deptAliases = getDepartmentAliases(userDept);
+
+    const query = `
+      SELECT b.*,
+             s.popup_dismissed_at,
+             CASE WHEN s.popup_dismissed_at IS NOT NULL THEN true ELSE false END AS is_popup_dismissed
+      FROM broadcast_notifications b
+      LEFT JOIN broadcast_user_status s
+        ON s.notification_id = b.id AND s.user_identifier = $1
+      WHERE b.popup_on_login = TRUE
+        AND s.popup_dismissed_at IS NULL
+        AND (b.expires_at IS NULL OR b.expires_at > CURRENT_TIMESTAMP)
+      ORDER BY (CASE WHEN b.priority = 'urgent' THEN 1 WHEN b.priority = 'action_required' THEN 2 ELSE 3 END), b.created_at DESC
+      LIMIT 20
+    `;
+
+    const result = await db.query(query, [userIdentifier]);
+    const filtered = result.rows.filter((b) => isNoticeForRecipient(b, userRole, deptAliases, mentorId));
+
+    res.json(filtered.slice(0, 5));
+  } catch (err: any) {
+    console.error('[GET /notifications/pending-popup Error]:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /notifications/debug — Diagnostics endpoint to verify stored notices and auth
+app.get('/notifications/debug', async (req: Request, res: Response) => {
+  try {
+    await ensureBroadcastTables();
+    const countRes = await db.query('SELECT COUNT(*) as total FROM broadcast_notifications');
+    const recentRes = await db.query('SELECT * FROM broadcast_notifications ORDER BY created_at DESC LIMIT 10');
+    res.json({
+      auth: req.auth,
+      total_notifications: parseInt(countRes.rows[0]?.total || '0'),
+      recent_notifications: recentRes.rows,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /notifications/:id/dismiss-popup — Mark login popup as dismissed for current user
+app.post('/notifications/:id/dismiss-popup', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureBroadcastTables();
+    const notificationId = req.params.id;
+    const userEmail = (req.auth?.email || '').toLowerCase().trim();
+    const userRole = req.auth?.role || 'student';
+    const userRegNo = req.auth?.regNo || '';
+    const userIdentifier = userRole === 'student' ? (userRegNo || userEmail) : userEmail;
+    const statusId = crypto.randomUUID();
+
+    await db.query(
+      `INSERT INTO broadcast_user_status (id, notification_id, user_identifier, popup_dismissed_at)
+       VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+       ON CONFLICT (notification_id, user_identifier)
+       DO UPDATE SET popup_dismissed_at = CURRENT_TIMESTAMP`,
+      [statusId, notificationId, userIdentifier]
+    );
+
+    res.json({ success: true, message: 'Popup dismissed.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /notifications/:id/mark-read — Mark notification as read in drawer
+app.post('/notifications/:id/mark-read', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureBroadcastTables();
+    const notificationId = req.params.id;
+    const userEmail = (req.auth?.email || '').toLowerCase().trim();
+    const userRole = req.auth?.role || 'student';
+    const userRegNo = req.auth?.regNo || '';
+    const userIdentifier = userRole === 'student' ? (userRegNo || userEmail) : userEmail;
+    const statusId = crypto.randomUUID();
+
+    await db.query(
+      `INSERT INTO broadcast_user_status (id, notification_id, user_identifier, read_at)
+       VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+       ON CONFLICT (notification_id, user_identifier)
+       DO UPDATE SET read_at = CURRENT_TIMESTAMP`,
+      [statusId, notificationId, userIdentifier]
+    );
+
+    res.json({ success: true, message: 'Notification marked as read.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /notifications/mark-all-read — Mark all notifications as read for current user
+app.post('/notifications/mark-all-read', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureBroadcastTables();
+    const userEmail = (req.auth?.email || '').toLowerCase().trim();
+    const userRole = (req.auth?.role || 'student').toLowerCase();
+    const userRegNo = req.auth?.regNo || '';
+    let userDept = req.auth?.department || '';
+    const userIdentifier = userRole === 'student' ? (userRegNo || userEmail) : userEmail;
+
+    if (!userDept && (userRole === 'faculty' || userRole === 'mentor')) {
+      const fCheck = await db.query('SELECT department FROM faculty WHERE LOWER(email) = LOWER($1) LIMIT 1', [userEmail]).catch(() => ({ rows: [] }));
+      if (fCheck.rows.length > 0 && fCheck.rows[0].department) {
+        userDept = fCheck.rows[0].department;
+      }
+    }
+    if (!userDept && userRole === 'student') {
+      const sCheck = await db.query('SELECT department FROM students WHERE UPPER(roll_number) = UPPER($1) OR LOWER(email) = LOWER($2) LIMIT 1', [userRegNo, userEmail]).catch(() => ({ rows: [] }));
+      if (sCheck.rows.length > 0 && sCheck.rows[0].department) {
+        userDept = sCheck.rows[0].department;
+      }
+    }
+
+    let mentorId: string | null = null;
+    if (userRole === 'student') {
+      mentorId = await getStudentMentorId(userRegNo, userEmail);
+    }
+
+    const deptAliases = getDepartmentAliases(userDept);
+    const allNotifs = await db.query(
+      `SELECT id, target_role, target_department, target_mentor_id 
+       FROM broadcast_notifications 
+       WHERE (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)`
+    );
+
+    const matching = allNotifs.rows.filter((b) => isNoticeForRecipient(b, userRole, deptAliases, mentorId));
+
+    for (const row of matching) {
+      const statusId = crypto.randomUUID();
+      await db.query(
+        `INSERT INTO broadcast_user_status (id, notification_id, user_identifier, read_at)
+         VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+         ON CONFLICT (notification_id, user_identifier)
+         DO UPDATE SET read_at = CURRENT_TIMESTAMP`,
+        [statusId, row.id, userIdentifier]
+      ).catch(() => {});
+    }
+
+    res.json({ success: true, count: matching.length });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /notifications/sent — Get announcements posted by the authenticated sender
+app.get('/notifications/sent', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureBroadcastTables();
+    const senderEmail = (req.auth?.email || '').toLowerCase().trim();
+    const isSuperAdmin = Boolean(req.auth?.isSuperAdmin);
+
+    const query = isSuperAdmin
+      ? `SELECT * FROM broadcast_notifications ORDER BY created_at DESC LIMIT 100`
+      : `SELECT * FROM broadcast_notifications WHERE LOWER(sender_email) = LOWER($1) ORDER BY created_at DESC LIMIT 100`;
+
+    const params = isSuperAdmin ? [] : [senderEmail];
+    const result = await db.query(query, params);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /notifications/:id — Delete or revoke an announcement
+app.delete('/notifications/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureBroadcastTables();
+    const id = req.params.id;
+    const senderEmail = (req.auth?.email || '').toLowerCase().trim();
+    const isSuperAdmin = Boolean(req.auth?.isSuperAdmin);
+
+    const check = await db.query('SELECT sender_email FROM broadcast_notifications WHERE id = $1', [id]);
+    if (check.rows.length === 0) {
+      return res.status(404).json({ error: 'Notification not found' });
+    }
+
+    if (!isSuperAdmin && check.rows[0].sender_email.toLowerCase() !== senderEmail) {
+      return res.status(403).json({ error: 'You can only delete announcements created by you.' });
+    }
+
+    await db.query('DELETE FROM broadcast_notifications WHERE id = $1', [id]);
+    res.json({ success: true, message: 'Announcement deleted.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// Admin: Unregistered Students (In mentor_assignments mapping but not yet registered)
+// ============================================================================
+app.get('/admin/unregistered-students', requireAuth, requireRole('admin', 'hod', 'coordinator', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS mentor_assignments (
+        roll_number  TEXT        NOT NULL PRIMARY KEY,
+        faculty_id   TEXT        NOT NULL,
+        assigned_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
+    `).catch(() => {});
+
+    const auth = req.auth!;
+    const callerDept = (auth.department || '').trim();
+    const callerRole = (auth.role || '').toLowerCase();
+    const isSuper = Boolean(auth.isSuperAdmin) ||
+      callerDept === '*' ||
+      callerDept.toLowerCase() === 'all' ||
+      ['principal', 'director', 'management', 'program_chair'].includes(callerRole);
+
+    const requestedDept = req.query.department ? String(req.query.department).trim() : null;
+    const effectiveDept = isSuper
+      ? (requestedDept && requestedDept !== 'All' ? requestedDept : null)
+      : (callerDept && callerDept !== '*' && callerDept.toLowerCase() !== 'all' ? callerDept : null);
+
+    // Query all records in mentor_assignments that do NOT have a matching student record
+    const result = await db.query(`
+      SELECT 
+        ma.roll_number,
+        ma.faculty_id,
+        ma.assigned_at,
+        f.name        AS mentor_name,
+        f.email       AS mentor_email,
+        f.department  AS mentor_department
+      FROM mentor_assignments ma
+      LEFT JOIN students s ON UPPER(s.roll_number) = UPPER(ma.roll_number)
+      LEFT JOIN faculty f ON UPPER(f.faculty_id) = UPPER(ma.faculty_id)
+      WHERE s.roll_number IS NULL
+      ORDER BY ma.roll_number ASC
+    `);
+
+    let targetAliases: string[] = [];
+    if (effectiveDept && effectiveDept !== 'All') {
+      targetAliases = getDepartmentAliases(effectiveDept);
+    }
+
+    const students = [];
+    for (const row of result.rows) {
+      const cleanRoll = (row.roll_number || '').trim().toUpperCase();
+      const inferredDept = getDeptFromRollNumber(cleanRoll);
+      const studentDept = inferredDept && inferredDept !== 'Unknown'
+        ? inferredDept
+        : (row.mentor_department || 'Unknown');
+
+      // Department filtering: matches student's branch OR mentor's department
+      if (targetAliases.length > 0) {
+        const studentAliases = getDepartmentAliases(studentDept);
+        const mentorAliases = row.mentor_department ? getDepartmentAliases(row.mentor_department) : [];
+        const matches = targetAliases.some((a) => studentAliases.includes(a) || mentorAliases.includes(a));
+        if (!matches) {
+          continue;
+        }
+      }
+
+      students.push({
+        roll_number: cleanRoll,
+        department: studentDept,
+        mentor_id: row.faculty_id,
+        mentor_name: row.mentor_name || 'Not Assigned',
+        mentor_email: row.mentor_email || '',
+        mentor_department: row.mentor_department || '',
+        assigned_at: row.assigned_at,
+      });
+    }
+
+    res.json({
+      total: students.length,
+      department: effectiveDept || 'All',
+      students,
+    });
+  } catch (err: any) {
+    console.error('[Admin Unregistered Students Error]:', err);
+    res.status(500).json({ error: err.message || 'Failed to fetch unregistered students.' });
   }
 });
 

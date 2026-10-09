@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { VALID_DEPARTMENT_NAMES } from '../../lib/validation/auth';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -53,6 +53,7 @@ import { HodLeaveApprovalTab } from '../leave/HodLeaveApprovalTab';
 import { HolidayCalendarTab } from './tabs/HolidayCalendarTab';
 import { LeaveCreditManagementTab } from './tabs/LeaveCreditManagementTab';
 import { CertificationAnalyticsView } from '../certifications/components/CertificationAnalyticsView';
+import { UnregisteredStudentsTab } from './tabs/UnregisteredStudentsTab';
 
 const DEPARTMENTS = VALID_DEPARTMENT_NAMES;
 const YEARS = ['1st Year', '2nd Year', '3rd Year', '4th Year'] as const;
@@ -275,9 +276,14 @@ export const AdminDashboardPage: React.FC = () => {
     })
     .sort((a, b) => b.cgpa - a.cgpa);
 
-  const uniqueStudents = Array.from(
+  const uniqueStudents: StudentProfile[] = Array.from(
     new Map(students.map((s) => [s.roll_number.toUpperCase(), s])).values()
   );
+
+  const yearScopedStudents: StudentProfile[] = useMemo(() => {
+    if (!yearFilter) return uniqueStudents;
+    return uniqueStudents.filter((s) => s.year === yearFilter);
+  }, [uniqueStudents, yearFilter]);
 
   const filteredStudents = uniqueStudents.filter((s) => {
     const q = searchQuery.toLowerCase();
@@ -552,6 +558,7 @@ export const AdminDashboardPage: React.FC = () => {
           <nav className="flex px-2 pt-2 pb-0 gap-1 border-b border-borderLine">
             {[
               { key: 'students', label: 'Student Directory (CRUD)' },
+              { key: 'unregistered', label: '⚠️ Unregistered Students' },
               { key: 'certifications', label: '🎓 Certification Analytics' },
               { key: 'leaves', label: '🌴 Leave & OD Approvals' },
               { key: 'leave-credits', label: '🎫 Leave Credit Mgmt' },
@@ -613,6 +620,9 @@ export const AdminDashboardPage: React.FC = () => {
         <StatCard icon={<Code2 className="w-5 h-5" />} iconBgColor="bg-[#FFA116]/10 text-[#FFA116]"
           accentColor="brand" label="LeetCode Profiles" value={`${leetcodeCount} Linked`} subtext="Students with LeetCode connected" />
       </div>
+
+      {/* ── TAB: Unregistered Students (Mentor Mapping vs Portal Registration) ── */}
+      {activeTab === 'unregistered' && <UnregisteredStudentsTab />}
 
       {/* ── TAB: Certification Analytics ── */}
       {activeTab === 'certifications' && <CertificationAnalyticsView />}
@@ -793,6 +803,42 @@ export const AdminDashboardPage: React.FC = () => {
                 <option value="B">Section B</option>
                 <option value="C">Section C</option>
               </select>
+            </div>
+          </div>
+
+          {/* ── Sub-toolbar layout: Filter summary, Real-time Counts & Dynamic Actions ── */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-3 pb-3 mb-4 border-t border-borderLine">
+            {/* Left: Dynamic Badges & Real-time Count */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-semibold text-textSecondary">
+                Total Students:
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-brand-soft text-brand-primary border border-brand-primary/20">
+                <Users className="w-3.5 h-3.5" />
+                {yearFilter ? (
+                  <>
+                    <span className="font-extrabold">{yearScopedStudents.length}</span>
+                    <span>in {departmentFilter !== 'All' ? departmentFilter : 'All Depts'} · {yearFilter}</span>
+                    {sectionFilter && <span className="text-brand-primary/70">(Sec {sectionFilter}: {filteredStudents.length})</span>}
+                  </>
+                ) : (
+                  <>
+                    <span className="font-extrabold">{uniqueStudents.length}</span>
+                    <span>in {departmentFilter !== 'All' ? departmentFilter : 'All Departments'}</span>
+                    {sectionFilter && <span className="text-brand-primary/70">(Sec {sectionFilter}: {filteredStudents.length})</span>}
+                  </>
+                )}
+              </span>
+
+              {searchQuery && (
+                <span className="text-[11px] text-textMuted">
+                  (Found {filteredStudents.length} matching "{searchQuery}")
+                </span>
+              )}
+            </div>
+
+            {/* Right: Dynamic Delete Actions scoped to Year/Dept/Section */}
+            <div className="flex items-center gap-2 flex-wrap">
               {/* Section-wise delete — only when section filter is active */}
               {sectionFilter && (
                 <button
@@ -804,22 +850,30 @@ export const AdminDashboardPage: React.FC = () => {
                   className="px-3 py-1.5 text-xs font-bold rounded-lg border border-red-300 text-red-600 bg-red-50 hover:bg-red-100 transition-all flex items-center gap-1.5"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  Delete Section
+                  Delete Section ({filteredStudents.length})
                 </button>
               )}
-              {/* Delete All — department scoped */}
+
+              {/* Dynamic Delete All / Delete Year button */}
               <button
                 onClick={() => {
-                  const isScoped = departmentFilter && departmentFilter !== 'All';
-                  const label = isScoped
-                    ? `ALL ${uniqueStudents.length} students in ${departmentFilter}`
-                    : `ALL ${uniqueStudents.length} students across all departments`;
-                  openBulkDeleteModal('all', uniqueStudents.map(s => s.roll_number), label);
+                  const isScopedDept = departmentFilter && departmentFilter !== 'All';
+                  const targetStudents = yearFilter ? yearScopedStudents : uniqueStudents;
+                  const label = yearFilter
+                    ? `ALL ${targetStudents.length} students in ${isScopedDept ? departmentFilter : 'All Departments'} (${yearFilter})`
+                    : (isScopedDept
+                        ? `ALL ${targetStudents.length} students in ${departmentFilter}`
+                        : `ALL ${targetStudents.length} students across all departments`);
+                  openBulkDeleteModal('all', targetStudents.map((s: any) => s.roll_number), label);
                 }}
                 className="px-3 py-1.5 text-xs font-bold rounded-lg border border-red-400 text-red-700 bg-red-50 hover:bg-red-600 hover:text-white transition-all flex items-center gap-1.5"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                {departmentFilter && departmentFilter !== 'All' ? `Delete All (${departmentFilter})` : 'Delete All'}
+                {yearFilter
+                  ? `Delete All (${departmentFilter !== 'All' ? departmentFilter : 'All'} - ${yearFilter}: ${yearScopedStudents.length})`
+                  : (departmentFilter && departmentFilter !== 'All'
+                      ? `Delete All (${departmentFilter}: ${uniqueStudents.length})`
+                      : `Delete All (${uniqueStudents.length})`)}
               </button>
             </div>
           </div>

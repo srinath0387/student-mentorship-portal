@@ -8,6 +8,9 @@ import {
   Achievement,
   PlacementProfile,
   ScoreBreakdown,
+  BroadcastNotification,
+  CreateBroadcastPayload,
+  UnregisteredStudent,
 } from '../types';
 
 /**
@@ -1377,6 +1380,57 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(data),
     });
+  },
+
+  // ── Broadcast & Targeted Notifications ─────────────────────────────────────
+  getBroadcastNotifications: async (): Promise<BroadcastNotification[]> => {
+    return fetchWithAuth('/notifications/my');
+  },
+
+  getPendingPopupNotifications: async (): Promise<BroadcastNotification[]> => {
+    return fetchWithAuth('/notifications/pending-popup');
+  },
+
+  dismissPopupNotification: async (id: string): Promise<{ success: boolean; message?: string }> => {
+    return fetchWithAuth(`/notifications/${encodeURIComponent(id)}/dismiss-popup`, {
+      method: 'POST',
+    });
+  },
+
+  markNotificationRead: async (id: string): Promise<{ success: boolean; message?: string }> => {
+    return fetchWithAuth(`/notifications/${encodeURIComponent(id)}/mark-read`, {
+      method: 'POST',
+    });
+  },
+
+  markAllNotificationsRead: async (): Promise<{ success: boolean; count?: number }> => {
+    return fetchWithAuth('/notifications/mark-all-read', {
+      method: 'POST',
+    });
+  },
+
+  createBroadcastNotification: async (data: CreateBroadcastPayload): Promise<BroadcastNotification> => {
+    return fetchWithAuth('/notifications/broadcast', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  getSentBroadcastNotifications: async (): Promise<BroadcastNotification[]> => {
+    return fetchWithAuth('/notifications/sent');
+  },
+
+  deleteBroadcastNotification: async (id: string): Promise<{ success: boolean; message?: string }> => {
+    return fetchWithAuth(`/notifications/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  getUnregisteredStudents: async (
+    department?: string
+  ): Promise<{ total: number; department: string; students: UnregisteredStudent[] }> => {
+    const q = department && department !== 'All' ? `?department=${encodeURIComponent(department)}` : '';
+    return fetchWithAuth(`/admin/unregistered-students${q}`);
   },
 };
 
