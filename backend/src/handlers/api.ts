@@ -13310,6 +13310,383 @@ app.put('/internships/:id/verify', requireRole('faculty', 'hod', 'admin', 'super
   }
 });
 
+// ============================================================================
+// Broadcast Notifications & Login Notice Engine
+// ============================================================================
+let broadcastTablesEnsured = false;
+const ensureBroadcastTables = async () => {
+  if (db.isMock || broadcastTablesEnsured) return;
+  broadcastTablesEnsured = true;
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS broadcast_notifications (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      sender_email VARCHAR(150) NOT NULL,
+      sender_name VARCHAR(150) NOT NULL,
+      sender_role VARCHAR(50) NOT NULL,
+      sender_department VARCHAR(100),
+      title VARCHAR(255) NOT NULL,
+      message TEXT NOT NULL,
+      priority VARCHAR(20) DEFAULT 'normal',
+      target_role VARCHAR(50) NOT NULL,
+      target_department VARCHAR(100) DEFAULT 'ALL',
+      target_mentor_id VARCHAR(50),
+      popup_on_login BOOLEAN DEFAULT TRUE,
+      expires_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS broadcast_user_status (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      notification_id UUID NOT NULL REFERENCES broadcast_notifications(id) ON DELETE CASCADE,
+      user_identifier VARCHAR(150) NOT NULL,
+      popup_dismissed_at TIMESTAMPTZ,
+      read_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(notification_id, user_identifier)
+    );
+    CREATE INDEX IF NOT EXISTS idx_broadcast_target ON broadcast_notifications(target_role, target_department, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_broadcast_user ON broadcast_user_status(user_identifier);
+  `).catch((err: any) => {
+    console.warn('[Broadcast] ensure tables notice:', err.message);
+  });
+};
+
+// POST /notifications/broadcast — Post a targeted broadcast announcement
+app.post('/notifications/broadcast', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureBroadcastTables();
+    const senderEmail = (req.auth?.email || '').toLowerCase().trim();
+    const senderRole = req.auth?.role || '';
+    const senderDept = req.auth?.department || '';
+    const isSuperAdmin = Boolean(req.auth?.isSuperAdmin);
+
+    if (senderRole === 'student') {
+      return res.status(403).json({ error: 'Students cannot send broadcast announcements.' });
+    }
+
+    const {
+      title,
+      message,
+      priority = 'normal',
+      target_role = 'all',
+      target_department = 'ALL',
+      popup_on_login = true,
+      sender_name,
+      expires_at,
+    } = req.body;
+
+    if (!title || !title.trim() || !message || !message.trim()) {
+      return res.status(400).json({ error: 'Title and message are required.' });
+    }
+
+    let finalTargetRole = target_role;
+    let finalTargetDept = target_department;
+    let finalTargetMentorId: string | null = null;
+
+    // Role-specific enforcement:
+    if (senderRole === 'hod') {
+      // HOD locked strictly to their department
+      finalTargetDept = senderDept || target_department;
+      if (!['all', 'students', 'faculty'].includes(finalTargetRole)) {
+        finalTargetRole = 'all';
+      }
+    } else if (senderRole === 'faculty') {
+      // Faculty can only send to their assigned mentees
+      finalTargetRole = 'mentees';
+      finalTargetDept = senderDept || 'ALL';
+      const facRes = await db.query('SELECT faculty_id FROM faculty WHERE LOWER(email) = LOWER($1) LIMIT 1', [senderEmail]);
+      finalTargetMentorId = facRes.rows[0]?.faculty_id || req.auth?.regNo || null;
+    } else if (['director', 'principal', 'management', 'program_chair'].includes(senderRole)) {
+      finalTargetDept = target_department || 'ALL';
+      if (!['all', 'students', 'faculty'].includes(finalTargetRole)) {
+        finalTargetRole = 'all';
+      }
+    } else if (senderRole === 'admin') {
+      if (!isSuperAdmin && senderDept) {
+        finalTargetDept = senderDept;
+      } else {
+        finalTargetDept = target_department || 'ALL';
+      }
+    }
+
+    const displayName = sender_name || req.auth?.email?.split('@')[0] || 'Authority';
+
+    const insertRes = await db.query(
+      `INSERT INTO broadcast_notifications 
+       (sender_email, sender_name, sender_role, sender_department, title, message, priority, target_role, target_department, target_mentor_id, popup_on_login, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       RETURNING *`,
+      [
+        senderEmail,
+        displayName,
+        senderRole,
+        senderDept,
+        title.trim(),
+        message.trim(),
+        priority,
+        finalTargetRole,
+        finalTargetDept,
+        finalTargetMentorId,
+        Boolean(popup_on_login),
+        expires_at || null,
+      ]
+    );
+
+    res.status(201).json(insertRes.rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Helper to determine student's mentor ID
+const getStudentMentorId = async (regNo: string, email: string): Promise<string | null> => {
+  try {
+    const res = await db.query(
+      `SELECT faculty_mentor_id FROM students WHERE UPPER(roll_number) = UPPER($1) OR LOWER(email) = LOWER($2) LIMIT 1`,
+      [regNo, email]
+    );
+    return res.rows[0]?.faculty_mentor_id || null;
+  } catch {
+    return null;
+  }
+};
+
+// GET /notifications/my — Get announcements targeted to the current authenticated user
+app.get('/notifications/my', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureBroadcastTables();
+    const userEmail = (req.auth?.email || '').toLowerCase().trim();
+    const userRole = req.auth?.role || 'student';
+    const userRegNo = req.auth?.regNo || '';
+    const userDept = req.auth?.department || '';
+    const userIdentifier = userRole === 'student' ? (userRegNo || userEmail) : userEmail;
+
+    let mentorId: string | null = null;
+    if (userRole === 'student') {
+      mentorId = await getStudentMentorId(userRegNo, userEmail);
+    }
+
+    const query = `
+      SELECT b.*,
+             s.popup_dismissed_at,
+             s.read_at,
+             CASE WHEN s.read_at IS NOT NULL THEN true ELSE false END AS is_read,
+             CASE WHEN s.popup_dismissed_at IS NOT NULL THEN true ELSE false END AS is_popup_dismissed
+      FROM broadcast_notifications b
+      LEFT JOIN broadcast_user_status s
+        ON s.notification_id = b.id AND s.user_identifier = $1
+      WHERE (
+        ($2 = 'student' AND (
+          (b.target_role IN ('all', 'students') AND (b.target_department = 'ALL' OR LOWER(b.target_department) = LOWER($3)))
+          OR (b.target_role = 'mentees' AND $4 IS NOT NULL AND b.target_mentor_id = $4)
+        ))
+        OR ($2 = 'faculty' AND (
+          (b.target_role IN ('all', 'faculty') AND (b.target_department = 'ALL' OR LOWER(b.target_department) = LOWER($3)))
+        ))
+        OR ($2 NOT IN ('student', 'faculty') AND (
+          b.target_role = 'all'
+          OR (b.target_role = 'faculty' AND (b.target_department = 'ALL' OR LOWER(b.target_department) = LOWER($3)))
+        ))
+      )
+      AND (b.expires_at IS NULL OR b.expires_at > CURRENT_TIMESTAMP)
+      ORDER BY b.created_at DESC
+      LIMIT 50
+    `;
+
+    const result = await db.query(query, [userIdentifier, userRole, userDept, mentorId]);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /notifications/pending-popup — Get pending un-dismissed login notice popup(s)
+app.get('/notifications/pending-popup', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureBroadcastTables();
+    const userEmail = (req.auth?.email || '').toLowerCase().trim();
+    const userRole = req.auth?.role || 'student';
+    const userRegNo = req.auth?.regNo || '';
+    const userDept = req.auth?.department || '';
+    const userIdentifier = userRole === 'student' ? (userRegNo || userEmail) : userEmail;
+
+    let mentorId: string | null = null;
+    if (userRole === 'student') {
+      mentorId = await getStudentMentorId(userRegNo, userEmail);
+    }
+
+    const query = `
+      SELECT b.*
+      FROM broadcast_notifications b
+      LEFT JOIN broadcast_user_status s
+        ON s.notification_id = b.id AND s.user_identifier = $1
+      WHERE b.popup_on_login = TRUE
+        AND s.popup_dismissed_at IS NULL
+        AND (
+          ($2 = 'student' AND (
+            (b.target_role IN ('all', 'students') AND (b.target_department = 'ALL' OR LOWER(b.target_department) = LOWER($3)))
+            OR (b.target_role = 'mentees' AND $4 IS NOT NULL AND b.target_mentor_id = $4)
+          ))
+          OR ($2 = 'faculty' AND (
+            (b.target_role IN ('all', 'faculty') AND (b.target_department = 'ALL' OR LOWER(b.target_department) = LOWER($3)))
+          ))
+          OR ($2 NOT IN ('student', 'faculty') AND (
+            b.target_role = 'all'
+            OR (b.target_role = 'faculty' AND (b.target_department = 'ALL' OR LOWER(b.target_department) = LOWER($3)))
+          ))
+        )
+        AND (b.expires_at IS NULL OR b.expires_at > CURRENT_TIMESTAMP)
+      ORDER BY (CASE WHEN b.priority = 'urgent' THEN 1 WHEN b.priority = 'action_required' THEN 2 ELSE 3 END), b.created_at DESC
+      LIMIT 5
+    `;
+
+    const result = await db.query(query, [userIdentifier, userRole, userDept, mentorId]);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /notifications/:id/dismiss-popup — Mark login popup as dismissed for current user
+app.post('/notifications/:id/dismiss-popup', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureBroadcastTables();
+    const notificationId = req.params.id;
+    const userEmail = (req.auth?.email || '').toLowerCase().trim();
+    const userRole = req.auth?.role || 'student';
+    const userRegNo = req.auth?.regNo || '';
+    const userIdentifier = userRole === 'student' ? (userRegNo || userEmail) : userEmail;
+
+    await db.query(
+      `INSERT INTO broadcast_user_status (notification_id, user_identifier, popup_dismissed_at)
+       VALUES ($1, $2, CURRENT_TIMESTAMP)
+       ON CONFLICT (notification_id, user_identifier)
+       DO UPDATE SET popup_dismissed_at = CURRENT_TIMESTAMP`,
+      [notificationId, userIdentifier]
+    );
+
+    res.json({ success: true, message: 'Popup dismissed.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /notifications/:id/mark-read — Mark notification as read in drawer
+app.post('/notifications/:id/mark-read', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureBroadcastTables();
+    const notificationId = req.params.id;
+    const userEmail = (req.auth?.email || '').toLowerCase().trim();
+    const userRole = req.auth?.role || 'student';
+    const userRegNo = req.auth?.regNo || '';
+    const userIdentifier = userRole === 'student' ? (userRegNo || userEmail) : userEmail;
+
+    await db.query(
+      `INSERT INTO broadcast_user_status (notification_id, user_identifier, read_at)
+       VALUES ($1, $2, CURRENT_TIMESTAMP)
+       ON CONFLICT (notification_id, user_identifier)
+       DO UPDATE SET read_at = CURRENT_TIMESTAMP`,
+      [notificationId, userIdentifier]
+    );
+
+    res.json({ success: true, message: 'Notification marked as read.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /notifications/mark-all-read — Mark all notifications as read for current user
+app.post('/notifications/mark-all-read', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureBroadcastTables();
+    const userEmail = (req.auth?.email || '').toLowerCase().trim();
+    const userRole = req.auth?.role || 'student';
+    const userRegNo = req.auth?.regNo || '';
+    const userDept = req.auth?.department || '';
+    const userIdentifier = userRole === 'student' ? (userRegNo || userEmail) : userEmail;
+
+    let mentorId: string | null = null;
+    if (userRole === 'student') {
+      mentorId = await getStudentMentorId(userRegNo, userEmail);
+    }
+
+    const notifs = await db.query(
+      `SELECT b.id FROM broadcast_notifications b
+       WHERE (
+         ($1 = 'student' AND (
+           (b.target_role IN ('all', 'students') AND (b.target_department = 'ALL' OR LOWER(b.target_department) = LOWER($2)))
+           OR (b.target_role = 'mentees' AND $3 IS NOT NULL AND b.target_mentor_id = $3)
+         ))
+         OR ($1 = 'faculty' AND (
+           (b.target_role IN ('all', 'faculty') AND (b.target_department = 'ALL' OR LOWER(b.target_department) = LOWER($2)))
+         ))
+         OR ($1 NOT IN ('student', 'faculty') AND (
+           b.target_role = 'all'
+           OR (b.target_role = 'faculty' AND (b.target_department = 'ALL' OR LOWER(b.target_department) = LOWER($2)))
+         ))
+       )
+       AND (b.expires_at IS NULL OR b.expires_at > CURRENT_TIMESTAMP)`,
+      [userRole, userDept, mentorId]
+    );
+
+    for (const row of notifs.rows) {
+      await db.query(
+        `INSERT INTO broadcast_user_status (notification_id, user_identifier, read_at)
+         VALUES ($1, $2, CURRENT_TIMESTAMP)
+         ON CONFLICT (notification_id, user_identifier)
+         DO UPDATE SET read_at = CURRENT_TIMESTAMP`,
+        [row.id, userIdentifier]
+      ).catch(() => {});
+    }
+
+    res.json({ success: true, count: notifs.rows.length });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /notifications/sent — Get announcements posted by the authenticated sender
+app.get('/notifications/sent', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureBroadcastTables();
+    const senderEmail = (req.auth?.email || '').toLowerCase().trim();
+    const isSuperAdmin = Boolean(req.auth?.isSuperAdmin);
+
+    const query = isSuperAdmin
+      ? `SELECT * FROM broadcast_notifications ORDER BY created_at DESC LIMIT 100`
+      : `SELECT * FROM broadcast_notifications WHERE LOWER(sender_email) = LOWER($1) ORDER BY created_at DESC LIMIT 100`;
+
+    const params = isSuperAdmin ? [] : [senderEmail];
+    const result = await db.query(query, params);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /notifications/:id — Delete or revoke an announcement
+app.delete('/notifications/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureBroadcastTables();
+    const id = req.params.id;
+    const senderEmail = (req.auth?.email || '').toLowerCase().trim();
+    const isSuperAdmin = Boolean(req.auth?.isSuperAdmin);
+
+    const check = await db.query('SELECT sender_email FROM broadcast_notifications WHERE id = $1', [id]);
+    if (check.rows.length === 0) {
+      return res.status(404).json({ error: 'Notification not found' });
+    }
+
+    if (!isSuperAdmin && check.rows[0].sender_email.toLowerCase() !== senderEmail) {
+      return res.status(403).json({ error: 'You can only delete announcements created by you.' });
+    }
+
+    await db.query('DELETE FROM broadcast_notifications WHERE id = $1', [id]);
+    res.json({ success: true, message: 'Announcement deleted.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Catch-all SPA route fallback — MUST be the last route registered
 app.get('*', (_req: Request, res: Response) => {
   return sendIndexHtml(res);

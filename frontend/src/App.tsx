@@ -11,6 +11,7 @@ import { DashboardSkeleton } from './components/layout/DashboardSkeleton';
 import { Footer } from './components/layout/Footer';
 import { api } from './lib/api';
 import { ProfilePhotoUploadModal } from './components/common/ProfilePhotoUploadModal';
+import { LoginNoticePopupModal } from './components/common/LoginNoticePopupModal';
 
 // Lazy load feature dashboard pages on-demand for fast initial page load
 const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage').then(m => ({ default: m.DashboardPage })));
@@ -125,7 +126,27 @@ const MainLayout: React.FC = () => {
   const { user, role, isAuthenticated, isLoading } = useAuth();
   const location = useLocation();
   const mainRef = useRef<HTMLElement>(null);
+  const queryClient = useQueryClient();
   const [photoModalDismissed, setPhotoModalDismissed] = useState(false);
+  const [popupNoticesDismissed, setPopupNoticesDismissed] = useState(false);
+
+  // Pending Login Notice Popups check
+  const { data: pendingNotices = [] } = useQuery({
+    queryKey: ['pendingPopupNotifications', user?.id || user?.email],
+    queryFn: () => (isAuthenticated ? api.getPendingPopupNotifications().catch(() => []) : Promise.resolve([])),
+    enabled: Boolean(isAuthenticated),
+    staleTime: 60 * 1000,
+  });
+
+  const handleDismissNotice = async (noticeId: string) => {
+    try {
+      await api.dismissPopupNotification(noticeId);
+      queryClient.invalidateQueries({ queryKey: ['pendingPopupNotifications'] });
+      queryClient.invalidateQueries({ queryKey: ['myNotifications'] });
+    } catch (e) {
+      console.warn('Failed to dismiss notice popup:', e);
+    }
+  };
 
   // Student profile check for photo
   const { data: studentProfile } = useQuery({
@@ -208,6 +229,15 @@ const MainLayout: React.FC = () => {
           currentPhotoUrl={role === 'student' ? studentProfile?.photo_url : facultyProfile?.personal?.photo_url}
           onClose={() => setPhotoModalDismissed(true)}
           onSuccess={() => setPhotoModalDismissed(true)}
+        />
+      )}
+
+      {/* Priority Login Notice Pop-up from HOD, Principal, Mentor, or Admin */}
+      {!popupNoticesDismissed && pendingNotices.length > 0 && (
+        <LoginNoticePopupModal
+          notices={pendingNotices}
+          onDismissNotice={handleDismissNotice}
+          onClose={() => setPopupNoticesDismissed(true)}
         />
       )}
     </div>

@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { PanelLeft, Bell, Search, User, LogOut, ChevronDown, X, Code2, Sun, Moon, CalendarCheck, Users, UserCheck } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { PanelLeft, Bell, Search, User, LogOut, ChevronDown, X, Code2, Sun, Moon, CalendarCheck, Users, UserCheck, Plus, CheckCheck, AlertTriangle, ShieldAlert, Info, Calendar } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
-import { StudentProfile } from '../../types';
+import { StudentProfile, BroadcastNotification } from '../../types';
+import { BroadcastComposeModal } from '../common/BroadcastComposeModal';
 
 interface TopBarProps {
   onMenuToggle: () => void;
@@ -43,8 +44,46 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
     }
   }, [isDarkMode]);
 
+  const queryClient = useQueryClient();
   const profileRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLDivElement>(null);
+  const notifRef = useRef<HTMLDivElement>(null);
+
+  const [isNotifOpen, setIsNotifOpen] = useState(false);
+  const [isComposeOpen, setIsComposeOpen] = useState(false);
+  const [selectedNotif, setSelectedNotif] = useState<BroadcastNotification | null>(null);
+
+  const canBroadcast = ['hod', 'faculty', 'coordinator', 'admin', 'principal', 'director', 'management', 'program_chair'].includes(user?.role || '');
+
+  const { data: notifications = [] } = useQuery({
+    queryKey: ['myNotifications'],
+    queryFn: () => api.getBroadcastNotifications().catch(() => []),
+    staleTime: 30000,
+    refetchInterval: 60000,
+  });
+
+  const unreadCount = notifications.filter((n) => !n.is_read).length;
+
+  const handleMarkAllRead = async () => {
+    try {
+      await api.markAllNotificationsRead();
+      queryClient.invalidateQueries({ queryKey: ['myNotifications'] });
+    } catch (e) {
+      console.warn('Failed to mark notifications read:', e);
+    }
+  };
+
+  const handleSelectNotif = async (notif: BroadcastNotification) => {
+    setSelectedNotif(notif);
+    if (!notif.is_read) {
+      try {
+        await api.markNotificationRead(notif.id);
+        queryClient.invalidateQueries({ queryKey: ['myNotifications'] });
+      } catch (e) {
+        console.warn('Failed to mark notification read:', e);
+      }
+    }
+  };
 
   const rawDisplayName = user?.name || (user?.email ? user.email.split('@')[0] : 'User');
   const displayName = rawDisplayName.replace(/\s*\(HOD.*$/i, '').replace(/\s*\(.*$/, '').trim();
@@ -88,6 +127,9 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
       }
       if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
         setIsSearchOpen(false);
+      }
+      if (notifRef.current && !notifRef.current.contains(event.target as Node)) {
+        setIsNotifOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -277,11 +319,119 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
           )}
         </button>
 
-        {/* Notification bell */}
-        <button className="relative p-2 rounded-xl text-textSecondary hover:bg-surface-2 hover:text-textPrimary transition-colors">
-          <Bell className="w-4.5 h-4.5" />
-          <span className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-brand-primary ring-2 ring-surface" />
-        </button>
+        {/* Notification bell & dropdown */}
+        <div ref={notifRef} className="relative">
+          <button
+            onClick={() => setIsNotifOpen(!isNotifOpen)}
+            className="relative p-2 rounded-xl text-textSecondary hover:bg-surface-2 hover:text-textPrimary transition-colors focus:outline-none"
+            aria-label="View notifications"
+          >
+            <Bell className="w-4.5 h-4.5" />
+            {unreadCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-surface shadow-xs animate-in zoom-in-75">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
+          </button>
+
+          {isNotifOpen && (
+            <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-surface rounded-2xl shadow-2xl border border-borderLine z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+              {/* Header */}
+              <div className="px-4 py-3 border-b border-borderLine bg-surface-2/60 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Bell className="w-4 h-4 text-brand-primary" />
+                  <span className="text-xs font-bold text-textPrimary">Announcements</span>
+                  {unreadCount > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-brand-primary/10 text-brand-primary">
+                      {unreadCount} new
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {unreadCount > 0 && (
+                    <button
+                      onClick={handleMarkAllRead}
+                      className="text-[11px] font-semibold text-brand-primary hover:underline flex items-center gap-1"
+                    >
+                      <CheckCheck className="w-3.5 h-3.5" />
+                      Mark read
+                    </button>
+                  )}
+                  {canBroadcast && (
+                    <button
+                      onClick={() => {
+                        setIsNotifOpen(false);
+                        setIsComposeOpen(true);
+                      }}
+                      className="px-2 py-1 rounded-lg bg-brand-primary text-white text-[11px] font-semibold hover:bg-brand-primary/90 transition-all flex items-center gap-1 shadow-xs"
+                    >
+                      <Plus className="w-3 h-3" />
+                      Broadcast
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Notifications List */}
+              <div className="max-h-80 overflow-y-auto divide-y divide-borderLine/50">
+                {notifications.length === 0 ? (
+                  <div className="py-10 px-4 text-center">
+                    <Bell className="w-8 h-8 text-textSecondary/40 mx-auto mb-2" />
+                    <p className="text-xs font-semibold text-textPrimary">No announcements yet</p>
+                    <p className="text-[11px] text-textSecondary mt-0.5">
+                      Messages from HOD, Principal, or Mentors will show up here.
+                    </p>
+                  </div>
+                ) : (
+                  notifications.map((n) => (
+                    <div
+                      key={n.id}
+                      onClick={() => handleSelectNotif(n)}
+                      className={`p-3.5 hover:bg-surface-2 transition-colors cursor-pointer text-left relative ${
+                        !n.is_read ? 'bg-brand-primary/5' : ''
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-surface-3 text-textPrimary border border-borderLine">
+                              {n.sender_name}
+                            </span>
+                            <span className="text-[10px] text-textSecondary">
+                              ({n.sender_role?.toUpperCase()}{n.sender_department ? ` • ${n.sender_department}` : ''})
+                            </span>
+                            {n.priority === 'urgent' && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-600 border border-amber-500/30">
+                                URGENT
+                              </span>
+                            )}
+                          </div>
+                          <h4 className={`text-xs mt-1 truncate ${!n.is_read ? 'font-bold text-textPrimary' : 'font-medium text-textSecondary'}`}>
+                            {n.title}
+                          </h4>
+                          <p className="text-[11px] text-textSecondary line-clamp-2 mt-0.5 leading-snug">
+                            {n.message}
+                          </p>
+                          <span className="text-[10px] text-textSecondary/80 mt-1 block">
+                            {new Date(n.created_at).toLocaleDateString('en-IN', {
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        </div>
+                        {!n.is_read && (
+                          <span className="w-2 h-2 rounded-full bg-brand-primary shrink-0 mt-1.5" />
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Profile dropdown */}
         <div ref={profileRef} className="relative border-l border-borderLine pl-3 md:pl-4">
@@ -413,6 +563,61 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
           )}
         </div>
       </div>
+
+      {/* Compose Broadcast Modal */}
+      {isComposeOpen && (
+        <BroadcastComposeModal
+          isOpen={isComposeOpen}
+          onClose={() => setIsComposeOpen(false)}
+        />
+      )}
+
+      {/* Selected Notice Detail Modal */}
+      {selectedNotif && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="relative w-full max-w-lg bg-surface rounded-2xl shadow-2xl border border-borderLine p-6 flex flex-col max-h-[85vh] overflow-hidden">
+            <div className="flex items-start justify-between pb-4 border-b border-borderLine">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-brand-primary/10 text-brand-primary border border-brand-primary/20 uppercase">
+                    {selectedNotif.sender_role}
+                  </span>
+                  <span className="text-xs text-textSecondary">
+                    From {selectedNotif.sender_name} {selectedNotif.sender_department ? `(${selectedNotif.sender_department})` : ''}
+                  </span>
+                </div>
+                <h3 className="text-base font-bold text-textPrimary mt-1.5">{selectedNotif.title}</h3>
+                <span className="text-[11px] text-textSecondary mt-0.5 block">
+                  {new Date(selectedNotif.created_at).toLocaleDateString('en-IN', {
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </span>
+              </div>
+              <button
+                onClick={() => setSelectedNotif(null)}
+                className="p-1 rounded-lg text-textSecondary hover:text-textPrimary hover:bg-surface-2 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="py-4 text-xs sm:text-sm text-textPrimary whitespace-pre-wrap leading-relaxed overflow-y-auto flex-1">
+              {selectedNotif.message}
+            </div>
+            <div className="pt-3 border-t border-borderLine flex justify-end">
+              <button
+                onClick={() => setSelectedNotif(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-brand-primary text-white hover:bg-brand-primary/90 transition-all"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 };
