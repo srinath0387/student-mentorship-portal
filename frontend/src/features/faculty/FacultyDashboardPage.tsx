@@ -24,6 +24,12 @@ import {
   Upload,
   AlertCircle,
   User,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  GraduationCap,
+  Briefcase,
+  Microscope,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { StudentProfile } from '../../types';
@@ -120,6 +126,41 @@ export const FacultyDashboardPage: React.FC = () => {
         : Promise.resolve(null),
     enabled: Boolean(activeIncharge),
   });
+
+  // ── Academic Overview ──────────────────────────────────────────────────────
+  const { data: subjectsHandled = [] } = useQuery({
+    queryKey: ['subjectsHandled', user?.email],
+    queryFn: () => user?.email ? api.getFacultySubjectsHandled(user.email) : Promise.resolve([]),
+    enabled: Boolean(user?.email),
+  });
+
+  const academicStats = useMemo(() => {
+    const pubs  = (facultyProfile?.publications  ?? []) as any[];
+    const acts  = (facultyProfile?.activities    ?? []) as any[];
+    const certs = (facultyProfile?.certifications ?? []) as any[];
+    const subs  = subjectsHandled as any[];
+    return {
+      publications  : pubs.filter((p) => p.category !== 'Patent').length,
+      patents       : pubs.filter((p) => p.category === 'Patent').length,
+      fdps          : acts.filter((a) => a.type === 'FDP').length,
+      conferences   : acts.filter((a) => a.type === 'Conference').length,
+      workshops     : acts.filter((a) => a.type === 'Workshop').length,
+      certifications: certs.length,
+      subjectsTotal : subs.length,
+      subjectsUnique: new Set(subs.map((s) => s.subject)).size,
+      pubList  : pubs.filter((p) => p.category !== 'Patent'),
+      patList  : pubs.filter((p) => p.category === 'Patent'),
+      fdpList  : acts.filter((a) => a.type === 'FDP'),
+      confList : acts.filter((a) => a.type === 'Conference'),
+      wsList   : acts.filter((a) => a.type === 'Workshop'),
+      certList : certs,
+      subList  : subs,
+    };
+  }, [facultyProfile, subjectsHandled]);
+
+  const [activeOverviewCard, setActiveOverviewCard] = useState<string | null>(null);
+  const toggleOverviewCard = (label: string) =>
+    setActiveOverviewCard((prev) => (prev === label ? null : label));
 
   // Compute real stat card values
   const topStandingCount = useMemo(
@@ -280,6 +321,535 @@ export const FacultyDashboardPage: React.FC = () => {
           </PillButton>
         </div>
       )}
+
+      {/* ── Academic Overview Cards & Interactive Details ── */}
+      <div className="bg-surface border border-borderLine rounded-2xl p-5 shadow-xs space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-extrabold text-textPrimary flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-brand-primary animate-pulse" />
+              Academic & Research Portfolio Overview
+            </h2>
+            <p className="text-xs text-textSecondary mt-0.5">
+              Click any card to inspect detailed records, papers, events, and subjects
+            </p>
+          </div>
+          {activeOverviewCard && (
+            <button
+              onClick={() => setActiveOverviewCard(null)}
+              className="text-xs font-semibold text-textSecondary hover:text-textPrimary inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-surface-2 border border-borderLine transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Collapse Details</span>
+            </button>
+          )}
+        </div>
+
+        {/* 7 Interactive Metric Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+          {[
+            {
+              id: 'publications',
+              label: 'Publications',
+              value: academicStats.publications,
+              icon: <BookOpen className="w-4 h-4 text-purple-500" />,
+              color: 'text-purple-600 dark:text-purple-400',
+              badgeBg: 'bg-purple-500/10 border-purple-500/20',
+              sub: 'SCI / Scopus / WoS',
+            },
+            {
+              id: 'patents',
+              label: 'Patents',
+              value: academicStats.patents,
+              icon: <Microscope className="w-4 h-4 text-emerald-500" />,
+              color: 'text-emerald-600 dark:text-emerald-400',
+              badgeBg: 'bg-emerald-500/10 border-emerald-500/20',
+              sub: 'Granted / Published',
+            },
+            {
+              id: 'fdps',
+              label: 'FDPs',
+              value: academicStats.fdps,
+              icon: <GraduationCap className="w-4 h-4 text-blue-500" />,
+              color: 'text-blue-600 dark:text-blue-400',
+              badgeBg: 'bg-blue-500/10 border-blue-500/20',
+              sub: 'Faculty Dev.',
+            },
+            {
+              id: 'conferences',
+              label: 'Conferences',
+              value: academicStats.conferences,
+              icon: <Award className="w-4 h-4 text-amber-500" />,
+              color: 'text-amber-600 dark:text-amber-400',
+              badgeBg: 'bg-amber-500/10 border-amber-500/20',
+              sub: 'National / Int.',
+            },
+            {
+              id: 'workshops',
+              label: 'Workshops',
+              value: academicStats.workshops,
+              icon: <Briefcase className="w-4 h-4 text-pink-500" />,
+              color: 'text-pink-600 dark:text-pink-400',
+              badgeBg: 'bg-pink-500/10 border-pink-500/20',
+              sub: 'Attended / Organ.',
+            },
+            {
+              id: 'certifications',
+              label: 'Certifications',
+              value: academicStats.certifications,
+              icon: <ShieldCheck className="w-4 h-4 text-teal-500" />,
+              color: 'text-teal-600 dark:text-teal-400',
+              badgeBg: 'bg-teal-500/10 border-teal-500/20',
+              sub: 'NPTEL & Industry',
+            },
+            {
+              id: 'subjects',
+              label: 'Subjects Handled',
+              value: academicStats.subjectsTotal,
+              icon: <FileBarChart className="w-4 h-4 text-indigo-500" />,
+              color: 'text-indigo-600 dark:text-indigo-400',
+              badgeBg: 'bg-indigo-500/10 border-indigo-500/20',
+              sub: `${academicStats.subjectsUnique} Unique`,
+            },
+          ].map((card) => {
+            const isSelected = activeOverviewCard === card.id;
+            return (
+              <button
+                key={card.id}
+                type="button"
+                onClick={() => toggleOverviewCard(card.id)}
+                className={`relative flex flex-col justify-between p-3.5 rounded-xl border text-left transition-all group ${
+                  isSelected
+                    ? 'border-brand-primary bg-brand-soft/30 shadow-sm ring-2 ring-brand-primary/20'
+                    : 'border-borderLine bg-surface hover:bg-surface-2 hover:border-brand-primary/40'
+                }`}
+              >
+                <div className="flex items-center justify-between w-full">
+                  <div className={`p-2 rounded-lg border ${card.badgeBg}`}>
+                    {card.icon}
+                  </div>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition-colors ${
+                    isSelected ? 'bg-brand-primary text-white' : 'text-textSecondary group-hover:text-textPrimary'
+                  }`}>
+                    {isSelected ? 'Viewing' : 'View'}
+                  </span>
+                </div>
+                <div className="mt-3">
+                  <div className={`text-2xl font-black ${card.color}`}>
+                    {card.value}
+                  </div>
+                  <div className="text-xs font-bold text-textPrimary mt-0.5 line-clamp-1">
+                    {card.label}
+                  </div>
+                  <div className="text-[10px] text-textSecondary mt-0.5 font-medium">
+                    {card.sub}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* ── Expandable Details Panel ── */}
+        {activeOverviewCard && (
+          <div className="border border-borderLine rounded-xl bg-surface-2 p-4 sm:p-5 space-y-4 animate-in fade-in duration-200">
+            {/* Details Panel Header */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-borderLine">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 rounded-lg bg-surface border border-borderLine text-textPrimary">
+                  {activeOverviewCard === 'publications' && <BookOpen className="w-5 h-5 text-purple-500" />}
+                  {activeOverviewCard === 'patents' && <Microscope className="w-5 h-5 text-emerald-500" />}
+                  {activeOverviewCard === 'fdps' && <GraduationCap className="w-5 h-5 text-blue-500" />}
+                  {activeOverviewCard === 'conferences' && <Award className="w-5 h-5 text-amber-500" />}
+                  {activeOverviewCard === 'workshops' && <Briefcase className="w-5 h-5 text-pink-500" />}
+                  {activeOverviewCard === 'certifications' && <ShieldCheck className="w-5 h-5 text-teal-500" />}
+                  {activeOverviewCard === 'subjects' && <FileBarChart className="w-5 h-5 text-indigo-500" />}
+                </span>
+                <div>
+                  <h3 className="text-sm font-bold text-textPrimary">
+                    {activeOverviewCard === 'publications' && `Research Publications (${academicStats.publications})`}
+                    {activeOverviewCard === 'patents' && `Patents (${academicStats.patents})`}
+                    {activeOverviewCard === 'fdps' && `Faculty Development Programs (${academicStats.fdps})`}
+                    {activeOverviewCard === 'conferences' && `Conferences (${academicStats.conferences})`}
+                    {activeOverviewCard === 'workshops' && `Workshops (${academicStats.workshops})`}
+                    {activeOverviewCard === 'certifications' && `Certifications (${academicStats.certifications})`}
+                    {activeOverviewCard === 'subjects' && `Subjects Handled (${academicStats.subjectsTotal} Total Instances, ${academicStats.subjectsUnique} Unique)`}
+                  </h3>
+                  <p className="text-xs text-textSecondary">
+                    {activeOverviewCard === 'subjects'
+                      ? 'Detailed semester exam performance and pass percentage results'
+                      : 'Records fetched from your faculty profile portfolio'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSearchParams({ tab: 'profile' })}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-primary text-white hover:bg-brand-primary/90 transition-colors inline-flex items-center gap-1.5 shadow-xs"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                  <span>Manage in Profile</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveOverviewCard(null)}
+                  className="p-1.5 rounded-lg text-textSecondary hover:text-textPrimary hover:bg-surface border border-borderLine transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Content: Publications */}
+            {activeOverviewCard === 'publications' && (
+              academicStats.pubList.length > 0 ? (
+                <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
+                  {academicStats.pubList.map((p: any) => (
+                    <div key={p.id || p.title} className="p-3.5 rounded-xl bg-surface border border-borderLine space-y-1.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300 border border-purple-200">
+                            {p.category || 'Research Article'}
+                          </span>
+                          <span className="text-xs font-bold text-textPrimary line-clamp-1">{p.title}</span>
+                        </div>
+                        {p.year && (
+                          <span className="text-[11px] font-bold text-textSecondary px-2 py-0.5 rounded bg-surface-2 border border-borderLine">
+                            Year: {p.year}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-textSecondary">
+                        <span className="font-semibold text-textPrimary">{p.journal_name}</span>
+                        {p.co_authors && <span> &bull; Authors: {p.co_authors}</span>}
+                      </p>
+                      {p.doi_link && (
+                        <div className="pt-1">
+                          <a
+                            href={p.doi_link.startsWith('http') ? p.doi_link : `https://${p.doi_link}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-brand-primary hover:underline inline-flex items-center gap-1 font-semibold"
+                          >
+                            <span>DOI / Link</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-6 text-xs text-textSecondary">
+                  <p>No research publications recorded yet.</p>
+                  <p className="mt-1">Add SCI, Scopus, or WoS papers under the Profile tab.</p>
+                </div>
+              )
+            )}
+
+            {/* Content: Patents */}
+            {activeOverviewCard === 'patents' && (
+              academicStats.patList.length > 0 ? (
+                <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
+                  {academicStats.patList.map((p: any) => (
+                    <div key={p.id || p.title} className="p-3.5 rounded-xl bg-surface border border-borderLine space-y-1.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300">
+                            Patent
+                          </span>
+                          <span className="text-xs font-bold text-textPrimary">{p.title}</span>
+                        </div>
+                        {p.year && (
+                          <span className="text-[11px] font-bold text-textSecondary px-2 py-0.5 rounded bg-surface-2 border border-borderLine">
+                            Year: {p.year}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-textSecondary">
+                        {p.journal_name && <span>{p.journal_name} &bull; </span>}
+                        {p.co_authors && <span>Inventors: {p.co_authors}</span>}
+                      </p>
+                      {p.doi_link && (
+                        <div className="pt-1">
+                          <a
+                            href={p.doi_link.startsWith('http') ? p.doi_link : `https://${p.doi_link}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-brand-primary hover:underline inline-flex items-center gap-1 font-semibold"
+                          >
+                            <span>Patent Details / Link</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-6 text-xs text-textSecondary">
+                  <p>No patents recorded yet.</p>
+                  <p className="mt-1">Add patents published or granted under the Faculty Profile tab.</p>
+                </div>
+              )
+            )}
+
+            {/* Content: FDPs */}
+            {activeOverviewCard === 'fdps' && (
+              academicStats.fdpList.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[380px] overflow-y-auto pr-1">
+                  {academicStats.fdpList.map((a: any) => {
+                    const startDate = a.from_date || a.date;
+                    const endDate = a.to_date || a.date;
+                    const isRange = startDate && endDate && startDate !== endDate;
+                    return (
+                      <div key={a.id || a.title} className="p-3 rounded-xl bg-surface border border-borderLine text-xs space-y-2 flex flex-col justify-between">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center justify-between gap-1">
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                              {a.level || 'National'} {a.role_type && `• ${a.role_type}`}
+                            </span>
+                            {a.academic_year && (
+                              <span className="text-[10px] font-bold text-blue-600">{a.academic_year}</span>
+                            )}
+                          </div>
+                          <p className="font-bold text-textPrimary line-clamp-2">{a.title}</p>
+                          <p className="text-[11px] text-textSecondary"><span className="font-medium">Organizer:</span> {a.organizer}</p>
+                        </div>
+                        <div className="pt-2 border-t border-borderLine/50 flex items-center justify-between text-[10px]">
+                          <span className="text-textSecondary">
+                            {isRange ? `${startDate} to ${endDate}` : startDate || 'Date N/A'}
+                            {a.no_of_days > 0 && <span className="ml-1 font-bold text-blue-600">({a.no_of_days} days)</span>}
+                          </span>
+                          {a.document_url && (
+                            <a
+                              href={a.document_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-brand-primary font-bold hover:underline inline-flex items-center gap-1"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              <span>Certificate</span>
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-center py-6 text-xs text-textSecondary">
+                  <p>No Faculty Development Programs recorded yet.</p>
+                </div>
+              )
+            )}
+
+            {/* Content: Conferences */}
+            {activeOverviewCard === 'conferences' && (
+              academicStats.confList.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[380px] overflow-y-auto pr-1">
+                  {academicStats.confList.map((a: any) => {
+                    const startDate = a.from_date || a.date;
+                    const endDate = a.to_date || a.date;
+                    const isRange = startDate && endDate && startDate !== endDate;
+                    return (
+                      <div key={a.id || a.title} className="p-3 rounded-xl bg-surface border border-borderLine text-xs space-y-2 flex flex-col justify-between">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center justify-between gap-1">
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                              {a.level || 'Conference'} {a.role_type && `• ${a.role_type}`}
+                            </span>
+                            {a.academic_year && (
+                              <span className="text-[10px] font-bold text-amber-600">{a.academic_year}</span>
+                            )}
+                          </div>
+                          <p className="font-bold text-textPrimary line-clamp-2">{a.title}</p>
+                          <p className="text-[11px] text-textSecondary"><span className="font-medium">Organizer:</span> {a.organizer}</p>
+                        </div>
+                        <div className="pt-2 border-t border-borderLine/50 flex items-center justify-between text-[10px]">
+                          <span className="text-textSecondary">
+                            {isRange ? `${startDate} to ${endDate}` : startDate || 'Date N/A'}
+                            {a.no_of_days > 0 && <span className="ml-1 font-bold text-amber-600">({a.no_of_days} days)</span>}
+                          </span>
+                          {a.document_url && (
+                            <a
+                              href={a.document_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-brand-primary font-bold hover:underline inline-flex items-center gap-1"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              <span>Certificate</span>
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-center py-6 text-xs text-textSecondary">
+                  <p>No conference records recorded yet.</p>
+                </div>
+              )
+            )}
+
+            {/* Content: Workshops */}
+            {activeOverviewCard === 'workshops' && (
+              academicStats.wsList.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[380px] overflow-y-auto pr-1">
+                  {academicStats.wsList.map((a: any) => {
+                    const startDate = a.from_date || a.date;
+                    const endDate = a.to_date || a.date;
+                    const isRange = startDate && endDate && startDate !== endDate;
+                    return (
+                      <div key={a.id || a.title} className="p-3 rounded-xl bg-surface border border-borderLine text-xs space-y-2 flex flex-col justify-between">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center justify-between gap-1">
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-pink-100 text-pink-800 dark:bg-pink-950 dark:text-pink-300">
+                              {a.level || 'Workshop'} {a.role_type && `• ${a.role_type}`}
+                            </span>
+                            {a.academic_year && (
+                              <span className="text-[10px] font-bold text-pink-600">{a.academic_year}</span>
+                            )}
+                          </div>
+                          <p className="font-bold text-textPrimary line-clamp-2">{a.title}</p>
+                          <p className="text-[11px] text-textSecondary"><span className="font-medium">Organizer:</span> {a.organizer}</p>
+                        </div>
+                        <div className="pt-2 border-t border-borderLine/50 flex items-center justify-between text-[10px]">
+                          <span className="text-textSecondary">
+                            {isRange ? `${startDate} to ${endDate}` : startDate || 'Date N/A'}
+                            {a.no_of_days > 0 && <span className="ml-1 font-bold text-pink-600">({a.no_of_days} days)</span>}
+                          </span>
+                          {a.document_url && (
+                            <a
+                              href={a.document_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-brand-primary font-bold hover:underline inline-flex items-center gap-1"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              <span>Certificate</span>
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-center py-6 text-xs text-textSecondary">
+                  <p>No workshop records recorded yet.</p>
+                </div>
+              )
+            )}
+
+            {/* Content: Certifications */}
+            {activeOverviewCard === 'certifications' && (
+              academicStats.certList.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 max-h-[380px] overflow-y-auto pr-1">
+                  {academicStats.certList.map((c: any) => (
+                    <div key={c.id || c.title} className="p-3 rounded-xl bg-surface border border-borderLine text-xs space-y-1.5 flex flex-col justify-between">
+                      <div>
+                        {c.academic_year && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300">
+                            {c.academic_year}
+                          </span>
+                        )}
+                        <p className="font-bold text-textPrimary mt-1 line-clamp-2">{c.title}</p>
+                        <p className="text-[11px] text-brand-primary font-medium">{c.issuing_body}</p>
+                      </div>
+                      <div className="pt-2 border-t border-borderLine/50 flex items-center justify-between text-[10px] text-textSecondary">
+                        <span>Completed: {c.completion_date || 'N/A'}</span>
+                        {c.certificate_url && (
+                          <a
+                            href={c.certificate_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-brand-primary font-bold hover:underline inline-flex items-center gap-1"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            <span>View</span>
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-6 text-xs text-textSecondary">
+                  <p>No certifications recorded yet.</p>
+                </div>
+              )
+            )}
+
+            {/* Content: Subjects Handled */}
+            {activeOverviewCard === 'subjects' && (
+              academicStats.subList.length > 0 ? (
+                <div className="overflow-x-auto max-h-[380px] overflow-y-auto border border-borderLine rounded-xl bg-surface">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-surface-2 text-textSecondary font-bold sticky top-0 border-b border-borderLine">
+                      <tr>
+                        <th className="py-2.5 px-3">Subject Name</th>
+                        <th className="py-2.5 px-3">Year / Batch / Sem</th>
+                        <th className="py-2.5 px-3">Sec</th>
+                        <th className="py-2.5 px-3">Branch</th>
+                        <th className="py-2.5 px-3 text-center">Reg / App</th>
+                        <th className="py-2.5 px-3 text-center">Failed</th>
+                        <th className="py-2.5 px-3 text-center">Pass %</th>
+                        <th className="py-2.5 px-3 text-center">Highest</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-borderLine">
+                      {academicStats.subList.map((s: any, idx: number) => {
+                        const passPct = Number(s.pass_percentage) || 0;
+                        const passBadgeColor =
+                          passPct >= 85
+                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                            : passPct >= 65
+                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                            : 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300';
+
+                        return (
+                          <tr key={s.id || idx} className="hover:bg-surface-2/60 transition-colors">
+                            <td className="py-2 px-3 font-bold text-textPrimary">
+                              {s.subject}
+                            </td>
+                            <td className="py-2 px-3 text-textSecondary">{s.year_batch || '—'}</td>
+                            <td className="py-2 px-3 font-semibold text-textPrimary">{s.section || '—'}</td>
+                            <td className="py-2 px-3 text-textSecondary">{s.branch || '—'}</td>
+                            <td className="py-2 px-3 text-center text-textSecondary">
+                              {s.registered || '—'} / {s.appeared || '—'}
+                            </td>
+                            <td className="py-2 px-3 text-center font-semibold text-rose-600">
+                              {s.failed ?? 0}
+                            </td>
+                            <td className="py-2 px-3 text-center">
+                              <span className={`px-2 py-0.5 rounded font-black text-[11px] ${passBadgeColor}`}>
+                                {s.pass_percentage != null ? `${s.pass_percentage}%` : '—'}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-center font-bold text-brand-primary">
+                              {s.highest_marks != null ? s.highest_marks : '—'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center py-6 text-xs text-textSecondary">
+                  <p>No subject performance records added yet.</p>
+                  <p className="mt-1">Add subject results and pass percentages in the Profile tab under Subjects Handled.</p>
+                </div>
+              )
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Sub-Tab Switcher */}
       <div className="bg-surface border border-borderLine rounded-2xl shadow-xs overflow-hidden">
