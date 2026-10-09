@@ -13883,10 +13883,29 @@ app.get('/admin/unregistered-students', requireAuth, requireRole('admin', 'hod',
       ORDER BY ma.roll_number ASC
     `);
 
-    let targetAliases: string[] = [];
-    if (effectiveDept && effectiveDept !== 'All') {
-      targetAliases = getDepartmentAliases(effectiveDept);
-    }
+    const isStrictBranchMatch = (studentBranch: string, targetBranch: string): boolean => {
+      const clean1 = (studentBranch || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const clean2 = (targetBranch || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (!clean1 || !clean2) return false;
+      if (clean1 === clean2) return true;
+
+      const getCanonicalCode = (str: string): string => {
+        if (str.includes('datascience') || str.includes('cseds') || str === 'ds' || str === '32') return '32';
+        if (str.includes('aiml') || str.includes('ai') || str === '33') return '33';
+        if (str.includes('csebs') || str.includes('business') || str === '34') return '34';
+        if (str.includes('csecs') || str.includes('cyber') || str === '37') return '37';
+        if (str === 'cse' || str === '05' || str.includes('computerscience')) return '05';
+        if (str === 'ece' || str === '04' || str.includes('electronics')) return '04';
+        if (str === 'eee' || str === '02' || str.includes('electrical')) return '02';
+        if (str === 'mech' || str === 'me' || str === '03' || str.includes('mechanical')) return '03';
+        if (str === 'civil' || str === 'ce' || str === '01') return '01';
+        if (str.includes('mca') || str.includes('f00')) return 'mca';
+        if (str.includes('mba') || str.includes('e00')) return 'mba';
+        return str;
+      };
+
+      return getCanonicalCode(clean1) === getCanonicalCode(clean2);
+    };
 
     const students = [];
     for (const row of result.rows) {
@@ -13896,12 +13915,9 @@ app.get('/admin/unregistered-students', requireAuth, requireRole('admin', 'hod',
         ? inferredDept
         : (row.mentor_department || 'Unknown');
 
-      // Department filtering: matches student's branch OR mentor's department
-      if (targetAliases.length > 0) {
-        const studentAliases = getDepartmentAliases(studentDept);
-        const mentorAliases = row.mentor_department ? getDepartmentAliases(row.mentor_department) : [];
-        const matches = targetAliases.some((a) => studentAliases.includes(a) || mentorAliases.includes(a));
-        if (!matches) {
+      // Strict department filtering: matches strictly the student's branch
+      if (effectiveDept && effectiveDept !== 'All' && effectiveDept !== '*') {
+        if (!isStrictBranchMatch(studentDept, effectiveDept)) {
           continue;
         }
       }
