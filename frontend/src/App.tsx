@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, Suspense, lazy } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
-import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQueryClient, useQuery } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { AuthPage } from './features/auth/AuthPage';
@@ -9,6 +9,8 @@ import { Sidebar } from './components/layout/Sidebar';
 import { TopBar } from './components/layout/TopBar';
 import { DashboardSkeleton } from './components/layout/DashboardSkeleton';
 import { Footer } from './components/layout/Footer';
+import { api } from './lib/api';
+import { ProfilePhotoUploadModal } from './components/common/ProfilePhotoUploadModal';
 
 // Lazy load feature dashboard pages on-demand for fast initial page load
 const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage').then(m => ({ default: m.DashboardPage })));
@@ -120,9 +122,35 @@ const ProtectedRoute: React.FC<{ allowedRoles: string[] }> = ({ allowedRoles }) 
 const MainLayout: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);  // mobile overlay
   const [collapsed, setCollapsed] = useState(false);           // desktop icon-rail
-  const { isAuthenticated, isLoading } = useAuth();
+  const { user, role, isAuthenticated, isLoading } = useAuth();
   const location = useLocation();
   const mainRef = useRef<HTMLElement>(null);
+  const [photoModalDismissed, setPhotoModalDismissed] = useState(false);
+
+  // Student profile check for photo
+  const { data: studentProfile } = useQuery({
+    queryKey: ['studentProfileForPhoto', user?.rollNumber],
+    queryFn: () => (user?.rollNumber ? api.getStudentProfile(user.rollNumber) : Promise.resolve(null)),
+    enabled: Boolean(isAuthenticated && role === 'student' && user?.rollNumber),
+    staleTime: 60 * 1000,
+  });
+
+  // Faculty profile check for photo
+  const isFacultyRole = ['faculty', 'coordinator', 'mentor'].includes(role || '');
+  const { data: facultyProfile } = useQuery({
+    queryKey: ['facultyProfileForPhoto', user?.email],
+    queryFn: () => (user?.email ? api.getFacultyFullProfile(user.email) : Promise.resolve(null)),
+    enabled: Boolean(isAuthenticated && isFacultyRole && user?.email),
+    staleTime: 60 * 1000,
+  });
+
+  // Check if profile photo is missing
+  const hasStudentPhoto = Boolean(studentProfile?.photo_url && studentProfile.photo_url.trim().length > 0);
+  const hasFacultyPhoto = Boolean(facultyProfile?.personal?.photo_url && facultyProfile.personal.photo_url.trim().length > 0);
+
+  const shouldPromptStudent = Boolean(role === 'student' && studentProfile && !hasStudentPhoto);
+  const shouldPromptFaculty = Boolean(isFacultyRole && facultyProfile && !hasFacultyPhoto);
+  const isPhotoRequired = (shouldPromptStudent || shouldPromptFaculty) && !photoModalDismissed;
 
   // Scroll the main content area to the top whenever the route or tab changes.
   useEffect(() => {
@@ -168,6 +196,20 @@ const MainLayout: React.FC = () => {
         </main>
         <Footer />
       </div>
+
+      {/* Mandatory / Enforced Profile Photo Upload on Login */}
+      {isPhotoRequired && (
+        <ProfilePhotoUploadModal
+          isOpen={true}
+          isEnforced={true}
+          role={role === 'student' ? 'student' : 'faculty'}
+          userId={role === 'student' ? (user?.rollNumber || '') : (user?.email || '')}
+          userName={user?.name || ''}
+          currentPhotoUrl={role === 'student' ? studentProfile?.photo_url : facultyProfile?.personal?.photo_url}
+          onClose={() => setPhotoModalDismissed(true)}
+          onSuccess={() => setPhotoModalDismissed(true)}
+        />
+      )}
     </div>
   );
 };

@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useSearchParams, Navigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ProfilePhotoUploadModal } from '../../components/common/ProfilePhotoUploadModal';
 import {
   User,
   BookOpen,
@@ -30,6 +31,7 @@ export const ProfilePage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
 
   // ?id=ROLLNO means admin/HOD is viewing a specific student's profile from search.
   const viewId = searchParams.get('id') || '';
@@ -165,11 +167,24 @@ export const ProfilePage: React.FC = () => {
           <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
             <div className="flex items-end gap-4">
               <div className="relative shrink-0">
-                <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white font-black text-3xl flex items-center justify-center shadow-xl border-4 border-surface ring-2 ring-brand-primary/20">
-                  {initials}
+                <div className="w-24 h-24 rounded-2xl overflow-hidden bg-gradient-to-br from-indigo-500 to-purple-600 text-white font-black text-3xl flex items-center justify-center shadow-xl border-4 border-surface ring-2 ring-brand-primary/20">
+                  {student?.photo_url ? (
+                    <img
+                      src={student.photo_url}
+                      alt={displayName}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    initials
+                  )}
                 </div>
                 {!isReadOnly && (
-                  <button className="absolute -bottom-1.5 -right-1.5 p-1.5 rounded-xl bg-surface border border-borderLine text-textMuted shadow-sm hover:text-textPrimary hover:border-brand-primary transition-all">
+                  <button
+                    type="button"
+                    onClick={() => setIsPhotoModalOpen(true)}
+                    className="absolute -bottom-1.5 -right-1.5 p-1.5 rounded-xl bg-surface border border-borderLine text-textMuted shadow-sm hover:text-textPrimary hover:border-brand-primary transition-all cursor-pointer"
+                    title="Upload / Change Profile Photo"
+                  >
                     <Camera className="w-3.5 h-3.5" />
                   </button>
                 )}
@@ -254,6 +269,17 @@ export const ProfilePage: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Manual photo upload modal triggered via camera button */}
+      <ProfilePhotoUploadModal
+        isOpen={isPhotoModalOpen}
+        onClose={() => setIsPhotoModalOpen(false)}
+        role="student"
+        userId={activeRollNo}
+        userName={displayName}
+        currentPhotoUrl={student?.photo_url}
+        onSuccess={() => handleRefreshAll()}
+      />
     </div>
   );
 };

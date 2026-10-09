@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { PanelLeft, Bell, Search, User, LogOut, ChevronDown, X, Code2, Sun, Moon, CalendarCheck, Users, UserCheck } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
@@ -60,6 +61,25 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
   const roleLabel = user?.role === 'hod'
     ? `HOD (${user.department || 'Department'})`
     : (user?.role?.toUpperCase() || 'STUDENT');
+
+  // Check student or faculty profile from cache for photo
+  const { data: studentProfile } = useQuery({
+    queryKey: ['studentProfileForPhoto', user?.rollNumber],
+    queryFn: () => (user?.rollNumber ? api.getStudentProfile(user.rollNumber) : Promise.resolve(null)),
+    enabled: Boolean(user?.role === 'student' && user?.rollNumber),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: facultyProfile } = useQuery({
+    queryKey: ['facultyProfileForPhoto', user?.email],
+    queryFn: () => (user?.email ? api.getFacultyFullProfile(user.email) : Promise.resolve(null)),
+    enabled: Boolean(user?.role !== 'student' && user?.email),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const photoUrl = user?.role === 'student'
+    ? studentProfile?.photo_url
+    : facultyProfile?.personal?.photo_url;
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -269,8 +289,12 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
             onClick={() => setIsProfileOpen(!isProfileOpen)}
             className="flex items-center gap-2.5 p-1.5 rounded-xl hover:bg-surface-2 transition-all focus:outline-none"
           >
-            <div className="w-8 h-8 rounded-full bg-brand-primary text-white font-bold flex items-center justify-center text-xs shadow-xs ring-2 ring-brand-soft">
-              {avatarText}
+            <div className="w-8 h-8 rounded-full overflow-hidden bg-brand-primary text-white font-bold flex items-center justify-center text-xs shadow-xs ring-2 ring-brand-soft">
+              {photoUrl ? (
+                <img src={photoUrl} alt={displayName} className="w-full h-full object-cover" />
+              ) : (
+                avatarText
+              )}
             </div>
             <div className="hidden sm:block text-left">
               <div className="flex items-center gap-1">
@@ -287,8 +311,12 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
               {/* Profile header */}
               <div className="p-4 border-b border-borderLine" style={{ background: 'linear-gradient(135deg, var(--color-brand-subtle), var(--color-surface-2))' }}>
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-brand-primary text-white font-bold flex items-center justify-center text-sm shadow-xs shrink-0">
-                    {avatarText}
+                  <div className="w-10 h-10 rounded-full overflow-hidden bg-brand-primary text-white font-bold flex items-center justify-center text-sm shadow-xs shrink-0 ring-2 ring-brand-soft">
+                    {photoUrl ? (
+                      <img src={photoUrl} alt={displayName} className="w-full h-full object-cover" />
+                    ) : (
+                      avatarText
+                    )}
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-bold text-textPrimary truncate">{displayName}</p>

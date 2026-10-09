@@ -24,6 +24,7 @@ import {
   Upload,
   AlertCircle,
   User,
+  Camera,
   ChevronDown,
   ChevronUp,
   ExternalLink,
@@ -35,6 +36,7 @@ import { api } from '../../lib/api';
 import { StudentProfile } from '../../types';
 import { StatCard } from '../../components/common/StatCard';
 import { PillButton } from '../../components/common/PillButton';
+import { ProfilePhotoUploadModal } from '../../components/common/ProfilePhotoUploadModal';
 import { PersonalInfoTab } from '../profile/tabs/PersonalInfoTab';
 import { AcademicsTab } from '../profile/tabs/AcademicsTab';
 import { CodingProfilesTab } from '../profile/tabs/CodingProfilesTab';
@@ -79,6 +81,7 @@ export const FacultyDashboardPage: React.FC = () => {
   const [remarkInput, setRemarkInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [showBulkImportModal, setShowBulkImportModal] = useState(false);
+  const [showPhotoModal, setShowPhotoModal] = useState(false);
 
   // Fetch mentees by email — resolves across ALL faculty records for this person
   // Handles the case where CSV created FAC_KRATHI but registration created a different faculty_id
@@ -279,13 +282,43 @@ export const FacultyDashboardPage: React.FC = () => {
     <div className="space-y-6">
       {/* Header */}
       <div className="bg-surface border border-borderLine rounded-2xl p-6 md:p-8 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-soft text-brand-primary text-xs font-semibold mb-2">
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>Faculty & Mentor Portal</span>
+        <div className="flex items-center gap-4">
+          <div className="relative shrink-0">
+            <div className="w-16 h-16 rounded-2xl overflow-hidden bg-gradient-to-br from-brand-primary to-indigo-600 text-white font-black text-xl flex items-center justify-center shadow-md border-2 border-surface ring-2 ring-brand-primary/20">
+              {facultyProfile?.personal?.photo_url ? (
+                <img
+                  src={facultyProfile.personal.photo_url}
+                  alt={user?.name || 'Faculty'}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                (user?.name || 'F')
+                  .split(' ')
+                  .filter(Boolean)
+                  .map((n: string) => n[0])
+                  .join('')
+                  .toUpperCase() || 'F'
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowPhotoModal(true)}
+              className="absolute -bottom-1 -right-1 p-1.5 rounded-lg bg-surface border border-borderLine text-textMuted shadow-xs hover:text-textPrimary hover:border-brand-primary transition-all cursor-pointer"
+              title="Upload / Change Profile Photo"
+            >
+              <Camera className="w-3.5 h-3.5" />
+            </button>
           </div>
-          <h1 className="text-2xl font-extrabold text-textPrimary">Mentee Directory & Department Overview</h1>
-          <p className="text-xs text-textSecondary mt-1">Track student progress, verify skills, and provide academic remarks</p>
+          <div>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-soft text-brand-primary text-xs font-semibold mb-1">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>Faculty & Mentor Portal</span>
+            </div>
+            <h1 className="text-xl md:text-2xl font-extrabold text-textPrimary leading-tight">{user?.name || 'Faculty Member'}</h1>
+            <p className="text-xs text-textSecondary mt-0.5">
+              {user?.department} • ID: {user?.rollNumber || facultyProfile?.faculty_id || 'FAC'}
+            </p>
+          </div>
         </div>
         <PillButton variant="outline" size="sm" onClick={() => setShowBulkImportModal(true)} icon={<Upload className="w-4 h-4 text-brand-primary" />}>
           Bulk Import CSV
@@ -1533,6 +1566,17 @@ export const FacultyDashboardPage: React.FC = () => {
         isOpen={showBulkImportModal}
         onClose={() => setShowBulkImportModal(false)}
         onSuccess={refetch}
+      />
+
+      {/* Manual photo upload modal triggered via camera button */}
+      <ProfilePhotoUploadModal
+        isOpen={showPhotoModal}
+        onClose={() => setShowPhotoModal(false)}
+        role="faculty"
+        userId={user?.email || ''}
+        userName={user?.name || ''}
+        currentPhotoUrl={facultyProfile?.personal?.photo_url}
+        onSuccess={() => refetch()}
       />
     </div>
   );
