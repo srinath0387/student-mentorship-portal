@@ -328,23 +328,51 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
         return next();
       }
 
-      if (demoRole === 'faculty' && db.isMock) {
+      if (demoRole === 'faculty') {
+        let facDept = 'CSE (Data Science)';
+        let facName = 'Faculty Member';
+        if (!db.isMock && email) {
+          try {
+            const fCheck = await db.query('SELECT department, name FROM faculty WHERE LOWER(email) = LOWER($1) LIMIT 1', [email]);
+            if (fCheck.rows.length > 0) {
+              if (fCheck.rows[0].department) facDept = fCheck.rows[0].department;
+              if (fCheck.rows[0].name) facName = fCheck.rows[0].name;
+            }
+          } catch { /* ignore */ }
+        }
         req.auth = {
           email: email || 'faculty@rgmcet.edu.in',
           role: 'faculty',
           regNo: email ? `FAC_${email.split('@')[0].toUpperCase()}` : 'FAC_FACULTY',
-          department: 'CSE (Data Science)',
+          department: facDept,
+          name: facName,
         };
         return next();
       }
 
-      if (demoRole === 'student' && db.isMock) {
-        const studentRegNo = email ? email.split('@')[0].toUpperCase() : '';
+      if (demoRole === 'student') {
+        let studentRegNo = email ? email.split('@')[0].toUpperCase() : '';
+        let stuDept: string | undefined;
+        let stuName = 'Student';
+        if (!db.isMock && email) {
+          try {
+            const sCheck = await db.query('SELECT roll_number, department, name FROM students WHERE LOWER(email) = LOWER($1) OR UPPER(roll_number) = UPPER($2) LIMIT 1', [email, studentRegNo]);
+            if (sCheck.rows.length > 0) {
+              if (sCheck.rows[0].roll_number) studentRegNo = sCheck.rows[0].roll_number;
+              if (sCheck.rows[0].department) stuDept = sCheck.rows[0].department;
+              if (sCheck.rows[0].name) stuName = sCheck.rows[0].name;
+            }
+          } catch { /* ignore */ }
+        }
+        if (!stuDept && studentRegNo.length === 10) {
+          stuDept = getDeptFromRollNumber(studentRegNo);
+        }
         req.auth = {
           email: email || '',
           role: 'student',
           regNo: studentRegNo,
-          department: studentRegNo.length === 10 ? getDeptFromRollNumber(studentRegNo) : undefined,
+          department: stuDept || 'CSE (Data Science)',
+          name: stuName,
         };
         return next();
       }

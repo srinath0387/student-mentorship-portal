@@ -90,10 +90,8 @@ export const BroadcastComposeModal: React.FC<BroadcastComposeModalProps> = ({
     } else if (isFaculty) {
       finalTargetRole = 'mentees';
       finalDept = user?.department || 'ALL';
-    } else if (isExecutive || (isAdmin && isSuperAdmin)) {
+    } else if (isExecutive || isAdmin) {
       finalDept = targetDeptScope === 'ALL' ? 'ALL' : specificDept;
-    } else if (isAdmin) {
-      finalDept = user?.department || specificDept;
     }
 
     setIsSubmitting(true);

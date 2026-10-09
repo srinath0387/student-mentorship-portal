@@ -13450,20 +13450,73 @@ const getStudentMentorId = async (regNo: string, email: string): Promise<string 
   }
 };
 
+// Helper to generate comprehensive department aliases and variations
+const getDepartmentAliases = (rawDept: string): string[] => {
+  const aliases = new Set<string>(['all', '*', '']);
+  if (!rawDept) return Array.from(aliases);
+
+  const trimmed = rawDept.toLowerCase().trim();
+  const cleaned = trimmed.replace(/[^a-z0-9]/g, '');
+  aliases.add(trimmed);
+  aliases.add(cleaned);
+
+  if (cleaned.includes('cseds') || cleaned.includes('datascience') || cleaned === '32') {
+    ['cse (data science)', 'cse(ds)', 'cse-ds', 'cse ds', 'cseds', 'data science', 'csedatascience', '32'].forEach((a) => aliases.add(a));
+  } else if (cleaned.includes('aiml') || cleaned.includes('ai') || cleaned === '33') {
+    ['cse (ai & ml)', 'cse(ai&ml)', 'cse-aiml', 'cse aiml', 'cseaiml', 'ai & ml', 'aiml', '33'].forEach((a) => aliases.add(a));
+  } else if (cleaned.includes('csebs') || cleaned.includes('business') || cleaned === '34') {
+    ['cse (bs)', 'cse & bs', 'cse-bs', 'csebs', '34'].forEach((a) => aliases.add(a));
+  } else if (cleaned.includes('csecs') || cleaned.includes('cyber') || cleaned === '37') {
+    ['cse (cs)', 'cse-cs', 'csecs', '37'].forEach((a) => aliases.add(a));
+  } else if (cleaned === 'cse' || cleaned === '05' || cleaned.includes('computerscience')) {
+    ['cse', 'computer science', 'computer science and engineering', '05'].forEach((a) => aliases.add(a));
+  } else if (cleaned === 'ece' || cleaned === '04' || cleaned.includes('electronics')) {
+    ['ece', 'electronics', '04'].forEach((a) => aliases.add(a));
+  } else if (cleaned === 'eee' || cleaned === '02' || cleaned.includes('electrical')) {
+    ['eee', 'electrical', '02'].forEach((a) => aliases.add(a));
+  } else if (cleaned === 'me' || cleaned === '03' || cleaned.includes('mech')) {
+    ['me', 'mech', 'mechanical', '03'].forEach((a) => aliases.add(a));
+  } else if (cleaned === 'ce' || cleaned === '01' || cleaned.includes('civil')) {
+    ['ce', 'civil', '01'].forEach((a) => aliases.add(a));
+  } else if (cleaned.includes('mca')) {
+    ['mca'].forEach((a) => aliases.add(a));
+  } else if (cleaned.includes('mba')) {
+    ['mba'].forEach((a) => aliases.add(a));
+  }
+
+  return Array.from(aliases);
+};
+
 // GET /notifications/my — Get announcements targeted to the current authenticated user
 app.get('/notifications/my', requireAuth, async (req: Request, res: Response) => {
   try {
     await ensureBroadcastTables();
     const userEmail = (req.auth?.email || '').toLowerCase().trim();
-    const userRole = req.auth?.role || 'student';
+    const userRole = (req.auth?.role || 'student').toLowerCase();
     const userRegNo = req.auth?.regNo || '';
-    const userDept = req.auth?.department || '';
+    let userDept = req.auth?.department || '';
     const userIdentifier = userRole === 'student' ? (userRegNo || userEmail) : userEmail;
+
+    // Resolve user's department directly from DB if missing from auth token
+    if (!userDept && userRole === 'faculty') {
+      const fCheck = await db.query('SELECT department FROM faculty WHERE LOWER(email) = LOWER($1) LIMIT 1', [userEmail]).catch(() => ({ rows: [] }));
+      if (fCheck.rows.length > 0 && fCheck.rows[0].department) {
+        userDept = fCheck.rows[0].department;
+      }
+    }
+    if (!userDept && userRole === 'student') {
+      const sCheck = await db.query('SELECT department FROM students WHERE UPPER(roll_number) = UPPER($1) OR LOWER(email) = LOWER($2) LIMIT 1', [userRegNo, userEmail]).catch(() => ({ rows: [] }));
+      if (sCheck.rows.length > 0 && sCheck.rows[0].department) {
+        userDept = sCheck.rows[0].department;
+      }
+    }
 
     let mentorId: string | null = null;
     if (userRole === 'student') {
       mentorId = await getStudentMentorId(userRegNo, userEmail);
     }
+
+    const deptAliases = getDepartmentAliases(userDept);
 
     const query = `
       SELECT b.*,
@@ -13476,15 +13529,15 @@ app.get('/notifications/my', requireAuth, async (req: Request, res: Response) =>
         ON s.notification_id = b.id AND s.user_identifier = $1
       WHERE (
         ($2 = 'student' AND (
-          (b.target_role IN ('all', 'students') AND (b.target_department = 'ALL' OR LOWER(b.target_department) = LOWER($3)))
+          (b.target_role IN ('all', 'students') AND LOWER(b.target_department) = ANY($3::text[]))
           OR (b.target_role = 'mentees' AND $4 IS NOT NULL AND b.target_mentor_id = $4)
         ))
         OR ($2 = 'faculty' AND (
-          (b.target_role IN ('all', 'faculty') AND (b.target_department = 'ALL' OR LOWER(b.target_department) = LOWER($3)))
+          (b.target_role IN ('all', 'faculty') AND LOWER(b.target_department) = ANY($3::text[]))
         ))
         OR ($2 NOT IN ('student', 'faculty') AND (
           b.target_role = 'all'
-          OR (b.target_role = 'faculty' AND (b.target_department = 'ALL' OR LOWER(b.target_department) = LOWER($3)))
+          OR (b.target_role = 'faculty' AND LOWER(b.target_department) = ANY($3::text[]))
         ))
       )
       AND (b.expires_at IS NULL OR b.expires_at > CURRENT_TIMESTAMP)
@@ -13492,7 +13545,7 @@ app.get('/notifications/my', requireAuth, async (req: Request, res: Response) =>
       LIMIT 50
     `;
 
-    const result = await db.query(query, [userIdentifier, userRole, userDept, mentorId]);
+    const result = await db.query(query, [userIdentifier, userRole, deptAliases, mentorId]);
     res.json(result.rows);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -13504,15 +13557,30 @@ app.get('/notifications/pending-popup', requireAuth, async (req: Request, res: R
   try {
     await ensureBroadcastTables();
     const userEmail = (req.auth?.email || '').toLowerCase().trim();
-    const userRole = req.auth?.role || 'student';
+    const userRole = (req.auth?.role || 'student').toLowerCase();
     const userRegNo = req.auth?.regNo || '';
-    const userDept = req.auth?.department || '';
+    let userDept = req.auth?.department || '';
     const userIdentifier = userRole === 'student' ? (userRegNo || userEmail) : userEmail;
+
+    if (!userDept && userRole === 'faculty') {
+      const fCheck = await db.query('SELECT department FROM faculty WHERE LOWER(email) = LOWER($1) LIMIT 1', [userEmail]).catch(() => ({ rows: [] }));
+      if (fCheck.rows.length > 0 && fCheck.rows[0].department) {
+        userDept = fCheck.rows[0].department;
+      }
+    }
+    if (!userDept && userRole === 'student') {
+      const sCheck = await db.query('SELECT department FROM students WHERE UPPER(roll_number) = UPPER($1) OR LOWER(email) = LOWER($2) LIMIT 1', [userRegNo, userEmail]).catch(() => ({ rows: [] }));
+      if (sCheck.rows.length > 0 && sCheck.rows[0].department) {
+        userDept = sCheck.rows[0].department;
+      }
+    }
 
     let mentorId: string | null = null;
     if (userRole === 'student') {
       mentorId = await getStudentMentorId(userRegNo, userEmail);
     }
+
+    const deptAliases = getDepartmentAliases(userDept);
 
     const query = `
       SELECT b.*
@@ -13523,15 +13591,15 @@ app.get('/notifications/pending-popup', requireAuth, async (req: Request, res: R
         AND s.popup_dismissed_at IS NULL
         AND (
           ($2 = 'student' AND (
-            (b.target_role IN ('all', 'students') AND (b.target_department = 'ALL' OR LOWER(b.target_department) = LOWER($3)))
+            (b.target_role IN ('all', 'students') AND LOWER(b.target_department) = ANY($3::text[]))
             OR (b.target_role = 'mentees' AND $4 IS NOT NULL AND b.target_mentor_id = $4)
           ))
           OR ($2 = 'faculty' AND (
-            (b.target_role IN ('all', 'faculty') AND (b.target_department = 'ALL' OR LOWER(b.target_department) = LOWER($3)))
+            (b.target_role IN ('all', 'faculty') AND LOWER(b.target_department) = ANY($3::text[]))
           ))
           OR ($2 NOT IN ('student', 'faculty') AND (
             b.target_role = 'all'
-            OR (b.target_role = 'faculty' AND (b.target_department = 'ALL' OR LOWER(b.target_department) = LOWER($3)))
+            OR (b.target_role = 'faculty' AND LOWER(b.target_department) = ANY($3::text[]))
           ))
         )
         AND (b.expires_at IS NULL OR b.expires_at > CURRENT_TIMESTAMP)
@@ -13539,7 +13607,7 @@ app.get('/notifications/pending-popup', requireAuth, async (req: Request, res: R
       LIMIT 5
     `;
 
-    const result = await db.query(query, [userIdentifier, userRole, userDept, mentorId]);
+    const result = await db.query(query, [userIdentifier, userRole, deptAliases, mentorId]);
     res.json(result.rows);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
