@@ -101,12 +101,14 @@ export const AdminDashboardPage: React.FC = () => {
   const [adminResetSaving, setAdminResetSaving] = useState(false);
   const [adminResetMessage, setAdminResetMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  const isEffectiveSuperAdmin = isSuperAdmin || Boolean(user?.isSuperAdmin) || user?.department === '*' || user?.department === 'All';
+
   // Student Directory state
   const [searchQuery, setSearchQuery] = useState('');
   const [sectionFilter, setSectionFilter] = useState('');
   const [yearFilter, setYearFilter] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState<string>(
-    (user?.isSuperAdmin || isOversight) ? 'All' : (user?.department || 'CSE (Data Science)')
+    (isEffectiveSuperAdmin || isOversight) ? 'All' : (user?.department || 'CSE (Data Science)')
   );
   const [showAddModal, setShowAddModal] = useState(false);
   const [showBulkImportModal, setShowBulkImportModal] = useState(false);
@@ -211,7 +213,7 @@ export const AdminDashboardPage: React.FC = () => {
   // Queries
   const { data: students = [], refetch } = useQuery({
     queryKey: ['adminStudents', departmentFilter],
-    queryFn: () => api.getAllStudents({ department: departmentFilter === 'All' ? undefined : departmentFilter }),
+    queryFn: () => api.getAllStudents({ department: (!departmentFilter || departmentFilter === 'All' || departmentFilter === '*') ? undefined : departmentFilter }),
     staleTime: 0,
     refetchOnMount: 'always',
   });
