@@ -2420,6 +2420,7 @@ app.get('/students/mentor-lookup', requireRole('hod', 'admin'), async (req: Requ
   }
 });
 
+let studentColumnsEnsured = false;
 // GET /students/:id — Get Student Profile
 app.get('/students/:id', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -2431,13 +2432,16 @@ app.get('/students/:id', requireAuth, async (req: Request, res: Response) => {
       return res.json(student);
     }
 
-    await db.query(`
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS cgpa NUMERIC(4,2) DEFAULT 0.00;
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_url TEXT;
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_updated TIMESTAMP WITH TIME ZONE;
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_url TEXT;
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS resume_url TEXT;
-    `).catch(() => {});
+    if (!studentColumnsEnsured) {
+      studentColumnsEnsured = true;
+      await db.query(`
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS cgpa NUMERIC(4,2) DEFAULT 0.00;
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_url TEXT;
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_updated TIMESTAMP WITH TIME ZONE;
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_url TEXT;
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS resume_url TEXT;
+      `).catch(() => {});
+    }
 
     const result = await db.query(
       `SELECT s.*, COALESCE(ROUND(AVG(a.semester_gpa), 2), s.cgpa, 0.00) AS cgpa
@@ -4400,8 +4404,10 @@ app.get('/faculty/by-email/:email', async (req: Request, res: Response) => {
 // ============================================================================
 // Faculty Full Profile (Personal, Education, Certs, Activities, Publications, Domains)
 // ============================================================================
+let facultyProfileTableEnsured = false;
 const ensureFacultyProfileTable = async () => {
-  if (db.isMock) return;
+  if (db.isMock || facultyProfileTableEnsured) return;
+  facultyProfileTableEnsured = true;
   await db.query(`
     CREATE TABLE IF NOT EXISTS faculty_full_profiles (
       email TEXT PRIMARY KEY,
