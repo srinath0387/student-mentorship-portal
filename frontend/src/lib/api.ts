@@ -108,51 +108,48 @@ export const api = {
   },
 
   getAllStudents: async (params?: { department?: string; batch?: string; section?: string; search?: string }): Promise<StudentProfile[]> => {
-    const isAllDept = !params?.department || params.department === 'All';
-    // When querying all departments institution-wide (2,900+ and growing),
-    // a single unchunked response exceeds AWS API Gateway's 6MB payload limit.
-    // Chunking with limit=1000 per request guarantees every batch stays safely at ~2.0 MB.
-    if (isAllDept && !params?.search && !params?.batch && !params?.section) {
-      try {
-        const pageSize = 1000;
-        // Fetch first 3 chunks (up to 3,000 students) in parallel for maximum speed
-        const [b1, b2, b3] = await Promise.all([
-          fetchWithAuth(`/students?limit=${pageSize}&offset=0`),
-          fetchWithAuth(`/students?limit=${pageSize}&offset=${pageSize}`),
-          fetchWithAuth(`/students?limit=${pageSize}&offset=${pageSize * 2}`),
-        ]);
-        const list1 = Array.isArray(b1) ? b1 : [];
-        const list2 = Array.isArray(b2) ? b2 : [];
-        const list3 = Array.isArray(b3) ? b3 : [];
-        let allStudents = [...list1, ...list2, ...list3];
-
-        // If college has more than 3,000 students in the future, continue dynamic pagination
-        if (list3.length === pageSize) {
-          let offset = pageSize * 3;
-          while (true) {
-            const nextBatch = await fetchWithAuth(`/students?limit=${pageSize}&offset=${offset}`);
-            if (!Array.isArray(nextBatch) || nextBatch.length === 0) break;
-            allStudents = allStudents.concat(nextBatch);
-            if (nextBatch.length < pageSize) break;
-            offset += pageSize;
-          }
-        }
-        return allStudents;
-      } catch (err) {
-        console.warn('[getAllStudents chunked fetch warning]:', err);
-      }
-    }
-
     const cleanParams: Record<string, string> = {};
     if (params) {
       Object.entries(params).forEach(([key, val]) => {
-        if (val !== undefined && val !== null && val !== '') {
+        if (val !== undefined && val !== null && val !== '' && val !== 'All' && val !== '*') {
           cleanParams[key] = val;
         }
       });
     }
-    const query = new URLSearchParams(cleanParams).toString();
-    return fetchWithAuth(`/students${query ? `?${query}` : ''}`);
+
+    // Universal chunking: whether querying All departments (super admin) or a specific
+    // department (e.g. CSE, ECE, Mech, or DS as numbers grow), chunking in 1,000-record batches
+    // guarantees NO query ever exceeds AWS API Gateway's 6MB payload limit.
+    const pageSize = 1000;
+    const baseQuery = new URLSearchParams(cleanParams).toString();
+    const delimiter = baseQuery ? '&' : '';
+
+    try {
+      // Fast path: fetch page 0
+      const firstChunk = await fetchWithAuth(`/students?${baseQuery}${delimiter}limit=${pageSize}&offset=0`);
+      if (!Array.isArray(firstChunk)) return [];
+
+      // If records fit in the first page (< 1,000), return immediately (1 single HTTP call)
+      if (firstChunk.length < pageSize) {
+        return firstChunk;
+      }
+
+      // If 1,000+ records exist, dynamically retrieve subsequent pages
+      let allStudents = [...firstChunk];
+      let offset = pageSize;
+      while (true) {
+        const nextChunk = await fetchWithAuth(`/students?${baseQuery}${delimiter}limit=${pageSize}&offset=${offset}`);
+        if (!Array.isArray(nextChunk) || nextChunk.length === 0) break;
+        allStudents = allStudents.concat(nextChunk);
+        if (nextChunk.length < pageSize) break;
+        offset += pageSize;
+      }
+      return allStudents;
+    } catch (err) {
+      console.warn('[getAllStudents universal chunking warning]:', err);
+      // Fallback
+      return fetchWithAuth(`/students${baseQuery ? `?${baseQuery}` : ''}`);
+    }
   },
 
   createStudent: async (data: Partial<StudentProfile>): Promise<{ message: string; student: StudentProfile }> => {
