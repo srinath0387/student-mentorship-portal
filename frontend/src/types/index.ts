@@ -232,6 +232,7 @@ export interface FacultyPersonalDetails {
   linkedin_url?: string;
   scopus_id?: string;
   orcid_id?: string;
+  photo_url?: string;
   joining_date?: string; // YYYY-MM-DD
   prior_experience_years?: number;
   prior_experience_months?: number;
