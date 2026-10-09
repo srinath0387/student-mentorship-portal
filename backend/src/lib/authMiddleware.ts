@@ -17,6 +17,7 @@ export interface AuthPayload {
   email: string;
   role: string;   // 'student' | 'faculty' | 'hod' | 'admin'
   regNo: string;  // roll_number or faculty_id
+  name?: string;
   department?: string;  // department name for scoped access
   isSuperAdmin?: boolean;  // true for the 3 super admin emails
 }
