@@ -13803,6 +13803,93 @@ app.delete('/notifications/:id', requireAuth, async (req: Request, res: Response
   }
 });
 
+// ============================================================================
+// Admin: Unregistered Students (In mentor_assignments mapping but not yet registered)
+// ============================================================================
+app.get('/admin/unregistered-students', requireAuth, requireRole('admin', 'hod', 'coordinator', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS mentor_assignments (
+        roll_number  TEXT        NOT NULL PRIMARY KEY,
+        faculty_id   TEXT        NOT NULL,
+        assigned_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
+    `).catch(() => {});
+
+    const auth = req.auth!;
+    const callerDept = (auth.department || '').trim();
+    const callerRole = (auth.role || '').toLowerCase();
+    const isSuper = Boolean(auth.isSuperAdmin) ||
+      callerDept === '*' ||
+      callerDept.toLowerCase() === 'all' ||
+      ['principal', 'director', 'management', 'program_chair'].includes(callerRole);
+
+    const requestedDept = req.query.department ? String(req.query.department).trim() : null;
+    const effectiveDept = isSuper
+      ? (requestedDept && requestedDept !== 'All' ? requestedDept : null)
+      : (callerDept && callerDept !== '*' && callerDept.toLowerCase() !== 'all' ? callerDept : null);
+
+    // Query all records in mentor_assignments that do NOT have a matching student record
+    const result = await db.query(`
+      SELECT 
+        ma.roll_number,
+        ma.faculty_id,
+        ma.assigned_at,
+        f.name        AS mentor_name,
+        f.email       AS mentor_email,
+        f.department  AS mentor_department
+      FROM mentor_assignments ma
+      LEFT JOIN students s ON UPPER(s.roll_number) = UPPER(ma.roll_number)
+      LEFT JOIN faculty f ON UPPER(f.faculty_id) = UPPER(ma.faculty_id)
+      WHERE s.roll_number IS NULL
+      ORDER BY ma.roll_number ASC
+    `);
+
+    let targetAliases: string[] = [];
+    if (effectiveDept && effectiveDept !== 'All') {
+      targetAliases = getDepartmentAliases(effectiveDept);
+    }
+
+    const students = [];
+    for (const row of result.rows) {
+      const cleanRoll = (row.roll_number || '').trim().toUpperCase();
+      const inferredDept = getDeptFromRollNumber(cleanRoll);
+      const studentDept = inferredDept && inferredDept !== 'Unknown'
+        ? inferredDept
+        : (row.mentor_department || 'Unknown');
+
+      // Department filtering: matches student's branch OR mentor's department
+      if (targetAliases.length > 0) {
+        const studentAliases = getDepartmentAliases(studentDept);
+        const mentorAliases = row.mentor_department ? getDepartmentAliases(row.mentor_department) : [];
+        const matches = targetAliases.some((a) => studentAliases.includes(a) || mentorAliases.includes(a));
+        if (!matches) {
+          continue;
+        }
+      }
+
+      students.push({
+        roll_number: cleanRoll,
+        department: studentDept,
+        mentor_id: row.faculty_id,
+        mentor_name: row.mentor_name || 'Not Assigned',
+        mentor_email: row.mentor_email || '',
+        mentor_department: row.mentor_department || '',
+        assigned_at: row.assigned_at,
+      });
+    }
+
+    res.json({
+      total: students.length,
+      department: effectiveDept || 'All',
+      students,
+    });
+  } catch (err: any) {
+    console.error('[Admin Unregistered Students Error]:', err);
+    res.status(500).json({ error: err.message || 'Failed to fetch unregistered students.' });
+  }
+});
+
 // Catch-all SPA route fallback — MUST be the last route registered
 app.get('*', (_req: Request, res: Response) => {
   return sendIndexHtml(res);

@@ -794,3 +794,14 @@ export interface CreateBroadcastPayload {
   sender_name?: string;
   expires_at?: string;
 }
+
+export interface UnregisteredStudent {
+  roll_number: string;
+  department: string;
+  mentor_id: string;
+  mentor_name: string;
+  mentor_email: string;
+  mentor_department?: string;
+  assigned_at?: string;
+}
+

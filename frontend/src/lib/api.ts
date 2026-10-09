@@ -10,6 +10,7 @@ import {
   ScoreBreakdown,
   BroadcastNotification,
   CreateBroadcastPayload,
+  UnregisteredStudent,
 } from '../types';
 
 /**
@@ -1423,6 +1424,13 @@ export const api = {
     return fetchWithAuth(`/notifications/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
+  },
+
+  getUnregisteredStudents: async (
+    department?: string
+  ): Promise<{ total: number; department: string; students: UnregisteredStudent[] }> => {
+    const q = department && department !== 'All' ? `?department=${encodeURIComponent(department)}` : '';
+    return fetchWithAuth(`/admin/unregistered-students${q}`);
   },
 };
 

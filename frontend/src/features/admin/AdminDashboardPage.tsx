@@ -53,6 +53,7 @@ import { HodLeaveApprovalTab } from '../leave/HodLeaveApprovalTab';
 import { HolidayCalendarTab } from './tabs/HolidayCalendarTab';
 import { LeaveCreditManagementTab } from './tabs/LeaveCreditManagementTab';
 import { CertificationAnalyticsView } from '../certifications/components/CertificationAnalyticsView';
+import { UnregisteredStudentsTab } from './tabs/UnregisteredStudentsTab';
 
 const DEPARTMENTS = VALID_DEPARTMENT_NAMES;
 const YEARS = ['1st Year', '2nd Year', '3rd Year', '4th Year'] as const;
@@ -557,6 +558,7 @@ export const AdminDashboardPage: React.FC = () => {
           <nav className="flex px-2 pt-2 pb-0 gap-1 border-b border-borderLine">
             {[
               { key: 'students', label: 'Student Directory (CRUD)' },
+              { key: 'unregistered', label: '⚠️ Unregistered Students' },
               { key: 'certifications', label: '🎓 Certification Analytics' },
               { key: 'leaves', label: '🌴 Leave & OD Approvals' },
               { key: 'leave-credits', label: '🎫 Leave Credit Mgmt' },
@@ -618,6 +620,9 @@ export const AdminDashboardPage: React.FC = () => {
         <StatCard icon={<Code2 className="w-5 h-5" />} iconBgColor="bg-[#FFA116]/10 text-[#FFA116]"
           accentColor="brand" label="LeetCode Profiles" value={`${leetcodeCount} Linked`} subtext="Students with LeetCode connected" />
       </div>
+
+      {/* ── TAB: Unregistered Students (Mentor Mapping vs Portal Registration) ── */}
+      {activeTab === 'unregistered' && <UnregisteredStudentsTab />}
 
       {/* ── TAB: Certification Analytics ── */}
       {activeTab === 'certifications' && <CertificationAnalyticsView />}

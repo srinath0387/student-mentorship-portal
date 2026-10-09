@@ -43,6 +43,7 @@ import { HodLeaveApprovalTab } from '../leave/HodLeaveApprovalTab';
 import { HolidayCalendarTab } from '../admin/tabs/HolidayCalendarTab';
 import { CertificationAnalyticsView } from '../certifications/components/CertificationAnalyticsView';
 import { HodPowerBiView } from './components/HodPowerBiView';
+import { UnregisteredStudentsTab } from '../admin/tabs/UnregisteredStudentsTab';
 
 const YEARS = ['1st Year', '2nd Year', '3rd Year', '4th Year'] as const;
 const SECTIONS = ['Section A', 'Section B', 'Section C'] as const;
@@ -120,7 +121,7 @@ function mapStudentToHodEntry(student: any, index: number, liveSolved?: number):
 }
 
 export const HodDashboardPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'certifications' | 'leaves' | 'holidays' | 'attendance' | 'analytics' | 'students' | 'rankings' | 'placement' | 'mentees' | 'settings' | 'powerbi'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'unregistered' | 'certifications' | 'leaves' | 'holidays' | 'attendance' | 'analytics' | 'students' | 'rankings' | 'placement' | 'mentees' | 'settings' | 'powerbi'>('overview');
   const [hodAttendanceSubTab, setHodAttendanceSubTab] = useState<'grid' | 'unposted' | 'tracking' | 'allotments'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -182,7 +183,7 @@ export const HodDashboardPage: React.FC = () => {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const tab = params.get('tab');
-    if (tab === 'overview' || tab === 'leaves' || tab === 'attendance' || tab === 'analytics' || tab === 'students' || tab === 'rankings' || tab === 'placement' || tab === 'mentees' || tab === 'settings' || tab === 'powerbi') {
+    if (tab === 'overview' || tab === 'unregistered' || tab === 'certifications' || tab === 'leaves' || tab === 'holidays' || tab === 'attendance' || tab === 'analytics' || tab === 'students' || tab === 'rankings' || tab === 'placement' || tab === 'mentees' || tab === 'settings' || tab === 'powerbi') {
       setActiveTab(tab as any);
     }
   }, [location.search]);
@@ -600,6 +601,7 @@ export const HodDashboardPage: React.FC = () => {
               { key: 'analytics', label: '📈 Academic Analytics' },
               { key: 'placement', label: '🎯 Placement Eligibility Engine (T&P)' },
               { key: 'students', label: '👨‍🎓 Student Directory & Inspection' },
+              { key: 'unregistered', label: '⚠️ Unregistered Students' },
               { key: 'rankings', label: '🏆 Department Leaderboard' },
               { key: 'mentees', label: `👤 My Mentees${hodMentees.length > 0 ? ` (${hodMentees.length})` : ''}` },
               { key: 'settings', label: '⚙️ Account Settings' },
@@ -635,6 +637,9 @@ export const HodDashboardPage: React.FC = () => {
           <HodPowerBiView department={user?.department || 'CSE (Data Science)'} />
         </div>
       )}
+
+      {/* ── TAB: Unregistered Students ── */}
+      {activeTab === 'unregistered' && <UnregisteredStudentsTab />}
 
       {/* ── TAB: Certification Analytics ── */}
       {activeTab === 'certifications' && <CertificationAnalyticsView />}
