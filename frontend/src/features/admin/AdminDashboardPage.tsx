@@ -220,6 +220,9 @@ export const AdminDashboardPage: React.FC = () => {
   const [mentorLookupLoading, setMentorLookupLoading] = useState(false);
   const [mentorLookupSearched, setMentorLookupSearched] = useState(false);
 
+  // Ref for the student table's scroll container — passed to VirtualStudentRows
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+
   // Queries — staleTime prevents re-fetching on every tab switch
   const { data: students = [], refetch } = useQuery({
     queryKey: ['adminStudents', departmentFilter],
@@ -926,7 +929,12 @@ export const AdminDashboardPage: React.FC = () => {
             </div>
           )}
 
-          <div className="overflow-x-auto">
+          {/* Table scroll container — ref passed to VirtualStudentRows for correct virtualizer scroll calculation */}
+          <div
+            ref={tableScrollRef}
+            className="overflow-x-auto"
+            style={{ maxHeight: '65vh', overflowY: 'auto' }}
+          >
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-borderLine bg-background text-[11px] font-semibold text-textSecondary uppercase tracking-wider">
@@ -971,6 +979,7 @@ export const AdminDashboardPage: React.FC = () => {
                     setInspectTab={setInspectTab}
                     openEditModal={openEditModal}
                     handleDeleteStudent={handleDeleteStudent}
+                    scrollContainerRef={tableScrollRef}
                   />
                 )}
               </tbody>
@@ -2316,6 +2325,7 @@ interface VirtualStudentRowsProps {
   setInspectTab: (tab: string) => void;
   openEditModal: (s: StudentProfile) => void;
   handleDeleteStudent: (rollNumber: string, name: string) => void;
+  scrollContainerRef: React.RefObject<HTMLDivElement>;
 }
 
 const VirtualStudentRows: React.FC<VirtualStudentRowsProps> = ({
@@ -2326,12 +2336,12 @@ const VirtualStudentRows: React.FC<VirtualStudentRowsProps> = ({
   setInspectTab,
   openEditModal,
   handleDeleteStudent,
+  scrollContainerRef,
 }) => {
-  const scrollRef = useRef<HTMLDivElement>(null);
-
   const virtualizer = useVirtualizer({
     count: students.length,
-    getScrollElement: () => scrollRef.current?.closest('.overflow-x-auto') as HTMLElement | null,
+    // Use the ref passed from the parent — this is the actual scrolling div
+    getScrollElement: () => scrollContainerRef.current,
     estimateSize: () => ROW_HEIGHT,
     overscan: 5,
   });
