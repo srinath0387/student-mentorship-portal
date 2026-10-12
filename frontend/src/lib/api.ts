@@ -299,6 +299,11 @@ export const api = {
     return fetchWithAuth(`/faculty/by-email/${encodeURIComponent(email)}`);
   },
 
+  getDepartmentFaculty: async (department?: string): Promise<any[]> => {
+    const q = department ? `?department=${encodeURIComponent(department)}` : '';
+    return fetchWithAuth(`/faculty${q}`);
+  },
+
   // Faculty Full Profile (Personal, Education, Certs, Activities, Publications, Domains)
   getFacultyFullProfile: async (email: string): Promise<any> => {
     return fetchWithAuth(`/faculty/full-profile/${encodeURIComponent(email)}`);

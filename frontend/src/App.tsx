@@ -12,6 +12,7 @@ import { Footer } from './components/layout/Footer';
 import { api } from './lib/api';
 import { ProfilePhotoUploadModal } from './components/common/ProfilePhotoUploadModal';
 import { LoginNoticePopupModal } from './components/common/LoginNoticePopupModal';
+import { StudentOnboardingPromptModal } from './components/common/StudentOnboardingPromptModal';
 
 // Lazy load feature dashboard pages on-demand for fast initial page load
 const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage').then(m => ({ default: m.DashboardPage })));
@@ -129,6 +130,9 @@ const MainLayout: React.FC = () => {
   const queryClient = useQueryClient();
   const [photoModalDismissed, setPhotoModalDismissed] = useState(false);
   const [popupNoticesDismissed, setPopupNoticesDismissed] = useState(false);
+  const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
+    return sessionStorage.getItem('advitiyans_onboarding_dismissed') === 'true';
+  });
 
   // Pending Login Notice Popups check
   const { data: pendingNotices = [] } = useQuery({
@@ -172,6 +176,19 @@ const MainLayout: React.FC = () => {
   const shouldPromptStudent = Boolean(role === 'student' && studentProfile && !hasStudentPhoto);
   const shouldPromptFaculty = Boolean(isFacultyRole && facultyProfile && !hasFacultyPhoto);
   const isPhotoRequired = (shouldPromptStudent || shouldPromptFaculty) && !photoModalDismissed;
+
+  // Check if student is missing Parent Phone OR Faculty Mentor
+  const isStudentMissingOnboarding = Boolean(
+    role === 'student' &&
+    studentProfile &&
+    (!studentProfile.parent_phone || !studentProfile.faculty_mentor_id)
+  );
+  const isStudentOnboardingRequired = isStudentMissingOnboarding && !onboardingDismissed && !isPhotoRequired;
+
+  const handleDismissOnboarding = () => {
+    setOnboardingDismissed(true);
+    sessionStorage.setItem('advitiyans_onboarding_dismissed', 'true');
+  };
 
   // Scroll the main content area to the top whenever the route or tab changes.
   useEffect(() => {
@@ -238,6 +255,16 @@ const MainLayout: React.FC = () => {
           notices={pendingNotices}
           onDismissNotice={handleDismissNotice}
           onClose={() => setPopupNoticesDismissed(true)}
+        />
+      )}
+
+      {/* Mandatory / Prompt Student Onboarding Modal (Parent Phone & Department Mentor) */}
+      {isStudentOnboardingRequired && studentProfile && (
+        <StudentOnboardingPromptModal
+          student={studentProfile}
+          isOpen={true}
+          onClose={handleDismissOnboarding}
+          onSuccess={handleDismissOnboarding}
         />
       )}
     </div>

@@ -2437,6 +2437,7 @@ app.get('/students/:id', requireAuth, async (req: Request, res: Response) => {
       studentColumnsEnsured = true;
       await db.query(`
         ALTER TABLE students ADD COLUMN IF NOT EXISTS cgpa NUMERIC(4,2) DEFAULT 0.00;
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_phone VARCHAR(20);
         ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_url TEXT;
         ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_updated TIMESTAMP WITH TIME ZONE;
         ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_url TEXT;
@@ -2445,14 +2446,21 @@ app.get('/students/:id', requireAuth, async (req: Request, res: Response) => {
     }
 
     const result = await db.query(
-      `SELECT s.*, COALESCE(ROUND(AVG(a.semester_gpa), 2), s.cgpa, 0.00) AS cgpa
+      `SELECT s.*,
+              COALESCE(ROUND(AVG(a.semester_gpa), 2), s.cgpa, 0.00) AS cgpa,
+              COALESCE(f.name, f2.name)   AS mentor_name,
+              COALESCE(f.email, f2.email) AS mentor_email,
+              COALESCE(f.department, f2.department) AS mentor_department
        FROM students s
        LEFT JOIN academics a ON a.student_id = s.roll_number
+       LEFT JOIN mentor_assignments ma ON UPPER(ma.roll_number) = UPPER(s.roll_number)
+       LEFT JOIN faculty f  ON UPPER(f.faculty_id) = UPPER(ma.faculty_id)
+       LEFT JOIN faculty f2 ON UPPER(f2.faculty_id) = UPPER(s.faculty_mentor_id)
        WHERE UPPER(s.roll_number) = $1
           OR UPPER(s.admission_id) = $1
           OR LOWER(s.email) = LOWER($1)
           OR s.personal_mobile = $1
-       GROUP BY s.roll_number, s.name, s.email, s.year, s.phone, s.address, s.native_place, s.department, s.batch, s.section, s.hostel_day_scholar, s.driving_license, s.passport, s.relocation_willingness, s.family_business, s.financial_background, s.faculty_mentor_id, s.photo_url, s.resume_url, s.linkedin_url, s.linkedin_updated, s.created_at, s.updated_at, s.cgpa
+       GROUP BY s.roll_number, s.name, s.email, s.year, s.phone, s.parent_phone, s.address, s.native_place, s.department, s.batch, s.section, s.hostel_day_scholar, s.driving_license, s.passport, s.relocation_willingness, s.family_business, s.financial_background, s.faculty_mentor_id, s.photo_url, s.resume_url, s.linkedin_url, s.linkedin_updated, s.created_at, s.updated_at, s.cgpa, f.name, f2.name, f.email, f2.email, f.department, f2.department
        LIMIT 1`,
       [studentId]
     );
@@ -2493,6 +2501,7 @@ app.put('/students/:id', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), as
 
     await db.query(`
       ALTER TABLE students ADD COLUMN IF NOT EXISTS cgpa NUMERIC(4,2) DEFAULT 0.00;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_phone VARCHAR(20);
       ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_url TEXT;
       ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_updated TIMESTAMP WITH TIME ZONE;
       ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_url TEXT;
@@ -2507,6 +2516,7 @@ app.put('/students/:id', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), as
     const email = body.email || existing.email || `${studentId.toLowerCase()}@rgmcet.edu.in`;
     const year = body.year && body.year !== '' ? body.year : (existing.year || '3rd Year');
     const phone = body.phone !== undefined ? body.phone : (existing.phone || null);
+    const parent_phone = body.parent_phone !== undefined ? body.parent_phone : (existing.parent_phone || null);
     const address = body.address !== undefined ? body.address : (existing.address || null);
     const native_place = body.native_place !== undefined ? body.native_place : (existing.native_place || null);
     const department = body.department && body.department !== '' ? body.department : (existing.department || getDeptFromRollNumber(studentId));
@@ -2518,13 +2528,74 @@ app.put('/students/:id', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), as
     const relocation_willingness = body.relocation_willingness !== undefined ? Boolean(body.relocation_willingness) : Boolean(existing.relocation_willingness);
     const family_business = body.family_business !== undefined ? body.family_business : (existing.family_business || null);
     const financial_background = body.financial_background !== undefined ? body.financial_background : (existing.financial_background || null);
-    const faculty_mentor_id = body.faculty_mentor_id !== undefined ? body.faculty_mentor_id : (existing.faculty_mentor_id || null);
+
+    // SECURITY & MENTOR LOCKING:
+    // If user is a student:
+    // 1. If mentor is ALREADY assigned (in existing.faculty_mentor_id or mentor_assignments), student CANNOT change it.
+    // 2. If mentor is not assigned, student can set it ONCE, and it must belong to their department.
+    // Admin and HOD can modify or reassign mentor at any time.
+    const isPrivileged = req.auth?.role === 'admin' || req.auth?.role === 'hod';
+    let faculty_mentor_id = existing.faculty_mentor_id || null;
+
+    if (body.faculty_mentor_id !== undefined && body.faculty_mentor_id !== null && body.faculty_mentor_id !== '') {
+      const requestedMentorId = String(body.faculty_mentor_id).trim();
+
+      if (!isPrivileged) {
+        // Check if student already has a mentor assigned
+        if (existing.faculty_mentor_id && existing.faculty_mentor_id.toUpperCase() !== requestedMentorId.toUpperCase()) {
+          return res.status(403).json({
+            error: 'You have already selected a mentor. Mentor re-assignment is locked and can only be changed by your department admin.',
+          });
+        }
+
+        // Validate that requested faculty belongs to the student's department
+        const facCheck = await db.query(
+          `SELECT faculty_id, name, department FROM faculty WHERE UPPER(faculty_id) = UPPER($1) LIMIT 1`,
+          [requestedMentorId]
+        );
+        if (facCheck.rows.length === 0) {
+          return res.status(400).json({ error: 'Selected faculty mentor does not exist.' });
+        }
+
+        const facDept = facCheck.rows[0].department || '';
+        const studentDeptKey = getDepartmentAliases(department);
+        const facDeptKey = getDepartmentAliases(facDept);
+        const deptMatches = studentDeptKey.some((a) => facDeptKey.includes(a));
+
+        if (!deptMatches) {
+          return res.status(400).json({
+            error: `You can only select a mentor from your own department (${department}).`,
+          });
+        }
+
+        faculty_mentor_id = facCheck.rows[0].faculty_id;
+      } else {
+        // Privileged caller (Admin / HOD) can set any valid mentor
+        faculty_mentor_id = requestedMentorId;
+      }
+
+      // Upsert into mentor_assignments table to keep global mappings unified
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS mentor_assignments (
+          roll_number  TEXT        NOT NULL PRIMARY KEY,
+          faculty_id   TEXT        NOT NULL,
+          assigned_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        )
+      `).catch(() => {});
+
+      await db.query(
+        `INSERT INTO mentor_assignments (roll_number, faculty_id, assigned_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (roll_number) DO UPDATE SET faculty_id = EXCLUDED.faculty_id, assigned_at = NOW()`,
+        [studentId, faculty_mentor_id]
+      ).catch(() => {});
+    }
+
     const photo_url = body.photo_url !== undefined ? body.photo_url : (existing.photo_url || null);
     const resume_url = body.resume_url !== undefined ? body.resume_url : (existing.resume_url || null);
     const linkedin_url = body.linkedin_url !== undefined ? body.linkedin_url : (existing.linkedin_url || null);
 
     // SECURITY: Students cannot self-modify CGPA. CGPA is computed from verified academics or updated by Admin/HOD.
-    const isPrivileged = req.auth?.role === 'admin' || req.auth?.role === 'hod';
     const cgpa = (isPrivileged && body.cgpa !== undefined && body.cgpa !== null && body.cgpa !== '')
       ? Number(body.cgpa)
       : (existing.cgpa !== undefined && existing.cgpa !== null ? Number(existing.cgpa) : 0);
@@ -2532,19 +2603,19 @@ app.put('/students/:id', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), as
     let result;
     if (existingRes.rows.length === 0) {
       result = await db.query(
-        `INSERT INTO students (roll_number, name, email, year, phone, address, native_place, department, batch, section, hostel_day_scholar, driving_license, passport, relocation_willingness, family_business, financial_background, faculty_mentor_id, photo_url, resume_url, linkedin_url, cgpa)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+        `INSERT INTO students (roll_number, name, email, year, phone, parent_phone, address, native_place, department, batch, section, hostel_day_scholar, driving_license, passport, relocation_willingness, family_business, financial_background, faculty_mentor_id, photo_url, resume_url, linkedin_url, cgpa)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
          RETURNING *`,
-        [studentId, name, email, year, phone, address, native_place, department, batch, section, hostel_day_scholar, driving_license, passport, relocation_willingness, family_business, financial_background, faculty_mentor_id, photo_url, resume_url, linkedin_url, cgpa]
+        [studentId, name, email, year, phone, parent_phone, address, native_place, department, batch, section, hostel_day_scholar, driving_license, passport, relocation_willingness, family_business, financial_background, faculty_mentor_id, photo_url, resume_url, linkedin_url, cgpa]
       );
     } else {
       result = await db.query(
-        `UPDATE students SET name=$1, email=$2, year=$3, phone=$4, address=$5, native_place=$6,
-         department=$7, batch=$8, section=$9, hostel_day_scholar=$10, driving_license=$11,
-         passport=$12, relocation_willingness=$13, family_business=$14, financial_background=$15,
-         faculty_mentor_id=$16, photo_url=$17, resume_url=$18, linkedin_url=$19, cgpa=$20, updated_at=CURRENT_TIMESTAMP
-         WHERE UPPER(roll_number) = $21 RETURNING *`,
-        [name, email, year, phone, address, native_place, department, batch, section, hostel_day_scholar, driving_license, passport, relocation_willingness, family_business, financial_background, faculty_mentor_id, photo_url, resume_url, linkedin_url, cgpa, studentId]
+        `UPDATE students SET name=$1, email=$2, year=$3, phone=$4, parent_phone=$5, address=$6, native_place=$7,
+         department=$8, batch=$9, section=$10, hostel_day_scholar=$11, driving_license=$12,
+         passport=$13, relocation_willingness=$14, family_business=$15, financial_background=$16,
+         faculty_mentor_id=$17, photo_url=$18, resume_url=$19, linkedin_url=$20, cgpa=$21, updated_at=CURRENT_TIMESTAMP
+         WHERE UPPER(roll_number) = $22 RETURNING *`,
+        [name, email, year, phone, parent_phone, address, native_place, department, batch, section, hostel_day_scholar, driving_license, passport, relocation_willingness, family_business, financial_background, faculty_mentor_id, photo_url, resume_url, linkedin_url, cgpa, studentId]
       );
     }
 
@@ -5067,8 +5138,8 @@ app.get('/faculty/mentees/by-email/:email', async (req: Request, res: Response) 
   }
 });
 
-// GET /faculty — List all faculty with mentee counts (admin/HOD/coordinator/faculty/oversight view, scoped by department or all)
-app.get('/faculty', requireRole('admin', 'hod', 'coordinator', 'faculty', 'director', 'principal', 'management', 'program_chair'), async (req: Request, res: Response) => {
+// GET /faculty — List all faculty with mentee counts (admin/HOD/coordinator/faculty/student view, scoped by department or all)
+app.get('/faculty', requireRole('admin', 'hod', 'coordinator', 'faculty', 'director', 'principal', 'management', 'program_chair', 'student'), async (req: Request, res: Response) => {
   try {
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
@@ -5077,7 +5148,9 @@ app.get('/faculty', requireRole('admin', 'hod', 'coordinator', 'faculty', 'direc
     const reqDept = req.query.department ? String(req.query.department) : undefined;
 
     let targetDept: string | undefined;
-    if (!isSuper && callerDept && callerDept !== 'All' && callerDept !== '*') {
+    if (callerRole === 'student') {
+      targetDept = callerDept || reqDept;
+    } else if (!isSuper && callerDept && callerDept !== 'All' && callerDept !== '*') {
       targetDept = callerDept;
     } else if (reqDept && reqDept !== 'All' && reqDept !== 'undefined' && reqDept !== 'null') {
       targetDept = reqDept;
