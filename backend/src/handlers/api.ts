@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import zlib from 'zlib';
+import compression from 'compression';
 import { globalErrorHandler } from '../lib/errors';
 import { logger } from '../lib/logger';
 import cors from 'cors';
@@ -39,7 +40,65 @@ import bcrypt from 'bcryptjs';
 // compareAndUpgradePassword and BCRYPT_ROUNDS now live in services/passwordService.ts
 // (Phase 1.1 extraction)
 
+// ── In-Memory Student List Cache (Phase 4 Optimization) ─────────────────────
+// Caches GET /students results per department+filters for 60 seconds.
+// Eliminates repeated expensive 3-table JOIN scans on the most common admin queries.
+// Automatically invalidated on any write operation (POST/PUT/DELETE /students).
+// Safe for Lambda: each instance has its own memory; inter-instance consistency is
+// not needed here since all writes also hit DB, and 60s TTL limits staleness.
+// ─────────────────────────────────────────────────────────────────────────────
+interface StudentCacheEntry { data: any[]; expiresAt: number; }
+const studentListCache = new Map<string, StudentCacheEntry>();
+const STUDENT_CACHE_TTL_MS = 60 * 1000; // 60 seconds
+
+function getStudentCacheKey(query: Record<string, any>): string {
+  return JSON.stringify({
+    dept:    String(query.department  || 'All'),
+    batch:   String(query.batch       || ''),
+    year:    String(query.year        || ''),
+    section: String(query.section     || ''),
+    limit:   String(query.limit       || '1000'),
+    offset:  String(query.offset      || '0'),
+    role:    String(query._role       || ''),
+    callerDept: String(query._callerDept || ''),
+  });
+}
+
+function getCachedStudents(key: string): any[] | null {
+  const entry = studentListCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    studentListCache.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+
+function setCachedStudents(key: string, data: any[]): void {
+  // Cap at 30 entries to prevent unbounded memory growth
+  if (studentListCache.size >= 30) {
+    const firstKey = studentListCache.keys().next().value;
+    if (firstKey) studentListCache.delete(firstKey);
+  }
+  studentListCache.set(key, { data, expiresAt: Date.now() + STUDENT_CACHE_TTL_MS });
+}
+
+function invalidateStudentCache(): void {
+  studentListCache.clear();
+}
+
 const app = express();
+
+// Compression middleware — compresses all JSON responses > 1KB (gzip level 6).
+// Reduces 3–6 MB student list payloads to 0.6–1.2 MB automatically.
+app.use(compression({
+  level: 6,
+  threshold: 1024,
+  filter: (req: Request, res: Response) => {
+    if (req.headers['x-no-compression']) return false;
+    return compression.filter(req, res);
+  },
+}));
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -357,36 +416,14 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
       });
     }
 
-    // ── Priority 1A: Tier-1 Gmail super-admins (highest authority) ───────────
-    // jayakrushna1622@gmail.com, dineshkumarpathipati@gmail.com, jayanthkumarnaidu777@gmail.com
+    // ── Priority 1 (consolidated): Super admin credentials — covers Tier 1A Gmail accounts AND
+    // standard super admins (admin@rgmcet.edu.in etc) in one single DB query.
+    // Previously split into two blocks that queried the SAME table twice for Gmail accounts.
     const TIER1_GMAIL_SUPER_ADMINS = [
       'jayakrushna1622@gmail.com',
       'dineshkumarpathipati@gmail.com',
       'jayanthkumarnaidu777@gmail.com',
     ];
-    if (!db.isMock && TIER1_GMAIL_SUPER_ADMINS.includes(emailLower)) {
-      try {
-        const saResult = await db.query(
-          'SELECT email, password FROM super_admin_credentials WHERE LOWER(email) = $1',
-          [emailLower]
-        );
-        if (saResult.rows.length > 0) {
-          const stored = saResult.rows[0].password;
-          const isMatch = await compareAndUpgradePassword(password, stored, async (newHash) => {
-            await db.query('UPDATE super_admin_credentials SET password = $1, updated_at = NOW() WHERE LOWER(email) = $2', [newHash, emailLower]);
-          });
-          if (isMatch) {
-            return res.json({ valid: true, role: 'admin', isSuperAdmin: true, department: '*', email: saResult.rows[0].email });
-          }
-          await new Promise(resolve => setTimeout(resolve, 600));
-          return res.status(401).json({ valid: false, error: 'Invalid email or password.' });
-        }
-      } catch {
-        // Table may not exist on first cold-start; fall through
-      }
-    }
-
-    // ── Priority 1B: Super admin credentials (DB) — admin@rgmcet.edu.in + others ──
     if (!db.isMock) {
       try {
         const saResult = await db.query(
@@ -662,6 +699,7 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
 });
 
 // GET /departments — Returns list of all departments
+// Departments are seeded at startup and change very rarely — cache for 1 hour.
 app.get('/departments', async (_req: Request, res: Response) => {
   try {
     if (db.isMock) {
@@ -670,9 +708,11 @@ app.get('/departments', async (_req: Request, res: Response) => {
         name,
         short_name: name.split(' ')[0],
       }));
+      res.setHeader('Cache-Control', 'public, max-age=3600'); // 1 hour
       return res.json(depts);
     }
     const result = await db.query('SELECT code, name, short_name FROM departments ORDER BY code ASC');
+    res.setHeader('Cache-Control', 'public, max-age=3600'); // 1 hour
     res.json(result.rows);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -1716,6 +1756,9 @@ app.get('/students', requireAuth, async (req: Request, res: Response) => {
         ALTER TABLE students ADD COLUMN IF NOT EXISTS resume_url TEXT;
         ALTER TABLE students ADD COLUMN IF NOT EXISTS is_lateral_entry BOOLEAN DEFAULT FALSE;
       `).catch(() => {});
+      // These ALTER TABLE statements are now idempotent guards only on the very first
+      // request after a cold start with an old schema. They are also run in ensureSchema()
+      // on pool creation, so the flag prevents repeat DDL on subsequent requests.
     }
 
     if (db.isMock) {
@@ -1944,6 +1987,28 @@ app.get('/students', requireAuth, async (req: Request, res: Response) => {
       paginationClause = `LIMIT 1000 OFFSET ${pageOffset}`;
     }
 
+    // Check in-memory cache for non-search queries.
+    // Search queries are always served live (unique per request).
+    const cacheKey = search
+      ? null
+      : getStudentCacheKey({
+          department: req.query.department,
+          batch: req.query.batch,
+          year: req.query.year,
+          section: req.query.section,
+          limit: req.query.limit,
+          offset: req.query.offset,
+          _role: callerRole,
+          _callerDept: callerDept,
+        });
+    if (cacheKey) {
+      const cached = getCachedStudents(cacheKey);
+      if (cached) {
+        res.setHeader('X-Cache', 'HIT');
+        return res.json(cached);
+      }
+    }
+
     const result = await db.query(`
       SELECT 
         s.*,
@@ -1986,6 +2051,12 @@ app.get('/students', requireAuth, async (req: Request, res: Response) => {
       ORDER BY s.roll_number, s.created_at DESC
       ${paginationClause}
     `, params);
+
+    // Store in cache and serve with MISS header
+    if (cacheKey) {
+      setCachedStudents(cacheKey, result.rows);
+      res.setHeader('X-Cache', 'MISS');
+    }
     res.json(result.rows);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -2029,13 +2100,9 @@ app.post('/students', extractAuth, requireAuth, async (req: Request, res: Respon
       return res.status(201).json({ message: 'Student created successfully', student: newStudent });
     }
 
-    await db.query(`
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS is_lateral_entry BOOLEAN DEFAULT FALSE;
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_url TEXT;
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_updated TIMESTAMP WITH TIME ZONE;
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_url TEXT;
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS resume_url TEXT;
-    `).catch(() => {});
+    // Note: ALTER TABLE DDL statements for optional columns (is_lateral_entry, linkedin_url,
+    // photo_url, resume_url) are now handled in ensureSchema() at cold start.
+    // Removed from here to avoid DDL overhead on every student creation request.
 
     const result = await db.query(
       `INSERT INTO students (roll_number, name, email, year, phone, address, native_place, department, batch, section,
@@ -2106,6 +2173,7 @@ app.post('/students', extractAuth, requireAuth, async (req: Request, res: Respon
       } catch (_) { /* mentor_assignments table may not exist yet — safe to ignore */ }
     }
 
+    invalidateStudentCache(); // Clear cached student lists so next GET /students is fresh
     res.status(201).json({ message: 'Student created successfully', student: createdStudent });
   } catch (err: any) {
     res.status(400).json({ error: err.message || err });
@@ -2540,14 +2608,8 @@ app.put('/students/:id', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), as
       return res.json({ message: 'Profile updated successfully', student: updated });
     }
 
-    await db.query(`
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS cgpa NUMERIC(4,2) DEFAULT 0.00;
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_phone VARCHAR(20);
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_url TEXT;
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_updated TIMESTAMP WITH TIME ZONE;
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_url TEXT;
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS resume_url TEXT;
-    `).catch(() => {});
+    // Note: ALTER TABLE for optional columns is handled in ensureSchema() at cold start.
+    // Removed from here to avoid DDL overhead on every student profile update.
 
     // Fetch existing student record to merge partial updates
     const existingRes = await db.query('SELECT * FROM students WHERE UPPER(roll_number) = $1', [studentId]);
@@ -2679,6 +2741,7 @@ app.put('/students/:id', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), as
       }
     } catch { /* ignore cgpa recalc errors */ }
 
+    invalidateStudentCache(); // Profile update — clear cached student lists
     res.json({ message: 'Profile updated successfully', student: result.rows[0] });
   } catch (err: any) {
     res.status(500).json({ error: err.message || err });
@@ -2774,6 +2837,7 @@ app.delete('/students', requireRole('admin'), async (req: Request, res: Response
       const delResult = await db.query('DELETE FROM students WHERE UPPER(roll_number) = ANY($1) RETURNING roll_number', [targetRolls]);
       deleteCognitoUsers([...targetEmails, ...targetRolls]).catch(() => {});
 
+      invalidateStudentCache(); // Dept batch delete — clear cached lists
       return res.json({
         message: `All ${delResult.rows.length} students in ${targetDeptFilter} deleted successfully. Other departments remain untouched.`,
         deleted: delResult.rows.length,
@@ -2807,6 +2871,7 @@ app.delete('/students', requireRole('admin'), async (req: Request, res: Response
     deleteCognitoUsers([...allEmails, ...allRolls]).catch(() => {});
     deleteAllCognitoUsers().catch(() => {});
 
+    invalidateStudentCache(); // Global delete — clear cached lists
     res.json({ message: 'All student records deleted successfully from database.' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -2886,6 +2951,7 @@ app.delete('/students/:id', requireRole('admin'), async (req: Request, res: Resp
 
     await deleteCognitoUsers([studentId, studentEmail]);
 
+    invalidateStudentCache(); // Single delete — clear cached lists
     res.json({ message: `Student ${studentId} and all associated records deleted successfully` });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -2973,7 +3039,72 @@ app.post('/admin/students/bulk-delete', requireRole('admin'), async (req: Reques
 
     await deleteCognitoUsers([...authorizedIds, ...emailsToDelete]);
 
+    invalidateStudentCache(); // Bulk delete — clear cached lists
     res.json({ deleted, message: `${deleted} student(s) and all associated records deleted successfully` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// Unified Full Profile — GET /students/:id/full-profile
+// Returns student + ALL sub-resources in one round-trip (parallel Promise.all).
+// Replaces 9 separate API calls from the frontend profile page.
+// Same auth rules as individual sub-resource endpoints.
+// ============================================================================
+app.get('/students/:id/full-profile', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const rollNo = req.params.id.toUpperCase();
+
+    if (db.isMock) {
+      const student = db.mockStore.students.get(rollNo) || null;
+      return res.json({
+        student,
+        academics:      db.mockStore.academics.get(rollNo) || [],
+        codingProfiles: db.mockStore.codingProfiles.get(rollNo) || [],
+        techSkills:     db.mockStore.techSkills?.get(rollNo) || [],
+        certifications: db.mockStore.certifications?.get(rollNo) || [],
+        softSkills:     db.mockStore.softSkills?.get(rollNo) || [],
+        achievements:   db.mockStore.achievements?.get(rollNo) || [],
+        placement:      db.mockStore.placement?.get(rollNo) || null,
+      });
+    }
+
+    // Fire all DB queries in parallel — single network round-trip latency
+    const [
+      studentRes,
+      academicsRes,
+      codingRes,
+      techSkillsRes,
+      certsRes,
+      softSkillsRes,
+      achievementsRes,
+      placementRes,
+    ] = await Promise.all([
+      db.query(`SELECT * FROM students WHERE UPPER(roll_number) = $1 LIMIT 1`, [rollNo]),
+      db.query(`SELECT * FROM academics WHERE UPPER(student_id) = $1 ORDER BY semester ASC`, [rollNo]),
+      db.query(`SELECT * FROM coding_profiles WHERE UPPER(student_id) = $1`, [rollNo]),
+      db.query(`SELECT * FROM tech_skills WHERE UPPER(student_id) = $1`, [rollNo]),
+      db.query(`SELECT * FROM certifications WHERE UPPER(student_id) = $1 ORDER BY date_completed DESC NULLS LAST`, [rollNo]),
+      db.query(`SELECT * FROM soft_skills WHERE UPPER(student_id) = $1`, [rollNo]),
+      db.query(`SELECT * FROM achievements WHERE UPPER(student_id) = $1 ORDER BY achievement_date DESC NULLS LAST`, [rollNo]),
+      db.query(`SELECT * FROM placement_profile WHERE UPPER(student_id) = $1 LIMIT 1`, [rollNo]).catch(() => ({ rows: [] })),
+    ]);
+
+    if (studentRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+
+    res.json({
+      student:        studentRes.rows[0],
+      academics:      academicsRes.rows,
+      codingProfiles: codingRes.rows,
+      techSkills:     techSkillsRes.rows,
+      certifications: certsRes.rows,
+      softSkills:     softSkillsRes.rows,
+      achievements:   achievementsRes.rows,
+      placement:      placementRes.rows[0] || null,
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

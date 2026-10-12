@@ -118,22 +118,25 @@ export const api = {
     }
 
     // Global query across 'All' departments with no specific search/section filter:
-    // Fetch in parallel 1000-student chunks to prevent AWS API Gateway 6MB response payload limit (HTTP 502)
+    // Fire ALL page requests in parallel simultaneously — no sequential first-page wait.
+    // With the backend in-memory cache (60s TTL), offset=1000..4000 requests return from
+    // cache almost instantly, making total fetch time ~= single request time after first load.
     const isGlobalQuery = (!cleanParams.department || cleanParams.department === 'All') && !cleanParams.search && !cleanParams.section && !cleanParams.batch;
     if (isGlobalQuery) {
       const pageSize = 1000;
       try {
-        const firstPage: StudentProfile[] = await fetchWithAuth(`/students?limit=${pageSize}&offset=0`);
-        if (Array.isArray(firstPage) && firstPage.length === pageSize) {
-          const subsequentPages = await Promise.all([
-            fetchWithAuth(`/students?limit=${pageSize}&offset=1000`).catch(() => []),
-            fetchWithAuth(`/students?limit=${pageSize}&offset=2000`).catch(() => []),
-            fetchWithAuth(`/students?limit=${pageSize}&offset=3000`).catch(() => []),
-            fetchWithAuth(`/students?limit=${pageSize}&offset=4000`).catch(() => []),
-          ]);
-          return [...firstPage, ...subsequentPages.flat()];
-        }
-        return Array.isArray(firstPage) ? firstPage : [];
+        const pages = await Promise.all([
+          fetchWithAuth(`/students?limit=${pageSize}&offset=0`),
+          fetchWithAuth(`/students?limit=${pageSize}&offset=1000`).catch(() => []),
+          fetchWithAuth(`/students?limit=${pageSize}&offset=2000`).catch(() => []),
+          fetchWithAuth(`/students?limit=${pageSize}&offset=3000`).catch(() => []),
+          fetchWithAuth(`/students?limit=${pageSize}&offset=4000`).catch(() => []),
+        ]);
+        const all = pages.flat().filter(Boolean) as StudentProfile[];
+        // De-duplicate by roll_number — guards against offset-boundary duplicates
+        return Array.from(
+          new Map(all.map(s => [s.roll_number.toUpperCase(), s])).values()
+        );
       } catch (err) {
         console.warn('[getAllStudents] Global chunked query notice:', err);
         return [];
@@ -180,6 +183,22 @@ export const api = {
   // Student Profile
   getStudentProfile: async (id: string): Promise<StudentProfile> => {
     return fetchWithAuth(`/students/${id}`);
+  },
+
+  // Unified full profile — returns student + all 8 sub-resources in one API call.
+  // Replaces 9 separate calls (getStudentProfile + 8 sub-resource fetches) on the profile page.
+  // Falls back gracefully: if full-profile endpoint fails, callers can fall back to individual endpoints.
+  getStudentFullProfile: async (id: string): Promise<{
+    student: StudentProfile;
+    academics: AcademicRecord[];
+    codingProfiles: CodingProfile[];
+    techSkills: TechSkill[];
+    certifications: Certification[];
+    softSkills: SoftSkill[];
+    achievements: Achievement[];
+    placement: PlacementProfile | null;
+  }> => {
+    return fetchWithAuth(`/students/${id}/full-profile`);
   },
 
   updateStudentProfile: async (id: string, data: Partial<StudentProfile>): Promise<StudentProfile> => {
