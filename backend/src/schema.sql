@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS students (
     email VARCHAR(100) UNIQUE NOT NULL,
     year VARCHAR(20) NOT NULL CHECK (year IN ('1st Year', '2nd Year', '3rd Year', '4th Year')),
     phone VARCHAR(20),
+    parent_phone VARCHAR(20),
     address TEXT,
     native_place VARCHAR(100),
     department VARCHAR(50) NOT NULL DEFAULT '',

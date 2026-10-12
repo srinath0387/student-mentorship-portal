@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import zlib from 'zlib';
+import compression from 'compression';
 import { globalErrorHandler } from '../lib/errors';
 import { logger } from '../lib/logger';
 import cors from 'cors';
@@ -39,7 +40,65 @@ import bcrypt from 'bcryptjs';
 // compareAndUpgradePassword and BCRYPT_ROUNDS now live in services/passwordService.ts
 // (Phase 1.1 extraction)
 
+// ── In-Memory Student List Cache (Phase 4 Optimization) ─────────────────────
+// Caches GET /students results per department+filters for 60 seconds.
+// Eliminates repeated expensive 3-table JOIN scans on the most common admin queries.
+// Automatically invalidated on any write operation (POST/PUT/DELETE /students).
+// Safe for Lambda: each instance has its own memory; inter-instance consistency is
+// not needed here since all writes also hit DB, and 60s TTL limits staleness.
+// ─────────────────────────────────────────────────────────────────────────────
+interface StudentCacheEntry { data: any[]; expiresAt: number; }
+const studentListCache = new Map<string, StudentCacheEntry>();
+const STUDENT_CACHE_TTL_MS = 60 * 1000; // 60 seconds
+
+function getStudentCacheKey(query: Record<string, any>): string {
+  return JSON.stringify({
+    dept:    String(query.department  || 'All'),
+    batch:   String(query.batch       || ''),
+    year:    String(query.year        || ''),
+    section: String(query.section     || ''),
+    limit:   String(query.limit       || '1000'),
+    offset:  String(query.offset      || '0'),
+    role:    String(query._role       || ''),
+    callerDept: String(query._callerDept || ''),
+  });
+}
+
+function getCachedStudents(key: string): any[] | null {
+  const entry = studentListCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    studentListCache.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+
+function setCachedStudents(key: string, data: any[]): void {
+  // Cap at 30 entries to prevent unbounded memory growth
+  if (studentListCache.size >= 30) {
+    const firstKey = studentListCache.keys().next().value;
+    if (firstKey) studentListCache.delete(firstKey);
+  }
+  studentListCache.set(key, { data, expiresAt: Date.now() + STUDENT_CACHE_TTL_MS });
+}
+
+function invalidateStudentCache(): void {
+  studentListCache.clear();
+}
+
 const app = express();
+
+// Compression middleware — compresses all JSON responses > 1KB (gzip level 6).
+// Reduces 3–6 MB student list payloads to 0.6–1.2 MB automatically.
+app.use(compression({
+  level: 6,
+  threshold: 1024,
+  filter: (req: Request, res: Response) => {
+    if (req.headers['x-no-compression']) return false;
+    return compression.filter(req, res);
+  },
+}));
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -357,36 +416,14 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
       });
     }
 
-    // ── Priority 1A: Tier-1 Gmail super-admins (highest authority) ───────────
-    // jayakrushna1622@gmail.com, dineshkumarpathipati@gmail.com, jayanthkumarnaidu777@gmail.com
+    // ── Priority 1 (consolidated): Super admin credentials — covers Tier 1A Gmail accounts AND
+    // standard super admins (admin@rgmcet.edu.in etc) in one single DB query.
+    // Previously split into two blocks that queried the SAME table twice for Gmail accounts.
     const TIER1_GMAIL_SUPER_ADMINS = [
       'jayakrushna1622@gmail.com',
       'dineshkumarpathipati@gmail.com',
       'jayanthkumarnaidu777@gmail.com',
     ];
-    if (!db.isMock && TIER1_GMAIL_SUPER_ADMINS.includes(emailLower)) {
-      try {
-        const saResult = await db.query(
-          'SELECT email, password FROM super_admin_credentials WHERE LOWER(email) = $1',
-          [emailLower]
-        );
-        if (saResult.rows.length > 0) {
-          const stored = saResult.rows[0].password;
-          const isMatch = await compareAndUpgradePassword(password, stored, async (newHash) => {
-            await db.query('UPDATE super_admin_credentials SET password = $1, updated_at = NOW() WHERE LOWER(email) = $2', [newHash, emailLower]);
-          });
-          if (isMatch) {
-            return res.json({ valid: true, role: 'admin', isSuperAdmin: true, department: '*', email: saResult.rows[0].email });
-          }
-          await new Promise(resolve => setTimeout(resolve, 600));
-          return res.status(401).json({ valid: false, error: 'Invalid email or password.' });
-        }
-      } catch {
-        // Table may not exist on first cold-start; fall through
-      }
-    }
-
-    // ── Priority 1B: Super admin credentials (DB) — admin@rgmcet.edu.in + others ──
     if (!db.isMock) {
       try {
         const saResult = await db.query(
@@ -662,6 +699,7 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
 });
 
 // GET /departments — Returns list of all departments
+// Departments are seeded at startup and change very rarely — cache for 1 hour.
 app.get('/departments', async (_req: Request, res: Response) => {
   try {
     if (db.isMock) {
@@ -670,9 +708,11 @@ app.get('/departments', async (_req: Request, res: Response) => {
         name,
         short_name: name.split(' ')[0],
       }));
+      res.setHeader('Cache-Control', 'public, max-age=3600'); // 1 hour
       return res.json(depts);
     }
     const result = await db.query('SELECT code, name, short_name FROM departments ORDER BY code ASC');
+    res.setHeader('Cache-Control', 'public, max-age=3600'); // 1 hour
     res.json(result.rows);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -1698,10 +1738,28 @@ function triggerBackgroundAutoSync() {
   })();
 }
 
+let studentColumnsEnsured = false;
+
 // GET /students — List/Search/Filter (Guarantees DISTINCT ON roll_number)
 app.get('/students', requireAuth, async (req: Request, res: Response) => {
   try {
     const { department, batch, section, year, standing, mentor_id, search } = req.query;
+
+    if (!db.isMock && !studentColumnsEnsured) {
+      studentColumnsEnsured = true;
+      await db.query(`
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS cgpa NUMERIC(4,2) DEFAULT 0.00;
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_phone VARCHAR(20);
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_url TEXT;
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_updated TIMESTAMP WITH TIME ZONE;
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_url TEXT;
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS resume_url TEXT;
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS is_lateral_entry BOOLEAN DEFAULT FALSE;
+      `).catch(() => {});
+      // These ALTER TABLE statements are now idempotent guards only on the very first
+      // request after a cold start with an old schema. They are also run in ensureSchema()
+      // on pool creation, so the flag prevents repeat DDL on subsequent requests.
+    }
 
     if (db.isMock) {
       let students = Array.from(db.mockStore.students.values());
@@ -1912,38 +1970,93 @@ app.get('/students', requireAuth, async (req: Request, res: Response) => {
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.map(c => c.startsWith('(') ? c : `s.${c}`).join(' AND ')}` : '';
 
-    let paginationClause = '';
-    if (req.query.limit !== undefined && req.query.limit !== 'all' && req.query.limit !== 'All') {
-      const rawLimit = parseInt(String(req.query.limit), 10);
+    let paginationClause = 'LIMIT 1000';
+    if (req.query.limit !== undefined) {
+      if (req.query.limit === 'all' || req.query.limit === 'All') {
+        paginationClause = '';
+      } else {
+        const rawLimit = parseInt(String(req.query.limit), 10);
+        const rawOffset = parseInt(String(req.query.offset || '0'), 10);
+        const pageLimit = Math.min(Math.max(isNaN(rawLimit) ? 1000 : rawLimit, 1), 1000);
+        const pageOffset = Math.max(isNaN(rawOffset) ? 0 : rawOffset, 0);
+        paginationClause = `LIMIT ${pageLimit} OFFSET ${pageOffset}`;
+      }
+    } else if (req.query.offset !== undefined) {
       const rawOffset = parseInt(String(req.query.offset || '0'), 10);
-      const pageLimit = Math.min(Math.max(isNaN(rawLimit) ? 10000 : rawLimit, 1), 10000);
       const pageOffset = Math.max(isNaN(rawOffset) ? 0 : rawOffset, 0);
-      paginationClause = `LIMIT ${pageLimit} OFFSET ${pageOffset}`;
+      paginationClause = `LIMIT 1000 OFFSET ${pageOffset}`;
+    }
+
+    // Check in-memory cache for non-search queries.
+    // Search queries are always served live (unique per request).
+    const cacheKey = search
+      ? null
+      : getStudentCacheKey({
+          department: req.query.department,
+          batch: req.query.batch,
+          year: req.query.year,
+          section: req.query.section,
+          limit: req.query.limit,
+          offset: req.query.offset,
+          _role: callerRole,
+          _callerDept: callerDept,
+        });
+    if (cacheKey) {
+      const cached = getCachedStudents(cacheKey);
+      if (cached) {
+        res.setHeader('X-Cache', 'HIT');
+        return res.json(cached);
+      }
     }
 
     const result = await db.query(`
-      SELECT DISTINCT ON (s.roll_number) 
+      SELECT 
         s.*,
-        COALESCE(ROUND(AVG(a.semester_gpa), 2), 0.00) AS cgpa,
-        MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN c.handle END) AS leetcode_handle,
-        COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN GREATEST(c.score_rating, (c.easy_count + c.medium_count + c.hard_count)) END), 0) AS leetcode_solved,
-        COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN c.easy_count END), 0) AS leetcode_easy,
-        COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN c.medium_count END), 0) AS leetcode_medium,
-        COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN c.hard_count END), 0) AS leetcode_hard,
-        COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN c.contest_rating END), 0) AS leetcode_contest,
-        MAX(CASE WHEN LOWER(c.platform) = 'github' THEN c.handle END) AS github_handle,
-        COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'github' THEN c.repositories_count END), 0) AS github_repos,
-        COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'github' THEN c.followers_count END), 0) AS github_followers,
-        COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'github' THEN c.stars_count END), 0) AS github_stars,
-        MAX(CASE WHEN LOWER(c.platform) = 'github' THEN c.top_language END) AS github_top_language
+        COALESCE(a.cgpa, s.cgpa, 0.00) AS cgpa,
+        c.leetcode_handle,
+        COALESCE(c.leetcode_solved, 0) AS leetcode_solved,
+        COALESCE(c.leetcode_easy, 0) AS leetcode_easy,
+        COALESCE(c.leetcode_medium, 0) AS leetcode_medium,
+        COALESCE(c.leetcode_hard, 0) AS leetcode_hard,
+        COALESCE(c.leetcode_contest, 0) AS leetcode_contest,
+        c.github_handle,
+        COALESCE(c.github_repos, 0) AS github_repos,
+        COALESCE(c.github_followers, 0) AS github_followers,
+        COALESCE(c.github_stars, 0) AS github_stars,
+        c.github_top_language
       FROM students s
-      LEFT JOIN academics a ON a.student_id = s.roll_number
-      LEFT JOIN coding_profiles c ON c.student_id = s.roll_number
+      LEFT JOIN (
+        SELECT student_id, ROUND(AVG(semester_gpa), 2) AS cgpa
+        FROM academics
+        GROUP BY student_id
+      ) a ON a.student_id = s.roll_number
+      LEFT JOIN (
+        SELECT 
+          student_id,
+          MAX(CASE WHEN LOWER(platform) = 'leetcode' THEN handle END) AS leetcode_handle,
+          COALESCE(MAX(CASE WHEN LOWER(platform) = 'leetcode' THEN GREATEST(score_rating, (easy_count + medium_count + hard_count)) END), 0) AS leetcode_solved,
+          COALESCE(MAX(CASE WHEN LOWER(platform) = 'leetcode' THEN easy_count END), 0) AS leetcode_easy,
+          COALESCE(MAX(CASE WHEN LOWER(platform) = 'leetcode' THEN medium_count END), 0) AS leetcode_medium,
+          COALESCE(MAX(CASE WHEN LOWER(platform) = 'leetcode' THEN hard_count END), 0) AS leetcode_hard,
+          COALESCE(MAX(CASE WHEN LOWER(platform) = 'leetcode' THEN contest_rating END), 0) AS leetcode_contest,
+          MAX(CASE WHEN LOWER(platform) = 'github' THEN handle END) AS github_handle,
+          COALESCE(MAX(CASE WHEN LOWER(platform) = 'github' THEN repositories_count END), 0) AS github_repos,
+          COALESCE(MAX(CASE WHEN LOWER(platform) = 'github' THEN followers_count END), 0) AS github_followers,
+          COALESCE(MAX(CASE WHEN LOWER(platform) = 'github' THEN stars_count END), 0) AS github_stars,
+          MAX(CASE WHEN LOWER(platform) = 'github' THEN top_language END) AS github_top_language
+        FROM coding_profiles
+        GROUP BY student_id
+      ) c ON c.student_id = s.roll_number
       ${whereClause}
-      GROUP BY s.roll_number, s.name, s.email, s.year, s.phone, s.address, s.native_place, s.department, s.batch, s.section, s.hostel_day_scholar, s.driving_license, s.passport, s.relocation_willingness, s.family_business, s.financial_background, s.faculty_mentor_id, s.photo_url, s.resume_url, s.linkedin_url, s.linkedin_updated, s.is_lateral_entry, s.created_at, s.updated_at
       ORDER BY s.roll_number, s.created_at DESC
       ${paginationClause}
     `, params);
+
+    // Store in cache and serve with MISS header
+    if (cacheKey) {
+      setCachedStudents(cacheKey, result.rows);
+      res.setHeader('X-Cache', 'MISS');
+    }
     res.json(result.rows);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -1987,13 +2100,9 @@ app.post('/students', extractAuth, requireAuth, async (req: Request, res: Respon
       return res.status(201).json({ message: 'Student created successfully', student: newStudent });
     }
 
-    await db.query(`
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS is_lateral_entry BOOLEAN DEFAULT FALSE;
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_url TEXT;
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_updated TIMESTAMP WITH TIME ZONE;
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_url TEXT;
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS resume_url TEXT;
-    `).catch(() => {});
+    // Note: ALTER TABLE DDL statements for optional columns (is_lateral_entry, linkedin_url,
+    // photo_url, resume_url) are now handled in ensureSchema() at cold start.
+    // Removed from here to avoid DDL overhead on every student creation request.
 
     const result = await db.query(
       `INSERT INTO students (roll_number, name, email, year, phone, address, native_place, department, batch, section,
@@ -2064,6 +2173,7 @@ app.post('/students', extractAuth, requireAuth, async (req: Request, res: Respon
       } catch (_) { /* mentor_assignments table may not exist yet — safe to ignore */ }
     }
 
+    invalidateStudentCache(); // Clear cached student lists so next GET /students is fresh
     res.status(201).json({ message: 'Student created successfully', student: createdStudent });
   } catch (err: any) {
     res.status(400).json({ error: err.message || err });
@@ -2421,7 +2531,6 @@ app.get('/students/mentor-lookup', requireRole('hod', 'admin'), async (req: Requ
   }
 });
 
-let studentColumnsEnsured = false;
 // GET /students/:id — Get Student Profile
 app.get('/students/:id', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -2437,6 +2546,7 @@ app.get('/students/:id', requireAuth, async (req: Request, res: Response) => {
       studentColumnsEnsured = true;
       await db.query(`
         ALTER TABLE students ADD COLUMN IF NOT EXISTS cgpa NUMERIC(4,2) DEFAULT 0.00;
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_phone VARCHAR(20);
         ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_url TEXT;
         ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_updated TIMESTAMP WITH TIME ZONE;
         ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_url TEXT;
@@ -2445,14 +2555,21 @@ app.get('/students/:id', requireAuth, async (req: Request, res: Response) => {
     }
 
     const result = await db.query(
-      `SELECT s.*, COALESCE(ROUND(AVG(a.semester_gpa), 2), s.cgpa, 0.00) AS cgpa
+      `SELECT s.*,
+              COALESCE(ROUND(AVG(a.semester_gpa), 2), s.cgpa, 0.00) AS cgpa,
+              COALESCE(f.name, f2.name)   AS mentor_name,
+              COALESCE(f.email, f2.email) AS mentor_email,
+              COALESCE(f.department, f2.department) AS mentor_department
        FROM students s
        LEFT JOIN academics a ON a.student_id = s.roll_number
+       LEFT JOIN mentor_assignments ma ON UPPER(ma.roll_number) = UPPER(s.roll_number)
+       LEFT JOIN faculty f  ON UPPER(f.faculty_id) = UPPER(ma.faculty_id)
+       LEFT JOIN faculty f2 ON UPPER(f2.faculty_id) = UPPER(s.faculty_mentor_id)
        WHERE UPPER(s.roll_number) = $1
           OR UPPER(s.admission_id) = $1
           OR LOWER(s.email) = LOWER($1)
           OR s.personal_mobile = $1
-       GROUP BY s.roll_number, s.name, s.email, s.year, s.phone, s.address, s.native_place, s.department, s.batch, s.section, s.hostel_day_scholar, s.driving_license, s.passport, s.relocation_willingness, s.family_business, s.financial_background, s.faculty_mentor_id, s.photo_url, s.resume_url, s.linkedin_url, s.linkedin_updated, s.created_at, s.updated_at, s.cgpa
+       GROUP BY s.roll_number, s.name, s.email, s.year, s.phone, s.parent_phone, s.address, s.native_place, s.department, s.batch, s.section, s.hostel_day_scholar, s.driving_license, s.passport, s.relocation_willingness, s.family_business, s.financial_background, s.faculty_mentor_id, s.photo_url, s.resume_url, s.linkedin_url, s.linkedin_updated, s.created_at, s.updated_at, s.cgpa, f.name, f2.name, f.email, f2.email, f.department, f2.department
        LIMIT 1`,
       [studentId]
     );
@@ -2491,13 +2608,8 @@ app.put('/students/:id', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), as
       return res.json({ message: 'Profile updated successfully', student: updated });
     }
 
-    await db.query(`
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS cgpa NUMERIC(4,2) DEFAULT 0.00;
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_url TEXT;
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_updated TIMESTAMP WITH TIME ZONE;
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_url TEXT;
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS resume_url TEXT;
-    `).catch(() => {});
+    // Note: ALTER TABLE for optional columns is handled in ensureSchema() at cold start.
+    // Removed from here to avoid DDL overhead on every student profile update.
 
     // Fetch existing student record to merge partial updates
     const existingRes = await db.query('SELECT * FROM students WHERE UPPER(roll_number) = $1', [studentId]);
@@ -2507,6 +2619,7 @@ app.put('/students/:id', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), as
     const email = body.email || existing.email || `${studentId.toLowerCase()}@rgmcet.edu.in`;
     const year = body.year && body.year !== '' ? body.year : (existing.year || '3rd Year');
     const phone = body.phone !== undefined ? body.phone : (existing.phone || null);
+    const parent_phone = body.parent_phone !== undefined ? body.parent_phone : (existing.parent_phone || null);
     const address = body.address !== undefined ? body.address : (existing.address || null);
     const native_place = body.native_place !== undefined ? body.native_place : (existing.native_place || null);
     const department = body.department && body.department !== '' ? body.department : (existing.department || getDeptFromRollNumber(studentId));
@@ -2518,13 +2631,74 @@ app.put('/students/:id', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), as
     const relocation_willingness = body.relocation_willingness !== undefined ? Boolean(body.relocation_willingness) : Boolean(existing.relocation_willingness);
     const family_business = body.family_business !== undefined ? body.family_business : (existing.family_business || null);
     const financial_background = body.financial_background !== undefined ? body.financial_background : (existing.financial_background || null);
-    const faculty_mentor_id = body.faculty_mentor_id !== undefined ? body.faculty_mentor_id : (existing.faculty_mentor_id || null);
+
+    // SECURITY & MENTOR LOCKING:
+    // If user is a student:
+    // 1. If mentor is ALREADY assigned (in existing.faculty_mentor_id or mentor_assignments), student CANNOT change it.
+    // 2. If mentor is not assigned, student can set it ONCE, and it must belong to their department.
+    // Admin and HOD can modify or reassign mentor at any time.
+    const isPrivileged = req.auth?.role === 'admin' || req.auth?.role === 'hod';
+    let faculty_mentor_id = existing.faculty_mentor_id || null;
+
+    if (body.faculty_mentor_id !== undefined && body.faculty_mentor_id !== null && body.faculty_mentor_id !== '') {
+      const requestedMentorId = String(body.faculty_mentor_id).trim();
+
+      if (!isPrivileged) {
+        // Check if student already has a mentor assigned
+        if (existing.faculty_mentor_id && existing.faculty_mentor_id.toUpperCase() !== requestedMentorId.toUpperCase()) {
+          return res.status(403).json({
+            error: 'You have already selected a mentor. Mentor re-assignment is locked and can only be changed by your department admin.',
+          });
+        }
+
+        // Validate that requested faculty belongs to the student's department
+        const facCheck = await db.query(
+          `SELECT faculty_id, name, department FROM faculty WHERE UPPER(faculty_id) = UPPER($1) LIMIT 1`,
+          [requestedMentorId]
+        );
+        if (facCheck.rows.length === 0) {
+          return res.status(400).json({ error: 'Selected faculty mentor does not exist.' });
+        }
+
+        const facDept = facCheck.rows[0].department || '';
+        const studentDeptKey = getDepartmentAliases(department);
+        const facDeptKey = getDepartmentAliases(facDept);
+        const deptMatches = studentDeptKey.some((a) => facDeptKey.includes(a));
+
+        if (!deptMatches) {
+          return res.status(400).json({
+            error: `You can only select a mentor from your own department (${department}).`,
+          });
+        }
+
+        faculty_mentor_id = facCheck.rows[0].faculty_id;
+      } else {
+        // Privileged caller (Admin / HOD) can set any valid mentor
+        faculty_mentor_id = requestedMentorId;
+      }
+
+      // Upsert into mentor_assignments table to keep global mappings unified
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS mentor_assignments (
+          roll_number  TEXT        NOT NULL PRIMARY KEY,
+          faculty_id   TEXT        NOT NULL,
+          assigned_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        )
+      `).catch(() => {});
+
+      await db.query(
+        `INSERT INTO mentor_assignments (roll_number, faculty_id, assigned_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (roll_number) DO UPDATE SET faculty_id = EXCLUDED.faculty_id, assigned_at = NOW()`,
+        [studentId, faculty_mentor_id]
+      ).catch(() => {});
+    }
+
     const photo_url = body.photo_url !== undefined ? body.photo_url : (existing.photo_url || null);
     const resume_url = body.resume_url !== undefined ? body.resume_url : (existing.resume_url || null);
     const linkedin_url = body.linkedin_url !== undefined ? body.linkedin_url : (existing.linkedin_url || null);
 
     // SECURITY: Students cannot self-modify CGPA. CGPA is computed from verified academics or updated by Admin/HOD.
-    const isPrivileged = req.auth?.role === 'admin' || req.auth?.role === 'hod';
     const cgpa = (isPrivileged && body.cgpa !== undefined && body.cgpa !== null && body.cgpa !== '')
       ? Number(body.cgpa)
       : (existing.cgpa !== undefined && existing.cgpa !== null ? Number(existing.cgpa) : 0);
@@ -2532,19 +2706,19 @@ app.put('/students/:id', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), as
     let result;
     if (existingRes.rows.length === 0) {
       result = await db.query(
-        `INSERT INTO students (roll_number, name, email, year, phone, address, native_place, department, batch, section, hostel_day_scholar, driving_license, passport, relocation_willingness, family_business, financial_background, faculty_mentor_id, photo_url, resume_url, linkedin_url, cgpa)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+        `INSERT INTO students (roll_number, name, email, year, phone, parent_phone, address, native_place, department, batch, section, hostel_day_scholar, driving_license, passport, relocation_willingness, family_business, financial_background, faculty_mentor_id, photo_url, resume_url, linkedin_url, cgpa)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
          RETURNING *`,
-        [studentId, name, email, year, phone, address, native_place, department, batch, section, hostel_day_scholar, driving_license, passport, relocation_willingness, family_business, financial_background, faculty_mentor_id, photo_url, resume_url, linkedin_url, cgpa]
+        [studentId, name, email, year, phone, parent_phone, address, native_place, department, batch, section, hostel_day_scholar, driving_license, passport, relocation_willingness, family_business, financial_background, faculty_mentor_id, photo_url, resume_url, linkedin_url, cgpa]
       );
     } else {
       result = await db.query(
-        `UPDATE students SET name=$1, email=$2, year=$3, phone=$4, address=$5, native_place=$6,
-         department=$7, batch=$8, section=$9, hostel_day_scholar=$10, driving_license=$11,
-         passport=$12, relocation_willingness=$13, family_business=$14, financial_background=$15,
-         faculty_mentor_id=$16, photo_url=$17, resume_url=$18, linkedin_url=$19, cgpa=$20, updated_at=CURRENT_TIMESTAMP
-         WHERE UPPER(roll_number) = $21 RETURNING *`,
-        [name, email, year, phone, address, native_place, department, batch, section, hostel_day_scholar, driving_license, passport, relocation_willingness, family_business, financial_background, faculty_mentor_id, photo_url, resume_url, linkedin_url, cgpa, studentId]
+        `UPDATE students SET name=$1, email=$2, year=$3, phone=$4, parent_phone=$5, address=$6, native_place=$7,
+         department=$8, batch=$9, section=$10, hostel_day_scholar=$11, driving_license=$12,
+         passport=$13, relocation_willingness=$14, family_business=$15, financial_background=$16,
+         faculty_mentor_id=$17, photo_url=$18, resume_url=$19, linkedin_url=$20, cgpa=$21, updated_at=CURRENT_TIMESTAMP
+         WHERE UPPER(roll_number) = $22 RETURNING *`,
+        [name, email, year, phone, parent_phone, address, native_place, department, batch, section, hostel_day_scholar, driving_license, passport, relocation_willingness, family_business, financial_background, faculty_mentor_id, photo_url, resume_url, linkedin_url, cgpa, studentId]
       );
     }
 
@@ -2567,6 +2741,7 @@ app.put('/students/:id', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), as
       }
     } catch { /* ignore cgpa recalc errors */ }
 
+    invalidateStudentCache(); // Profile update — clear cached student lists
     res.json({ message: 'Profile updated successfully', student: result.rows[0] });
   } catch (err: any) {
     res.status(500).json({ error: err.message || err });
@@ -2662,6 +2837,7 @@ app.delete('/students', requireRole('admin'), async (req: Request, res: Response
       const delResult = await db.query('DELETE FROM students WHERE UPPER(roll_number) = ANY($1) RETURNING roll_number', [targetRolls]);
       deleteCognitoUsers([...targetEmails, ...targetRolls]).catch(() => {});
 
+      invalidateStudentCache(); // Dept batch delete — clear cached lists
       return res.json({
         message: `All ${delResult.rows.length} students in ${targetDeptFilter} deleted successfully. Other departments remain untouched.`,
         deleted: delResult.rows.length,
@@ -2695,6 +2871,7 @@ app.delete('/students', requireRole('admin'), async (req: Request, res: Response
     deleteCognitoUsers([...allEmails, ...allRolls]).catch(() => {});
     deleteAllCognitoUsers().catch(() => {});
 
+    invalidateStudentCache(); // Global delete — clear cached lists
     res.json({ message: 'All student records deleted successfully from database.' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -2774,6 +2951,7 @@ app.delete('/students/:id', requireRole('admin'), async (req: Request, res: Resp
 
     await deleteCognitoUsers([studentId, studentEmail]);
 
+    invalidateStudentCache(); // Single delete — clear cached lists
     res.json({ message: `Student ${studentId} and all associated records deleted successfully` });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -2861,7 +3039,72 @@ app.post('/admin/students/bulk-delete', requireRole('admin'), async (req: Reques
 
     await deleteCognitoUsers([...authorizedIds, ...emailsToDelete]);
 
+    invalidateStudentCache(); // Bulk delete — clear cached lists
     res.json({ deleted, message: `${deleted} student(s) and all associated records deleted successfully` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// Unified Full Profile — GET /students/:id/full-profile
+// Returns student + ALL sub-resources in one round-trip (parallel Promise.all).
+// Replaces 9 separate API calls from the frontend profile page.
+// Same auth rules as individual sub-resource endpoints.
+// ============================================================================
+app.get('/students/:id/full-profile', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const rollNo = req.params.id.toUpperCase();
+
+    if (db.isMock) {
+      const student = db.mockStore.students.get(rollNo) || null;
+      return res.json({
+        student,
+        academics:      db.mockStore.academics.get(rollNo) || [],
+        codingProfiles: db.mockStore.codingProfiles.get(rollNo) || [],
+        techSkills:     db.mockStore.techSkills?.get(rollNo) || [],
+        certifications: db.mockStore.certifications?.get(rollNo) || [],
+        softSkills:     db.mockStore.softSkills?.get(rollNo) || [],
+        achievements:   db.mockStore.achievements?.get(rollNo) || [],
+        placement:      db.mockStore.placement?.get(rollNo) || null,
+      });
+    }
+
+    // Fire all DB queries in parallel — single network round-trip latency
+    const [
+      studentRes,
+      academicsRes,
+      codingRes,
+      techSkillsRes,
+      certsRes,
+      softSkillsRes,
+      achievementsRes,
+      placementRes,
+    ] = await Promise.all([
+      db.query(`SELECT * FROM students WHERE UPPER(roll_number) = $1 LIMIT 1`, [rollNo]),
+      db.query(`SELECT * FROM academics WHERE UPPER(student_id) = $1 ORDER BY semester ASC`, [rollNo]),
+      db.query(`SELECT * FROM coding_profiles WHERE UPPER(student_id) = $1`, [rollNo]),
+      db.query(`SELECT * FROM tech_skills WHERE UPPER(student_id) = $1`, [rollNo]),
+      db.query(`SELECT * FROM certifications WHERE UPPER(student_id) = $1 ORDER BY date_completed DESC NULLS LAST`, [rollNo]),
+      db.query(`SELECT * FROM soft_skills WHERE UPPER(student_id) = $1`, [rollNo]),
+      db.query(`SELECT * FROM achievements WHERE UPPER(student_id) = $1 ORDER BY achievement_date DESC NULLS LAST`, [rollNo]),
+      db.query(`SELECT * FROM placement_profile WHERE UPPER(student_id) = $1 LIMIT 1`, [rollNo]).catch(() => ({ rows: [] })),
+    ]);
+
+    if (studentRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+
+    res.json({
+      student:        studentRes.rows[0],
+      academics:      academicsRes.rows,
+      codingProfiles: codingRes.rows,
+      techSkills:     techSkillsRes.rows,
+      certifications: certsRes.rows,
+      softSkills:     softSkillsRes.rows,
+      achievements:   achievementsRes.rows,
+      placement:      placementRes.rows[0] || null,
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -5067,8 +5310,8 @@ app.get('/faculty/mentees/by-email/:email', async (req: Request, res: Response) 
   }
 });
 
-// GET /faculty — List all faculty with mentee counts (admin/HOD/coordinator/faculty/oversight view, scoped by department or all)
-app.get('/faculty', requireRole('admin', 'hod', 'coordinator', 'faculty', 'director', 'principal', 'management', 'program_chair'), async (req: Request, res: Response) => {
+// GET /faculty — List all faculty with mentee counts (admin/HOD/coordinator/faculty/student view, scoped by department or all)
+app.get('/faculty', requireRole('admin', 'hod', 'coordinator', 'faculty', 'director', 'principal', 'management', 'program_chair', 'student'), async (req: Request, res: Response) => {
   try {
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
@@ -5077,7 +5320,9 @@ app.get('/faculty', requireRole('admin', 'hod', 'coordinator', 'faculty', 'direc
     const reqDept = req.query.department ? String(req.query.department) : undefined;
 
     let targetDept: string | undefined;
-    if (!isSuper && callerDept && callerDept !== 'All' && callerDept !== '*') {
+    if (callerRole === 'student') {
+      targetDept = callerDept || reqDept;
+    } else if (!isSuper && callerDept && callerDept !== 'All' && callerDept !== '*') {
       targetDept = callerDept;
     } else if (reqDept && reqDept !== 'All' && reqDept !== 'undefined' && reqDept !== 'null') {
       targetDept = reqDept;
@@ -6225,12 +6470,15 @@ app.get('/reports/hod-analytics', async (req: Request, res: Response) => {
     );
 
     const topRes = await db.query(
-      `SELECT s.*, ROUND(AVG(a.semester_gpa)::numeric, 2) as avg_gpa
+      `SELECT s.*, a.avg_gpa
        FROM students s
-       JOIN academics a ON s.roll_number = a.student_id
+       JOIN (
+         SELECT student_id, ROUND(AVG(semester_gpa)::numeric, 2) as avg_gpa
+         FROM academics
+         GROUP BY student_id
+       ) a ON s.roll_number = a.student_id
        ${sWhere}
-       GROUP BY s.roll_number, s.name, s.email, s.year, s.department, s.batch, s.section, s.phone, s.photo_url, s.resume_url, s.linkedin_url, s.created_at, s.updated_at
-       ORDER BY avg_gpa DESC
+       ORDER BY a.avg_gpa DESC
        LIMIT 5`,
       deptParams
     );

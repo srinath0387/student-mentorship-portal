@@ -18,6 +18,7 @@ export interface StudentProfile {
   email: string;
   year: '1st Year' | '2nd Year' | '3rd Year' | '4th Year';
   phone?: string;
+  parent_phone?: string;
   address?: string;
   native_place?: string;
   department: string;
@@ -30,6 +31,9 @@ export interface StudentProfile {
   family_business?: string;
   financial_background?: string;
   faculty_mentor_id?: string;
+  mentor_name?: string;
+  mentor_email?: string;
+  mentor_department?: string;
   photo_url?: string;
   resume_url?: string;
   linkedin_url?: string;

@@ -139,6 +139,21 @@ export const PersonalInfoTab: React.FC<PersonalInfoTabProps> = ({ student, acade
 
   const { register, handleSubmit, reset } = useForm<StudentProfile>();
 
+  const [deptFaculty, setDeptFaculty] = useState<any[]>([]);
+  const [loadingFaculty, setLoadingFaculty] = useState(false);
+
+  // Fetch department faculty mentors if student does not have a mentor yet
+  React.useEffect(() => {
+    const studentDept = student?.department || user?.department;
+    if (studentDept && (!student?.faculty_mentor_id || isEditing)) {
+      setLoadingFaculty(true);
+      api.getDepartmentFaculty(studentDept)
+        .then((fac) => setDeptFaculty(Array.isArray(fac) ? fac : []))
+        .catch(() => setDeptFaculty([]))
+        .finally(() => setLoadingFaculty(false));
+    }
+  }, [student?.department, student?.faculty_mentor_id, user?.department, isEditing]);
+
   React.useEffect(() => {
     reset({
       ...student,
@@ -147,6 +162,8 @@ export const PersonalInfoTab: React.FC<PersonalInfoTabProps> = ({ student, acade
       email: student?.email || activeEmail,
       year: (student?.year as any) || '3rd Year',
       phone: student?.phone || '',
+      parent_phone: student?.parent_phone || '',
+      faculty_mentor_id: student?.faculty_mentor_id || '',
       address: student?.address || '',
       native_place: student?.native_place || '',
       department: student?.department || user?.department || '',
@@ -316,15 +333,36 @@ export const PersonalInfoTab: React.FC<PersonalInfoTabProps> = ({ student, acade
                 maxLength={10}
                 placeholder="e.g. 9876543210"
                 onKeyDown={(e) => {
-                  // Allow: backspace, delete, tab, escape, enter, arrows
                   if (['Backspace','Delete','Tab','Escape','Enter','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)) return;
-                  // Block non-digit characters
                   if (!/^[0-9]$/.test(e.key)) e.preventDefault();
                 }}
                 className="w-full px-3 py-2 text-sm rounded-lg border border-borderLine bg-background"
               />
             ) : (
               <p className="text-sm font-medium text-textPrimary">{s?.phone || 'Not provided'}</p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-textSecondary uppercase tracking-wider mb-1 flex items-center justify-between">
+              <span>Parent / Guardian Mobile No</span>
+              <span className="text-[10px] text-brand-primary lowercase font-normal">(required)</span>
+            </label>
+            {isEditing ? (
+              <input
+                {...register('parent_phone')}
+                type="text"
+                inputMode="numeric"
+                maxLength={10}
+                placeholder="e.g. 9876543210"
+                onKeyDown={(e) => {
+                  if (['Backspace','Delete','Tab','Escape','Enter','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)) return;
+                  if (!/^[0-9]$/.test(e.key)) e.preventDefault();
+                }}
+                className="w-full px-3 py-2 text-sm rounded-lg border border-borderLine bg-background"
+              />
+            ) : (
+              <p className="text-sm font-medium text-textPrimary">{s?.parent_phone || 'Not provided'}</p>
             )}
           </div>
 
@@ -410,23 +448,55 @@ export const PersonalInfoTab: React.FC<PersonalInfoTabProps> = ({ student, acade
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-textSecondary uppercase tracking-wider mb-1">LinkedIn Profile</label>
-            {isEditing ? (
-              <input {...register('linkedin_url')} placeholder="https://linkedin.com/in/yourprofile" className="w-full px-3 py-2 text-sm rounded-lg border border-borderLine bg-background" />
-            ) : (
-              s?.linkedin_url ? (
-                <a
-                  href={formatExternalUrl(s.linkedin_url)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm font-medium text-brand-primary hover:underline flex items-center gap-1"
-                >
-                  <span className="truncate">{s.linkedin_url}</span>
-                  <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-                </a>
+            <label className="block text-xs font-semibold text-textSecondary uppercase tracking-wider mb-1 flex items-center justify-between">
+              <span>Assigned Faculty Mentor</span>
+              {s?.faculty_mentor_id ? (
+                <span className="inline-flex items-center gap-1 text-[10px] text-amber-500 font-bold">
+                  <Lock className="w-3 h-3" />
+                  Locked (Contact Admin to change)
+                </span>
               ) : (
-                <p className="text-sm text-alert italic">Not linked yet</p>
-              )
+                <span className="text-[10px] text-brand-primary font-medium">Select Once & Permanently</span>
+              )}
+            </label>
+            {s?.faculty_mentor_id ? (
+              <div className="p-2.5 rounded-lg border border-borderLine bg-surface-2 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-bold text-textPrimary">
+                    {s?.mentor_name || 'Assigned Mentor'}
+                  </p>
+                  <p className="text-xs text-textSecondary">
+                    {s?.mentor_email || s?.faculty_mentor_id} · {s?.mentor_department || s?.department}
+                  </p>
+                </div>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[10px] font-bold">
+                  <CheckCircle2 className="w-3 h-3" />
+                  Assigned
+                </span>
+              </div>
+            ) : isEditing ? (
+              <div>
+                <select
+                  {...register('faculty_mentor_id')}
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-borderLine bg-background"
+                >
+                  <option value="">Choose a Faculty Mentor from {s?.department || 'your department'}...</option>
+                  {deptFaculty.map((fac: any) => (
+                    <option key={fac.faculty_id} value={fac.faculty_id}>
+                      {fac.name} ({fac.email}) {fac.role ? `— ${fac.role}` : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-amber-500 mt-1 flex items-center gap-1 font-medium">
+                  <Lock className="w-3 h-3 shrink-0" />
+                  Warning: Once selected and saved, you cannot change your mentor yourself. Reach out to department admin for changes.
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-alert italic flex items-center gap-1">
+                <span>Not assigned yet</span>
+                <span className="text-xs text-textSecondary font-normal">(Click Edit to choose your mentor)</span>
+              </p>
             )}
           </div>
         </div>

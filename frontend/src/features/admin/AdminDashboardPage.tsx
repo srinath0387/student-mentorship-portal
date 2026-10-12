@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { VALID_DEPARTMENT_NAMES } from '../../lib/validation/auth';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -54,6 +54,7 @@ import { HolidayCalendarTab } from './tabs/HolidayCalendarTab';
 import { LeaveCreditManagementTab } from './tabs/LeaveCreditManagementTab';
 import { CertificationAnalyticsView } from '../certifications/components/CertificationAnalyticsView';
 import { UnregisteredStudentsTab } from './tabs/UnregisteredStudentsTab';
+import { useVirtualizer } from '@tanstack/react-virtual';
 
 const DEPARTMENTS = VALID_DEPARTMENT_NAMES;
 const YEARS = ['1st Year', '2nd Year', '3rd Year', '4th Year'] as const;
@@ -86,7 +87,7 @@ export const AdminDashboardPage: React.FC = () => {
   const { user } = useAuth();
 
   // Detect super admin + tier level from user email
-  const isSuperAdmin = user?.role === 'admin' && SUPER_ADMIN_EMAILS.includes(user?.email ?? '');
+  const isSuperAdmin = user?.role === 'admin' && (Boolean(user?.isSuperAdmin) || SUPER_ADMIN_EMAILS.includes(user?.email ?? ''));
   const isTier1A = user?.role === 'admin' && TIER1A_EMAILS.includes(user?.email ?? '');
   const isOversight = ['director', 'principal', 'management', 'program_chair'].includes(user?.role ?? '');
 
@@ -107,9 +108,20 @@ export const AdminDashboardPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [sectionFilter, setSectionFilter] = useState('');
   const [yearFilter, setYearFilter] = useState('');
+  const [hasUserChangedDept, setHasUserChangedDept] = useState(false);
   const [departmentFilter, setDepartmentFilter] = useState<string>(
     (isEffectiveSuperAdmin || isOversight) ? 'All' : (user?.department || 'CSE (Data Science)')
   );
+
+  React.useEffect(() => {
+    if (hasUserChangedDept) return;
+    if (isSuperAdmin || user?.isSuperAdmin || isOversight) {
+      setDepartmentFilter('All');
+    } else if (user?.department) {
+      setDepartmentFilter(user.department);
+      setHodDept(user.department);
+    }
+  }, [user?.department, user?.isSuperAdmin, isSuperAdmin, isOversight, hasUserChangedDept]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showBulkImportModal, setShowBulkImportModal] = useState(false);
   const [editingStudent, setEditingStudent] = useState<StudentProfile | null>(null);
@@ -210,45 +222,63 @@ export const AdminDashboardPage: React.FC = () => {
   const [mentorLookupLoading, setMentorLookupLoading] = useState(false);
   const [mentorLookupSearched, setMentorLookupSearched] = useState(false);
 
-  // Queries
+  // Ref for the student table's scroll container — passed to VirtualStudentRows
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+
+  // Queries — staleTime prevents re-fetching on every tab switch
   const { data: students = [], refetch } = useQuery({
     queryKey: ['adminStudents', departmentFilter],
     queryFn: () => api.getAllStudents({ department: (!departmentFilter || departmentFilter === 'All' || departmentFilter === '*') ? undefined : departmentFilter }),
-    staleTime: 0,
-    refetchOnMount: 'always',
+    staleTime: 5 * 60 * 1000,   // 5 minutes — data is considered fresh, no refetch on tab switch
+    gcTime: 10 * 60 * 1000,     // Keep in memory for 10 minutes after last use
+    refetchOnWindowFocus: false, // Don't refetch when switching browser tabs
   });
 
   // Per-student sub-resources for inspection modal
+  // staleTime prevents re-fetching the same student's data when closing and reopening the modal
+  const INSPECT_STALE = 3 * 60 * 1000; // 3 minutes
   const inspectId = inspectStudent?.roll_number || '';
   const { data: inspectAcademics = [] } = useQuery({
     queryKey: ['adminInspectAcademics', inspectId],
     queryFn: () => api.getAcademics(inspectId),
     enabled: Boolean(inspectId),
+    staleTime: INSPECT_STALE,
+    refetchOnWindowFocus: false,
   });
   const { data: inspectCoding = [] } = useQuery({
     queryKey: ['adminInspectCoding', inspectId],
     queryFn: () => api.getCodingProfiles(inspectId),
     enabled: Boolean(inspectId),
+    staleTime: INSPECT_STALE,
+    refetchOnWindowFocus: false,
   });
   const { data: inspectSkills = [] } = useQuery({
     queryKey: ['adminInspectSkills', inspectId],
     queryFn: () => api.getTechSkills(inspectId),
     enabled: Boolean(inspectId),
+    staleTime: INSPECT_STALE,
+    refetchOnWindowFocus: false,
   });
   const { data: inspectCerts = [] } = useQuery({
     queryKey: ['adminInspectCerts', inspectId],
     queryFn: () => api.getCertifications(inspectId),
     enabled: Boolean(inspectId),
+    staleTime: INSPECT_STALE,
+    refetchOnWindowFocus: false,
   });
   const { data: inspectSoft = [] } = useQuery({
     queryKey: ['adminInspectSoft', inspectId],
     queryFn: () => api.getSoftSkills(inspectId),
     enabled: Boolean(inspectId),
+    staleTime: INSPECT_STALE,
+    refetchOnWindowFocus: false,
   });
   const { data: inspectAchievements = [] } = useQuery({
     queryKey: ['adminInspectAchievements', inspectId],
     queryFn: () => api.getAchievements(inspectId),
     enabled: Boolean(inspectId),
+    staleTime: INSPECT_STALE,
+    refetchOnWindowFocus: false,
   });
 
   // Top performers data dynamically mapped from real API students (using database stored stats)
@@ -783,7 +813,7 @@ export const AdminDashboardPage: React.FC = () => {
                 />
               </div>
               {isSuperAdmin ? (
-                <select value={departmentFilter} onChange={(e) => setDepartmentFilter(e.target.value)}
+                <select value={departmentFilter} onChange={(e) => { setHasUserChangedDept(true); setDepartmentFilter(e.target.value); }}
                   className="px-3 py-1.5 text-xs rounded-lg border border-borderLine bg-background text-textPrimary font-medium">
                   <option value="All">All Departments</option>
                   {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
@@ -901,7 +931,12 @@ export const AdminDashboardPage: React.FC = () => {
             </div>
           )}
 
-          <div className="overflow-x-auto">
+          {/* Table scroll container — ref passed to VirtualStudentRows for correct virtualizer scroll calculation */}
+          <div
+            ref={tableScrollRef}
+            className="overflow-x-auto"
+            style={{ maxHeight: '65vh', overflowY: 'auto' }}
+          >
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-borderLine bg-background text-[11px] font-semibold text-textSecondary uppercase tracking-wider">
@@ -937,69 +972,18 @@ export const AdminDashboardPage: React.FC = () => {
                 {filteredStudents.length === 0 && (
                   <tr><td colSpan={8} className="py-10 text-center text-textSecondary text-xs">No students found matching your filters.</td></tr>
                 )}
-                {filteredStudents.map((s, i) => (
-                  <tr key={s.roll_number} className={`hover:bg-background/50 transition-colors ${selectedRollNos.has(s.roll_number) ? 'bg-red-50/40' : ''}`}>
-                    {/* Row checkbox */}
-                    <td className="py-3.5 px-3">
-                      <input
-                        type="checkbox"
-                        className="w-4 h-4 accent-red-600 cursor-pointer"
-                        checked={selectedRollNos.has(s.roll_number)}
-                        onChange={(e) => {
-                          setSelectedRollNos(prev => {
-                            const next = new Set(prev);
-                            e.target.checked ? next.add(s.roll_number) : next.delete(s.roll_number);
-                            return next;
-                          });
-                        }}
-                      />
-                    </td>
-                    <td className="py-3.5 px-4 font-bold text-textPrimary">
-                      {s.name}
-                      <p className="text-[11px] text-textSecondary font-normal">{s.email}</p>
-                    </td>
-                    <td className="py-3.5 px-4 font-bold text-brand-primary text-xs">{s.roll_number}</td>
-                    <td className="py-3.5 px-4 text-xs font-medium">{s.department} • {s.year}</td>
-                    <td className="py-3.5 px-4 font-black text-green-600">
-                      {(s as any).cgpa !== undefined && (s as any).cgpa !== null
-                        ? `${Number((s as any).cgpa).toFixed(2)} / 10.0`
-                        : <span className="text-textSecondary font-normal text-xs">N/A</span>}
-                    </td>
-                    <td className="py-3.5 px-4">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {(s as any).leetcode_handle && (s as any).leetcode_handle !== 'Not Linked' && (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#FFA116]/10 text-[#FFA116]">LeetCode</span>
-                        )}
-                        {(s as any).github_handle && (s as any).github_handle !== 'Not Linked' && (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-borderLine text-textPrimary">GitHub</span>
-                        )}
-                        {(s as any).codeforces_handle && (s as any).codeforces_handle !== 'Not Linked' && (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-600">Codeforces</span>
-                        )}
-                        {!(s as any).leetcode_handle && !(s as any).github_handle && !(s as any).codeforces_handle && (
-                          <span className="text-xs text-textSecondary italic">None linked</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-3.5 px-4 text-xs">{s.batch} • Sec {s.section}</td>
-                    <td className="py-3.5 px-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button onClick={() => { setInspectStudent(s); setInspectTab('personal-info'); }}
-                          className="p-1.5 rounded-lg border border-borderLine text-brand-primary hover:bg-brand-soft" title="Inspect Full Profile">
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        <button onClick={() => openEditModal(s)}
-                          className="p-1.5 rounded-lg border border-borderLine text-textPrimary hover:bg-background" title="Edit Student">
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button onClick={() => handleDeleteStudent(s.roll_number, s.name)}
-                          className="p-1.5 rounded-lg border border-borderLine text-alert hover:bg-alert-soft" title="Delete Student">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {filteredStudents.length > 0 && (
+                  <VirtualStudentRows
+                    students={filteredStudents}
+                    selectedRollNos={selectedRollNos}
+                    setSelectedRollNos={setSelectedRollNos}
+                    setInspectStudent={setInspectStudent}
+                    setInspectTab={setInspectTab}
+                    openEditModal={openEditModal}
+                    handleDeleteStudent={handleDeleteStudent}
+                    scrollContainerRef={tableScrollRef}
+                  />
+                )}
               </tbody>
             </table>
           </div>
@@ -2326,3 +2310,170 @@ export const AdminDashboardPage: React.FC = () => {
     </div>
   );
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VirtualStudentRows — renders only visible rows using @tanstack/react-virtual.
+// Replaces a full .map() over 1000+ students with a windowed list of ~15 rows.
+// All existing features (checkboxes, inspect, edit, delete) are preserved exactly.
+// ─────────────────────────────────────────────────────────────────────────────
+const ROW_HEIGHT = 57; // px — matches py-3.5 (14px top + 14px bottom + ~29px content)
+const VISIBLE_ROWS = 15;
+
+interface VirtualStudentRowsProps {
+  students: StudentProfile[];
+  selectedRollNos: Set<string>;
+  setSelectedRollNos: React.Dispatch<React.SetStateAction<Set<string>>>;
+  setInspectStudent: (s: StudentProfile) => void;
+  setInspectTab: (tab: string) => void;
+  openEditModal: (s: StudentProfile) => void;
+  handleDeleteStudent: (rollNumber: string, name: string) => void;
+  scrollContainerRef: React.RefObject<HTMLDivElement>;
+}
+
+const VirtualStudentRows: React.FC<VirtualStudentRowsProps> = ({
+  students,
+  selectedRollNos,
+  setSelectedRollNos,
+  setInspectStudent,
+  setInspectTab,
+  openEditModal,
+  handleDeleteStudent,
+  scrollContainerRef,
+}) => {
+  const virtualizer = useVirtualizer({
+    count: students.length,
+    // Use the ref passed from the parent — this is the actual scrolling div
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 5,
+  });
+
+  // When list is small, skip virtualisation — render directly
+  if (students.length <= VISIBLE_ROWS) {
+    return (
+      <>
+        {students.map((s) => (
+          <StudentTableRow
+            key={s.roll_number}
+            s={s}
+            selected={selectedRollNos.has(s.roll_number)}
+            onSelect={(checked) =>
+              setSelectedRollNos((prev) => {
+                const next = new Set(prev);
+                checked ? next.add(s.roll_number) : next.delete(s.roll_number);
+                return next;
+              })
+            }
+            onInspect={() => { setInspectStudent(s); setInspectTab('personal-info'); }}
+            onEdit={() => openEditModal(s)}
+            onDelete={() => handleDeleteStudent(s.roll_number, s.name)}
+          />
+        ))}
+      </>
+    );
+  }
+
+  const totalHeight = virtualizer.getTotalSize();
+  const virtualItems = virtualizer.getVirtualItems();
+  const topPad = virtualItems[0]?.start ?? 0;
+  const lastItem = virtualItems[virtualItems.length - 1];
+  const bottomPad = lastItem ? totalHeight - lastItem.end : 0;
+
+  return (
+    <>
+      {topPad > 0 && <tr style={{ height: topPad }} aria-hidden />}
+      {virtualItems.map((virtualRow: any) => {
+        const s = students[virtualRow.index];
+        return (
+          <StudentTableRow
+            key={s.roll_number}
+            s={s}
+            selected={selectedRollNos.has(s.roll_number)}
+            onSelect={(checked) =>
+              setSelectedRollNos((prev) => {
+                const next = new Set(prev);
+                checked ? next.add(s.roll_number) : next.delete(s.roll_number);
+                return next;
+              })
+            }
+            onInspect={() => { setInspectStudent(s); setInspectTab('personal-info'); }}
+            onEdit={() => openEditModal(s)}
+            onDelete={() => handleDeleteStudent(s.roll_number, s.name)}
+          />
+        );
+      })}
+      {bottomPad > 0 && <tr style={{ height: bottomPad }} aria-hidden />}
+    </>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// StudentTableRow — memoised single row (used by VirtualStudentRows)
+// ─────────────────────────────────────────────────────────────────────────────
+interface StudentTableRowProps {
+  s: StudentProfile;
+  selected: boolean;
+  onSelect: (checked: boolean) => void;
+  onInspect: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}
+
+const StudentTableRow: React.FC<StudentTableRowProps> = React.memo(({
+  s, selected, onSelect, onInspect, onEdit, onDelete,
+}) => (
+  <tr className={`hover:bg-background/50 transition-colors ${selected ? 'bg-red-50/40' : ''}`}>
+    <td className="py-3.5 px-3">
+      <input
+        type="checkbox"
+        className="w-4 h-4 accent-red-600 cursor-pointer"
+        checked={selected}
+        onChange={(e) => onSelect(e.target.checked)}
+      />
+    </td>
+    <td className="py-3.5 px-4 font-bold text-textPrimary">
+      {s.name}
+      <p className="text-[11px] text-textSecondary font-normal">{s.email}</p>
+    </td>
+    <td className="py-3.5 px-4 font-bold text-brand-primary text-xs">{s.roll_number}</td>
+    <td className="py-3.5 px-4 text-xs font-medium">{s.department} • {s.year}</td>
+    <td className="py-3.5 px-4 font-black text-green-600">
+      {(s as any).cgpa !== undefined && (s as any).cgpa !== null
+        ? `${Number((s as any).cgpa).toFixed(2)} / 10.0`
+        : <span className="text-textSecondary font-normal text-xs">N/A</span>}
+    </td>
+    <td className="py-3.5 px-4">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {(s as any).leetcode_handle && (s as any).leetcode_handle !== 'Not Linked' && (
+          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#FFA116]/10 text-[#FFA116]">LeetCode</span>
+        )}
+        {(s as any).github_handle && (s as any).github_handle !== 'Not Linked' && (
+          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-borderLine text-textPrimary">GitHub</span>
+        )}
+        {(s as any).codeforces_handle && (s as any).codeforces_handle !== 'Not Linked' && (
+          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-600">Codeforces</span>
+        )}
+        {!(s as any).leetcode_handle && !(s as any).github_handle && !(s as any).codeforces_handle && (
+          <span className="text-xs text-textSecondary italic">None linked</span>
+        )}
+      </div>
+    </td>
+    <td className="py-3.5 px-4 text-xs">{s.batch} • Sec {s.section}</td>
+    <td className="py-3.5 px-4 text-right">
+      <div className="flex items-center justify-end gap-2">
+        <button onClick={onInspect}
+          className="p-1.5 rounded-lg border border-borderLine text-brand-primary hover:bg-brand-soft" title="Inspect Full Profile">
+          <Eye className="w-4 h-4" />
+        </button>
+        <button onClick={onEdit}
+          className="p-1.5 rounded-lg border border-borderLine text-textPrimary hover:bg-background" title="Edit Student">
+          <Edit className="w-4 h-4" />
+        </button>
+        <button onClick={onDelete}
+          className="p-1.5 rounded-lg border border-borderLine text-alert hover:bg-alert-soft" title="Delete Student">
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+    </td>
+  </tr>
+));

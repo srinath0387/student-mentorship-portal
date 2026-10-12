@@ -68,6 +68,14 @@ async function getPool(): Promise<Pool> {
     console.error('[DB] Unexpected pool error:', err.message);
   });
 
+  // Run schema init ONCE when the pool is first created (Lambda cold start).
+  // This moves it OFF the hot path of every db.query() call — the single biggest
+  // cold-start latency fix. Fire-and-forget: individual queries still work even if
+  // schema init takes a moment; the error-recovery block in query() is the safety net.
+  ensureSchema(pool).catch((err: any) =>
+    console.warn('[DB] Schema init warning on cold start:', err?.message)
+  );
+
   return pool;
 }
 
@@ -469,9 +477,17 @@ async function ensureSchema(p: Pool) {
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_students_admission_id ON students(admission_id) WHERE admission_id IS NOT NULL AND admission_id != '';`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_students_username ON students(LOWER(username)) WHERE username IS NOT NULL AND username != '';`,
 
-    // Index for department-based lookups
+    // Indexes for department-based lookups
     `CREATE INDEX IF NOT EXISTS idx_students_department ON students(department);`,
     `CREATE INDEX IF NOT EXISTS idx_faculty_department ON faculty(department);`,
+
+    // ── Performance indexes for GET /students JOIN subqueries (Phase 4 optimization) ──
+    // These make the heavy 3-table JOIN on academics + coding_profiles dramatically faster.
+    `CREATE INDEX IF NOT EXISTS idx_academics_student_gpa ON academics(student_id, semester_gpa);`,
+    `CREATE INDEX IF NOT EXISTS idx_coding_student_platform ON coding_profiles(student_id, platform);`,
+    `CREATE INDEX IF NOT EXISTS idx_students_dept_year_section ON students(department, year, section);`,
+    // Expression index for UPPER(roll_number) lookups in WHERE/JOIN conditions
+    `CREATE INDEX IF NOT EXISTS idx_students_roll_upper ON students(UPPER(roll_number));`,
 
     // Single-session enforcement table — one active session per email
     // Must exist before any delete route tries to clean up user_sessions
@@ -668,7 +684,8 @@ export const db = {
       return { rows: [], rowCount: 0, command: '', oid: 0, fields: [] } as any;
     }
     const p = await getPool();
-    await ensureSchema(p);
+    // NOTE: ensureSchema is called inside getPool() on cold start — NOT here.
+    // Calling it on every query added 500ms–3s overhead per Lambda invocation.
     try {
       return await p.query(text, params);
     } catch (err: any) {

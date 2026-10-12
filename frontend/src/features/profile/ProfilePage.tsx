@@ -61,16 +61,43 @@ export const ProfilePage: React.FC = () => {
     setSearchParams(params);
   };
 
-  // Queries for profile sections — all keyed by activeRollNo so switching students busts cache
-  const { data: student, refetch: refetchStudent, isLoading: isStudentLoading } = useQuery({ queryKey: ['studentProfile', activeRollNo], queryFn: () => api.getStudentProfile(activeRollNo), enabled: Boolean(activeRollNo) });
-  const { data: academics = [], refetch: refetchAcademics } = useQuery({ queryKey: ['academics', activeRollNo], queryFn: () => api.getAcademics(activeRollNo), enabled: Boolean(activeRollNo) });
-  const { data: codingProfiles = [], refetch: refetchCoding } = useQuery({ queryKey: ['codingProfiles', activeRollNo], queryFn: () => api.getCodingProfiles(activeRollNo), enabled: Boolean(activeRollNo) });
-  const { data: techSkills = [], refetch: refetchSkills } = useQuery({ queryKey: ['techSkills', activeRollNo], queryFn: () => api.getTechSkills(activeRollNo), enabled: Boolean(activeRollNo) });
-  const { data: certifications = [], refetch: refetchCerts } = useQuery({ queryKey: ['certifications', activeRollNo], queryFn: () => api.getCertifications(activeRollNo), enabled: Boolean(activeRollNo) });
-  const { data: softSkills = [], refetch: refetchSoft } = useQuery({ queryKey: ['softSkills', activeRollNo], queryFn: () => api.getSoftSkills(activeRollNo), enabled: Boolean(activeRollNo) });
-  const { data: achievements = [], refetch: refetchAchievements } = useQuery({ queryKey: ['achievements', activeRollNo], queryFn: () => api.getAchievements(activeRollNo), enabled: Boolean(activeRollNo) });
-  const { data: placement, refetch: refetchPlacement } = useQuery({ queryKey: ['placementProfile', activeRollNo], queryFn: () => api.getPlacementProfile(activeRollNo), enabled: Boolean(activeRollNo) });
-  const { data: scoreData, refetch: refetchScore } = useQuery({ queryKey: ['employabilityScore', activeRollNo], queryFn: () => api.getEmployabilityScore(activeRollNo), enabled: Boolean(activeRollNo), staleTime: 0, refetchOnMount: 'always' });
+  // Unified profile fetch — 9 API calls → 1.
+  // All sub-resources (student, academics, codingProfiles, etc.) load in a single round-trip.
+  // staleTime: 5 min prevents re-fetching on tab switches; manual refresh via handleRefreshAll.
+  const PROFILE_STALE = 5 * 60 * 1000;
+  const PROFILE_OPTS = { staleTime: PROFILE_STALE, refetchOnWindowFocus: false, gcTime: 10 * 60 * 1000 } as const;
+
+  const {
+    data: fullProfile,
+    refetch: refetchAll,
+    isLoading: isStudentLoading,
+  } = useQuery({
+    queryKey: ['studentFullProfile', activeRollNo],
+    queryFn: () => api.getStudentFullProfile(activeRollNo),
+    enabled: Boolean(activeRollNo),
+    ...PROFILE_OPTS,
+  });
+
+  // Destructure all sub-resources from the single response
+  const student        = fullProfile?.student;
+  const academics      = fullProfile?.academics      ?? [];
+  const codingProfiles = fullProfile?.codingProfiles ?? [];
+  const techSkills     = fullProfile?.techSkills     ?? [];
+  const certifications = fullProfile?.certifications ?? [];
+  const softSkills     = fullProfile?.softSkills     ?? [];
+  const achievements   = fullProfile?.achievements   ?? [];
+  const placement      = fullProfile?.placement      ?? undefined;
+
+  // Employability score is compute-heavy — kept as a separate lazy query.
+  // Only fetched when the 'Academic Growth Target' tab is active.
+  const { data: scoreData, refetch: refetchScore } = useQuery({
+    queryKey: ['employabilityScore', activeRollNo],
+    queryFn: () => api.getEmployabilityScore(activeRollNo),
+    enabled: Boolean(activeRollNo) && currentTab === 'placement-preferences',
+    staleTime: PROFILE_STALE,
+    refetchOnWindowFocus: false,
+    gcTime: 10 * 60 * 1000,
+  });
 
   // Guard: no roll number at all (admin/HOD on /profile with no ?id= param)
   if (!activeRollNo) {
@@ -92,16 +119,15 @@ export const ProfilePage: React.FC = () => {
 
 
   const handleRefreshAll = () => {
-    refetchStudent();
-    refetchAcademics();
-    refetchCoding();
-    refetchSkills();
-    refetchCerts();
-    refetchSoft();
-    refetchAchievements();
-    refetchPlacement();
-    refetchScore();
-    queryClient.invalidateQueries();
+    // Re-fetch the unified profile (all sub-resources in one call)
+    refetchAll();
+    // Also refresh the employability score if we're on that tab
+    if (currentTab === 'placement-preferences') {
+      refetchScore();
+    }
+    // Invalidate all related query cache keys so any open sub-components also refresh
+    queryClient.invalidateQueries({ queryKey: ['studentFullProfile', activeRollNo] });
+    queryClient.invalidateQueries({ queryKey: ['employabilityScore', activeRollNo] });
   };
 
   const tabs = [

@@ -117,9 +117,8 @@ export const api = {
       });
     }
 
-    // Universal chunking: whether querying All departments (super admin) or a specific
-    // department (e.g. CSE, ECE, Mech, or DS as numbers grow), chunking in 1,000-record batches
-    // guarantees NO query ever exceeds AWS API Gateway's 6MB payload limit.
+    // Universal chunking: guarantees NO query ever exceeds AWS API Gateway's 6MB payload limit.
+    // Works for 'All' departments (super admin) as well as branch admins and filter queries.
     const pageSize = 1000;
     const baseQuery = new URLSearchParams(cleanParams).toString();
     const delimiter = baseQuery ? '&' : '';
@@ -134,20 +133,21 @@ export const api = {
         return firstChunk;
       }
 
-      // If 1,000+ records exist, dynamically retrieve subsequent pages
-      let allStudents = [...firstChunk];
-      let offset = pageSize;
-      while (true) {
-        const nextChunk = await fetchWithAuth(`/students?${baseQuery}${delimiter}limit=${pageSize}&offset=${offset}`);
-        if (!Array.isArray(nextChunk) || nextChunk.length === 0) break;
-        allStudents = allStudents.concat(nextChunk);
-        if (nextChunk.length < pageSize) break;
-        offset += pageSize;
-      }
-      return allStudents;
+      // If 1,000+ records exist, fetch subsequent pages in parallel (supports up to 6,000+ students)
+      const additionalOffsets = [1000, 2000, 3000, 4000, 5000];
+      const additionalPages = await Promise.all(
+        additionalOffsets.map(offset =>
+          fetchWithAuth(`/students?${baseQuery}${delimiter}limit=${pageSize}&offset=${offset}`).catch(() => [])
+        )
+      );
+
+      const all = [firstChunk, ...additionalPages].flat().filter(Boolean) as StudentProfile[];
+      // De-duplicate by roll_number — guards against offset-boundary duplicates
+      return Array.from(
+        new Map(all.map(s => [s.roll_number.toUpperCase(), s])).values()
+      );
     } catch (err) {
-      console.warn('[getAllStudents universal chunking warning]:', err);
-      // Fallback
+      console.warn('[getAllStudents chunking warning]:', err);
       return fetchWithAuth(`/students${baseQuery ? `?${baseQuery}` : ''}`);
     }
   },
@@ -188,6 +188,22 @@ export const api = {
   // Student Profile
   getStudentProfile: async (id: string): Promise<StudentProfile> => {
     return fetchWithAuth(`/students/${id}`);
+  },
+
+  // Unified full profile — returns student + all 8 sub-resources in one API call.
+  // Replaces 9 separate calls (getStudentProfile + 8 sub-resource fetches) on the profile page.
+  // Falls back gracefully: if full-profile endpoint fails, callers can fall back to individual endpoints.
+  getStudentFullProfile: async (id: string): Promise<{
+    student: StudentProfile;
+    academics: AcademicRecord[];
+    codingProfiles: CodingProfile[];
+    techSkills: TechSkill[];
+    certifications: Certification[];
+    softSkills: SoftSkill[];
+    achievements: Achievement[];
+    placement: PlacementProfile | null;
+  }> => {
+    return fetchWithAuth(`/students/${id}/full-profile`);
   },
 
   updateStudentProfile: async (id: string, data: Partial<StudentProfile>): Promise<StudentProfile> => {
@@ -329,6 +345,11 @@ export const api = {
 
   getFacultyByEmail: async (email: string) => {
     return fetchWithAuth(`/faculty/by-email/${encodeURIComponent(email)}`);
+  },
+
+  getDepartmentFaculty: async (department?: string): Promise<any[]> => {
+    const q = department ? `?department=${encodeURIComponent(department)}` : '';
+    return fetchWithAuth(`/faculty${q}`);
   },
 
   // Faculty Full Profile (Personal, Education, Certs, Activities, Publications, Domains)
