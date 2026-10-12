@@ -86,7 +86,7 @@ export const AdminDashboardPage: React.FC = () => {
   const { user } = useAuth();
 
   // Detect super admin + tier level from user email
-  const isSuperAdmin = user?.role === 'admin' && SUPER_ADMIN_EMAILS.includes(user?.email ?? '');
+  const isSuperAdmin = user?.role === 'admin' && (Boolean(user?.isSuperAdmin) || SUPER_ADMIN_EMAILS.includes(user?.email ?? ''));
   const isTier1A = user?.role === 'admin' && TIER1A_EMAILS.includes(user?.email ?? '');
   const isOversight = ['director', 'principal', 'management', 'program_chair'].includes(user?.role ?? '');
 
@@ -105,9 +105,20 @@ export const AdminDashboardPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [sectionFilter, setSectionFilter] = useState('');
   const [yearFilter, setYearFilter] = useState('');
+  const [hasUserChangedDept, setHasUserChangedDept] = useState(false);
   const [departmentFilter, setDepartmentFilter] = useState<string>(
-    (user?.isSuperAdmin || isOversight) ? 'All' : (user?.department || 'CSE (Data Science)')
+    (user?.isSuperAdmin || isSuperAdmin || isOversight) ? 'All' : (user?.department || 'All')
   );
+
+  React.useEffect(() => {
+    if (hasUserChangedDept) return;
+    if (isSuperAdmin || user?.isSuperAdmin || isOversight) {
+      setDepartmentFilter('All');
+    } else if (user?.department) {
+      setDepartmentFilter(user.department);
+      setHodDept(user.department);
+    }
+  }, [user?.department, user?.isSuperAdmin, isSuperAdmin, isOversight, hasUserChangedDept]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showBulkImportModal, setShowBulkImportModal] = useState(false);
   const [editingStudent, setEditingStudent] = useState<StudentProfile | null>(null);
@@ -781,7 +792,7 @@ export const AdminDashboardPage: React.FC = () => {
                 />
               </div>
               {isSuperAdmin ? (
-                <select value={departmentFilter} onChange={(e) => setDepartmentFilter(e.target.value)}
+                <select value={departmentFilter} onChange={(e) => { setHasUserChangedDept(true); setDepartmentFilter(e.target.value); }}
                   className="px-3 py-1.5 text-xs rounded-lg border border-borderLine bg-background text-textPrimary font-medium">
                   <option value="All">All Departments</option>
                   {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}

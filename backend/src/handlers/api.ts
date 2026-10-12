@@ -1698,10 +1698,25 @@ function triggerBackgroundAutoSync() {
   })();
 }
 
+let studentColumnsEnsured = false;
+
 // GET /students — List/Search/Filter (Guarantees DISTINCT ON roll_number)
 app.get('/students', requireAuth, async (req: Request, res: Response) => {
   try {
     const { department, batch, section, year, standing, mentor_id, search } = req.query;
+
+    if (!db.isMock && !studentColumnsEnsured) {
+      studentColumnsEnsured = true;
+      await db.query(`
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS cgpa NUMERIC(4,2) DEFAULT 0.00;
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_phone VARCHAR(20);
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_url TEXT;
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS linkedin_updated TIMESTAMP WITH TIME ZONE;
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_url TEXT;
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS resume_url TEXT;
+        ALTER TABLE students ADD COLUMN IF NOT EXISTS is_lateral_entry BOOLEAN DEFAULT FALSE;
+      `).catch(() => {});
+    }
 
     if (db.isMock) {
       let students = Array.from(db.mockStore.students.values());
@@ -1922,25 +1937,44 @@ app.get('/students', requireAuth, async (req: Request, res: Response) => {
     }
 
     const result = await db.query(`
-      SELECT DISTINCT ON (s.roll_number) 
+      SELECT 
         s.*,
-        COALESCE(ROUND(AVG(a.semester_gpa), 2), 0.00) AS cgpa,
-        MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN c.handle END) AS leetcode_handle,
-        COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN GREATEST(c.score_rating, (c.easy_count + c.medium_count + c.hard_count)) END), 0) AS leetcode_solved,
-        COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN c.easy_count END), 0) AS leetcode_easy,
-        COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN c.medium_count END), 0) AS leetcode_medium,
-        COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN c.hard_count END), 0) AS leetcode_hard,
-        COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'leetcode' THEN c.contest_rating END), 0) AS leetcode_contest,
-        MAX(CASE WHEN LOWER(c.platform) = 'github' THEN c.handle END) AS github_handle,
-        COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'github' THEN c.repositories_count END), 0) AS github_repos,
-        COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'github' THEN c.followers_count END), 0) AS github_followers,
-        COALESCE(MAX(CASE WHEN LOWER(c.platform) = 'github' THEN c.stars_count END), 0) AS github_stars,
-        MAX(CASE WHEN LOWER(c.platform) = 'github' THEN c.top_language END) AS github_top_language
+        COALESCE(a.cgpa, s.cgpa, 0.00) AS cgpa,
+        c.leetcode_handle,
+        COALESCE(c.leetcode_solved, 0) AS leetcode_solved,
+        COALESCE(c.leetcode_easy, 0) AS leetcode_easy,
+        COALESCE(c.leetcode_medium, 0) AS leetcode_medium,
+        COALESCE(c.leetcode_hard, 0) AS leetcode_hard,
+        COALESCE(c.leetcode_contest, 0) AS leetcode_contest,
+        c.github_handle,
+        COALESCE(c.github_repos, 0) AS github_repos,
+        COALESCE(c.github_followers, 0) AS github_followers,
+        COALESCE(c.github_stars, 0) AS github_stars,
+        c.github_top_language
       FROM students s
-      LEFT JOIN academics a ON a.student_id = s.roll_number
-      LEFT JOIN coding_profiles c ON c.student_id = s.roll_number
+      LEFT JOIN (
+        SELECT student_id, ROUND(AVG(semester_gpa), 2) AS cgpa
+        FROM academics
+        GROUP BY student_id
+      ) a ON a.student_id = s.roll_number
+      LEFT JOIN (
+        SELECT 
+          student_id,
+          MAX(CASE WHEN LOWER(platform) = 'leetcode' THEN handle END) AS leetcode_handle,
+          COALESCE(MAX(CASE WHEN LOWER(platform) = 'leetcode' THEN GREATEST(score_rating, (easy_count + medium_count + hard_count)) END), 0) AS leetcode_solved,
+          COALESCE(MAX(CASE WHEN LOWER(platform) = 'leetcode' THEN easy_count END), 0) AS leetcode_easy,
+          COALESCE(MAX(CASE WHEN LOWER(platform) = 'leetcode' THEN medium_count END), 0) AS leetcode_medium,
+          COALESCE(MAX(CASE WHEN LOWER(platform) = 'leetcode' THEN hard_count END), 0) AS leetcode_hard,
+          COALESCE(MAX(CASE WHEN LOWER(platform) = 'leetcode' THEN contest_rating END), 0) AS leetcode_contest,
+          MAX(CASE WHEN LOWER(platform) = 'github' THEN handle END) AS github_handle,
+          COALESCE(MAX(CASE WHEN LOWER(platform) = 'github' THEN repositories_count END), 0) AS github_repos,
+          COALESCE(MAX(CASE WHEN LOWER(platform) = 'github' THEN followers_count END), 0) AS github_followers,
+          COALESCE(MAX(CASE WHEN LOWER(platform) = 'github' THEN stars_count END), 0) AS github_stars,
+          MAX(CASE WHEN LOWER(platform) = 'github' THEN top_language END) AS github_top_language
+        FROM coding_profiles
+        GROUP BY student_id
+      ) c ON c.student_id = s.roll_number
       ${whereClause}
-      GROUP BY s.roll_number, s.name, s.email, s.year, s.phone, s.address, s.native_place, s.department, s.batch, s.section, s.hostel_day_scholar, s.driving_license, s.passport, s.relocation_willingness, s.family_business, s.financial_background, s.faculty_mentor_id, s.photo_url, s.resume_url, s.linkedin_url, s.linkedin_updated, s.is_lateral_entry, s.created_at, s.updated_at
       ORDER BY s.roll_number, s.created_at DESC
       ${paginationClause}
     `, params);
@@ -2421,7 +2455,6 @@ app.get('/students/mentor-lookup', requireRole('hod', 'admin'), async (req: Requ
   }
 });
 
-let studentColumnsEnsured = false;
 // GET /students/:id — Get Student Profile
 app.get('/students/:id', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -6298,12 +6331,15 @@ app.get('/reports/hod-analytics', async (req: Request, res: Response) => {
     );
 
     const topRes = await db.query(
-      `SELECT s.*, ROUND(AVG(a.semester_gpa)::numeric, 2) as avg_gpa
+      `SELECT s.*, a.avg_gpa
        FROM students s
-       JOIN academics a ON s.roll_number = a.student_id
+       JOIN (
+         SELECT student_id, ROUND(AVG(semester_gpa)::numeric, 2) as avg_gpa
+         FROM academics
+         GROUP BY student_id
+       ) a ON s.roll_number = a.student_id
        ${sWhere}
-       GROUP BY s.roll_number, s.name, s.email, s.year, s.department, s.batch, s.section, s.phone, s.photo_url, s.resume_url, s.linkedin_url, s.created_at, s.updated_at
-       ORDER BY avg_gpa DESC
+       ORDER BY a.avg_gpa DESC
        LIMIT 5`,
       deptParams
     );
