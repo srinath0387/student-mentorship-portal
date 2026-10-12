@@ -1927,13 +1927,21 @@ app.get('/students', requireAuth, async (req: Request, res: Response) => {
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.map(c => c.startsWith('(') ? c : `s.${c}`).join(' AND ')}` : '';
 
-    let paginationClause = '';
-    if (req.query.limit !== undefined && req.query.limit !== 'all' && req.query.limit !== 'All') {
-      const rawLimit = parseInt(String(req.query.limit), 10);
+    let paginationClause = 'LIMIT 1000';
+    if (req.query.limit !== undefined) {
+      if (req.query.limit === 'all' || req.query.limit === 'All') {
+        paginationClause = '';
+      } else {
+        const rawLimit = parseInt(String(req.query.limit), 10);
+        const rawOffset = parseInt(String(req.query.offset || '0'), 10);
+        const pageLimit = Math.min(Math.max(isNaN(rawLimit) ? 1000 : rawLimit, 1), 1000);
+        const pageOffset = Math.max(isNaN(rawOffset) ? 0 : rawOffset, 0);
+        paginationClause = `LIMIT ${pageLimit} OFFSET ${pageOffset}`;
+      }
+    } else if (req.query.offset !== undefined) {
       const rawOffset = parseInt(String(req.query.offset || '0'), 10);
-      const pageLimit = Math.min(Math.max(isNaN(rawLimit) ? 10000 : rawLimit, 1), 10000);
       const pageOffset = Math.max(isNaN(rawOffset) ? 0 : rawOffset, 0);
-      paginationClause = `LIMIT ${pageLimit} OFFSET ${pageOffset}`;
+      paginationClause = `LIMIT 1000 OFFSET ${pageOffset}`;
     }
 
     const result = await db.query(`

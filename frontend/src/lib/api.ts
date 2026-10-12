@@ -116,6 +116,30 @@ export const api = {
         }
       });
     }
+
+    // Global query across 'All' departments with no specific search/section filter:
+    // Fetch in parallel 1000-student chunks to prevent AWS API Gateway 6MB response payload limit (HTTP 502)
+    const isGlobalQuery = (!cleanParams.department || cleanParams.department === 'All') && !cleanParams.search && !cleanParams.section && !cleanParams.batch;
+    if (isGlobalQuery) {
+      const pageSize = 1000;
+      try {
+        const firstPage: StudentProfile[] = await fetchWithAuth(`/students?limit=${pageSize}&offset=0`);
+        if (Array.isArray(firstPage) && firstPage.length === pageSize) {
+          const subsequentPages = await Promise.all([
+            fetchWithAuth(`/students?limit=${pageSize}&offset=1000`).catch(() => []),
+            fetchWithAuth(`/students?limit=${pageSize}&offset=2000`).catch(() => []),
+            fetchWithAuth(`/students?limit=${pageSize}&offset=3000`).catch(() => []),
+            fetchWithAuth(`/students?limit=${pageSize}&offset=4000`).catch(() => []),
+          ]);
+          return [...firstPage, ...subsequentPages.flat()];
+        }
+        return Array.isArray(firstPage) ? firstPage : [];
+      } catch (err) {
+        console.warn('[getAllStudents] Global chunked query notice:', err);
+        return [];
+      }
+    }
+
     const query = new URLSearchParams(cleanParams).toString();
     return fetchWithAuth(`/students${query ? `?${query}` : ''}`);
   },
