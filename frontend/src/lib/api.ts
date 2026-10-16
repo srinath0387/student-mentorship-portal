@@ -117,11 +117,11 @@ export const api = {
       });
     }
 
-    // Global query across 'All' departments with no specific search/section filter:
-    // Fetch in parallel 1000-student chunks to prevent AWS API Gateway 6MB response payload limit (HTTP 502)
+    const pageSize = 1000;
+
+    // Global query (no dept/search/section/batch filter) — fetch all pages in parallel
     const isGlobalQuery = (!cleanParams.department || cleanParams.department === 'All') && !cleanParams.search && !cleanParams.section && !cleanParams.batch;
     if (isGlobalQuery) {
-      const pageSize = 1000;
       try {
         const firstPage: StudentProfile[] = await fetchWithAuth(`/students?limit=${pageSize}&offset=0`);
         if (Array.isArray(firstPage) && firstPage.length === pageSize) {
@@ -140,11 +140,33 @@ export const api = {
       }
     }
 
-    const query = new URLSearchParams(cleanParams).toString();
-    return fetchWithAuth(`/students${query ? `?${query}` : ''}`);
+    // Dept-scoped or filtered query — paginate sequentially to handle large depts (CSE has 1113+ students)
+    const baseQuery = new URLSearchParams(cleanParams).toString();
+    try {
+      const firstPage: StudentProfile[] = await fetchWithAuth(`/students?${baseQuery}&limit=${pageSize}&offset=0`);
+      if (!Array.isArray(firstPage)) return [];
+      if (firstPage.length < pageSize) return firstPage; // fits in one page
+      // Need more pages
+      const allResults = [...firstPage];
+      let offset = pageSize;
+      while (true) {
+        const nextPage: StudentProfile[] = await fetchWithAuth(
+          `/students?${baseQuery}&limit=${pageSize}&offset=${offset}`
+        ).catch(() => []);
+        if (!Array.isArray(nextPage) || nextPage.length === 0) break;
+        allResults.push(...nextPage);
+        if (nextPage.length < pageSize) break;
+        offset += pageSize;
+        if (offset > 10000) break; // safety cap
+      }
+      return allResults;
+    } catch (err) {
+      console.warn('[getAllStudents] Dept-scoped chunked query notice:', err);
+      return [];
+    }
   },
 
-  createStudent: async (data: Partial<StudentProfile>): Promise<{ message: string; student: StudentProfile }> => {
+    createStudent: async (data: Partial<StudentProfile>): Promise<{ message: string; student: StudentProfile }> => {
     return fetchWithAuth(`/students`, {
       method: 'POST',
       body: JSON.stringify(data),
