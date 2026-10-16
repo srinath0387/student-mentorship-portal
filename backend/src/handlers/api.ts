@@ -13585,10 +13585,19 @@ const getStudentMentorId = async (regNo: string, email: string): Promise<string 
 
 // Helper to generate comprehensive department aliases and variations
 const getDepartmentAliases = (rawDept: string): string[] => {
-  const aliases = new Set<string>(['all', '*', '']);
-  if (!rawDept) return Array.from(aliases);
+  const aliases = new Set<string>();
+  if (!rawDept) {
+    // empty dept = wildcard
+    aliases.add('all'); aliases.add('*'); aliases.add('');
+    return Array.from(aliases);
+  }
+  const trimmedRaw = rawDept.toLowerCase().trim();
+  if (trimmedRaw === 'all' || trimmedRaw === '*') {
+    aliases.add('all'); aliases.add('*'); aliases.add('');
+    return Array.from(aliases);
+  }
 
-  const trimmed = rawDept.toLowerCase().trim();
+  const trimmed = trimmedRaw;
   const cleaned = trimmed.replace(/[^a-z0-9]/g, '');
   aliases.add(trimmed);
   aliases.add(cleaned);
