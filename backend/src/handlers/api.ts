@@ -2557,7 +2557,12 @@ app.put('/students/:id', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), as
     const email = body.email || existing.email || `${studentId.toLowerCase()}@rgmcet.edu.in`;
     const year = body.year && body.year !== '' ? body.year : (existing.year || '3rd Year');
     const phone = body.phone !== undefined ? body.phone : (existing.phone || null);
-    const parent_phone = body.parent_phone !== undefined ? body.parent_phone : (existing.parent_phone || null);
+    // Validate and truncate parent_phone to 20 chars (VARCHAR(20) limit)
+    const rawParentPhone = body.parent_phone !== undefined ? body.parent_phone : (existing.parent_phone || null);
+    if (rawParentPhone && typeof rawParentPhone === 'string' && rawParentPhone.replace(/\D/g, '').length > 15) {
+      return res.status(400).json({ error: 'parent_phone must be a valid phone number (max 15 digits).' });
+    }
+    const parent_phone = rawParentPhone ? String(rawParentPhone).slice(0, 20) : null;
     const address = body.address !== undefined ? body.address : (existing.address || null);
     const native_place = body.native_place !== undefined ? body.native_place : (existing.native_place || null);
     const department = body.department && body.department !== '' ? body.department : (existing.department || getDeptFromRollNumber(studentId));
