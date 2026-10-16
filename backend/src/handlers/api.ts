@@ -13975,11 +13975,10 @@ app.get('/admin/unregistered-students', requireAuth, requireRole('admin', 'hod',
         ? inferredDept
         : (row.mentor_department || 'Unknown');
 
-      // Department filtering: matches student's branch OR mentor's department
+      // Department filtering: only match by student's inferred department (not mentor's dept)
       if (targetAliases.length > 0) {
         const studentAliases = getDepartmentAliases(studentDept);
-        const mentorAliases = row.mentor_department ? getDepartmentAliases(row.mentor_department) : [];
-        const matches = targetAliases.some((a) => studentAliases.includes(a) || mentorAliases.includes(a));
+        const matches = targetAliases.some((a) => studentAliases.includes(a));
         if (!matches) {
           continue;
         }
