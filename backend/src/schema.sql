@@ -368,5 +368,27 @@ CREATE INDEX IF NOT EXISTS idx_internships_roll ON student_internships(roll_numb
 CREATE INDEX IF NOT EXISTS idx_internships_mentor ON student_internships(mentor_email);
 CREATE INDEX IF NOT EXISTS idx_internships_status ON student_internships(verification_status);
 
+-- Student Document Uploads (CSP Project, Major Project, Internships, Assignments)
+CREATE TABLE IF NOT EXISTS student_documents (
+  id                  SERIAL PRIMARY KEY,
+  roll_number         TEXT        NOT NULL,
+  doc_type            TEXT        NOT NULL CHECK (doc_type IN ('CSP Project','Major Project','Short-term Internship','Long-term Internship','Assignment')),
+  semester            TEXT        NOT NULL,
+  title               TEXT        NOT NULL,
+  description         TEXT,
+  file_key            TEXT        NOT NULL,
+  file_name           TEXT        NOT NULL,
+  file_size_kb        INTEGER,
+  verification_status TEXT        NOT NULL DEFAULT 'Pending' CHECK (verification_status IN ('Pending','Verified','Rejected')),
+  admin_note          TEXT,
+  verified_by         TEXT,
+  verified_at         TIMESTAMPTZ,
+  uploaded_at         TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  updated_at          TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_student_docs_roll ON student_documents(roll_number);
+CREATE INDEX IF NOT EXISTS idx_student_docs_type ON student_documents(doc_type);
+CREATE INDEX IF NOT EXISTS idx_student_docs_status ON student_documents(verification_status);
+
 -- End of schema.sql
 

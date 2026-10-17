@@ -4151,6 +4151,143 @@ app.get('/students/:id/employability-score', requireAuth, async (req: Request, r
 // ============================================================================
 // Upload URL (S3 Pre-signed URL) — Real pre-signed URL generation
 // ============================================================================
+// \u2500\u2500 Student Documents CRUD \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+// GET /students/:id/documents \u2014 fetch all documents for a student
+app.get('/students/:id/documents', requireOwnerOrRole('id', 'faculty', 'hod', 'admin', 'coordinator', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
+  try {
+    const studentId = req.params.id.toUpperCase();
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS student_documents (
+        id SERIAL PRIMARY KEY, roll_number TEXT NOT NULL, doc_type TEXT NOT NULL,
+        semester TEXT NOT NULL, title TEXT NOT NULL, description TEXT,
+        file_key TEXT NOT NULL, file_name TEXT NOT NULL, file_size_kb INTEGER,
+        verification_status TEXT NOT NULL DEFAULT 'Pending',
+        admin_note TEXT, verified_by TEXT, verified_at TIMESTAMPTZ,
+        uploaded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
+    `).catch(() => {});
+    const result = await db.query(
+      `SELECT * FROM student_documents WHERE roll_number = $1 ORDER BY uploaded_at DESC`,
+      [studentId]
+    );
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /students/:id/documents \u2014 save document record after S3 upload
+app.post('/students/:id/documents', requireOwnerOrRole('id', 'admin', 'hod'), async (req: Request, res: Response) => {
+  try {
+    const studentId = req.params.id.toUpperCase();
+    const { doc_type, semester, title, description, file_key, file_name, file_size_kb } = req.body;
+    if (!doc_type || !semester || !title || !file_key || !file_name) {
+      return res.status(400).json({ error: 'doc_type, semester, title, file_key, file_name are required.' });
+    }
+    const VALID_TYPES = ['CSP Project','Major Project','Short-term Internship','Long-term Internship','Assignment'];
+    if (!VALID_TYPES.includes(doc_type)) {
+      return res.status(400).json({ error: `Invalid doc_type. Must be one of: ${VALID_TYPES.join(', ')}` });
+    }
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS student_documents (
+        id SERIAL PRIMARY KEY, roll_number TEXT NOT NULL, doc_type TEXT NOT NULL,
+        semester TEXT NOT NULL, title TEXT NOT NULL, description TEXT,
+        file_key TEXT NOT NULL, file_name TEXT NOT NULL, file_size_kb INTEGER,
+        verification_status TEXT NOT NULL DEFAULT 'Pending',
+        admin_note TEXT, verified_by TEXT, verified_at TIMESTAMPTZ,
+        uploaded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
+    `).catch(() => {});
+    const result = await db.query(
+      `INSERT INTO student_documents (roll_number, doc_type, semester, title, description, file_key, file_name, file_size_kb)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [studentId, doc_type, semester, title, description || null, file_key, file_name, file_size_kb || null]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /students/:id/documents/:docId/status \u2014 admin/hod approves or rejects
+app.patch('/students/:id/documents/:docId/status', requireAuth, requireRole('admin', 'hod', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
+  try {
+    const studentId = req.params.id.toUpperCase();
+    const docId = parseInt(req.params.docId, 10);
+    const { verification_status, admin_note } = req.body;
+    if (!['Verified', 'Rejected'].includes(verification_status)) {
+      return res.status(400).json({ error: 'verification_status must be Verified or Rejected.' });
+    }
+    const callerEmail = req.auth?.email || 'unknown';
+    const result = await db.query(
+      `UPDATE student_documents SET verification_status=$1, admin_note=$2, verified_by=$3, verified_at=NOW(), updated_at=NOW()
+       WHERE id=$4 AND roll_number=$5 RETURNING *`,
+      [verification_status, admin_note || null, callerEmail, docId, studentId]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Document not found.' });
+    res.json(result.rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /students/:id/documents/:docId/view-url \u2014 fresh presigned S3 view URL
+app.get('/students/:id/documents/:docId/view-url', requireOwnerOrRole('id', 'faculty', 'hod', 'admin', 'coordinator', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
+  try {
+    const studentId = req.params.id.toUpperCase();
+    const docId = parseInt(req.params.docId, 10);
+    const docResult = await db.query(
+      `SELECT file_key FROM student_documents WHERE id=$1 AND roll_number=$2`,
+      [docId, studentId]
+    );
+    if (docResult.rowCount === 0) return res.status(404).json({ error: 'Document not found.' });
+    const fileKey = docResult.rows[0].file_key;
+    const bucketName = process.env.UPLOADS_BUCKET_NAME;
+    if (!bucketName) {
+      return res.json({ viewUrl: `https://placeholder.s3.amazonaws.com/${fileKey}`, expiresInSeconds: 3600 });
+    }
+    const { S3Client, GetObjectCommand } = await import('@aws-sdk/client-s3');
+    const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
+    const s3 = new S3Client({});
+    const cmd = new GetObjectCommand({ Bucket: bucketName, Key: fileKey });
+    const viewUrl = await getSignedUrl(s3, cmd, { expiresIn: 3600 });
+    res.json({ viewUrl, expiresInSeconds: 3600 });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /students/:id/documents/:docId \u2014 delete record + S3 object
+app.delete('/students/:id/documents/:docId', requireOwnerOrRole('id', 'admin', 'hod'), async (req: Request, res: Response) => {
+  try {
+    const studentId = req.params.id.toUpperCase();
+    const docId = parseInt(req.params.docId, 10);
+    const docResult = await db.query(
+      `SELECT file_key FROM student_documents WHERE id=$1 AND roll_number=$2`,
+      [docId, studentId]
+    );
+    if (docResult.rowCount === 0) return res.status(404).json({ error: 'Document not found.' });
+    const fileKey = docResult.rows[0].file_key;
+    const bucketName = process.env.UPLOADS_BUCKET_NAME;
+    if (bucketName && fileKey) {
+      try {
+        const { S3Client, DeleteObjectCommand } = await import('@aws-sdk/client-s3');
+        const s3 = new S3Client({});
+        await s3.send(new DeleteObjectCommand({ Bucket: bucketName, Key: fileKey }));
+      } catch (s3Err) {
+        console.warn('[Documents] S3 delete warning:', s3Err);
+      }
+    }
+    await db.query(`DELETE FROM student_documents WHERE id=$1 AND roll_number=$2`, [docId, studentId]);
+    res.json({ message: 'Document deleted successfully.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/students/:id/upload-url', requireOwnerOrRole('id', 'faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { fileName, uploadType } = req.query;

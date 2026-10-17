@@ -326,6 +326,31 @@ export const api = {
   },
 
   // Upload Presigned URL
+  // Student Documents
+  getStudentDocuments: async (rollNo: string) => {
+    return fetchWithAuth(`/students/${rollNo}/documents`);
+  },
+  createStudentDocument: async (rollNo: string, data: {
+    doc_type: string; semester: string; title: string;
+    description?: string; file_key: string; file_name: string; file_size_kb?: number;
+  }) => {
+    return fetchWithAuth(`/students/${rollNo}/documents`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  updateDocumentStatus: async (rollNo: string, docId: number, status: 'Verified' | 'Rejected', admin_note?: string) => {
+    return fetchWithAuth(`/students/${rollNo}/documents/${docId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ verification_status: status, admin_note }),
+    });
+  },
+  getDocumentViewUrl: async (rollNo: string, docId: number): Promise<{ viewUrl: string }> => {
+    return fetchWithAuth(`/students/${rollNo}/documents/${docId}/view-url`);
+  },
+  deleteStudentDocument: async (rollNo: string, docId: number) => {
+    return fetchWithAuth(`/students/${rollNo}/documents/${docId}`, { method: 'DELETE' });
+  },
   getUploadUrl: async (id: string, fileName: string, uploadType: string) => {
     return fetchWithAuth(`/students/${id}/upload-url?fileName=${encodeURIComponent(fileName)}&uploadType=${uploadType}`);
   },

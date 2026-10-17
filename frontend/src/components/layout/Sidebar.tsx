@@ -18,6 +18,7 @@ import {
   CalendarCheck,
   Calendar,
   ClipboardCheck,
+  FolderOpen,
   LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -77,6 +78,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
         { label: 'On-Duty Permissions', path: '/profile?tab=permissions', icon: FileCheck },
         { label: 'My Mentor', path: '/mentor', icon: UserCheck },
         { label: 'Certificates', path: '/profile?tab=certifications', icon: CheckCircle2 },
+        { label: 'Documents', path: '/profile?tab=documents', icon: FolderOpen },
         { label: 'Resume Builder', path: '/resume-builder', icon: FileText, soon: true },
       ],
     },

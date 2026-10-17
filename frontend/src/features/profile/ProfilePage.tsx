@@ -13,6 +13,7 @@ import {
   Target,
   Camera,
   CalendarCheck,
+  FolderOpen,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../lib/api';
@@ -26,6 +27,7 @@ import { AchievementsTab } from './tabs/AchievementsTab';
 import { PlacementPreferencesTab } from './tabs/PlacementPreferencesTab';
 import { StudentAttendanceView } from '../attendance/student/StudentAttendanceView';
 import { StudentPermissionTab } from '../leave/StudentPermissionTab';
+import { DocumentsTab } from './tabs/DocumentsTab';
 
 export const ProfilePage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -115,6 +117,7 @@ export const ProfilePage: React.FC = () => {
     { slug: 'soft-skills', label: 'Soft Skills & Extracurriculars', icon: Zap },
     { slug: 'achievements', label: 'Achievements', icon: Award },
     { slug: 'placement-preferences', label: 'Academic Growth Target', icon: Target },
+    { slug: 'documents', label: 'Documents', icon: FolderOpen },
   ];
 
   const displayName = student?.name || user?.name || 'Student Profile';
@@ -266,6 +269,9 @@ export const ProfilePage: React.FC = () => {
           {currentTab === 'achievements' && <AchievementsTab achievements={achievements} onRefresh={handleRefreshAll} readOnly={isReadOnly} />}
           {currentTab === 'placement-preferences' && (
             <PlacementPreferencesTab placement={placement} scoreData={scoreData} onRefresh={handleRefreshAll} />
+          )}
+          {currentTab === 'documents' && (
+            <DocumentsTab rollNumber={activeRollNo} readOnly={isReadOnly} isAdminView={isViewingOther && (user?.role === 'admin' || user?.role === 'hod')} />
           )}
         </div>
       </div>

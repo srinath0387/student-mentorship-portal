@@ -809,3 +809,34 @@ export interface UnregisteredStudent {
   assigned_at?: string;
 }
 
+
+export interface StudentDocument {
+  id: number;
+  roll_number: string;
+  doc_type: 'CSP Project' | 'Major Project' | 'Short-term Internship' | 'Long-term Internship' | 'Assignment';
+  semester: string;
+  title: string;
+  description?: string;
+  file_key: string;
+  file_name: string;
+  file_size_kb?: number;
+  verification_status: 'Pending' | 'Verified' | 'Rejected';
+  admin_note?: string;
+  verified_by?: string;
+  verified_at?: string;
+  uploaded_at: string;
+  updated_at: string;
+}
+
+export const STUDENT_DOC_TYPES = [
+  'CSP Project',
+  'Major Project',
+  'Short-term Internship',
+  'Long-term Internship',
+  'Assignment',
+] as const;
+
+export const STUDENT_SEMESTERS = [
+  '1st Semester', '2nd Semester', '3rd Semester', '4th Semester',
+  '5th Semester', '6th Semester', '7th Semester', '8th Semester',
+] as const;
