@@ -140,23 +140,25 @@ export const api = {
       }
     }
 
-    // Dept-scoped or filtered query — paginate sequentially to handle large depts (CSE has 1113+ students)
+    // Dept-scoped or filtered query — use deptPageSize=200 to avoid 6MB Lambda limit.
+    // EEE has 347 students; at limit=1000 the full payload exceeds 6MB — 500 error — UI shows 0.
+    const deptPageSize = 200;
     const baseQuery = new URLSearchParams(cleanParams).toString();
     try {
-      const firstPage: StudentProfile[] = await fetchWithAuth(`/students?${baseQuery}&limit=${pageSize}&offset=0`);
+      const firstPage: StudentProfile[] = await fetchWithAuth(`/students?${baseQuery}&limit=${deptPageSize}&offset=0`);
       if (!Array.isArray(firstPage)) return [];
-      if (firstPage.length < pageSize) return firstPage; // fits in one page
+      if (firstPage.length < deptPageSize) return firstPage; // fits in one page
       // Need more pages
       const allResults = [...firstPage];
-      let offset = pageSize;
+      let offset = deptPageSize;
       while (true) {
         const nextPage: StudentProfile[] = await fetchWithAuth(
-          `/students?${baseQuery}&limit=${pageSize}&offset=${offset}`
+          `/students?${baseQuery}&limit=${deptPageSize}&offset=${offset}`
         ).catch(() => []);
         if (!Array.isArray(nextPage) || nextPage.length === 0) break;
         allResults.push(...nextPage);
-        if (nextPage.length < pageSize) break;
-        offset += pageSize;
+        if (nextPage.length < deptPageSize) break;
+        offset += deptPageSize;
         if (offset > 10000) break; // safety cap
       }
       return allResults;
