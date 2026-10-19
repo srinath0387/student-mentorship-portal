@@ -1939,7 +1939,7 @@ export const AuthPage: React.FC = () => {
                       <input
                         {...registerAdminLogin('email')}
                         type="email"
-                        placeholder="admin@rgmcet.edu.in"
+                        placeholder="enter your mail"
                         className={`w-full px-3.5 py-2 pr-10 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 font-medium ${
                           watchedAdminLoginEmail && watchedAdminLoginEmail.includes('@')
                             ? (watchedAdminLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in') ||
@@ -2017,18 +2017,20 @@ export const AuthPage: React.FC = () => {
               ) : (
                 /* ── FACULTY / HOD LOGIN — @rgmcet.edu.in only ── */
                 <form onSubmit={handleLoginSubmit(onLogin)} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-textPrimary mb-1">Department *</label>
-                    <select
-                      value={loginDept}
-                      onChange={(e) => setLoginDept(e.target.value)}
-                      className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary font-medium"
-                    >
-                      {VALID_DEPARTMENT_NAMES.map((d) => (
-                        <option key={d} value={d}>{d}</option>
-                      ))}
-                    </select>
-                  </div>
+                  {activeTab === 'faculty' && (
+                    <div>
+                      <label className="block text-xs font-semibold text-textPrimary mb-1">Department *</label>
+                      <select
+                        value={loginDept}
+                        onChange={(e) => setLoginDept(e.target.value)}
+                        className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary font-medium"
+                      >
+                        {VALID_DEPARTMENT_NAMES.map((d) => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   <div>
                     <div className="flex justify-between items-center mb-1">
@@ -2041,7 +2043,7 @@ export const AuthPage: React.FC = () => {
                       <input
                         {...registerLogin('email')}
                         type="email"
-                        placeholder={activeTab === 'faculty' ? 'faculty.name@rgmcet.edu.in' : 'hod.ds@rgmcet.edu.in'}
+                        placeholder={activeTab === 'faculty' ? 'faculty.name@rgmcet.edu.in' : 'enter your mail'}
                         className={`w-full px-3.5 py-2 pr-10 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 font-medium ${
                           watchedLoginEmail && watchedLoginEmail.includes('@')
                             ? watchedLoginEmail.toLowerCase().endsWith('@rgmcet.edu.in')

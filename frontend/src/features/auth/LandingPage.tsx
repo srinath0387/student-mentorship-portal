@@ -781,15 +781,17 @@ export const LandingPage: React.FC = () => {
                         ? (studentYearMode === 'fresher' ? 'Admission ID / Username / Mobile' : 'yourmail@rgmcet.edu.in')
                         : selectedRole.id === 'parent' 
                           ? 'Student Roll Number'
-                          : 'yourname@rgmcet.edu.in'
+                          : (selectedRole.id === 'hod' || selectedRole.id === 'admin')
+                            ? 'enter your mail'
+                            : 'yourname@rgmcet.edu.in'
                     }
                     className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-xs sm:text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
                   />
                 </div>
               </div>
 
-              {/* Department Selector (for HOD, Admin, or Faculty) */}
-              {(selectedRole.id === 'hod' || selectedRole.id === 'admin' || selectedRole.id === 'faculty') && (
+              {/* Department Selector (for Faculty) */}
+              {selectedRole.id === 'faculty' && (
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">
                     Department
