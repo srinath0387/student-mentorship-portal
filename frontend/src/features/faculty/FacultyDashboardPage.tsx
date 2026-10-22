@@ -32,6 +32,7 @@ import {
   Briefcase,
   Microscope,
   MessageSquare,
+  Download,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { StudentProfile } from '../../types';
@@ -47,6 +48,7 @@ import { SoftSkillsTab } from '../profile/tabs/SoftSkillsTab';
 import { AchievementsTab } from '../profile/tabs/AchievementsTab';
 import { DocumentsTab } from '../profile/tabs/DocumentsTab';
 import { MeetingLogModal } from './MeetingLogModal';
+import { generateMentorReport } from '../../utils/mentorReportGenerator';
 import { PlacementPreferencesTab } from '../profile/tabs/PlacementPreferencesTab';
 import { BulkImportModal } from '../admin/components/BulkImportModal';
 import { PlacementEligibilitySection } from '../hod/components/PlacementEligibilitySection';
@@ -81,6 +83,7 @@ export const FacultyDashboardPage: React.FC = () => {
   const [selectedMentee, setSelectedMentee] = useState<StudentProfile | null>(null);
   const [inspectMentee, setInspectMentee] = useState<StudentProfile | null>(null);
   const [meetingLogMentee, setMeetingLogMentee] = useState<{ roll_number: string; name: string } | null>(null);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [inspectTab, setInspectTab] = useState('personal-info');
   const [remarkInput, setRemarkInput] = useState('');
   const [saving, setSaving] = useState(false);
@@ -246,6 +249,25 @@ export const FacultyDashboardPage: React.FC = () => {
     const matchesYear = !yearFilter || m.year === yearFilter;
     return matchesSearch && matchesSection && matchesYear;
   });
+
+  const handleDownloadMentorReport = async () => {
+    if (!user?.email || mentees.length === 0) return;
+    setIsGeneratingReport(true);
+    try {
+      await generateMentorReport({
+        facultyName: user.name || user.email || '',
+        facultyEmail: user.email || '',
+        department: user.department || '',
+        mentees: filteredMentees.length > 0 ? filteredMentees : mentees,
+        yearFilter: yearFilter || 'All',
+      });
+    } catch (err) {
+      console.error('Report generation failed:', err);
+      alert('Failed to generate report. Please try again.');
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  };
 
   // Group filtered mentees by year for collapsible sections
   const YEAR_ORDER = ['4th Year', '3rd Year', '2nd Year', '1st Year'];
@@ -1287,6 +1309,29 @@ export const FacultyDashboardPage: React.FC = () => {
                 <option value="B">Section B</option>
                 <option value="C">Section C</option>
               </select>
+
+              {/* ── Download Mentor Report for HOD Meeting ── */}
+              <button
+                onClick={handleDownloadMentorReport}
+                disabled={isGeneratingReport || mentees.length === 0}
+                title="Download Excel report of your mentees for HOD review meeting"
+                className="flex items-center gap-2 px-4 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isGeneratingReport ? (
+                  <>
+                    <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                    </svg>
+                    Generating Report…
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-3.5 h-3.5" />
+                    📥 Mentor Report (.xlsx)
+                  </>
+                )}
+              </button>
             </div>
           </div>
 
