@@ -7315,73 +7315,140 @@ app.get('/hod/at-risk-students', requireRole('hod', 'admin', 'principal', 'direc
   try {
     const department = (req.query.department as string) || (req.auth as any)?.department;
 
-    // Build dept WHERE clause — same pattern as /reports/hod-analytics
-    const params: any[] = [];
-    let sWhere = 'WHERE 1=1';
+    // STEP 1: Fetch all students for this department + their academics (CGPA)
+    const deptParams: any[] = [];
+    let deptWhere = '1=1';
     if (department && department !== '*') {
-      params.push(department);
-      sWhere = `WHERE LOWER(REPLACE(s.department,' ','')) = LOWER(REPLACE($${params.length},' ',''))`;
+      deptParams.push(department);
+      deptWhere = `LOWER(REPLACE(s.department,' ','')) = LOWER(REPLACE($${deptParams.length},' ',''))`;
     }
 
-    // Use the same subquery JOIN pattern that works in hod-analytics:
-    //   LEFT JOIN (SELECT student_id, AVG(semester_gpa), AVG(attendance_pct) FROM academics GROUP BY student_id) a
-    //   ON s.roll_number = a.student_id
-    // Then filter HAVING on avg values
-    const result = await db.query(`
+    const studentsRes = await db.query(`
       SELECT
         s.roll_number, s.name, s.year, s.section, s.department,
         s.batch, s.mentor_email,
-        ROUND(COALESCE(a.avg_cgpa, 0)::numeric, 2)       AS avg_cgpa,
-        ROUND(COALESCE(a.avg_att, 0)::numeric, 1)         AS attendance_pct,
-        COALESCE(a.sem_count, 0)                          AS semester_count
+        ROUND(COALESCE(ac.avg_cgpa, 0)::numeric, 2) AS avg_cgpa,
+        COALESCE(ac.sem_count, 0) AS semester_count
       FROM students s
       LEFT JOIN (
-        SELECT
-          student_id,
-          AVG(semester_gpa)    AS avg_cgpa,
-          AVG(attendance_pct)  AS avg_att,
-          COUNT(*)             AS sem_count
+        SELECT student_id, AVG(semester_gpa) AS avg_cgpa, COUNT(*) AS sem_count
         FROM academics
         WHERE semester_gpa IS NOT NULL AND semester_gpa > 0
         GROUP BY student_id
-      ) a ON s.roll_number = a.student_id
-      ${sWhere}
-      AND (
-        (a.avg_cgpa IS NOT NULL AND a.avg_cgpa < 6.0)
-        OR
-        (a.avg_att  IS NOT NULL AND a.avg_att  < 75.0)
-      )
-      ORDER BY a.avg_cgpa ASC NULLS LAST
-      LIMIT 500
-    `, params);
+      ) ac ON s.roll_number = ac.student_id
+      WHERE ${deptWhere}
+      LIMIT 2000
+    `, deptParams);
 
-    const students = result.rows.map((r: any) => {
-      const cgpa = parseFloat(r.avg_cgpa ?? '0');
-      const att  = parseFloat(r.attendance_pct ?? '0');
-      const hasAtt = att > 0;
+    if (studentsRes.rows.length === 0) {
+      return res.json({ students: [], total: 0, department: department || 'All' });
+    }
+
+    const rollNumbers = studentsRes.rows.map((r: any) => r.roll_number);
+
+    // STEP 2: Compute LIVE attendance from subject_rosters + attendance_sessions + attendance_records
+    const attRes = await db.query(`
+      SELECT
+        sr.roll_number,
+        COALESCE(SUM(s.num_periods), 0)::integer                                       AS total_held,
+        COALESCE(SUM(CASE WHEN ar.is_present = true THEN 1 ELSE 0 END), 0)::integer    AS total_present
+      FROM subject_rosters sr
+      JOIN subject_allotments a  ON a.id = sr.allotment_id
+      JOIN attendance_sessions s ON s.allotment_id = a.id
+      LEFT JOIN attendance_records ar ON ar.session_id = s.id AND UPPER(ar.roll_number) = UPPER(sr.roll_number)
+      WHERE UPPER(sr.roll_number) = ANY($1)
+      GROUP BY sr.roll_number
+    `, [rollNumbers]);
+
+    // Also fetch directly from attendance_records (handles students without roster entry)
+    const attRes2 = await db.query(`
+      SELECT
+        UPPER(ar.roll_number) AS roll_number,
+        COALESCE(SUM(s.num_periods), 0)::integer                                    AS total_held,
+        COALESCE(SUM(CASE WHEN ar.is_present = true THEN 1 ELSE 0 END), 0)::integer AS total_present
+      FROM attendance_records ar
+      JOIN attendance_sessions s ON s.id = ar.session_id
+      WHERE UPPER(ar.roll_number) = ANY($1)
+      GROUP BY UPPER(ar.roll_number)
+    `, [rollNumbers]);
+
+    // Merge: prefer whichever gives more total_held per student
+    const attMap: Record<string, { total_held: number; total_present: number }> = {};
+    for (const row of attRes.rows) {
+      const roll = row.roll_number.toUpperCase();
+      attMap[roll] = { total_held: parseInt(row.total_held || '0'), total_present: parseInt(row.total_present || '0') };
+    }
+    for (const row of attRes2.rows) {
+      const roll = row.roll_number.toUpperCase();
+      const held = parseInt(row.total_held || '0');
+      const present = parseInt(row.total_present || '0');
+      if (!attMap[roll] || held > attMap[roll].total_held) {
+        attMap[roll] = { total_held: held, total_present: present };
+      }
+    }
+
+    // STEP 3: Fallback attendance from academics.attendance_pct
+    const acadAttRes = await db.query(`
+      SELECT student_id, AVG(attendance_pct) AS avg_att
+      FROM academics
+      WHERE attendance_pct IS NOT NULL AND attendance_pct > 0 AND student_id = ANY($1)
+      GROUP BY student_id
+    `, [rollNumbers]);
+    const acadAttMap: Record<string, number> = {};
+    for (const row of acadAttRes.rows) {
+      acadAttMap[row.student_id.toUpperCase()] = parseFloat(row.avg_att || '0');
+    }
+
+    // STEP 4: Build at-risk list — filter by CGPA < 6 OR attendance < 75%
+    const students: any[] = [];
+
+    for (const s of studentsRes.rows) {
+      const roll = s.roll_number.toUpperCase();
+      const cgpa = parseFloat(s.avg_cgpa || '0');
+
+      // Best attendance figure: live first, then academics fallback
+      const liveAtt = attMap[roll];
+      let attPct: number | null = null;
+      let attSource = 'none';
+      if (liveAtt && liveAtt.total_held > 0) {
+        attPct = Math.round((liveAtt.total_present / liveAtt.total_held) * 1000) / 10;
+        attSource = 'live';
+      } else if (acadAttMap[roll] && acadAttMap[roll] > 0) {
+        attPct = acadAttMap[roll];
+        attSource = 'academics';
+      }
+
+      const cgpaRisk = cgpa > 0 && cgpa < 6.0;
+      const attRisk  = attPct !== null && attPct < 75.0;
+
+      if (!cgpaRisk && !attRisk) continue;
+
       const reasons: string[] = [];
+      if (cgpa > 0 && cgpa < 5.0)             reasons.push('CGPA < 5.0 (Fail Risk)');
+      else if (cgpa > 0 && cgpa < 6.0)        reasons.push('CGPA < 6.0 (Low Performance)');
+      if (attPct !== null && attPct < 65)      reasons.push('Attendance < 65% (Detained Risk)');
+      else if (attPct !== null && attPct < 75) reasons.push('Attendance 65-75% (Condonation Zone)');
 
-      if (cgpa > 0 && cgpa < 5.0)       reasons.push('CGPA < 5.0 (Fail Risk)');
-      else if (cgpa > 0 && cgpa < 6.0)  reasons.push('CGPA < 6.0 (Low Performance)');
+      const severity = (cgpa > 0 && cgpa < 5.0) || (attPct !== null && attPct < 65) ? 'high' : 'medium';
 
-      if (hasAtt && att < 65)            reasons.push('Attendance < 65% (Detained Risk)');
-      else if (hasAtt && att < 75)       reasons.push('Attendance 65–75% (Condonation Zone)');
-
-      return {
-        roll_number:    r.roll_number,
-        name:           r.name,
-        year:           r.year || '—',
-        section:        r.section || '—',
-        department:     r.department,
-        batch:          r.batch || '—',
-        mentor_email:   r.mentor_email || null,
+      students.push({
+        roll_number:    s.roll_number,
+        name:           s.name,
+        year:           s.year || '-',
+        section:        s.section || '-',
+        department:     s.department,
+        batch:          s.batch || '-',
+        mentor_email:   s.mentor_email || null,
         avg_cgpa:       cgpa,
-        attendance_pct: hasAtt ? att : null,
-        semester_count: parseInt(r.semester_count || '0'),
-        risk_reasons:   reasons.length > 0 ? reasons : ['Under review'],
-        severity:       (cgpa > 0 && cgpa < 5.0) || (hasAtt && att < 65) ? 'high' : 'medium',
-      };
-    }).sort((a: any, b: any) => {
+        attendance_pct: attPct,
+        semester_count: parseInt(s.semester_count || '0'),
+        risk_reasons:   reasons,
+        severity,
+        _att_source:    attSource,
+      });
+    }
+
+    students.sort((a, b) => {
       if (a.severity !== b.severity) return a.severity === 'high' ? -1 : 1;
       return (a.avg_cgpa || 99) - (b.avg_cgpa || 99);
     });
@@ -7390,13 +7457,17 @@ app.get('/hod/at-risk-students', requireRole('hod', 'admin', 'principal', 'direc
       students,
       total: students.length,
       department: department || 'All',
-      _debug: { received_department: department, raw_rows: result.rows.length },
+      _debug: {
+        received_department: department,
+        total_students_in_dept: studentsRes.rows.length,
+        students_with_live_att: Object.keys(attMap).length,
+        students_with_acad_att: Object.keys(acadAttMap).length,
+      },
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
-
 // ============================================================================
 // Feature 4: Mentor Meeting Log
 // ============================================================================
