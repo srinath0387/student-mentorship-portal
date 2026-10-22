@@ -373,6 +373,10 @@ export const api = {
   deleteMentorMeeting: async (id: number) => {
     return fetchWithAuth(`/mentor-meetings/${id}`, { method: 'DELETE' });
   },
+  getDeptMeetingLogs: async (department?: string): Promise<any[]> => {
+    const params = department ? `?department=${encodeURIComponent(department)}` : '';
+    return fetchWithAuth(`/mentor-meetings/department${params}`);
+  },
   getMentoringCompliance: async (department?: string) => {
     const q = department ? `?department=${encodeURIComponent(department)}` : ``;
     return fetchWithAuth(`/hod/mentoring-compliance${q}`);

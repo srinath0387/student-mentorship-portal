@@ -7554,6 +7554,60 @@ app.get('/mentor-meetings', requireAuth, async (req: Request, res: Response) => 
   }
 });
 
+
+// GET /mentor-meetings/department — HOD/admin sees all meetings for a dept
+app.get('/mentor-meetings/department', requireRole('hod', 'admin', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
+  try {
+    const department = (req.query.department as string) || (req.auth as any)?.department;
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS mentor_meetings (
+        id SERIAL PRIMARY KEY,
+        faculty_id TEXT,
+        faculty_email TEXT NOT NULL,
+        roll_number TEXT NOT NULL,
+        student_name TEXT,
+        meeting_date DATE NOT NULL,
+        topics TEXT NOT NULL,
+        action_items TEXT,
+        next_meeting DATE,
+        tag TEXT DEFAULT 'General',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `).catch(() => {});
+
+    let query: string;
+    let params: any[];
+
+    if (!department || department === '*') {
+      query = `
+        SELECT mm.*, s.name AS student_name_live, s.department, s.year, s.section
+        FROM mentor_meetings mm
+        LEFT JOIN students s ON UPPER(s.roll_number) = UPPER(mm.roll_number)
+        ORDER BY mm.meeting_date DESC LIMIT 500
+      `;
+      params = [];
+    } else {
+      query = `
+        SELECT mm.*, s.name AS student_name_live, s.department, s.year, s.section
+        FROM mentor_meetings mm
+        LEFT JOIN students s ON UPPER(s.roll_number) = UPPER(mm.roll_number)
+        WHERE LOWER(REPLACE(COALESCE(s.department,''),' ','')) = LOWER(REPLACE($1,' ',''))
+        ORDER BY mm.meeting_date DESC LIMIT 500
+      `;
+      params = [department];
+    }
+
+    const result = await db.query(query, params);
+    const rows = result.rows.map((r: any) => ({
+      ...r,
+      student_name: r.student_name_live || r.student_name,
+    }));
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.delete('/mentor-meetings/:id', requireRole('faculty', 'hod', 'admin', 'coordinator', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);

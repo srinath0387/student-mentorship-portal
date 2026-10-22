@@ -29,6 +29,7 @@ import { StudentAttendanceView } from '../attendance/student/StudentAttendanceVi
 import { StudentPermissionTab } from '../leave/StudentPermissionTab';
 import { DocumentsTab } from './tabs/DocumentsTab';
 import { PlacementTrackerSection } from '../placement/PlacementTrackerSection';
+import { MeetingLogsView } from '../../components/MeetingLogsView';
 
 export const ProfilePage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -74,6 +75,12 @@ export const ProfilePage: React.FC = () => {
   const { data: achievements = [], refetch: refetchAchievements } = useQuery({ queryKey: ['achievements', activeRollNo], queryFn: () => api.getAchievements(activeRollNo), enabled: Boolean(activeRollNo) });
   const { data: placement, refetch: refetchPlacement } = useQuery({ queryKey: ['placementProfile', activeRollNo], queryFn: () => api.getPlacementProfile(activeRollNo), enabled: Boolean(activeRollNo) });
   const { data: scoreData, refetch: refetchScore } = useQuery({ queryKey: ['employabilityScore', activeRollNo], queryFn: () => api.getEmployabilityScore(activeRollNo), enabled: Boolean(activeRollNo), staleTime: 0, refetchOnMount: 'always' });
+  const { data: meetingLogs = [], isLoading: meetingsLoading } = useQuery({
+    queryKey: ['myMeetingLogs', activeRollNo],
+    queryFn: () => api.getMentorMeetings({ student_id: activeRollNo }),
+    enabled: Boolean(activeRollNo) && currentTab === 'meetings',
+    staleTime: 0,
+  });
 
   // Guard: no roll number at all (admin/HOD on /profile with no ?id= param)
   if (!activeRollNo) {
@@ -120,6 +127,7 @@ export const ProfilePage: React.FC = () => {
     { slug: 'placement-preferences', label: 'Academic Growth Target', icon: Target },
     { slug: 'my-placement', label: '🎓 My Placement', icon: Target },
     { slug: 'documents', label: 'Documents', icon: FolderOpen },
+    { slug: 'meetings', label: '📋 Meeting Logs', icon: FolderOpen },
   ];
 
   const displayName = student?.name || user?.name || 'Student Profile';
@@ -280,6 +288,18 @@ export const ProfilePage: React.FC = () => {
           )}
           {currentTab === 'documents' && (
             <DocumentsTab rollNumber={activeRollNo} readOnly={isReadOnly} isAdminView={isViewingOther && (user?.role === 'admin' || user?.role === 'hod')} />
+          )}
+          {currentTab === 'meetings' && (
+            <div className="space-y-4">
+              <h3 className="text-base font-semibold text-textPrimary flex items-center gap-2">
+                📋 Mentor Meeting Logs
+              </h3>
+              <MeetingLogsView
+                logs={meetingLogs}
+                isLoading={meetingsLoading}
+                emptyMessage="No mentor meetings recorded yet. Your mentor will log meetings here after your mentoring sessions."
+              />
+            </div>
           )}
         </div>
       </div>

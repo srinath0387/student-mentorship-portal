@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2, XCircle, Clock, RefreshCw, Users, TrendingUp } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { MentoringCompliance } from '../../../types';
+import { MeetingLogsView } from '../../../components/MeetingLogsView';
 
 interface Props {
   department?: string;
@@ -14,6 +15,12 @@ export const MentoringComplianceTab: React.FC<Props> = ({ department }) => {
   const { data, isLoading, refetch, isFetching } = useQuery<{ compliance: MentoringCompliance[]; department: string }>({
     queryKey: ['mentoringCompliance', department],
     queryFn: () => api.getMentoringCompliance(department),
+    staleTime: 2 * 60 * 1000,
+  });
+
+  const { data: deptMeetingLogs = [], isLoading: logsLoading } = useQuery<any[]>({
+    queryKey: ['deptMeetingLogs', department],
+    queryFn: () => api.getDeptMeetingLogs(department),
     staleTime: 2 * 60 * 1000,
   });
 
@@ -159,6 +166,20 @@ export const MentoringComplianceTab: React.FC<Props> = ({ department }) => {
           </table>
         </div>
       )}
+
+      {/* Recent Meeting Logs */}
+      <div className="space-y-3 mt-6">
+        <h3 className="text-base font-semibold text-white flex items-center gap-2">
+          📋 Recent Meeting Logs
+          <span className="text-xs font-normal text-white/40">(last 50)</span>
+        </h3>
+        <MeetingLogsView
+          logs={deptMeetingLogs.slice(0, 50)}
+          isLoading={logsLoading}
+          showStudent={true}
+          emptyMessage="No meeting logs found for this department."
+        />
+      </div>
     </div>
   );
 };
