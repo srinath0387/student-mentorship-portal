@@ -44,6 +44,7 @@ import { TechSkillsTab } from '../profile/tabs/TechSkillsTab';
 import { CertificationsTab } from '../profile/tabs/CertificationsTab';
 import { SoftSkillsTab } from '../profile/tabs/SoftSkillsTab';
 import { AchievementsTab } from '../profile/tabs/AchievementsTab';
+import { DocumentsTab } from '../profile/tabs/DocumentsTab';
 import { PlacementPreferencesTab } from '../profile/tabs/PlacementPreferencesTab';
 import { BulkImportModal } from '../admin/components/BulkImportModal';
 import { PlacementEligibilitySection } from '../hod/components/PlacementEligibilitySection';
@@ -1521,7 +1522,7 @@ export const FacultyDashboardPage: React.FC = () => {
 
             {/* Inspect Tabs Selector */}
             <div className="flex space-x-2 border-b border-borderLine pb-px mb-6 overflow-x-auto text-xs font-semibold">
-              {['personal-info', 'academics', 'coding-profiles', 'tech-skills', 'certifications', 'soft-skills', 'achievements', 'placement-preferences'].map((t) => (
+              {['personal-info', 'academics', 'coding-profiles', 'tech-skills', 'certifications', 'soft-skills', 'achievements', 'placement-preferences', 'documents'].map((t) => (
                 <button
                   key={t}
                   onClick={() => setInspectTab(t)}
@@ -1529,7 +1530,7 @@ export const FacultyDashboardPage: React.FC = () => {
                     inspectTab === t ? 'bg-brand-soft text-brand-primary font-bold border-b-2 border-brand-primary' : 'text-textSecondary hover:text-textPrimary'
                   }`}
                 >
-                  {t === 'placement-preferences' ? 'Academic Goals' : t.replace('-', ' ')}
+                  {t === 'placement-preferences' ? 'Academic Goals' : t === 'documents' ? '📁 Documents' : t.replace('-', ' ')}
                 </button>
               ))}
             </div>
@@ -1552,6 +1553,7 @@ export const FacultyDashboardPage: React.FC = () => {
               {inspectTab === 'soft-skills' && <SoftSkillsTab readOnly={true} softSkills={inspectSoft} onRefresh={refetch} />}
               {inspectTab === 'achievements' && <AchievementsTab readOnly={true} achievements={inspectAchievements} onRefresh={refetch} />}
               {inspectTab === 'placement-preferences' && <PlacementPreferencesTab readOnly={true} placement={null} scoreData={null} onRefresh={refetch} />}
+              {inspectTab === 'documents' && <DocumentsTab rollNumber={inspectMentee.roll_number} readOnly={true} isAdminView={false} />}
             </div>
           </div>
         </div>

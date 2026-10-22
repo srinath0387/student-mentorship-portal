@@ -37,6 +37,7 @@ import { TechSkillsTab } from '../profile/tabs/TechSkillsTab';
 import { CertificationsTab } from '../profile/tabs/CertificationsTab';
 import { SoftSkillsTab } from '../profile/tabs/SoftSkillsTab';
 import { AchievementsTab } from '../profile/tabs/AchievementsTab';
+import { DocumentsTab } from '../profile/tabs/DocumentsTab';
 import { PlacementPreferencesTab } from '../profile/tabs/PlacementPreferencesTab';
 import { HodAttendancePage } from '../attendance/hod/HodAttendancePage';
 import { HodLeaveApprovalTab } from '../leave/HodLeaveApprovalTab';
@@ -1635,6 +1636,7 @@ export const HodDashboardPage: React.FC = () => {
                 { key: 'soft-skills', label: 'Soft Skills' },
                 { key: 'achievements', label: 'Achievements' },
                 { key: 'academic-goals', label: 'Placement Goals' },
+                { key: 'documents', label: '📁 Documents' },
               ].map((t) => (
                 <button
                   key={t.key}
@@ -1740,6 +1742,7 @@ export const HodDashboardPage: React.FC = () => {
               {inspectTab === 'soft-skills' && <SoftSkillsTab readOnly={true} softSkills={inspectStudentSoftSkills} onRefresh={() => {}} />}
               {inspectTab === 'achievements' && <AchievementsTab readOnly={true} achievements={inspectStudentAchievements} onRefresh={() => {}} />}
               {inspectTab === 'academic-goals' && <PlacementPreferencesTab readOnly={true} placement={inspectStudentPlacement} scoreData={null} onRefresh={() => {}} />}
+              {inspectTab === 'documents' && <DocumentsTab rollNumber={inspectStudent.regNo} readOnly={true} isAdminView={true} />}
             </div>
           </div>
         </div>

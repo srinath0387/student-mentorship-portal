@@ -44,6 +44,7 @@ import { TechSkillsTab } from '../profile/tabs/TechSkillsTab';
 import { CertificationsTab } from '../profile/tabs/CertificationsTab';
 import { SoftSkillsTab } from '../profile/tabs/SoftSkillsTab';
 import { AchievementsTab } from '../profile/tabs/AchievementsTab';
+import { DocumentsTab } from '../profile/tabs/DocumentsTab';
 import { PlacementPreferencesTab } from '../profile/tabs/PlacementPreferencesTab';
 import { BulkImportModal } from './components/BulkImportModal';
 import { FacultyRecordsTable } from './components/FacultyRecordsTable';
@@ -1426,6 +1427,7 @@ export const AdminDashboardPage: React.FC = () => {
                 { key: 'soft-skills', label: 'Soft Skills' },
                 { key: 'achievements', label: 'Achievements' },
                 { key: 'academic-goals', label: 'Academic Goals' },
+                { key: 'documents', label: 'Documents' },
               ].map((t) => (
                 <button key={t.key} onClick={() => setInspectTab(t.key)}
                   className={`px-3 py-2 text-xs font-bold rounded-t-lg transition-all whitespace-nowrap ${
@@ -1454,6 +1456,7 @@ export const AdminDashboardPage: React.FC = () => {
               {inspectTab === 'soft-skills' && <SoftSkillsTab readOnly={true} softSkills={inspectSoft} onRefresh={refetch} />}
               {inspectTab === 'achievements' && <AchievementsTab readOnly={true} achievements={inspectAchievements} onRefresh={refetch} />}
               {inspectTab === 'academic-goals' && <PlacementPreferencesTab readOnly={true} placement={null} scoreData={null} onRefresh={refetch} />}
+              {inspectTab === 'documents' && <DocumentsTab rollNumber={inspectStudent.roll_number} readOnly={true} isAdminView={true} />}
             </div>
           </div>
         </div>
