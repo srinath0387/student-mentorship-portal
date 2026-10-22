@@ -7314,79 +7314,100 @@ app.get('/reports/placement-summary', async (_req: Request, res: Response) => {
 app.get('/hod/at-risk-students', requireRole('hod', 'admin', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
   try {
     const department = (req.query.department as string) || (req.auth as any)?.department;
+    console.log('[at-risk] dept:', department, '| auth.dept:', (req.auth as any)?.department, '| query.dept:', req.query.department);
 
-    // Build department filter
+    // Use LOWER(REPLACE()) matching — same pattern as other HOD endpoints
+    // to handle dept strings like "CSE (Data Science)" vs "CSE(Data Science)"
     const params: any[] = [];
     let deptClause = '';
-    if (department) {
+    if (department && department !== '*') {
       params.push(department);
-      deptClause = `AND s.department = $${params.length}`;
+      deptClause = `AND LOWER(REPLACE(s.department,' ','')) = LOWER(REPLACE($${params.length},' ',''))`;
     }
 
-    // Single query using academics table which has both semester_gpa AND attendance_pct
-    // Only flag students who actually have academics data
-    const result = await db.query(`
+    // Query 1: CGPA-based — students whose average semester_gpa < 6
+    // Use LEFT JOIN so students with only some semesters still appear
+    const cgpaResult = await db.query(`
       SELECT
-        s.roll_number,
-        s.name,
-        s.year,
-        s.section,
-        s.department,
-        s.batch,
-        s.mentor_email,
-        ROUND(AVG(a.semester_gpa)::numeric, 2)         AS avg_cgpa,
-        ROUND(AVG(a.attendance_pct)::numeric, 1)        AS attendance_pct,
-        COUNT(a.id)                                     AS semester_count
+        s.roll_number, s.name, s.year, s.section, s.department,
+        s.batch, s.mentor_email,
+        ROUND(AVG(a.semester_gpa)::numeric, 2) AS avg_cgpa
       FROM students s
-      INNER JOIN academics a ON a.student_id = s.roll_number
-      WHERE a.semester_gpa IS NOT NULL
-        AND a.semester_gpa > 0
-        ${deptClause}
+      JOIN academics a ON a.student_id = s.roll_number AND a.semester_gpa > 0
+      WHERE 1=1 ${deptClause}
       GROUP BY s.roll_number, s.name, s.year, s.section, s.department, s.batch, s.mentor_email
-      HAVING
-        ROUND(AVG(a.semester_gpa)::numeric, 2) < 6.0
-        OR (
-          AVG(a.attendance_pct) IS NOT NULL
-          AND ROUND(AVG(a.attendance_pct)::numeric, 1) < 75
-        )
-      ORDER BY avg_cgpa ASC NULLS LAST
-      LIMIT 500
+      HAVING ROUND(AVG(a.semester_gpa)::numeric, 2) < 6.0
+      ORDER BY avg_cgpa ASC
+      LIMIT 300
     `, params);
 
-    const students = result.rows.map((r: any) => {
+    // Query 2: Attendance-based — students whose average attendance_pct < 75
+    // (attendance_pct is stored per semester in academics table)
+    const attParams: any[] = [];
+    let attDeptClause = '';
+    if (department && department !== '*') {
+      attParams.push(department);
+      attDeptClause = `AND LOWER(REPLACE(s.department,' ','')) = LOWER(REPLACE($${attParams.length},' ',''))`;
+    }
+
+    const attResult = await db.query(`
+      SELECT
+        s.roll_number, s.name, s.year, s.section, s.department,
+        s.batch, s.mentor_email,
+        ROUND(AVG(a.attendance_pct)::numeric, 1) AS attendance_pct
+      FROM students s
+      JOIN academics a ON a.student_id = s.roll_number AND a.attendance_pct IS NOT NULL
+      WHERE 1=1 ${attDeptClause}
+      GROUP BY s.roll_number, s.name, s.year, s.section, s.department, s.batch, s.mentor_email
+      HAVING ROUND(AVG(a.attendance_pct)::numeric, 1) < 75
+      ORDER BY attendance_pct ASC
+      LIMIT 300
+    `, attParams);
+
+    // Merge both result sets (deduplicate by roll_number)
+    const map: Record<string, any> = {};
+
+    for (const r of cgpaResult.rows) {
       const cgpa = parseFloat(r.avg_cgpa ?? '0');
-      const att  = r.attendance_pct !== null ? parseFloat(r.attendance_pct) : null;
-      const reasons: string[] = [];
-
-      if (cgpa > 0 && cgpa < 5.0)  reasons.push('CGPA < 5.0 (Fail Risk)');
-      else if (cgpa > 0 && cgpa < 6.0) reasons.push('CGPA < 6.0 (Low Performance)');
-
-      if (att !== null && att < 65)      reasons.push('Attendance < 65% (Detained Risk)');
-      else if (att !== null && att < 75) reasons.push('Attendance 65–75% (Condonation Zone)');
-
-      const severity =
-        (cgpa > 0 && cgpa < 5.0) || (att !== null && att < 65) ? 'high' : 'medium';
-
-      return {
-        roll_number:    r.roll_number,
-        name:           r.name,
-        year:           r.year || '—',
-        section:        r.section || '—',
-        department:     r.department,
-        batch:          r.batch || '—',
-        mentor_email:   r.mentor_email || null,
-        avg_cgpa:       cgpa,
-        attendance_pct: att,
-        semester_count: parseInt(r.semester_count || '0'),
-        risk_reasons:   reasons,
-        severity,
+      map[r.roll_number] = {
+        roll_number: r.roll_number, name: r.name, year: r.year,
+        section: r.section, department: r.department, batch: r.batch,
+        mentor_email: r.mentor_email || null,
+        avg_cgpa: cgpa, attendance_pct: null, risk_reasons: [],
       };
-    }).sort((a: any, b: any) => {
+      if (cgpa < 5.0) map[r.roll_number].risk_reasons.push('CGPA < 5.0 (Fail Risk)');
+      else             map[r.roll_number].risk_reasons.push('CGPA < 6.0 (Low Performance)');
+    }
+
+    for (const r of attResult.rows) {
+      const att = r.attendance_pct !== null ? parseFloat(r.attendance_pct) : null;
+      if (!map[r.roll_number]) {
+        map[r.roll_number] = {
+          roll_number: r.roll_number, name: r.name, year: r.year,
+          section: r.section, department: r.department, batch: r.batch,
+          mentor_email: r.mentor_email || null,
+          avg_cgpa: 0, attendance_pct: att, risk_reasons: [],
+        };
+      } else {
+        map[r.roll_number].attendance_pct = att;
+      }
+      if (att !== null) {
+        if (att < 65) map[r.roll_number].risk_reasons.push('Attendance < 65% (Detained Risk)');
+        else          map[r.roll_number].risk_reasons.push('Attendance 65–75% (Condonation Zone)');
+      }
+    }
+
+    const students = Object.values(map).map((s: any) => ({
+      ...s,
+      severity: (s.avg_cgpa > 0 && s.avg_cgpa < 5.0) ||
+                (s.attendance_pct !== null && s.attendance_pct < 65)
+                ? 'high' : 'medium',
+    })).sort((a: any, b: any) => {
       if (a.severity !== b.severity) return a.severity === 'high' ? -1 : 1;
-      return a.avg_cgpa - b.avg_cgpa;
+      return (a.avg_cgpa || 99) - (b.avg_cgpa || 99);
     });
 
-    res.json({ students, total: students.length, department: department || 'All' });
+    res.json({ students, total: students.length, department: department || 'All', _debug: { received_department: department, cgpa_rows: cgpaResult.rows.length, att_rows: attResult.rows.length } });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
