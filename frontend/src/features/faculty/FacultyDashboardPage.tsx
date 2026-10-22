@@ -31,6 +31,7 @@ import {
   GraduationCap,
   Briefcase,
   Microscope,
+  MessageSquare,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { StudentProfile } from '../../types';
@@ -45,6 +46,7 @@ import { CertificationsTab } from '../profile/tabs/CertificationsTab';
 import { SoftSkillsTab } from '../profile/tabs/SoftSkillsTab';
 import { AchievementsTab } from '../profile/tabs/AchievementsTab';
 import { DocumentsTab } from '../profile/tabs/DocumentsTab';
+import { MeetingLogModal } from './MeetingLogModal';
 import { PlacementPreferencesTab } from '../profile/tabs/PlacementPreferencesTab';
 import { BulkImportModal } from '../admin/components/BulkImportModal';
 import { PlacementEligibilitySection } from '../hod/components/PlacementEligibilitySection';
@@ -78,6 +80,7 @@ export const FacultyDashboardPage: React.FC = () => {
   const [yearFilter, setYearFilter] = useState('');
   const [selectedMentee, setSelectedMentee] = useState<StudentProfile | null>(null);
   const [inspectMentee, setInspectMentee] = useState<StudentProfile | null>(null);
+  const [meetingLogMentee, setMeetingLogMentee] = useState<{ roll_number: string; name: string } | null>(null);
   const [inspectTab, setInspectTab] = useState('personal-info');
   const [remarkInput, setRemarkInput] = useState('');
   const [saving, setSaving] = useState(false);
@@ -1416,6 +1419,13 @@ export const FacultyDashboardPage: React.FC = () => {
                                       <Eye className="w-4 h-4" />
                                     </button>
                                     <button
+                                      onClick={() => setMeetingLogMentee({ roll_number: mentee.roll_number, name: mentee.name })}
+                                      className="p-1.5 rounded-lg border border-borderLine text-purple-500 hover:bg-purple-500/10"
+                                      title="Log Mentoring Meeting"
+                                    >
+                                      <MessageSquare className="w-4 h-4" />
+                                    </button>
+                                    <button
                                       onClick={() => { setSelectedMentee(mentee); setRemarkInput(''); }}
                                       className="p-1.5 rounded-lg border border-borderLine text-textPrimary hover:bg-background"
                                       title="Add Faculty Remarks"
@@ -1569,6 +1579,16 @@ export const FacultyDashboardPage: React.FC = () => {
         onClose={() => setShowBulkImportModal(false)}
         onSuccess={refetch}
       />
+
+      {/* Meeting Log Modal */}
+      {meetingLogMentee && (
+        <MeetingLogModal
+          rollNumber={meetingLogMentee.roll_number}
+          studentName={meetingLogMentee.name}
+          facultyEmail={user?.email || ''}
+          onClose={() => setMeetingLogMentee(null)}
+        />
+      )}
 
       {/* Manual photo upload modal triggered via camera button */}
       <ProfilePhotoUploadModal

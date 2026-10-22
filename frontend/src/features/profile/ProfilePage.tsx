@@ -28,6 +28,7 @@ import { PlacementPreferencesTab } from './tabs/PlacementPreferencesTab';
 import { StudentAttendanceView } from '../attendance/student/StudentAttendanceView';
 import { StudentPermissionTab } from '../leave/StudentPermissionTab';
 import { DocumentsTab } from './tabs/DocumentsTab';
+import { PlacementTrackerSection } from '../placement/PlacementTrackerSection';
 
 export const ProfilePage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -117,6 +118,7 @@ export const ProfilePage: React.FC = () => {
     { slug: 'soft-skills', label: 'Soft Skills & Extracurriculars', icon: Zap },
     { slug: 'achievements', label: 'Achievements', icon: Award },
     { slug: 'placement-preferences', label: 'Academic Growth Target', icon: Target },
+    { slug: 'my-placement', label: '🎓 My Placement', icon: Target },
     { slug: 'documents', label: 'Documents', icon: FolderOpen },
   ];
 
@@ -269,6 +271,12 @@ export const ProfilePage: React.FC = () => {
           {currentTab === 'achievements' && <AchievementsTab achievements={achievements} onRefresh={handleRefreshAll} readOnly={isReadOnly} />}
           {currentTab === 'placement-preferences' && (
             <PlacementPreferencesTab placement={placement} scoreData={scoreData} onRefresh={handleRefreshAll} />
+          )}
+          {currentTab === 'my-placement' && !isReadOnly && (
+            <PlacementTrackerSection
+              isStudentView
+              studentRollNumber={activeRollNo}
+            />
           )}
           {currentTab === 'documents' && (
             <DocumentsTab rollNumber={activeRollNo} readOnly={isReadOnly} isAdminView={isViewingOther && (user?.role === 'admin' || user?.role === 'hod')} />

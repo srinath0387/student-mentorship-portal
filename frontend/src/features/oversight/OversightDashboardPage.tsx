@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../lib/api';
+import { PlacementTrackerSection } from '../placement/PlacementTrackerSection';
 import type {
   ExecutiveDepartmentMetrics,
   OversightFacultyProfile,
@@ -1248,6 +1249,15 @@ export const OversightDashboardPage: React.FC = () => {
           </table>
         </div>
       </div>
+    <div className="mt-4">
+      <div className="px-1 mb-3">
+        <h3 className="text-sm font-bold text-textPrimary flex items-center gap-2">
+          <span className="text-emerald-600">🎓</span> Live Placement Tracker
+          <span className="text-xs font-normal text-textMuted">(student-reported & HOD-verified)</span>
+        </h3>
+      </div>
+      <PlacementTrackerSection isAdminView />
+    </div>
     </div>
   );
 

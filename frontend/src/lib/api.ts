@@ -351,6 +351,70 @@ export const api = {
   deleteStudentDocument: async (rollNo: string, docId: number) => {
     return fetchWithAuth(`/students/${rollNo}/documents/${docId}`, { method: 'DELETE' });
   },
+  // ── Feature 1: At-Risk Students ──────────────────────────────────────────
+  getAtRiskStudents: async (department?: string) => {
+    const q = department ? `?department=${encodeURIComponent(department)}` : ``;
+    return fetchWithAuth(`/hod/at-risk-students${q}`);
+  },
+
+  // ── Feature 4: Mentor Meeting Log ─────────────────────────────────────────
+  getMentorMeetings: async (params: { student_id?: string; faculty_email?: string }) => {
+    const q = new URLSearchParams();
+    if (params.student_id) q.set('student_id', params.student_id);
+    if (params.faculty_email) q.set('faculty_email', params.faculty_email);
+    return fetchWithAuth(`/mentor-meetings?${q.toString()}`);
+  },
+  createMentorMeeting: async (data: {
+    roll_number: string; student_name?: string; meeting_date: string; topics: string;
+    action_items?: string; next_meeting?: string; tag?: string;
+  }) => {
+    return fetchWithAuth('/mentor-meetings', { method: 'POST', body: JSON.stringify(data) });
+  },
+  deleteMentorMeeting: async (id: number) => {
+    return fetchWithAuth(`/mentor-meetings/${id}`, { method: 'DELETE' });
+  },
+  getMentoringCompliance: async (department?: string) => {
+    const q = department ? `?department=${encodeURIComponent(department)}` : ``;
+    return fetchWithAuth(`/hod/mentoring-compliance${q}`);
+  },
+
+  // ── Feature 5: Broadcast Notifications ────────────────────────────────────
+  broadcastNotice: async (data: {
+    title: string; message: string; target_department?: string; target_year?: string;
+    target_roles?: string[]; priority?: string; expires_at?: string;
+  }) => {
+    return fetchWithAuth('/notices/broadcast', { method: 'POST', body: JSON.stringify(data) });
+  },
+  getBroadcastNotices: async (department?: string) => {
+    const q = department ? `?department=${encodeURIComponent(department)}` : ``;
+    return fetchWithAuth(`/notices/broadcast${q}`);
+  },
+
+  // ── Feature 6: Student Placement Tracker ──────────────────────────────────
+  getStudentPlacements: async (params?: { roll_number?: string; department?: string; verified?: boolean }) => {
+    const q = new URLSearchParams();
+    if (params?.roll_number) q.set('roll_number', params.roll_number);
+    if (params?.department) q.set('department', params.department);
+    if (params?.verified) q.set('verified', 'true');
+    return fetchWithAuth(`/student-placements?${q.toString()}`);
+  },
+  createStudentPlacement: async (data: {
+    company_name: string; role_title: string; package_lpa?: number; offer_date?: string;
+    placement_type?: string; roll_number?: string;
+  }) => {
+    return fetchWithAuth('/student-placements', { method: 'POST', body: JSON.stringify(data) });
+  },
+  verifyPlacement: async (id: number) => {
+    return fetchWithAuth(`/student-placements/${id}/verify`, { method: 'PATCH', body: JSON.stringify({}) });
+  },
+  deleteStudentPlacement: async (id: number) => {
+    return fetchWithAuth(`/student-placements/${id}`, { method: 'DELETE' });
+  },
+  getHodPlacementSummary: async (department?: string) => {
+    const q = department ? `?department=${encodeURIComponent(department)}` : ``;
+    return fetchWithAuth(`/hod/placement-summary${q}`);
+  },
+
   getUploadUrl: async (id: string, fileName: string, uploadType: string) => {
     return fetchWithAuth(`/students/${id}/upload-url?fileName=${encodeURIComponent(fileName)}&uploadType=${uploadType}`);
   },

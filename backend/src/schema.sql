@@ -390,5 +390,45 @@ CREATE INDEX IF NOT EXISTS idx_student_docs_roll ON student_documents(roll_numbe
 CREATE INDEX IF NOT EXISTS idx_student_docs_type ON student_documents(doc_type);
 CREATE INDEX IF NOT EXISTS idx_student_docs_status ON student_documents(verification_status);
 
+
+-- ── Feature: Mentor Meeting Logs ────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS mentor_meetings (
+  id            SERIAL PRIMARY KEY,
+  faculty_id    TEXT        NOT NULL,
+  faculty_email TEXT        NOT NULL,
+  roll_number   TEXT        NOT NULL,
+  student_name  TEXT,
+  meeting_date  DATE        NOT NULL DEFAULT CURRENT_DATE,
+  topics        TEXT        NOT NULL,
+  action_items  TEXT,
+  next_meeting  DATE,
+  tag           TEXT        NOT NULL DEFAULT 'Academic' CHECK (tag IN ('Academic','Personal','Placement','Attendance','Other')),
+  created_at    TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_mentor_meetings_roll    ON mentor_meetings(roll_number);
+CREATE INDEX IF NOT EXISTS idx_mentor_meetings_faculty ON mentor_meetings(faculty_email);
+CREATE INDEX IF NOT EXISTS idx_mentor_meetings_date    ON mentor_meetings(meeting_date);
+
+-- ── Feature: Placement Tracker ───────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS student_placements (
+  id             SERIAL PRIMARY KEY,
+  roll_number    TEXT        NOT NULL,
+  student_name   TEXT,
+  department     TEXT,
+  batch          TEXT,
+  company_name   TEXT        NOT NULL,
+  role_title     TEXT,
+  package_lpa    NUMERIC(6,2),
+  offer_date     DATE,
+  placement_type TEXT        NOT NULL DEFAULT 'Campus' CHECK (placement_type IN ('Campus','Off-Campus','Internship','Higher Studies','Entrepreneurship')),
+  verified       BOOLEAN     NOT NULL DEFAULT FALSE,
+  verified_by    TEXT,
+  created_at     TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  updated_at     TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_placements_roll ON student_placements(roll_number);
+CREATE INDEX IF NOT EXISTS idx_placements_dept ON student_placements(department);
+CREATE INDEX IF NOT EXISTS idx_placements_batch ON student_placements(batch);
+
 -- End of schema.sql
 

@@ -7306,6 +7306,513 @@ app.get('/reports/placement-summary', async (_req: Request, res: Response) => {
   }
 });
 
+
+// ============================================================================
+// Feature 1: At-Risk Student Alert System
+// ============================================================================
+
+app.get('/hod/at-risk-students', requireRole('hod', 'admin', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
+  try {
+    const department = (req.query.department as string) || (req.auth as any)?.department;
+    // Ensure student_risk_overrides table exists
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS student_risk_overrides (
+        id SERIAL PRIMARY KEY,
+        roll_number TEXT NOT NULL UNIQUE,
+        dismissed_by TEXT,
+        dismissed_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `).catch(() => {});
+
+    const deptFilter = department ? `AND s.department = $1` : '';
+    const params: any[] = department ? [department] : [];
+
+    const result = await db.query(`
+      SELECT
+        s.roll_number, s.name, s.year, s.section, s.department, s.batch,
+        COALESCE(ROUND(AVG(a.gpa)::numeric, 2), 0) AS avg_cgpa,
+        COALESCE(
+          ROUND(
+            100.0 * SUM(CASE WHEN ar.status = 'present' THEN 1 ELSE 0 END)::numeric
+            / NULLIF(COUNT(ar.id), 0), 1
+          ), NULL
+        ) AS attendance_pct,
+        s.mentor_email
+      FROM students s
+      LEFT JOIN academics a ON a.student_id = s.roll_number
+      LEFT JOIN subject_rosters sr ON sr.roll_number = s.roll_number
+      LEFT JOIN attendance_records ar ON ar.roster_id = sr.id
+      WHERE 1=1 ${deptFilter}
+      GROUP BY s.roll_number, s.name, s.year, s.section, s.department, s.batch, s.mentor_email
+      HAVING
+        COALESCE(ROUND(AVG(a.gpa)::numeric,2),0) < 6.0
+        OR (
+          COUNT(ar.id) > 0 AND
+          ROUND(100.0 * SUM(CASE WHEN ar.status='present' THEN 1 ELSE 0 END)::numeric / NULLIF(COUNT(ar.id),0),1) < 75
+        )
+      ORDER BY avg_cgpa ASC, attendance_pct ASC NULLS LAST
+      LIMIT 500
+    `, params);
+
+    const students = result.rows.map((r: any) => {
+      const reasons: string[] = [];
+      const cgpa = parseFloat(r.avg_cgpa || '0');
+      const att = r.attendance_pct !== null ? parseFloat(r.attendance_pct) : null;
+      if (cgpa < 5.0) reasons.push('CGPA < 5 (Fail Risk)');
+      else if (cgpa < 6.0) reasons.push('CGPA < 6 (Low Performance)');
+      if (att !== null && att < 65) reasons.push('Attendance < 65% (Detained Risk)');
+      else if (att !== null && att < 75) reasons.push('Attendance 65-75% (Condonation Zone)');
+      return {
+        ...r,
+        avg_cgpa: cgpa,
+        attendance_pct: att,
+        risk_reasons: reasons,
+        severity: (cgpa < 5.0 || (att !== null && att < 65)) ? 'high' : 'medium',
+      };
+    });
+
+    res.json({ students, total: students.length, department: department || 'All' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// Feature 4: Mentor Meeting Log
+// ============================================================================
+
+app.post('/mentor-meetings', requireRole('faculty', 'hod', 'admin', 'coordinator', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
+  try {
+    const { roll_number, student_name, meeting_date, topics, action_items, next_meeting, tag } = req.body;
+    if (!roll_number || !meeting_date || !topics) {
+      return res.status(400).json({ error: 'roll_number, meeting_date, topics are required.' });
+    }
+    const facultyEmail = (req.auth as any)?.email || '';
+    const facultyId = (req.auth as any)?.sub || '';
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS mentor_meetings (
+        id SERIAL PRIMARY KEY,
+        faculty_id TEXT,
+        faculty_email TEXT NOT NULL,
+        roll_number TEXT NOT NULL,
+        student_name TEXT,
+        meeting_date DATE NOT NULL,
+        topics TEXT NOT NULL,
+        action_items TEXT,
+        next_meeting DATE,
+        tag TEXT DEFAULT 'General',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `).catch(() => {});
+    const result = await db.query(
+      `INSERT INTO mentor_meetings (faculty_id, faculty_email, roll_number, student_name, meeting_date, topics, action_items, next_meeting, tag)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [facultyId, facultyEmail, roll_number.toUpperCase(), student_name || null, meeting_date, topics, action_items || null, next_meeting || null, tag || 'General']
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/mentor-meetings', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS mentor_meetings (
+        id SERIAL PRIMARY KEY,
+        faculty_id TEXT,
+        faculty_email TEXT NOT NULL,
+        roll_number TEXT NOT NULL,
+        student_name TEXT,
+        meeting_date DATE NOT NULL,
+        topics TEXT NOT NULL,
+        action_items TEXT,
+        next_meeting DATE,
+        tag TEXT DEFAULT 'General',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `).catch(() => {});
+    const studentId = req.query.student_id as string;
+    const facultyEmail = req.query.faculty_email as string;
+    const authEmail = (req.auth as any)?.email || '';
+    const role = (req.auth as any)?.role || '';
+
+    let query = '';
+    let params: any[] = [];
+
+    if (studentId) {
+      // Student can only see their own; faculty/hod/admin can see any
+      if (!['faculty','hod','admin','coordinator','principal','director','management'].includes(role) && authEmail !== studentId) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+      query = `SELECT * FROM mentor_meetings WHERE roll_number=$1 ORDER BY meeting_date DESC LIMIT 200`;
+      params = [studentId.toUpperCase()];
+    } else if (facultyEmail) {
+      query = `SELECT * FROM mentor_meetings WHERE faculty_email=$1 ORDER BY meeting_date DESC LIMIT 200`;
+      params = [facultyEmail];
+    } else {
+      // Faculty sees own; HOD/admin sees dept (no filter here, handled client-side)
+      query = `SELECT * FROM mentor_meetings WHERE faculty_email=$1 ORDER BY meeting_date DESC LIMIT 200`;
+      params = [authEmail];
+    }
+
+    const result = await db.query(query, params);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/mentor-meetings/:id', requireRole('faculty', 'hod', 'admin', 'coordinator', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const authEmail = (req.auth as any)?.email || '';
+    const role = (req.auth as any)?.role || '';
+    // Faculty can only delete own meetings; HOD/admin can delete any
+    const isPrivileged = ['hod','admin','principal','director','management'].includes(role);
+    const check = await db.query(`SELECT faculty_email FROM mentor_meetings WHERE id=$1`, [id]);
+    if (check.rowCount === 0) return res.status(404).json({ error: 'Meeting not found.' });
+    if (!isPrivileged && check.rows[0].faculty_email !== authEmail) {
+      return res.status(403).json({ error: 'Cannot delete another faculty\'s meeting log.' });
+    }
+    await db.query(`DELETE FROM mentor_meetings WHERE id=$1`, [id]);
+    res.json({ message: 'Meeting log deleted.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/hod/mentoring-compliance', requireRole('hod', 'admin', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
+  try {
+    const department = (req.query.department as string) || (req.auth as any)?.department;
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS mentor_meetings (
+        id SERIAL PRIMARY KEY, faculty_id TEXT, faculty_email TEXT NOT NULL,
+        roll_number TEXT NOT NULL, student_name TEXT, meeting_date DATE NOT NULL,
+        topics TEXT NOT NULL, action_items TEXT, next_meeting DATE,
+        tag TEXT DEFAULT 'General', created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `).catch(() => {});
+
+    const deptJoin = department
+      ? `JOIN faculty_full_profiles fp ON fp.email = mm.faculty_email AND fp.department = $1`
+      : `LEFT JOIN faculty_full_profiles fp ON fp.email = mm.faculty_email`;
+    const params: any[] = department ? [department] : [];
+
+    const result = await db.query(`
+      SELECT
+        mm.faculty_email,
+        COALESCE(fp.name, mm.faculty_email) AS faculty_name,
+        COALESCE(fp.department, 'N/A') AS department,
+        COUNT(mm.id) AS total_meetings,
+        COUNT(CASE WHEN mm.meeting_date >= DATE_TRUNC('month', NOW()) THEN 1 END) AS meetings_this_month,
+        MAX(mm.meeting_date) AS last_meeting_date,
+        COUNT(DISTINCT mm.roll_number) AS students_met
+      FROM mentor_meetings mm
+      ${deptJoin}
+      GROUP BY mm.faculty_email, fp.name, fp.department
+      ORDER BY meetings_this_month DESC, total_meetings DESC
+    `, params);
+
+    // Also pull faculty who have ZERO meetings
+    const deptFilter = department ? `WHERE department = $1` : '';
+    const zeroResult = await db.query(`
+      SELECT email, name, department FROM faculty_full_profiles
+      ${deptFilter}
+    `, params);
+
+    const compliance = result.rows;
+    const emailsWithMeetings = new Set(compliance.map((r: any) => r.faculty_email));
+    for (const f of zeroResult.rows) {
+      if (!emailsWithMeetings.has(f.email)) {
+        compliance.push({
+          faculty_email: f.email,
+          faculty_name: f.name,
+          department: f.department,
+          total_meetings: 0,
+          meetings_this_month: 0,
+          last_meeting_date: null,
+          students_met: 0,
+        });
+      }
+    }
+
+    res.json({ compliance, department: department || 'All' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// Feature 6: Student Placement Tracker
+// ============================================================================
+
+const ensurePlacementsTable = async () => {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS student_placements (
+      id SERIAL PRIMARY KEY,
+      roll_number TEXT NOT NULL,
+      student_name TEXT,
+      department TEXT,
+      batch TEXT,
+      company_name TEXT NOT NULL,
+      role_title TEXT NOT NULL,
+      package_lpa NUMERIC(6,2),
+      offer_date DATE,
+      placement_type TEXT DEFAULT 'On-Campus' CHECK (placement_type IN ('On-Campus','Off-Campus','CGAP','Internship')),
+      verified BOOLEAN DEFAULT FALSE,
+      verified_by TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {});
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_placements_roll ON student_placements(roll_number)`).catch(() => {});
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_placements_dept ON student_placements(department)`).catch(() => {});
+};
+
+app.post('/student-placements', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensurePlacementsTable();
+    const { company_name, role_title, package_lpa, offer_date, placement_type, roll_number: bodyRoll } = req.body;
+    if (!company_name || !role_title) {
+      return res.status(400).json({ error: 'company_name and role_title are required.' });
+    }
+    const role = (req.auth as any)?.role || '';
+    const authEmail = (req.auth as any)?.email || '';
+    let rollNumber: string;
+    let studentName: string | null = null;
+    let department: string | null = null;
+    let batch: string | null = null;
+
+    if (['admin','hod','principal','director','management','coordinator'].includes(role) && bodyRoll) {
+      rollNumber = bodyRoll.toUpperCase();
+    } else {
+      // Student self-report — get their roll from DB
+      const studentRes = await db.query(
+        `SELECT roll_number, name, department, batch FROM students WHERE email=$1`,
+        [authEmail]
+      );
+      if (studentRes.rowCount === 0) return res.status(404).json({ error: 'Student not found.' });
+      rollNumber = studentRes.rows[0].roll_number;
+      studentName = studentRes.rows[0].name;
+      department = studentRes.rows[0].department;
+      batch = studentRes.rows[0].batch;
+    }
+
+    if (!studentName) {
+      const sr = await db.query(`SELECT name, department, batch FROM students WHERE roll_number=$1`, [rollNumber]);
+      if ((sr.rowCount ?? 0) > 0) { studentName = sr.rows[0].name; department = sr.rows[0].department; batch = sr.rows[0].batch; }
+    }
+
+    const result = await db.query(
+      `INSERT INTO student_placements (roll_number, student_name, department, batch, company_name, role_title, package_lpa, offer_date, placement_type)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [rollNumber, studentName, department, batch, company_name, role_title, package_lpa || null, offer_date || null, placement_type || 'On-Campus']
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/student-placements', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensurePlacementsTable();
+    const role = (req.auth as any)?.role || '';
+    const authEmail = (req.auth as any)?.email || '';
+    const department = (req.query.department as string) || ((role === 'hod') ? (req.auth as any)?.department : undefined);
+    const rollNumber = req.query.roll_number as string;
+    const verifiedOnly = req.query.verified === 'true';
+
+    let query = `SELECT * FROM student_placements WHERE 1=1`;
+    const params: any[] = [];
+    let idx = 1;
+
+    if (rollNumber) {
+      // Can only see own unless privileged
+      if (!['faculty','hod','admin','coordinator','principal','director','management'].includes(role)) {
+        const sr = await db.query(`SELECT roll_number FROM students WHERE email=$1`, [authEmail]);
+        if (sr.rowCount === 0 || sr.rows[0].roll_number !== rollNumber.toUpperCase()) {
+          return res.status(403).json({ error: 'Forbidden' });
+        }
+      }
+      query += ` AND roll_number=$${idx++}`;
+      params.push(rollNumber.toUpperCase());
+    } else if (!['admin','principal','director','management'].includes(role)) {
+      if (role === 'hod' && department) {
+        query += ` AND department=$${idx++}`;
+        params.push(department);
+      } else if (role === 'faculty') {
+        // Faculty sees their mentees
+        query += ` AND roll_number IN (SELECT roll_number FROM students WHERE mentor_email=$${idx++})`;
+        params.push(authEmail);
+      } else {
+        // Student: their own
+        const sr = await db.query(`SELECT roll_number FROM students WHERE email=$1`, [authEmail]);
+        const rn = sr.rows[0]?.roll_number;
+        if (!rn) return res.json([]);
+        query += ` AND roll_number=$${idx++}`;
+        params.push(rn);
+      }
+    } else if (department) {
+      query += ` AND department=$${idx++}`;
+      params.push(department);
+    }
+
+    if (verifiedOnly) { query += ` AND verified=TRUE`; }
+    query += ` ORDER BY created_at DESC LIMIT 500`;
+    const result = await db.query(query, params);
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch('/student-placements/:id/verify', requireRole('hod', 'admin', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
+  try {
+    await ensurePlacementsTable();
+    const id = parseInt(req.params.id, 10);
+    const callerEmail = (req.auth as any)?.email || '';
+    const result = await db.query(
+      `UPDATE student_placements SET verified=TRUE, verified_by=$1, updated_at=NOW() WHERE id=$2 RETURNING *`,
+      [callerEmail, id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Placement not found.' });
+    res.json(result.rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/student-placements/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensurePlacementsTable();
+    const id = parseInt(req.params.id, 10);
+    const role = (req.auth as any)?.role || '';
+    const authEmail = (req.auth as any)?.email || '';
+    const check = await db.query(`SELECT roll_number FROM student_placements WHERE id=$1`, [id]);
+    if (check.rowCount === 0) return res.status(404).json({ error: 'Not found.' });
+    const isPrivileged = ['hod','admin','principal','director','management'].includes(role);
+    if (!isPrivileged) {
+      const sr = await db.query(`SELECT roll_number FROM students WHERE email=$1`, [authEmail]);
+      if (!sr.rows[0] || sr.rows[0].roll_number !== check.rows[0].roll_number) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+    await db.query(`DELETE FROM student_placements WHERE id=$1`, [id]);
+    res.json({ message: 'Deleted.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/hod/placement-summary', requireRole('hod', 'admin', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
+  try {
+    await ensurePlacementsTable();
+    const department = (req.query.department as string) || (req.auth as any)?.department;
+    const deptFilter = department ? `WHERE department=$1` : '';
+    const params: any[] = department ? [department] : [];
+
+    const result = await db.query(`
+      SELECT
+        COUNT(*) AS total,
+        COUNT(CASE WHEN verified THEN 1 END) AS verified_count,
+        ROUND(AVG(CASE WHEN package_lpa IS NOT NULL THEN package_lpa END)::numeric, 2) AS avg_package,
+        MAX(package_lpa) AS max_package,
+        COUNT(CASE WHEN placement_type='On-Campus' THEN 1 END) AS on_campus,
+        COUNT(CASE WHEN placement_type='Off-Campus' THEN 1 END) AS off_campus,
+        COUNT(CASE WHEN placement_type='CGAP' THEN 1 END) AS cgap,
+        COUNT(CASE WHEN placement_type='Internship' THEN 1 END) AS internship
+      FROM student_placements ${deptFilter}
+    `, params);
+
+    const topCompanies = await db.query(`
+      SELECT company_name, COUNT(*) as count
+      FROM student_placements
+      ${deptFilter}
+      GROUP BY company_name
+      ORDER BY count DESC
+      LIMIT 10
+    `, params);
+
+    const totalStudents = department
+      ? (await db.query(`SELECT COUNT(*) as cnt FROM students WHERE department=$1`, [department])).rows[0]?.cnt
+      : (await db.query(`SELECT COUNT(*) as cnt FROM students`)).rows[0]?.cnt;
+
+    const summary = result.rows[0] || {};
+    res.json({
+      department: department || 'All',
+      total_placed: parseInt(summary.total || '0'),
+      verified_placements: parseInt(summary.verified_count || '0'),
+      avg_package_lpa: parseFloat(summary.avg_package || '0'),
+      max_package_lpa: parseFloat(summary.max_package || '0'),
+      placement_rate: totalStudents > 0 ? Math.round((parseInt(summary.total || '0') / parseInt(totalStudents)) * 100) : 0,
+      by_type: { on_campus: parseInt(summary.on_campus||'0'), off_campus: parseInt(summary.off_campus||'0'), cgap: parseInt(summary.cgap||'0'), internship: parseInt(summary.internship||'0') },
+      top_companies: topCompanies.rows,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// Feature 5: Enhanced Broadcast Notifications
+// ============================================================================
+
+app.post('/notices/broadcast', requireRole('hod', 'admin', 'principal', 'director', 'management', 'coordinator'), async (req: Request, res: Response) => {
+  try {
+    const { title, message, target_department, target_year, target_roles, priority, expires_at } = req.body;
+    if (!title || !message) {
+      return res.status(400).json({ error: 'title and message are required.' });
+    }
+    const senderEmail = (req.auth as any)?.email || '';
+    const senderRole = (req.auth as any)?.role || '';
+
+    // Build targeting metadata
+    const targeting = {
+      department: target_department || null,
+      year: target_year || null,
+      roles: target_roles || ['student', 'faculty', 'hod'],
+    };
+
+    const result = await db.query(
+      `INSERT INTO notices (title, message, created_by, priority, expires_at, targeting)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [title, message, senderEmail, priority || 'normal', expires_at || null, JSON.stringify(targeting)]
+    ).catch(async () => {
+      // notices table may not have targeting column yet — add it
+      await db.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS targeting JSONB`).catch(() => {});
+      await db.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'normal'`).catch(() => {});
+      return db.query(
+        `INSERT INTO notices (title, message, created_by, priority, expires_at, targeting)
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+        [title, message, senderEmail, priority || 'normal', expires_at || null, JSON.stringify(targeting)]
+      );
+    });
+
+    res.status(201).json(result.rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/notices/broadcast', requireRole('hod', 'admin', 'principal', 'director', 'management', 'coordinator', 'faculty'), async (req: Request, res: Response) => {
+  try {
+    const department = req.query.department as string;
+    const result = await db.query(
+      `SELECT * FROM notices
+       WHERE (targeting IS NULL OR targeting='null'
+         OR (targeting->>'department' IS NULL)
+         OR (targeting->>'department' = $1))
+       ORDER BY created_at DESC LIMIT 50`,
+      [department || '']
+    ).catch(() => db.query(`SELECT * FROM notices ORDER BY created_at DESC LIMIT 50`));
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ============================================================================
 // Attendance Management System Endpoints
 // ============================================================================
