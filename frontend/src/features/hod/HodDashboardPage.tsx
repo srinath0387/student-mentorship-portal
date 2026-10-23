@@ -178,6 +178,7 @@ export const HodDashboardPage: React.FC = () => {
   const [inspectStudentSoftSkills, setInspectStudentSoftSkills] = useState<SoftSkill[]>([]);
   const [inspectStudentAchievements, setInspectStudentAchievements] = useState<Achievement[]>([]);
   const [inspectStudentPlacement, setInspectStudentPlacement] = useState<PlacementProfile | null>(null);
+  const [inspectStudentScore, setInspectStudentScore] = useState<any>(null);
 
   // Analytics Tab — real semester-wise CGPA progression per selected year batch
   const [progressionYear, setProgressionYear] = useState('3rd Year');
@@ -222,6 +223,7 @@ export const HodDashboardPage: React.FC = () => {
       setInspectStudentSoftSkills([]);
       setInspectStudentAchievements([]);
       setInspectStudentPlacement(null);
+      setInspectStudentScore(null);
       return;
     }
     let cancelled = false;
@@ -236,7 +238,8 @@ export const HodDashboardPage: React.FC = () => {
       api.getSoftSkills(regNo),
       api.getAchievements(regNo),
       api.getPlacementProfile(regNo),
-    ]).then(([profileRes, academicsRes, techRes, certsRes, softRes, achRes, placementRes]) => {
+      api.getEmployabilityScore(regNo),
+    ]).then(([profileRes, academicsRes, techRes, certsRes, softRes, achRes, placementRes, scoreRes]) => {
       if (cancelled) return;
       setInspectStudentFullProfile(profileRes.status === 'fulfilled' ? profileRes.value : null);
       setInspectStudentAcademics(academicsRes.status === 'fulfilled' ? academicsRes.value : []);
@@ -245,6 +248,7 @@ export const HodDashboardPage: React.FC = () => {
       setInspectStudentSoftSkills(softRes.status === 'fulfilled' ? softRes.value : []);
       setInspectStudentAchievements(achRes.status === 'fulfilled' ? achRes.value : []);
       setInspectStudentPlacement(placementRes.status === 'fulfilled' ? placementRes.value : null);
+      setInspectStudentScore(scoreRes.status === 'fulfilled' ? scoreRes.value : null);
       setInspectProfileLoading(false);
     });
 
@@ -1680,7 +1684,7 @@ export const HodDashboardPage: React.FC = () => {
               {inspectTab === 'certifications' && <CertificationsTab readOnly={true} certifications={inspectStudentCerts} onRefresh={() => {}} />}
               {inspectTab === 'soft-skills' && <SoftSkillsTab readOnly={true} softSkills={inspectStudentSoftSkills} onRefresh={() => {}} />}
               {inspectTab === 'achievements' && <AchievementsTab readOnly={true} achievements={inspectStudentAchievements} onRefresh={() => {}} />}
-              {inspectTab === 'academic-goals' && <PlacementPreferencesTab readOnly={true} placement={inspectStudentPlacement} scoreData={null} onRefresh={() => {}} />}
+              {inspectTab === 'academic-goals' && <PlacementPreferencesTab readOnly={true} placement={inspectStudentPlacement} scoreData={inspectStudentScore} onRefresh={() => {}} />}
               {inspectTab === 'documents' && <DocumentsTab rollNumber={inspectStudent.regNo} readOnly={true} isAdminView={true} />}
             </div>
           </div>

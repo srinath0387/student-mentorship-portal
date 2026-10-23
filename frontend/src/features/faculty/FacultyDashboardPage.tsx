@@ -243,6 +243,19 @@ export const FacultyDashboardPage: React.FC = () => {
     enabled: Boolean(inspectMentee) && Boolean(menteeId),
   });
 
+  const { data: inspectPlacement } = useQuery({
+    queryKey: ['inspectPlacement', menteeId],
+    queryFn: () => api.getPlacementProfile(menteeId),
+    enabled: Boolean(inspectMentee) && Boolean(menteeId),
+  });
+
+  const { data: inspectScore } = useQuery({
+    queryKey: ['inspectScore', menteeId],
+    queryFn: () => api.getEmployabilityScore(menteeId),
+    enabled: Boolean(inspectMentee) && Boolean(menteeId),
+    staleTime: 0,
+  });
+
   const filteredMentees = mentees.filter((m) => {
       const q = searchQuery.toLowerCase();
     const matchesSearch = !q || m.name.toLowerCase().includes(q) || m.roll_number.toLowerCase().includes(q);
@@ -1618,7 +1631,7 @@ export const FacultyDashboardPage: React.FC = () => {
               {inspectTab === 'certifications' && <CertificationsTab readOnly={true} certifications={inspectCerts} onRefresh={refetch} />}
               {inspectTab === 'soft-skills' && <SoftSkillsTab readOnly={true} softSkills={inspectSoft} onRefresh={refetch} />}
               {inspectTab === 'achievements' && <AchievementsTab readOnly={true} achievements={inspectAchievements} onRefresh={refetch} />}
-              {inspectTab === 'placement-preferences' && <PlacementPreferencesTab readOnly={true} placement={null} scoreData={null} onRefresh={refetch} />}
+              {inspectTab === 'placement-preferences' && <PlacementPreferencesTab readOnly={true} placement={inspectPlacement} scoreData={inspectScore} onRefresh={refetch} />}
               {inspectTab === 'documents' && <DocumentsTab rollNumber={inspectMentee.roll_number} readOnly={true} isAdminView={false} />}
             </div>
           </div>

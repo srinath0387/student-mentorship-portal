@@ -261,6 +261,13 @@ export const AdminDashboardPage: React.FC = () => {
     enabled: Boolean(inspectId),
   });
 
+  const { data: inspectScore } = useQuery({
+    queryKey: ['adminInspectScore', inspectId],
+    queryFn: () => api.getEmployabilityScore(inspectId),
+    enabled: Boolean(inspectId),
+    staleTime: 0,
+  });
+
   // Top performers data dynamically mapped from real API students (using database stored stats)
   const performersData = [...students]
     .map((s, idx) => {
@@ -1455,7 +1462,7 @@ export const AdminDashboardPage: React.FC = () => {
               {inspectTab === 'certifications' && <CertificationsTab readOnly={true} certifications={inspectCerts} onRefresh={refetch} />}
               {inspectTab === 'soft-skills' && <SoftSkillsTab readOnly={true} softSkills={inspectSoft} onRefresh={refetch} />}
               {inspectTab === 'achievements' && <AchievementsTab readOnly={true} achievements={inspectAchievements} onRefresh={refetch} />}
-              {inspectTab === 'academic-goals' && <PlacementPreferencesTab readOnly={true} placement={null} scoreData={null} onRefresh={refetch} />}
+              {inspectTab === 'academic-goals' && <PlacementPreferencesTab readOnly={true} placement={null} scoreData={inspectScore} onRefresh={refetch} />}
               {inspectTab === 'documents' && <DocumentsTab rollNumber={inspectStudent.roll_number} readOnly={true} isAdminView={true} />}
             </div>
           </div>
