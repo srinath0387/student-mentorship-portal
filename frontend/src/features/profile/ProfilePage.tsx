@@ -275,7 +275,7 @@ export const ProfilePage: React.FC = () => {
           {currentTab === 'permissions' && <StudentPermissionTab rollNumber={activeRollNo} />}
           {currentTab === 'academics' && <AcademicsTab academics={academics} studentYear={student?.year} onRefresh={handleRefreshAll} readOnly={isReadOnly} />}
           {currentTab === 'tech-skills' && <TechSkillsTab skills={techSkills} onRefresh={handleRefreshAll} readOnly={isReadOnly} />}
-          {currentTab === 'certifications' && <CertificationsTab certifications={certifications} onRefresh={handleRefreshAll} readOnly={isReadOnly} />}
+          {currentTab === 'certifications' && <CertificationsTab certifications={certifications} onRefresh={handleRefreshAll} readOnly={isReadOnly} isAdminView={isViewingOther && user?.role === 'admin'} studentRollNo={activeRollNo} />}
           {currentTab === 'soft-skills' && <SoftSkillsTab softSkills={softSkills} onRefresh={handleRefreshAll} readOnly={isReadOnly} />}
           {currentTab === 'achievements' && <AchievementsTab achievements={achievements} onRefresh={handleRefreshAll} readOnly={isReadOnly} />}
           {currentTab === 'placement-preferences' && (
