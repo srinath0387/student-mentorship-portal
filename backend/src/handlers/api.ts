@@ -9021,9 +9021,9 @@ app.get('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coor
     }
 
     const recordsRes = await db.query(
-      `SELECT r.roll_number, r.is_present, s.name as student_name
+      `SELECT UPPER(r.roll_number) as roll_number, r.is_present, s.name as student_name
        FROM attendance_records r
-       LEFT JOIN students s ON s.roll_number = r.roll_number
+       LEFT JOIN students s ON UPPER(s.roll_number) = UPPER(r.roll_number)
        WHERE r.session_id = $1
        ORDER BY r.roll_number`,
       [id]
@@ -9119,7 +9119,7 @@ app.put('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coor
          VALUES ($1, $2, $3)
          ON CONFLICT (session_id, roll_number)
          DO UPDATE SET is_present = EXCLUDED.is_present`,
-        [id, r.roll_number.toUpperCase(), Boolean(r.is_present)]
+        [id, r.roll_number.toUpperCase().trim(), Boolean(r.is_present)]
       );
     }
 

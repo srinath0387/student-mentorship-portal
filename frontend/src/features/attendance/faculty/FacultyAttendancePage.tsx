@@ -212,19 +212,26 @@ export const FacultyAttendancePage: React.FC = () => {
     if(!isLoaded) return;
     if(roster.length===0) return;
     if(isPosted&&sessionDetails?.records?.length>0){
+      // Bug fix: normalise roll numbers to UPPER for case-insensitive map lookup
       const map = new Map<string,boolean>();
-      sessionDetails.records.forEach((r:any)=>map.set(r.roll_number,r.is_present));
-      setRecords(roster.map(s=>({
-        roll_number: s.roll_number,
-        student_name: s.student_name,
-        is_on_od: Boolean((s as any).is_on_od),
-        od_type: (s as any).od_type || '',
-        od_reason: (s as any).od_reason || '',
-        h1: (s as any).is_on_od ? true : (map.get(s.roll_number)??true),
-        h2: (s as any).is_on_od ? true : (map.get(s.roll_number)??true),
-        h3: (s as any).is_on_od ? true : (map.get(s.roll_number)??true)
-      })));
-    } else {
+      sessionDetails.records.forEach((r:any)=>map.set((r.roll_number||'').toUpperCase().trim(), Boolean(r.is_present)));
+      setRecords(roster.map(s=>{
+        const roll = (s.roll_number||'').toUpperCase().trim();
+        // Bug fix: use false as explicit default (not true) when key found; only default true when NOT in map at all
+        const saved = map.has(roll) ? map.get(roll)! : true;
+        return {
+          roll_number: s.roll_number,
+          student_name: s.student_name,
+          is_on_od: Boolean((s as any).is_on_od),
+          od_type: (s as any).od_type || '',
+          od_reason: (s as any).od_reason || '',
+          h1: (s as any).is_on_od ? true : saved,
+          h2: (s as any).is_on_od ? true : saved,
+          h3: (s as any).is_on_od ? true : saved
+        };
+      }));
+    } else if(!isPosted) {
+      // Only reset to all-present when session does NOT exist yet (fresh mark)
       setRecords(roster.map(s=>({
         roll_number: s.roll_number,
         student_name: s.student_name,
@@ -236,6 +243,7 @@ export const FacultyAttendancePage: React.FC = () => {
         h3: true
       })));
     }
+    // Note: if isPosted but sessionDetails not loaded yet, don't reset — wait for it
   },[roster,isPosted,sessionDetails,isLoaded]);
 
   const totalActiveHours = (hour1?1:0) + (hour2?1:0) + (hour3?1:0) || 1;
@@ -261,6 +269,7 @@ export const FacultyAttendancePage: React.FC = () => {
     },
     onSuccess:()=>{
       qc.invalidateQueries({queryKey:['sessions']});
+      qc.invalidateQueries({queryKey:['sessionDetails']});
       qc.invalidateQueries({queryKey:['notPosted']});
       qc.invalidateQueries({queryKey:['dailyPeriodGrid']});
       qc.invalidateQueries({queryKey:['attendanceAllotments']});
