@@ -117,11 +117,11 @@ export interface ScoreBreakdown {
 
   // Quests & Guidance
   feedback: string[];
-  quests: { title: string; rewardXp: number; category: string }[];
+  quests: string[];
 }
 
 export function calculateRPGScore(data: EmployabilityData): ScoreBreakdown {
-  const quests: { title: string; rewardXp: number; category: string }[] = [];
+  const quests: string[] = [];
   const feedback: string[] = [];
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -186,13 +186,13 @@ export function calculateRPGScore(data: EmployabilityData): ScoreBreakdown {
   const codingScore = Math.min(350, Math.round(rawCoding * 10) / 10);
 
   if (mediumCount < 15) {
-    quests.push({ title: 'Solve 10 more Medium problems on LeetCode/GFG', rewardXp: 30, category: 'Coding' });
+    quests.push('Solve 10 more Medium problems on LeetCode/GFG (+30 XP)');
   }
   if (hardCount < 3) {
-    quests.push({ title: 'Solve 3 Hard DSA problems to boost problem mastery', rewardXp: 18, category: 'Coding' });
+    quests.push('Solve 3 Hard DSA problems to boost problem mastery (+18 XP)');
   }
   if (maxStreak < 15) {
-    quests.push({ title: 'Achieve a 15-day continuous coding streak', rewardXp: 20, category: 'Coding' });
+    quests.push('Achieve a 15-day continuous coding streak (+20 XP)');
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -246,10 +246,10 @@ export function calculateRPGScore(data: EmployabilityData): ScoreBreakdown {
   const githubScore = Math.min(200, Math.round(rawGithub * 10) / 10);
 
   if (reposCount < 3) {
-    quests.push({ title: 'Publish 2 full-stack / core engineering projects on GitHub', rewardXp: 30, category: 'GitHub' });
+    quests.push('Publish 2 full-stack / core engineering projects on GitHub (+30 XP)');
   }
   if (!normalizedLang || languagePoints < 90) {
-    quests.push({ title: 'Build a project using Python, C++, Java, or TypeScript', rewardXp: 30, category: 'GitHub' });
+    quests.push('Build a project using Python, C++, Java, or TypeScript (+30 XP)');
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -307,10 +307,10 @@ export function calculateRPGScore(data: EmployabilityData): ScoreBreakdown {
   const academicsScore = Math.min(250, Math.round(rawAcademics * 10) / 10);
 
   if (cgpa < 8.0) {
-    quests.push({ title: 'Aim for ≥ 8.0 GPA in upcoming semester exams', rewardXp: 30, category: 'Academics' });
+    quests.push('Aim for ≥ 8.0 GPA in upcoming semester exams (+30 XP)');
   }
   if (attPct < 85 && attPct > 0) {
-    quests.push({ title: 'Boost attendance above 85% for full discipline points', rewardXp: 10, category: 'Academics' });
+    quests.push('Boost attendance above 85% for full discipline points (+10 XP)');
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -356,10 +356,10 @@ export function calculateRPGScore(data: EmployabilityData): ScoreBreakdown {
   const certsScore = Math.min(200, Math.round(certPointsRaw * 10) / 10);
 
   if (platinumCount === 0) {
-    quests.push({ title: 'Earn a Cloud / Networking certification (AWS, Google, Cisco)', rewardXp: 50, category: 'Certifications' });
+    quests.push('Earn a Cloud / Networking certification (AWS, Google, Cisco) (+50 XP)');
   }
   if (silverCount === 0 && goldCount === 0 && platinumCount === 0) {
-    quests.push({ title: 'Complete an NPTEL or Coursera technical certification', rewardXp: 25, category: 'Certifications' });
+    quests.push('Complete an NPTEL or Coursera technical certification (+25 XP)');
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -450,7 +450,7 @@ export function calculateRPGScore(data: EmployabilityData): ScoreBreakdown {
     },
 
     feedback,
-    quests: quests.slice(0, 3),
+    quests: quests.slice(0, 5),
   };
 }
 
