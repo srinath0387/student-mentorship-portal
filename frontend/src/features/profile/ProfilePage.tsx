@@ -233,11 +233,12 @@ export const ProfilePage: React.FC = () => {
               <div className="shrink-0 flex items-center gap-3 bg-surface-2 border border-borderLine rounded-2xl px-4 py-3 self-end">
                 <div className="text-center">
                   <div className="text-2xl font-extrabold text-brand-primary leading-none">{scoreData.overallScore}</div>
-                  <div className="text-[10px] text-textMuted font-semibold mt-0.5 uppercase tracking-widest">Score</div>
+                  <div className="text-[10px] text-textMuted font-semibold mt-0.5 uppercase tracking-widest">/ 1000 XP</div>
                 </div>
                 <div className="w-px h-8 bg-borderLine" />
                 <div className="text-center">
-                  <div className="text-xs font-bold text-textPrimary leading-snug">Employability<br />Index</div>
+                  {scoreData.badge && <div className="text-lg">{scoreData.badge}</div>}
+                  <div className="text-xs font-bold text-textPrimary leading-snug">{scoreData.levelTitle || 'RPG Score'}</div>
                 </div>
               </div>
             )}

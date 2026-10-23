@@ -7,7 +7,7 @@ import cors from 'cors';
 import serverless from 'serverless-http';
 import routes from '../routes';
 import { db } from '../db';
-import { calculateEmployabilityScore } from '../services/employability';
+import { calculateEmployabilityScore, calculateRPGScore, RPG_LEVELS } from '../services/employability';
 import { runCodingProfileCronSync, fetchLeetCodeStatsDirect, fetchGitHubStatsDirect, fetchEduSkillsStatsDirect, cleanEduSkillsHandle } from '../services/cronSync';
 import { cachedFetch } from '../services/platformCache';
 import { deleteCognitoUsers, deleteAllCognitoUsers, updateCognitoUserPassword, adminCreateCognitoUser, adminSignIn } from '../services/cognitoService';
@@ -176,6 +176,19 @@ app.get('/db-init', async (req: Request, res: Response) => {
         ALTER TABLE coding_profiles ADD COLUMN IF NOT EXISTS medium_count INT DEFAULT 0;
         ALTER TABLE coding_profiles ADD COLUMN IF NOT EXISTS hard_count INT DEFAULT 0;
         ALTER TABLE coding_profiles ADD COLUMN IF NOT EXISTS contest_rating INT DEFAULT 0;
+        CREATE TABLE IF NOT EXISTS student_scores (
+          id SERIAL PRIMARY KEY,
+          student_id TEXT NOT NULL UNIQUE,
+          overall_score INT DEFAULT 0,
+          coding_score INT DEFAULT 0,
+          github_score INT DEFAULT 0,
+          academics_score INT DEFAULT 0,
+          certs_score INT DEFAULT 0,
+          level_number INT DEFAULT 1,
+          level_title TEXT,
+          badge TEXT,
+          computed_at TIMESTAMPTZ DEFAULT NOW()
+        );
       `).catch(() => {/* ignore */});
 
       // Ensure every real student has a coding profile record (default 0 solved unless set)
@@ -4109,7 +4122,7 @@ app.put('/students/:id/placement-profile', requireOwnerOrRole('id', 'faculty', '
 });
 
 // ============================================================================
-// Employability Score
+// Employability Score (1000-XP RPG System)
 // ============================================================================
 app.get('/students/:id/employability-score', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -4118,31 +4131,138 @@ app.get('/students/:id/employability-score', requireAuth, async (req: Request, r
     if (db.isMock) {
       const academics = db.mockStore.academics.get(studentId) || [];
       const codingProfiles = db.mockStore.codingProfiles.get(studentId) || [];
-      const techSkills = db.mockStore.techSkills.get(studentId) || [];
       const certifications = db.mockStore.certifications.get(studentId) || [];
-      const softSkills = db.mockStore.softSkills.get(studentId) || [];
-      const achievements = db.mockStore.achievements.get(studentId) || [];
-      return res.json(calculateEmployabilityScore({ academics, codingProfiles, techSkills, certifications, softSkills, achievements }));
+      return res.json(calculateRPGScore({ academics, codingProfiles, certifications }));
     }
 
-    const [academicsRes, codingRes, skillsRes, certsRes, softRes, achieveRes] = await Promise.all([
+    const [academicsRes, codingRes, certsRes, studentCertsRes] = await Promise.all([
       db.query('SELECT * FROM academics WHERE student_id = $1', [studentId]),
       db.query('SELECT * FROM coding_profiles WHERE student_id = $1', [studentId]),
-      db.query('SELECT * FROM tech_skills WHERE student_id = $1', [studentId]),
       db.query('SELECT * FROM certifications WHERE student_id = $1', [studentId]),
-      db.query('SELECT * FROM soft_skills WHERE student_id = $1', [studentId]),
-      db.query('SELECT * FROM achievements WHERE student_id = $1', [studentId]),
+      db.query("SELECT * FROM student_certifications WHERE student_id = $1 AND status = 'verified'", [studentId]).catch(() => ({ rows: [] })),
     ]);
 
-    const scoreData = calculateEmployabilityScore({
+    const combinedCerts = [
+      ...certsRes.rows,
+      ...studentCertsRes.rows.map((c: any) => ({ ...c, provider: c.issuer, verified: true })),
+    ];
+
+    const scoreData = calculateRPGScore({
       academics: academicsRes.rows,
       codingProfiles: codingRes.rows,
-      techSkills: skillsRes.rows,
-      certifications: certsRes.rows,
-      softSkills: softRes.rows,
-      achievements: achieveRes.rows,
+      certifications: combinedCerts,
     });
+
+    // Upsert into student_scores cache
+    db.query(
+      `INSERT INTO student_scores (student_id, overall_score, coding_score, github_score, academics_score, certs_score, level_number, level_title, badge, computed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
+       ON CONFLICT (student_id) DO UPDATE SET
+         overall_score=EXCLUDED.overall_score, coding_score=EXCLUDED.coding_score, github_score=EXCLUDED.github_score,
+         academics_score=EXCLUDED.academics_score, certs_score=EXCLUDED.certs_score,
+         level_number=EXCLUDED.level_number, level_title=EXCLUDED.level_title, badge=EXCLUDED.badge, computed_at=NOW()`,
+      [studentId, scoreData.overallScore, scoreData.codingScore, scoreData.githubScore,
+       scoreData.academicsScore, scoreData.certsScore, scoreData.levelNumber, scoreData.levelTitle, scoreData.badge]
+    ).catch(() => {}); // Non-blocking cache write
+
     res.json(scoreData);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// Leaderboards (RPG Scoreboard)
+// ============================================================================
+
+// GET /leaderboard/faculty — mentee scoreboard for a faculty
+app.get('/leaderboard/faculty', requireAuth, requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const facultyEmail = req.auth?.email;
+    if (!facultyEmail) return res.status(401).json({ error: 'Not authenticated' });
+
+    // Get mentees of this faculty
+    const menteesRes = await db.query(
+      `SELECT s.roll_number, s.name, s.section, s.year, s.department,
+              ss.overall_score, ss.coding_score, ss.github_score, ss.academics_score, ss.certs_score,
+              ss.level_number, ss.level_title, ss.badge, ss.computed_at
+       FROM students s
+       LEFT JOIN student_scores ss ON ss.student_id = s.roll_number
+       WHERE s.mentor_email = $1
+       ORDER BY COALESCE(ss.overall_score, 0) DESC`,
+      [facultyEmail]
+    );
+
+    const rows = menteesRes.rows.map((r: any, idx: number) => ({
+      rank: idx + 1,
+      studentId: r.roll_number,
+      name: r.name,
+      section: r.section,
+      year: r.year,
+      department: r.department,
+      overallScore: r.overall_score || 0,
+      codingScore: r.coding_score || 0,
+      githubScore: r.github_score || 0,
+      academicsScore: r.academics_score || 0,
+      certsScore: r.certs_score || 0,
+      levelNumber: r.level_number || 1,
+      levelTitle: r.level_title || 'Apprentice Novice',
+      badge: r.badge || '🐣',
+      computedAt: r.computed_at,
+    }));
+
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /leaderboard/hod — department scoreboard for HOD
+app.get('/leaderboard/hod', requireAuth, requireRole('hod', 'admin', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
+  try {
+    const { department, year, section, limit = '50' } = req.query as any;
+    const filters: string[] = [];
+    const params: any[] = [];
+
+    if (department) { filters.push(`s.department = $${params.length + 1}`); params.push(department); }
+    if (year) { filters.push(`s.year = $${params.length + 1}`); params.push(year); }
+    if (section) { filters.push(`s.section = $${params.length + 1}`); params.push(section); }
+
+    const whereClause = filters.length > 0 ? 'WHERE ' + filters.join(' AND ') : '';
+    const limitNum = Math.min(parseInt(limit) || 50, 200);
+
+    const result = await db.query(
+      `SELECT s.roll_number, s.name, s.section, s.year, s.department, s.mentor_email,
+              ss.overall_score, ss.coding_score, ss.github_score, ss.academics_score, ss.certs_score,
+              ss.level_number, ss.level_title, ss.badge, ss.computed_at
+       FROM students s
+       LEFT JOIN student_scores ss ON ss.student_id = s.roll_number
+       ${whereClause}
+       ORDER BY COALESCE(ss.overall_score, 0) DESC
+       LIMIT $${params.length + 1}`,
+      [...params, limitNum]
+    );
+
+    const rows = result.rows.map((r: any, idx: number) => ({
+      rank: idx + 1,
+      studentId: r.roll_number,
+      name: r.name,
+      section: r.section,
+      year: r.year,
+      department: r.department,
+      mentorEmail: r.mentor_email,
+      overallScore: r.overall_score || 0,
+      codingScore: r.coding_score || 0,
+      githubScore: r.github_score || 0,
+      academicsScore: r.academics_score || 0,
+      certsScore: r.certs_score || 0,
+      levelNumber: r.level_number || 1,
+      levelTitle: r.level_title || 'Apprentice Novice',
+      badge: r.badge || '🐣',
+      computedAt: r.computed_at,
+    }));
+
+    res.json(rows);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

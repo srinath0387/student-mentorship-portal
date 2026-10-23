@@ -8,6 +8,7 @@ import {
   Achievement,
   PlacementProfile,
   ScoreBreakdown,
+  LeaderboardEntry,
   BroadcastNotification,
   CreateBroadcastPayload,
   UnregisteredStudent,
@@ -320,9 +321,23 @@ export const api = {
     });
   },
 
-  // Employability Score
+  // Employability Score (1000-XP RPG)
   getEmployabilityScore: async (id: string): Promise<ScoreBreakdown> => {
     return fetchWithAuth(`/students/${id}/employability-score`);
+  },
+
+  // Leaderboards
+  getFacultyLeaderboard: async (): Promise<LeaderboardEntry[]> => {
+    return fetchWithAuth(`/leaderboard/faculty`);
+  },
+  getHodLeaderboard: async (filters?: { department?: string; year?: string; section?: string; limit?: number }): Promise<LeaderboardEntry[]> => {
+    const params = new URLSearchParams();
+    if (filters?.department) params.set('department', filters.department);
+    if (filters?.year) params.set('year', filters.year);
+    if (filters?.section) params.set('section', filters.section);
+    if (filters?.limit) params.set('limit', String(filters.limit));
+    const qs = params.toString();
+    return fetchWithAuth(`/leaderboard/hod${qs ? '?' + qs : ''}`);
   },
 
   // Upload Presigned URL

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { PlacementEligibilitySection } from './components/PlacementEligibilitySection';
 import { BulkImportModal } from '../admin/components/BulkImportModal';
+import DeptScoreboard from './tabs/DeptScoreboard';
 import {
   ResponsiveContainer,
   LineChart,
@@ -1303,84 +1304,9 @@ export const HodDashboardPage: React.FC = () => {
       </div>
       )}
 
-      {/* ── TAB 4: Department Leaderboard ── */}
+      {/* ── TAB 4: Department Scoreboard (RPG) ── */}
       {activeTab === 'rankings' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* CGPA Leaderboard */}
-          <div className="bg-surface border border-borderLine rounded-2xl p-6 shadow-sm space-y-4">
-            <div className="flex items-center gap-2">
-              <Trophy className="w-5 h-5 text-amber-500" />
-              <h3 className="text-base font-bold text-textPrimary">Top Academic Performers (CGPA)</h3>
-            </div>
-            <div className="space-y-3">
-              {filteredDataset.filter((s) => s.cgpa > 0).length === 0 ? (
-                <div className="p-4 text-center text-xs text-textSecondary bg-background rounded-xl border border-borderLine">
-                  No academic CGPA records published yet.
-                </div>
-              ) : (
-                [...filteredDataset]
-                  .filter((s) => s.cgpa > 0)
-                  .sort((a, b) => b.cgpa - a.cgpa)
-                  .slice(0, 5)
-                  .map((s, idx) => (
-                    <div key={s.regNo} className="p-3.5 rounded-xl bg-background border border-borderLine flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded-full font-black text-xs flex items-center justify-center ${
-                          idx === 0 ? 'bg-amber-100 text-amber-700' : idx === 1 ? 'bg-borderLine text-textSecondary' : 'bg-orange-100 text-orange-700'
-                        }`}>
-                          #{idx + 1}
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold text-textPrimary">{s.name}</p>
-                          <p className="text-[11px] text-textSecondary">{s.regNo} • {s.year}</p>
-                        </div>
-                      </div>
-                      <span className="text-sm font-black text-brand-primary">{s.cgpa} CGPA</span>
-                    </div>
-                  ))
-              )}
-            </div>
-          </div>
-
-          {/* Coding Leaderboard */}
-          <div className="bg-surface border border-borderLine rounded-2xl p-6 shadow-sm space-y-4">
-            <div className="flex items-center gap-2">
-              <Code2 className="w-5 h-5 text-[#FFA116]" />
-              <h3 className="text-base font-bold text-textPrimary">Top Coding Rankers (LeetCode)</h3>
-            </div>
-            <div className="space-y-3">
-              {[...filteredDataset]
-                .sort((a, b) => {
-                  if (a.isLcLinked && !b.isLcLinked) return -1;
-                  if (!a.isLcLinked && b.isLcLinked) return 1;
-                  return b.leetcode - a.leetcode;
-                })
-                .slice(0, 5)
-                .map((s, idx) => (
-                  <div key={s.regNo} className="p-3.5 rounded-xl bg-background border border-borderLine flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-full font-black text-xs flex items-center justify-center ${
-                        idx === 0 && s.isLcLinked ? 'bg-amber-100 text-amber-700' : 'bg-brand-soft text-brand-primary'
-                      }`}>
-                        #{idx + 1}
-                      </div>
-                      <div>
-                        <p className="text-xs font-bold text-textPrimary">{s.name}</p>
-                        <p className="text-[11px] text-textSecondary">{s.regNo} • {s.section}</p>
-                      </div>
-                    </div>
-                    {s.isLcLinked ? (
-                      <span className="text-sm font-black text-[#FFA116]">{s.leetcode} Solved</span>
-                    ) : (
-                      <span className="text-xs font-semibold text-textSecondary bg-surface border border-borderLine px-2.5 py-1 rounded-lg">
-                        Not Linked
-                      </span>
-                    )}
-                  </div>
-                ))}
-            </div>
-          </div>
-        </div>
+        <DeptScoreboard />
       )}
 
       {/* ── TAB: Placement Eligibility Engine (T&P Drive) ── */}

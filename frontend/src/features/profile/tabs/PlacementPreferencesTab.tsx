@@ -183,42 +183,64 @@ export const PlacementPreferencesTab: React.FC<PlacementPreferencesTabProps> = (
 
       {/* Auto-Calculated Intelligence Card */}
       <div className="bg-surface border border-brand-primary/30 rounded-xl p-6 shadow-sm relative overflow-hidden">
+        {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-brand-primary" />
-            <h3 className="text-base font-bold text-textPrimary">Automated Academic Performance Metrics</h3>
+            <h3 className="text-base font-bold text-textPrimary">🎮 RPG Employability Score</h3>
           </div>
-          <span className="text-[10px] font-bold uppercase tracking-wider bg-brand-soft text-brand-primary px-2.5 py-1 rounded-full border border-brand-primary/20">
-            Auto-calculated Engine
-          </span>
+          {scoreData?.badge && (
+            <span className="text-[10px] font-bold uppercase tracking-wider bg-brand-soft text-brand-primary px-2.5 py-1 rounded-full border border-brand-primary/20">
+              {scoreData.badge} {scoreData.levelTitle}
+            </span>
+          )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div className="p-4 rounded-xl bg-background border border-borderLine">
-            <p className="text-xs font-semibold text-textSecondary uppercase">Overall Academic Score</p>
-            <p className="text-2xl font-black text-brand-primary mt-1">{scoreData?.overallScore !== undefined ? `${scoreData.overallScore} / 100` : '0.0 / 100'}</p>
+        {/* XP Bar */}
+        {scoreData && (
+          <div className="mb-5">
+            <div className="flex items-end justify-between mb-1">
+              <span className="text-3xl font-black text-brand-primary">{scoreData.overallScore}<span className="text-base font-semibold text-textSecondary"> / 1000 XP</span></span>
+              <span className="text-xs text-textSecondary">{scoreData.nextLevelXp ? `${scoreData.nextLevelXp} XP to next level` : '🏆 Max Level!'}</span>
+            </div>
+            <div className="w-full h-3 bg-borderLine rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${scoreData.overallScore >= 800 ? 'bg-yellow-400' : scoreData.overallScore >= 600 ? 'bg-orange-400' : scoreData.overallScore >= 400 ? 'bg-indigo-400' : scoreData.overallScore >= 200 ? 'bg-teal-400' : 'bg-gray-400'}`}
+                style={{ width: `${scoreData.progressPercentage || Math.min(100, (scoreData.overallScore / 1000) * 100)}%` }}
+              />
+            </div>
           </div>
-          <div className="p-4 rounded-xl bg-background border border-borderLine">
-            <p className="text-xs font-semibold text-textSecondary uppercase">Academic Potential</p>
-            <p className="text-2xl font-black text-success mt-1">
-              {scoreData?.academicsScore !== undefined ? `${(scoreData.academicsScore / 10).toFixed(1)} / 5.0 ⭐` : '0.0 / 5.0 ⭐'}
-            </p>
+        )}
+
+        {/* 4 Pillars */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+          <div className="p-3 rounded-xl bg-background border border-borderLine text-center">
+            <p className="text-[11px] font-semibold text-textSecondary uppercase mb-1">⚔️ Coding</p>
+            <p className="text-xl font-black text-orange-500">{scoreData?.codingScore ?? 0}</p>
+            <p className="text-[10px] text-textMuted">/ 350</p>
           </div>
-          <div className="p-4 rounded-xl bg-background border border-borderLine">
-            <p className="text-xs font-semibold text-textSecondary uppercase">Research & Innovation</p>
-            <p className="text-2xl font-black text-indigo-600 mt-1">
-              {scoreData?.certsScore !== undefined ? `${(scoreData.certsScore / 10).toFixed(1)} / 5.0` : '0.0 / 5.0'}
-            </p>
+          <div className="p-3 rounded-xl bg-background border border-borderLine text-center">
+            <p className="text-[11px] font-semibold text-textSecondary uppercase mb-1">🐙 GitHub</p>
+            <p className="text-xl font-black text-gray-600">{scoreData?.githubScore ?? 0}</p>
+            <p className="text-[10px] text-textMuted">/ 200</p>
+          </div>
+          <div className="p-3 rounded-xl bg-background border border-borderLine text-center">
+            <p className="text-[11px] font-semibold text-textSecondary uppercase mb-1">📚 Academics</p>
+            <p className="text-xl font-black text-blue-500">{scoreData?.academicsScore ?? 0}</p>
+            <p className="text-[10px] text-textMuted">/ 250</p>
+          </div>
+          <div className="p-3 rounded-xl bg-background border border-borderLine text-center">
+            <p className="text-[11px] font-semibold text-textSecondary uppercase mb-1">🏅 Certs</p>
+            <p className="text-xl font-black text-emerald-500">{scoreData?.certsScore ?? 0}</p>
+            <p className="text-[10px] text-textMuted">/ 200</p>
           </div>
         </div>
 
+        {/* Quest Tips */}
         <div>
-          <h4 className="text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">Identified Academic Focus Items</h4>
+          <h4 className="text-xs font-bold text-textSecondary uppercase tracking-wider mb-2">⚡ Quest Tips to Level Up</h4>
           <ul className="space-y-1.5 text-xs text-textPrimary">
-            {(scoreData?.feedback && scoreData.feedback.length > 0
-              ? scoreData.feedback
-              : ['Complete your profile details to generate academic focus insights']
-            ).map((item, idx) => (
+            {((scoreData?.quests && scoreData.quests.length > 0 ? scoreData.quests : scoreData?.feedback && scoreData.feedback.length > 0 ? scoreData.feedback : ['Complete your profile to generate quest tips'])).map((item, idx) => (
               <li key={idx} className="flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-brand-primary shrink-0" />
                 <span>{item}</span>

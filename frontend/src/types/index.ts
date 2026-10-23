@@ -210,14 +210,46 @@ export interface PlacementProfile {
 }
 
 export interface ScoreBreakdown {
-  overallScore: number;
-  academicsScore: number;
-  codingScore: number;
-  techSkillsScore: number;
-  certsScore: number;
-  softSkillsScore: number;
-  achievementsScore: number;
+  // 1000-XP RPG System
+  overallScore: number;          // max 1000
+  codingScore: number;           // max 350
+  githubScore: number;           // max 200
+  academicsScore: number;        // max 250
+  certsScore: number;            // max 200
+  levelNumber: number;           // 1-10
+  levelTitle: string;
+  badge: string;
+  nextLevelXp: number;
+  progressPercentage: number;
+  codingBreakdown?: { easy: number; medium: number; hard: number; contestRating: number; streak: number };
+  githubBreakdown?: { langScore: number; repoScore: number; socialScore: number; topLanguage?: string };
+  academicsBreakdown?: { cgpaScore: number; attendanceScore: number };
+  certsBreakdown?: { totalCerts: number; verifiedBonus: number };
+  quests?: string[];
   feedback: string[];
+  // Legacy compat fields
+  techSkillsScore?: number;
+  softSkillsScore?: number;
+  achievementsScore?: number;
+}
+
+export interface LeaderboardEntry {
+  rank: number;
+  studentId: string;
+  name: string;
+  section: string;
+  year: string;
+  department: string;
+  mentorEmail?: string;
+  overallScore: number;
+  codingScore: number;
+  githubScore: number;
+  academicsScore: number;
+  certsScore: number;
+  levelNumber: number;
+  levelTitle: string;
+  badge: string;
+  computedAt?: string;
 }
 
 // ── Faculty Profile Types ──────────────────────────────────────────────────

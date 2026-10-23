@@ -53,6 +53,7 @@ import { PlacementPreferencesTab } from '../profile/tabs/PlacementPreferencesTab
 import { BulkImportModal } from '../admin/components/BulkImportModal';
 import { PlacementEligibilitySection } from '../hod/components/PlacementEligibilitySection';
 import { FacultyProfileTab } from './tabs/FacultyProfileTab';
+import MenteeScoreboard from './tabs/MenteeScoreboard';
 import { calculateFacultyProfileCompletion } from '../../lib/facultyUtils';
 import { FacultyAttendancePage } from '../attendance/faculty/FacultyAttendancePage';
 import { FacultyLeaveTab } from '../leave/FacultyLeaveTab';
@@ -984,6 +985,16 @@ export const FacultyDashboardPage: React.FC = () => {
             >
               <span>🎯 Placement Eligibility (T&P Drive)</span>
             </button>
+            <button
+              onClick={() => setSearchParams({ tab: 'scoreboard' })}
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold border-b-2 whitespace-nowrap transition-all rounded-t-lg ${
+                activeTab === 'scoreboard'
+                  ? 'border-amber-500 text-amber-600 bg-amber-500/10'
+                  : 'border-transparent text-textSecondary hover:text-textPrimary hover:bg-surface-2'
+              }`}
+            >
+              <span>🏆 Mentee Scoreboard</span>
+            </button>
             {inchargeSections.length > 0 && (
               <button
                 onClick={() => setSearchParams({ tab: 'incharge' })}
@@ -1616,6 +1627,10 @@ export const FacultyDashboardPage: React.FC = () => {
       {/* Tab 3: Placement Eligibility Engine */}
       {activeTab === 'placement' && (
         <PlacementEligibilitySection students={mentees} />
+      )}
+
+      {activeTab === 'scoreboard' && (
+        <MenteeScoreboard />
       )}
 
       {/* Bulk Import Modal */}
