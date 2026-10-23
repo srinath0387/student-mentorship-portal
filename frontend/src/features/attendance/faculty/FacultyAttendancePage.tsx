@@ -442,18 +442,21 @@ export const FacultyAttendancePage: React.FC = () => {
                       <button onClick={()=>{
                         if (slot.semester_label) setSem(slot.semester_label as any);
                         if (slot.section) setSection(slot.section);
-                        let m = mySubjects.find(s => 
-                          s.subject_name?.toLowerCase().trim() === slot.subject_name?.toLowerCase().trim() && 
+                        let m = mySubjects.find(s =>
+                          s.subject_name?.toLowerCase().trim() === slot.subject_name?.toLowerCase().trim() &&
                           (!slot.section || s.section === slot.section)
                         );
                         if (!m) {
-                          m = mySubjects.find(s => 
-                            s.subject_name?.toLowerCase().includes(slot.subject_name?.toLowerCase()) || 
+                          m = mySubjects.find(s =>
+                            s.subject_name?.toLowerCase().includes(slot.subject_name?.toLowerCase()) ||
                             slot.subject_name?.toLowerCase().includes(s.subject_name?.toLowerCase())
                           );
                         }
-                        if (!m && mySubjects.length > 0) {
-                          m = mySubjects.find(s => s.section === slot.section) || mySubjects[0];
+                        // BUG-12 fix: do NOT silently fall back to wrong subject — warn instead
+                        if (!m) {
+                          alert(`No matching subject found for "${slot.subject_name}". Please select your subject manually in the Mark Attendance tab.`);
+                          setNav('mark');
+                          return;
                         }
                         if (m) setSubjectId(m.id);
                         setIsLoaded(true);

@@ -128,19 +128,29 @@ export const AttendanceSetupPage: React.FC = () => {
 
   const handleDeleteAllotment = async (id:string) => {
     if(!window.confirm('Remove this allotment?')) return;
-    await api.deleteAllotment(id);
-    qc.invalidateQueries({queryKey:['attendanceAllotments']});
+    try {
+      await api.deleteAllotment(id);
+      qc.invalidateQueries({queryKey:['attendanceAllotments']});
+      setAllotStatus({type:'success',message:'Allotment removed.'});
+    } catch(err:any) { setAllotStatus({type:'error',message:err.message||'Failed to delete allotment.'}); }
   };
 
   const handleBulkAllotUpload = (e:React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if(!file) return;
     const reader = new FileReader();
     reader.onload = async (evt) => {
-      const wb = XLSX.read(evt.target?.result,{type:'binary'});
-      const rows:any[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-      await api.uploadAllotments(allotSem, rows.map(r=>({ subject_name:r['Subject Name']||r['subject_name']||'', subject_type:(r['Subject Type']||'Theory').toLowerCase().includes('lab')?'Lab':'Theory', faculty_email:r['Faculty Email']||r['faculty_email']||'', faculty_name:r['Faculty Name']||r['faculty_name']||'', section:r['Section']||allotSection, department:allotDept })));
-      qc.invalidateQueries({queryKey:['attendanceAllotments']});
-      setAllotStatus({type:'success',message:`${rows.length} allotments imported.`});
+      try {
+        const wb = XLSX.read(evt.target?.result,{type:'binary'});
+        const rows:any[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+        if(rows.length===0){setAllotStatus({type:'error',message:'No rows found in the uploaded file.'});return;}
+        const result = await api.uploadAllotments(allotSem, rows.map(r=>({ subject_name:r['Subject Name']||r['subject_name']||'', subject_type:(r['Subject Type']||'Theory').toLowerCase().includes('lab')?'Lab':'Theory', faculty_email:r['Faculty Email']||r['faculty_email']||'', faculty_name:r['Faculty Name']||r['faculty_name']||'', section:r['Section']||allotSection, department:allotDept })));
+        qc.invalidateQueries({queryKey:['attendanceAllotments']});
+        // BUG-14 fix: show real imported/error counts from backend response
+        const imported = result?.importedCount ?? result?.addedCount ?? rows.length;
+        const errCount = result?.errorsCount ?? 0;
+        setAllotStatus({type:errCount>0?'error':'success',message:`${imported} allotments imported${errCount>0?`, ${errCount} failed — check console for details`:'.'}` });
+        if(errCount>0 && result?.errors) console.warn('[Allotment Upload Errors]', result.errors);
+      } catch(err:any){setAllotStatus({type:'error',message:err.message||'Bulk upload failed.'});}
     };
     reader.readAsBinaryString(file);
   };
@@ -170,11 +180,18 @@ export const AttendanceSetupPage: React.FC = () => {
     const file = e.target.files?.[0]; if(!file||!rosterAllotId) return;
     const reader = new FileReader();
     reader.onload = async (evt) => {
-      const wb = XLSX.read(evt.target?.result,{type:'binary'});
-      const rows:any[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-      await api.uploadRoster(rosterAllotId, rows.map(r=>({ roll_number:String(r['Roll Number']||r['roll_number']||r['Roll No']||'').trim().toUpperCase(), student_name:r['Student Name']||r['student_name']||'', joining_date:r['Joining Date']||undefined })));
-      qc.invalidateQueries({queryKey:['attendanceRoster']});
-      setRosterStatus({type:'success',message:`${rows.length} students enrolled.`});
+      try {
+        const wb = XLSX.read(evt.target?.result,{type:'binary'});
+        const rows:any[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+        if(rows.length===0){setRosterStatus({type:'error',message:'No rows found in the uploaded file.'});return;}
+        const result = await api.uploadRoster(rosterAllotId, rows.map(r=>({ roll_number:String(r['Roll Number']||r['roll_number']||r['Roll No']||'').trim().toUpperCase(), student_name:r['Student Name']||r['student_name']||'', joining_date:r['Joining Date']||undefined })));
+        qc.invalidateQueries({queryKey:['attendanceRoster']});
+        // BUG-14 fix: show real added/error counts from backend response
+        const added = result?.addedCount ?? rows.length;
+        const errCount = result?.errorsCount ?? 0;
+        setRosterStatus({type:errCount>0?'error':'success',message:`${added} students enrolled${errCount>0?`, ${errCount} failed — check console for details`:'.'}` });
+        if(errCount>0 && result?.errors) console.warn('[Roster Upload Errors]', result.errors);
+      } catch(err:any){setRosterStatus({type:'error',message:err.message||'Bulk roster upload failed.'});}
     };
     reader.readAsBinaryString(file);
   };
@@ -190,6 +207,10 @@ export const AttendanceSetupPage: React.FC = () => {
   const [ttNumPeriods, setTtNumPeriods] = useState(1);
   const [ttRoom, setTtRoom] = useState('');
   const [ttStatus, setTtStatus] = useState<{type:string;message:string}|null>(null);
+
+  // BUG-11 fix: use a separate allotments query keyed on ttSem/ttDept (independent of Tab 2 state)
+  const {data:rawTtAllotments=[]} = useQuery({ queryKey:['ttAllotments',ttSem,ttDept], queryFn:()=>api.getAllotments(ttSem||undefined,ttDept||undefined).catch(()=>[]) });
+  const ttAllotments = Array.isArray(rawTtAllotments)?rawTtAllotments:[];
 
   const {data:rawTT=[]} = useQuery({ queryKey:['attendanceTimetable',ttSem,ttDept,ttSection], queryFn:()=>api.getTimetable({semester:ttSem||undefined,department:ttDept||undefined,section:ttSection||undefined}).catch(()=>[]) });
   const timetable = Array.isArray(rawTT)?rawTT:[];
@@ -473,7 +494,7 @@ export const AttendanceSetupPage: React.FC = () => {
                   {ttSubject ? 'Select Faculty *' : '— Pick subject first —'}
                 </option>
                 {ttSubject
-                  ? allotments
+                  ? ttAllotments
                       .filter((a: any) =>
                         a.subject_name?.toLowerCase().trim() === ttSubject.toLowerCase().trim() &&
                         a.faculty_email

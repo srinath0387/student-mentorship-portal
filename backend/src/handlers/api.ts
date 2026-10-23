@@ -8401,6 +8401,14 @@ app.post('/attendance/rosters/upload', requireRole('admin', 'hod', 'coordinator'
     if (allotCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Subject allotment not found for this roster' });
     }
+    // BUG-09 fix: HOD can only upload rosters for their own department's allotments
+    if (req.auth?.role === 'hod') {
+      const hodDept = (req.auth?.department || '').toLowerCase().replace(/\s+/g, '');
+      const aDept = (allotCheck.rows[0].department || '').toLowerCase().replace(/\s+/g, '');
+      if (hodDept && aDept && hodDept !== aDept && !aDept.includes(hodDept) && !hodDept.includes(aDept)) {
+        return res.status(403).json({ error: 'You can only manage rosters for your own department.' });
+      }
+    }
 
     let addedCount = 0;
     const errors: { row: number; reason: string; item: any }[] = [];
@@ -8416,7 +8424,15 @@ app.post('/attendance/rosters/upload', requireRole('admin', 'hod', 'coordinator'
       const rawDate = row.joining_date || row.joiningDate || row['Joining Date'] || row['Date of Joining'] || row['Date of Joining This Subject'];
       if (rawDate) {
         try {
-          const parsed = new Date(rawDate);
+          const rawStr = String(rawDate).trim();
+          let parsed: Date;
+          // BUG-10 fix: handle DD/MM/YYYY (common Indian format) which new Date() cannot parse
+          const ddmmyyyy = rawStr.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+          if (ddmmyyyy) {
+            parsed = new Date(`${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2,'0')}-${ddmmyyyy[1].padStart(2,'0')}`);
+          } else {
+            parsed = new Date(rawStr);
+          }
           if (!isNaN(parsed.getTime())) {
             joiningDate = parsed.toISOString().split('T')[0];
           }
@@ -8804,6 +8820,14 @@ app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordin
     if (req.auth?.role === 'faculty' && allotment.faculty_email.toLowerCase() !== req.auth.email.toLowerCase()) {
       return res.status(403).json({ error: 'You can only post attendance for subjects you are assigned to handle.' });
     }
+    // BUG-09 fix: HOD can only post attendance for their own department's subjects
+    if (req.auth?.role === 'hod') {
+      const hodDept = (req.auth?.department || '').toLowerCase().replace(/\s+/g, '');
+      const allotDept = (allotment.department || '').toLowerCase().replace(/\s+/g, '');
+      if (hodDept && allotDept && hodDept !== allotDept && !allotDept.includes(hodDept) && !hodDept.includes(allotDept)) {
+        return res.status(403).json({ error: 'You can only post attendance for your own department.' });
+      }
+    }
 
     // 1. Holiday Check — Attendance cannot be marked on declared public/institutional holidays
     const holRes = await db.query('SELECT title, type FROM holiday_calendar WHERE date = $1', [session_date]);
@@ -9033,6 +9057,14 @@ app.delete('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'c
     // Faculty can only delete their own sessions
     if (req.auth?.role === 'faculty' && sess.faculty_email.toLowerCase() !== req.auth.email.toLowerCase()) {
       return res.status(403).json({ error: 'You can only delete attendance sessions you conducted.' });
+    }
+    // BUG-09 fix: HOD can only delete sessions belonging to their own department
+    if (req.auth?.role === 'hod') {
+      const hodDept = (req.auth?.department || '').toLowerCase().replace(/\s+/g, '');
+      const sessDept = (sess.department || '').toLowerCase().replace(/\s+/g, '');
+      if (hodDept && sessDept && hodDept !== sessDept && !sessDept.includes(hodDept) && !hodDept.includes(sessDept)) {
+        return res.status(403).json({ error: 'You can only manage attendance sessions for your own department.' });
+      }
     }
 
     await db.query('DELETE FROM attendance_sessions WHERE id = $1', [id]);
