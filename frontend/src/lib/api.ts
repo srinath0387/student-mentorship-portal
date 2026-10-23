@@ -509,7 +509,9 @@ export const api = {
 
   // Get all faculty with mentee counts (admin/HOD)
   getAllFaculty: async (department?: string): Promise<any[]> => {
-    return fetchWithAuth(`/faculty${department && department !== 'All' ? `?department=${encodeURIComponent(department)}` : ''}`);
+    // BUG-01 fix: pass department=All explicitly to bypass per-dept scoping on backend
+    const param = department ? `?department=${encodeURIComponent(department)}` : '?department=All';
+    return fetchWithAuth(`/faculty${param}`);
   },
 
   // Verify student password set by admin if Cognito rejects credentials

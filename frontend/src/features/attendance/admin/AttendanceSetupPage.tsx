@@ -329,7 +329,8 @@ export const AttendanceSetupPage: React.FC = () => {
               </select>
               <select value={allotFaculty} onChange={e=>setAllotFaculty(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none" required>
                 <option value="">Select Faculty *</option>
-                {facultyList.map((f:any)=><option key={f.email} value={f.email}>{f.name||f.email}</option>)}
+                {/* BUG-01 fix: show all departments' faculty with dept label */}
+                {facultyList.map((f:any)=><option key={f.email} value={f.email}>{f.name||f.email} {f.department ? `(${f.department})` : ''}</option>)}
               </select>
               <button type="submit" className="px-4 py-2 bg-brand-primary text-white font-bold text-xs rounded-xl hover:opacity-90">Allot</button>
             </div>

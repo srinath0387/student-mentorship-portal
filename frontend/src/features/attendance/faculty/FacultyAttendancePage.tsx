@@ -204,8 +204,9 @@ export const FacultyAttendancePage: React.FC = () => {
   }, [matchedSlot]);
 
   // Not posted
-  const {data:rawNotPosted=[]} = useQuery({ queryKey:['notPosted',user?.email], queryFn:()=>api.getNotPostedAttendance({faculty_email:user?.email}).catch(()=>[]) });
-  const notPosted = Array.isArray(rawNotPosted)?rawNotPosted:[];
+  const {data:rawNotPosted={}} = useQuery({ queryKey:['notPosted',user?.email], queryFn:()=>api.getNotPostedAttendance({faculty_email:user?.email}).catch(()=>({})) });
+  // BUG-03 fix: backend returns { pendingSlots: [...] }, not a plain array
+  const notPosted: any[] = Array.isArray((rawNotPosted as any)?.pendingSlots) ? (rawNotPosted as any).pendingSlots : [];
 
   useEffect(()=>{
     if(!isLoaded) return;
@@ -252,7 +253,8 @@ export const FacultyAttendancePage: React.FC = () => {
         period_start: matchedSlot?.period_start || 1,
         records: records.map(r => ({
           roll_number: r.roll_number,
-          is_present: r.is_on_od ? true : (hour1 ? (hour2 ? (hour3 ? (r.h1 && r.h2 && r.h3) : (r.h1 && r.h2)) : r.h1) : r.h1)
+          // BUG-08 fix: use OR logic — attending any period counts as present (not AND which penalises partial attendance)
+          is_present: r.is_on_od ? true : (hour1 ? (hour2 ? (hour3 ? (r.h1 || r.h2 || r.h3) : (r.h1 || r.h2)) : r.h1) : r.h1)
         }))
       };
       return isPosted&&existingSession?.id ? api.updateAttendanceSession(existingSession.id,payload.records) : api.saveAttendanceSession(payload);

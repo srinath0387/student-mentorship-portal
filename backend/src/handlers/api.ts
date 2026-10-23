@@ -5506,7 +5506,7 @@ app.get('/faculty', requireRole('admin', 'hod', 'coordinator', 'faculty', 'direc
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
     const isOversight = ['director', 'principal', 'management', 'program_chair'].includes(callerRole || '');
-    const isSuper = req.auth?.isSuperAdmin === true || callerDept === '*' || callerDept === 'All' || callerRole === 'coordinator' || isOversight;
+    const isSuper = req.auth?.isSuperAdmin === true || callerDept === '*' || callerDept === 'All' || callerRole === 'admin' || callerRole === 'coordinator' || isOversight;
     const reqDept = req.query.department ? String(req.query.department) : undefined;
 
     let targetDept: string | undefined;
@@ -5517,6 +5517,8 @@ app.get('/faculty', requireRole('admin', 'hod', 'coordinator', 'faculty', 'direc
     } else if (reqDept && reqDept !== 'All' && reqDept !== 'undefined' && reqDept !== 'null') {
       targetDept = reqDept;
     }
+    // Explicit 'All' parameter from allotment form bypasses all dept scoping
+    if (req.query.department === 'All') targetDept = undefined;
 
     // Normalize department strings for flexible matching (handles 'CSE (Data Science)', 'CSE(Data Science)', 'Data Science')
     const normalizeDeptKey = (dept: string): string => {
@@ -8749,7 +8751,7 @@ app.get('/attendance/my-subjects', requireRole('faculty', 'hod', 'admin', 'coord
         const target = userDept.toLowerCase().replace(/\s+/g, '');
         return d.includes(target) || target.includes(d);
       });
-      return res.json(hodRows.length > 0 ? hodRows : allRows);
+      return res.json(hodRows); // BUG-05 fixed: never leak allRows to HOD
     }
 
     // For faculty: match strictly by assigned faculty email or faculty name
@@ -9060,7 +9062,10 @@ app.put('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coor
 
     const session = sessRes.rows[0];
     const today = new Date().toISOString().split('T')[0];
-    const sessionDateStr = new Date(session.session_date).toISOString().split('T')[0];
+    // BUG-07 fix: use raw date string to avoid IST→UTC day shift
+    const sessionDateStr = typeof session.session_date === 'string'
+      ? session.session_date.split('T')[0]
+      : new Date(session.session_date).toLocaleDateString('en-CA');
 
     // Same-Day Edit Protection for Faculty
     if (req.auth?.role === 'faculty') {
@@ -9117,7 +9122,7 @@ app.get('/attendance/not-posted', requireRole('faculty', 'hod', 'coordinator', '
 
     // Check holiday or calendar substitution day
     const calCheck = await db.query(
-      `SELECT * FROM holiday_calendar WHERE holiday_date = $1 LIMIT 1`,
+      `SELECT * FROM holiday_calendar WHERE date = $1 LIMIT 1`,
       [dateStr]
     );
     if (calCheck.rows.length > 0) {
@@ -9229,7 +9234,7 @@ app.get('/attendance/daily-period-grid', requireRole('faculty', 'hod', 'coordina
     }
 
     // Check holiday
-    const calCheck = await db.query(`SELECT * FROM holiday_calendar WHERE holiday_date = $1 LIMIT 1`, [dateStr]);
+    const calCheck = await db.query(`SELECT * FROM holiday_calendar WHERE date = $1 LIMIT 1`, [dateStr]);
     if (calCheck.rows.length > 0) {
       return res.json({
         date: dateStr,
