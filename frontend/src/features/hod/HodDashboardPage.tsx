@@ -45,7 +45,6 @@ import { HodAttendancePage } from '../attendance/hod/HodAttendancePage';
 import { HodLeaveApprovalTab } from '../leave/HodLeaveApprovalTab';
 import { HolidayCalendarTab } from '../admin/tabs/HolidayCalendarTab';
 import { CertificationAnalyticsView } from '../certifications/components/CertificationAnalyticsView';
-import { AtRiskTab } from './tabs/AtRiskTab';
 import { MentoringComplianceTab } from './tabs/MentoringComplianceTab';
 import { PlacementTrackerSection } from '../placement/PlacementTrackerSection';
 import { BroadcastNoticePanel } from './BroadcastNoticePanel';
@@ -128,7 +127,7 @@ function mapStudentToHodEntry(student: any, index: number, liveSolved?: number):
 }
 
 export const HodDashboardPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'unregistered' | 'certifications' | 'leaves' | 'holidays' | 'attendance' | 'analytics' | 'students' | 'rankings' | 'placement' | 'mentees' | 'settings' | 'powerbi' | 'risk' | 'mentoring' | 'placement-tracker'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'unregistered' | 'certifications' | 'leaves' | 'holidays' | 'attendance' | 'analytics' | 'students' | 'rankings' | 'placement' | 'mentees' | 'settings' | 'powerbi' | 'mentoring' | 'placement-tracker'>('overview');
   const [hodAttendanceSubTab, setHodAttendanceSubTab] = useState<'grid' | 'unposted' | 'tracking' | 'allotments'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -190,7 +189,7 @@ export const HodDashboardPage: React.FC = () => {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const tab = params.get('tab');
-    if (tab === 'overview' || tab === 'unregistered' || tab === 'certifications' || tab === 'leaves' || tab === 'holidays' || tab === 'attendance' || tab === 'analytics' || tab === 'students' || tab === 'rankings' || tab === 'placement' || tab === 'mentees' || tab === 'settings' || tab === 'powerbi' || tab === 'risk' || tab === 'mentoring' || tab === 'placement-tracker') {
+    if (tab === 'overview' || tab === 'unregistered' || tab === 'certifications' || tab === 'leaves' || tab === 'holidays' || tab === 'attendance' || tab === 'analytics' || tab === 'students' || tab === 'rankings' || tab === 'placement' || tab === 'mentees' || tab === 'settings' || tab === 'powerbi' || tab === 'mentoring' || tab === 'placement-tracker') {
       setActiveTab(tab as any);
     }
   }, [location.search]);
@@ -618,7 +617,6 @@ export const HodDashboardPage: React.FC = () => {
               { key: 'unregistered', label: '⚠️ Unregistered Students' },
               { key: 'rankings', label: '🏆 Department Leaderboard' },
               { key: 'mentees', label: `👤 My Mentees${hodMentees.length > 0 ? ` (${hodMentees.length})` : ''}` },
-              { key: 'risk', label: '🚨 At-Risk Alerts' },
               { key: 'mentoring', label: '🤝 Mentoring Compliance' },
               { key: 'placement-tracker', label: '🎓 Placement Tracker' },
               { key: 'settings', label: '⚙️ Account Settings' },
@@ -1695,18 +1693,7 @@ export const HodDashboardPage: React.FC = () => {
         onSuccess={refetch}
       />
 
-      {/* ── TAB: At-Risk Students ── */}
-      {activeTab === 'risk' && (
-        <div className="bg-[#0f0f1a] border border-white/10 rounded-2xl p-6 shadow-sm">
-          <AtRiskTab
-            department={user?.department}
-            onViewStudent={(roll) => {
-              const found = mergedStudentDataset.find(s => s.regNo === roll || s.regNo.toLowerCase() === roll.toLowerCase());
-              if (found) setInspectStudent(found);
-            }}
-          />
-        </div>
-      )}
+
 
       {/* ── TAB: Mentoring Compliance ── */}
       {activeTab === 'mentoring' && (

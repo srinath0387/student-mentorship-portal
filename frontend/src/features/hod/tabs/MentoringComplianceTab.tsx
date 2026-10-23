@@ -32,10 +32,6 @@ export const MentoringComplianceTab: React.FC<Props> = ({ department }) => {
     f.faculty_email.toLowerCase().includes(search.toLowerCase())
   );
 
-  const compliant = compliance.filter(f => f.meetings_this_month >= 1).length;
-  const totalFaculty = compliance.length;
-  const totalMeetings = compliance.reduce((s, f) => s + parseInt(String(f.total_meetings || '0'), 10), 0);
-
   const getStatusBadge = (f: MentoringCompliance) => {
     const m = Number(f.meetings_this_month);
     if (m >= 2) return { label: '✅ Active', cls: 'bg-emerald-500/20 text-emerald-400' };
@@ -68,41 +64,6 @@ export const MentoringComplianceTab: React.FC<Props> = ({ department }) => {
           <RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} /> Refresh
         </button>
       </div>
-
-      {/* Summary */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 text-center">
-          <div className="text-2xl font-bold text-emerald-400">{compliant}</div>
-          <div className="text-xs text-emerald-300 mt-1">Faculty with Meetings</div>
-          <div className="text-xs text-white/40">this month</div>
-        </div>
-        <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 text-center">
-          <div className="text-2xl font-bold text-red-400">{totalFaculty - compliant}</div>
-          <div className="text-xs text-red-300 mt-1">No Meetings Yet</div>
-          <div className="text-xs text-white/40">this month</div>
-        </div>
-        <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 text-center">
-          <div className="text-2xl font-bold text-blue-400">{totalMeetings}</div>
-          <div className="text-xs text-blue-300 mt-1">Total Logged</div>
-          <div className="text-xs text-white/40">all time</div>
-        </div>
-      </div>
-
-      {/* Compliance bar */}
-      {totalFaculty > 0 && (
-        <div className="bg-white/5 rounded-xl p-4 border border-white/10">
-          <div className="flex justify-between text-xs text-white/50 mb-2">
-            <span>Compliance Rate (this month)</span>
-            <span className="font-medium text-white">{Math.round((compliant / totalFaculty) * 100)}%</span>
-          </div>
-          <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-gradient-to-r from-emerald-500 to-blue-500 rounded-full transition-all duration-700"
-              style={{ width: `${Math.round((compliant / totalFaculty) * 100)}%` }}
-            />
-          </div>
-        </div>
-      )}
 
       {/* Search */}
       <input

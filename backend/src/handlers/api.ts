@@ -4175,41 +4175,57 @@ app.get('/students/:id/employability-score', requireAuth, async (req: Request, r
 // Leaderboards (RPG Scoreboard)
 // ============================================================================
 
-// GET /leaderboard/faculty — mentee scoreboard for a faculty
+// GET /leaderboard/faculty — mentee scoreboard for a faculty (live-computed)
 app.get('/leaderboard/faculty', requireAuth, requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
   try {
     const facultyEmail = req.auth?.email;
     if (!facultyEmail) return res.status(401).json({ error: 'Not authenticated' });
 
-    // Get mentees of this faculty
+    // Get mentees + their profile data in one query for live scoring
     const menteesRes = await db.query(
       `SELECT s.roll_number, s.name, s.section, s.year, s.department,
               ss.overall_score, ss.coding_score, ss.github_score, ss.academics_score, ss.certs_score,
-              ss.level_number, ss.level_title, ss.badge, ss.computed_at
+              ss.level_number, ss.level_title, ss.badge, ss.computed_at,
+              (SELECT json_agg(a.*) FROM academics a WHERE a.student_id = s.roll_number) AS academics_data,
+              (SELECT json_agg(cp.*) FROM coding_profiles cp WHERE cp.student_id = s.roll_number) AS coding_data,
+              (SELECT json_agg(c.*) FROM certifications c WHERE c.student_id = s.roll_number) AS certs_data
        FROM students s
        LEFT JOIN student_scores ss ON ss.student_id = s.roll_number
-       WHERE s.mentor_email = $1
-       ORDER BY COALESCE(ss.overall_score, 0) DESC`,
+       WHERE s.mentor_email = $1`,
       [facultyEmail]
     );
 
-    const rows = menteesRes.rows.map((r: any, idx: number) => ({
-      rank: idx + 1,
-      studentId: r.roll_number,
-      name: r.name,
-      section: r.section,
-      year: r.year,
-      department: r.department,
-      overallScore: r.overall_score || 0,
-      codingScore: r.coding_score || 0,
-      githubScore: r.github_score || 0,
-      academicsScore: r.academics_score || 0,
-      certsScore: r.certs_score || 0,
-      levelNumber: r.level_number || 1,
-      levelTitle: r.level_title || 'Apprentice Novice',
-      badge: r.badge || '🐣',
-      computedAt: r.computed_at,
-    }));
+    const rows = menteesRes.rows.map((r: any) => {
+      // If cached score exists and is recent (< 24h), use it
+      const hasCache = r.overall_score != null;
+      let score: any = null;
+      if (!hasCache) {
+        try {
+          score = calculateRPGScore({
+            academics: r.academics_data || [],
+            codingProfiles: r.coding_data || [],
+            certifications: r.certs_data || [],
+          });
+        } catch { score = null; }
+      }
+      return {
+        studentId: r.roll_number,
+        name: r.name,
+        section: r.section,
+        year: r.year,
+        department: r.department,
+        overallScore: hasCache ? (r.overall_score || 0) : (score?.overallScore || 0),
+        codingScore: hasCache ? (r.coding_score || 0) : (score?.codingScore || 0),
+        githubScore: hasCache ? (r.github_score || 0) : (score?.githubScore || 0),
+        academicsScore: hasCache ? (r.academics_score || 0) : (score?.academicsScore || 0),
+        certsScore: hasCache ? (r.certs_score || 0) : (score?.certsScore || 0),
+        levelNumber: hasCache ? (r.level_number || 1) : (score?.levelNumber || 1),
+        levelTitle: hasCache ? (r.level_title || 'Apprentice Novice') : (score?.levelTitle || 'Apprentice Novice'),
+        badge: hasCache ? (r.badge || '🐣') : (score?.badge || '🐣'),
+        computedAt: r.computed_at,
+      };
+    }).sort((a: any, b: any) => b.overallScore - a.overallScore)
+      .map((r: any, idx: number) => ({ ...r, rank: idx + 1 }));
 
     res.json(rows);
   } catch (err: any) {
@@ -4217,10 +4233,10 @@ app.get('/leaderboard/faculty', requireAuth, requireRole('faculty', 'hod', 'admi
   }
 });
 
-// GET /leaderboard/hod — department scoreboard for HOD
+// GET /leaderboard/hod — department scoreboard for HOD (live-computed)
 app.get('/leaderboard/hod', requireAuth, requireRole('hod', 'admin', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
   try {
-    const { department, year, section, limit = '50' } = req.query as any;
+    const { department, year, section, limit = '100' } = req.query as any;
     const filters: string[] = [];
     const params: any[] = [];
 
@@ -4229,38 +4245,53 @@ app.get('/leaderboard/hod', requireAuth, requireRole('hod', 'admin', 'principal'
     if (section) { filters.push(`s.section = $${params.length + 1}`); params.push(section); }
 
     const whereClause = filters.length > 0 ? 'WHERE ' + filters.join(' AND ') : '';
-    const limitNum = Math.min(parseInt(limit) || 50, 200);
+    const limitNum = Math.min(parseInt(limit) || 100, 300);
 
     const result = await db.query(
       `SELECT s.roll_number, s.name, s.section, s.year, s.department, s.mentor_email,
               ss.overall_score, ss.coding_score, ss.github_score, ss.academics_score, ss.certs_score,
-              ss.level_number, ss.level_title, ss.badge, ss.computed_at
+              ss.level_number, ss.level_title, ss.badge, ss.computed_at,
+              (SELECT json_agg(a.*) FROM academics a WHERE a.student_id = s.roll_number) AS academics_data,
+              (SELECT json_agg(cp.*) FROM coding_profiles cp WHERE cp.student_id = s.roll_number) AS coding_data,
+              (SELECT json_agg(c.*) FROM certifications c WHERE c.student_id = s.roll_number) AS certs_data
        FROM students s
        LEFT JOIN student_scores ss ON ss.student_id = s.roll_number
        ${whereClause}
-       ORDER BY COALESCE(ss.overall_score, 0) DESC
        LIMIT $${params.length + 1}`,
       [...params, limitNum]
     );
 
-    const rows = result.rows.map((r: any, idx: number) => ({
-      rank: idx + 1,
-      studentId: r.roll_number,
-      name: r.name,
-      section: r.section,
-      year: r.year,
-      department: r.department,
-      mentorEmail: r.mentor_email,
-      overallScore: r.overall_score || 0,
-      codingScore: r.coding_score || 0,
-      githubScore: r.github_score || 0,
-      academicsScore: r.academics_score || 0,
-      certsScore: r.certs_score || 0,
-      levelNumber: r.level_number || 1,
-      levelTitle: r.level_title || 'Apprentice Novice',
-      badge: r.badge || '🐣',
-      computedAt: r.computed_at,
-    }));
+    const rows = result.rows.map((r: any) => {
+      const hasCache = r.overall_score != null;
+      let score: any = null;
+      if (!hasCache) {
+        try {
+          score = calculateRPGScore({
+            academics: r.academics_data || [],
+            codingProfiles: r.coding_data || [],
+            certifications: r.certs_data || [],
+          });
+        } catch { score = null; }
+      }
+      return {
+        studentId: r.roll_number,
+        name: r.name,
+        section: r.section,
+        year: r.year,
+        department: r.department,
+        mentorEmail: r.mentor_email,
+        overallScore: hasCache ? (r.overall_score || 0) : (score?.overallScore || 0),
+        codingScore: hasCache ? (r.coding_score || 0) : (score?.codingScore || 0),
+        githubScore: hasCache ? (r.github_score || 0) : (score?.githubScore || 0),
+        academicsScore: hasCache ? (r.academics_score || 0) : (score?.academicsScore || 0),
+        certsScore: hasCache ? (r.certs_score || 0) : (score?.certsScore || 0),
+        levelNumber: hasCache ? (r.level_number || 1) : (score?.levelNumber || 1),
+        levelTitle: hasCache ? (r.level_title || 'Apprentice Novice') : (score?.levelTitle || 'Apprentice Novice'),
+        badge: hasCache ? (r.badge || '🐣') : (score?.badge || '🐣'),
+        computedAt: r.computed_at,
+      };
+    }).sort((a: any, b: any) => b.overallScore - a.overallScore)
+      .map((r: any, idx: number) => ({ ...r, rank: idx + 1 }));
 
     res.json(rows);
   } catch (err: any) {
