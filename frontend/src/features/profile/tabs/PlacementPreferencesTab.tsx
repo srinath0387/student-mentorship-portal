@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Target, Sparkles, Building, Check, Edit2, Save, X, BookOpen, Award, Loader2 } from 'lucide-react';
 import { PlacementProfile, ScoreBreakdown } from '../../../types';
 import { api } from '../../../lib/api';
@@ -29,6 +29,17 @@ export const PlacementPreferencesTab: React.FC<PlacementPreferencesTabProps> = (
   const [saving, setSaving] = useState(false);
   const { user } = useAuth();
   const activeRollNo = user?.rollNumber || '';
+
+  // Sync form state when placement data loads asynchronously (fixes blank page on initial load)
+  useEffect(() => {
+    if (placement && !isEditing) {
+      setCareer(placement.preferred_career || '');
+      setSpecializations(placement.dream_company || []);
+      setHigherStudies(placement.higher_studies_interest || false);
+      setNeedFromDept(placement.need_from_department || '');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placement]);
 
   const handleAddSpec = () => {
     if (newInput.trim() && !specializations.includes(newInput.trim())) {
