@@ -7533,11 +7533,19 @@ app.get('/mentor-meetings', requireAuth, async (req: Request, res: Response) => 
 
     if (studentId) {
       // Student can only see their own; faculty/hod/admin can see any
-      if (!['faculty','hod','admin','coordinator','principal','director','management'].includes(role) && authEmail !== studentId) {
-        return res.status(403).json({ error: 'Forbidden' });
+      const isPrivileged = ['faculty','hod','admin','coordinator','principal','director','management'].includes(role);
+      // Students auth by email — verify by checking their roll_number in students table
+      if (!isPrivileged) {
+        const ownerCheck = await db.query(
+          `SELECT roll_number FROM students WHERE UPPER(roll_number) = UPPER($1) AND email = $2 LIMIT 1`,
+          [studentId, authEmail]
+        );
+        if (ownerCheck.rowCount === 0) {
+          return res.status(403).json({ error: 'Forbidden' });
+        }
       }
-      query = `SELECT * FROM mentor_meetings WHERE roll_number=$1 ORDER BY meeting_date DESC LIMIT 200`;
-      params = [studentId.toUpperCase()];
+      query = `SELECT * FROM mentor_meetings WHERE UPPER(roll_number)=UPPER($1) ORDER BY meeting_date DESC LIMIT 200`;
+      params = [studentId];
     } else if (facultyEmail) {
       query = `SELECT * FROM mentor_meetings WHERE faculty_email=$1 ORDER BY meeting_date DESC LIMIT 200`;
       params = [facultyEmail];

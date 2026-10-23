@@ -334,7 +334,7 @@ export const OversightDashboardPage: React.FC = () => {
 
   const { data: oversightMeetingLogs = [], isLoading: meetingLogsLoading } = useQuery<any[]>({
     queryKey: ['oversightMeetingLogs', selectedDept],
-    queryFn: () => api.getDeptMeetingLogs(selectedDept !== 'all' ? selectedDept : undefined),
+    queryFn: () => api.getDeptMeetingLogs(selectedDept && selectedDept.toLowerCase() !== 'all' ? selectedDept : undefined),
     staleTime: 60 * 1000,
   });
 
@@ -1266,19 +1266,6 @@ export const OversightDashboardPage: React.FC = () => {
       <PlacementTrackerSection isAdminView />
     </div>
 
-      {/* Meeting Logs Section */}
-      <div className="rounded-2xl border border-slate-700/50 bg-slate-900/50 p-5 space-y-3">
-        <h3 className="text-sm font-bold text-white flex items-center gap-2">
-          📋 Recent Mentor Meeting Logs
-          <span className="text-xs font-normal text-white/40">(institution-wide)</span>
-        </h3>
-        <MeetingLogsView
-          logs={oversightMeetingLogs}
-          isLoading={meetingLogsLoading}
-          showStudent={true}
-          emptyMessage="No mentor meeting logs found."
-        />
-      </div>
     </div>
   );
 
@@ -1599,6 +1586,20 @@ export const OversightDashboardPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Meeting Logs Section */}
+      <div className="rounded-2xl border border-slate-700/50 bg-slate-900/50 p-5 space-y-3">
+        <h3 className="text-sm font-bold text-white flex items-center gap-2">
+          📋 Recent Mentor Meeting Logs
+          <span className="text-xs font-normal text-white/40">(institution-wide)</span>
+        </h3>
+        <MeetingLogsView
+          logs={oversightMeetingLogs}
+          isLoading={meetingLogsLoading}
+          showStudent={true}
+          emptyMessage="No mentor meeting logs found."
+        />
+      </div>
 
     </div>
   );

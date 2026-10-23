@@ -34,7 +34,7 @@ export const MentoringComplianceTab: React.FC<Props> = ({ department }) => {
 
   const compliant = compliance.filter(f => f.meetings_this_month >= 1).length;
   const totalFaculty = compliance.length;
-  const totalMeetings = compliance.reduce((s, f) => s + Number(f.total_meetings), 0);
+  const totalMeetings = compliance.reduce((s, f) => s + parseInt(String(f.total_meetings || '0'), 10), 0);
 
   const getStatusBadge = (f: MentoringCompliance) => {
     const m = Number(f.meetings_this_month);
@@ -146,7 +146,7 @@ export const MentoringComplianceTab: React.FC<Props> = ({ department }) => {
                         {f.meetings_this_month}
                       </span>
                     </td>
-                    <td className="px-3 py-2.5 text-center text-white/60">{f.total_meetings}</td>
+                    <td className="px-3 py-2.5 text-center text-white/60">{parseInt(String(f.total_meetings || 0), 10)}</td>
                     <td className="px-3 py-2.5 text-center text-white/60">{f.students_met}</td>
                     <td className="px-3 py-2.5 text-white/60 text-xs">
                       {f.last_meeting_date

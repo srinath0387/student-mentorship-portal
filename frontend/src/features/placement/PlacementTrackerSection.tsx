@@ -27,7 +27,7 @@ const PlacementForm: React.FC<{
     onSubmit({ ...form, package_lpa: form.package_lpa ? parseFloat(form.package_lpa) : undefined });
   };
   return (
-    <form onSubmit={handleSubmit} className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
+    <form onSubmit={handleSubmit} className="bg-slate-800/70 border border-slate-700/60 rounded-xl p-4 space-y-3">
       <h3 className="font-semibold text-white flex items-center gap-2">
         <Plus size={16} className="text-emerald-400" /> Report Placement
       </h3>
@@ -39,11 +39,11 @@ const PlacementForm: React.FC<{
             value={form.company_name}
             onChange={e => setForm(f => ({ ...f, company_name: e.target.value }))}
             placeholder="e.g. TCS, Infosys, Google"
-            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-white/30"
+            className="w-full bg-slate-700/50 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
           />
         </div>
         <div>
-          <label className="text-xs text-white/50 mb-1 block">Role / Job Title *</label>
+          <label className="text-xs text-slate-400 mb-1 block">Role / Job Title *</label>
           <input
             required
             value={form.role_title}
@@ -217,7 +217,7 @@ export const PlacementTrackerSection: React.FC<Props> = ({
 
       {/* Top Companies */}
       {(isHodView || isAdminView) && summary && summary.top_companies.length > 0 && (
-        <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+        <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-4">
           <div className="flex items-center gap-2 mb-3">
             <Building2 size={16} className="text-white/50" />
             <span className="text-sm font-medium text-white/70">Top Recruiting Companies</span>
