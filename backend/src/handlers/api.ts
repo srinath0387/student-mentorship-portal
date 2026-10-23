@@ -4181,7 +4181,24 @@ app.get('/leaderboard/faculty', requireAuth, requireRole('faculty', 'hod', 'admi
     const facultyEmail = req.auth?.email;
     if (!facultyEmail) return res.status(401).json({ error: 'Not authenticated' });
 
-    // Get mentees + their profile data in one query for live scoring
+    // Ensure student_scores table exists (defensive — may not exist on first Lambda cold start)
+    await db.query(`CREATE TABLE IF NOT EXISTS student_scores (
+      id SERIAL PRIMARY KEY, student_id TEXT NOT NULL UNIQUE,
+      overall_score INT DEFAULT 0, coding_score INT DEFAULT 0, github_score INT DEFAULT 0,
+      academics_score INT DEFAULT 0, certs_score INT DEFAULT 0,
+      level_number INT DEFAULT 1, level_title TEXT, badge TEXT, computed_at TIMESTAMPTZ DEFAULT NOW()
+    )`).catch(() => {});
+
+    // Look up faculty_id from faculty table by email (mentees are linked via faculty_id, not email)
+    const facRes = await db.query(
+      `SELECT faculty_id FROM faculty WHERE LOWER(email) = LOWER($1) LIMIT 1`,
+      [facultyEmail]
+    );
+    const facultyId = facRes.rows[0]?.faculty_id || null;
+
+    if (!facultyId) return res.json([]); // Faculty record not found
+
+    // Get mentees via faculty_mentor_id OR mentor_assignments, with live profile data for scoring
     const menteesRes = await db.query(
       `SELECT s.roll_number, s.name, s.section, s.year, s.department,
               ss.overall_score, ss.coding_score, ss.github_score, ss.academics_score, ss.certs_score,
@@ -4191,8 +4208,9 @@ app.get('/leaderboard/faculty', requireAuth, requireRole('faculty', 'hod', 'admi
               (SELECT json_agg(c.*) FROM certifications c WHERE c.student_id = s.roll_number) AS certs_data
        FROM students s
        LEFT JOIN student_scores ss ON ss.student_id = s.roll_number
-       WHERE s.mentor_email = $1`,
-      [facultyEmail]
+       WHERE UPPER(s.faculty_mentor_id) = UPPER($1)
+          OR EXISTS (SELECT 1 FROM mentor_assignments ma WHERE UPPER(ma.roll_number) = UPPER(s.roll_number) AND UPPER(ma.faculty_id) = UPPER($1))`,
+      [facultyId]
     );
 
     const rows = menteesRes.rows.map((r: any) => {
@@ -4237,6 +4255,13 @@ app.get('/leaderboard/faculty', requireAuth, requireRole('faculty', 'hod', 'admi
 app.get('/leaderboard/hod', requireAuth, requireRole('hod', 'admin', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
   try {
     const { department, year, section, limit = '100' } = req.query as any;
+    // Ensure student_scores table exists (defensive)
+    await db.query(`CREATE TABLE IF NOT EXISTS student_scores (
+      id SERIAL PRIMARY KEY, student_id TEXT NOT NULL UNIQUE,
+      overall_score INT DEFAULT 0, coding_score INT DEFAULT 0, github_score INT DEFAULT 0,
+      academics_score INT DEFAULT 0, certs_score INT DEFAULT 0,
+      level_number INT DEFAULT 1, level_title TEXT, badge TEXT, computed_at TIMESTAMPTZ DEFAULT NOW()
+    )`).catch(() => {});
     const filters: string[] = [];
     const params: any[] = [];
 
@@ -4248,7 +4273,9 @@ app.get('/leaderboard/hod', requireAuth, requireRole('hod', 'admin', 'principal'
     const limitNum = Math.min(parseInt(limit) || 100, 300);
 
     const result = await db.query(
-      `SELECT s.roll_number, s.name, s.section, s.year, s.department, s.mentor_email,
+      `SELECT s.roll_number, s.name, s.section, s.year, s.department,
+              s.faculty_mentor_id AS mentor_id,
+              f.name AS mentor_name, f.email AS mentor_email,
               ss.overall_score, ss.coding_score, ss.github_score, ss.academics_score, ss.certs_score,
               ss.level_number, ss.level_title, ss.badge, ss.computed_at,
               (SELECT json_agg(a.*) FROM academics a WHERE a.student_id = s.roll_number) AS academics_data,
@@ -4256,6 +4283,7 @@ app.get('/leaderboard/hod', requireAuth, requireRole('hod', 'admin', 'principal'
               (SELECT json_agg(c.*) FROM certifications c WHERE c.student_id = s.roll_number) AS certs_data
        FROM students s
        LEFT JOIN student_scores ss ON ss.student_id = s.roll_number
+       LEFT JOIN faculty f ON UPPER(f.faculty_id) = UPPER(s.faculty_mentor_id)
        ${whereClause}
        LIMIT $${params.length + 1}`,
       [...params, limitNum]
@@ -4279,7 +4307,7 @@ app.get('/leaderboard/hod', requireAuth, requireRole('hod', 'admin', 'principal'
         section: r.section,
         year: r.year,
         department: r.department,
-        mentorEmail: r.mentor_email,
+        mentorEmail: r.mentor_email || r.mentor_id || '',
         overallScore: hasCache ? (r.overall_score || 0) : (score?.overallScore || 0),
         codingScore: hasCache ? (r.coding_score || 0) : (score?.codingScore || 0),
         githubScore: hasCache ? (r.github_score || 0) : (score?.githubScore || 0),
