@@ -59,6 +59,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 
 const DEPARTMENTS = VALID_DEPARTMENT_NAMES;
 const YEARS = ['1st Year', '2nd Year', '3rd Year', '4th Year'] as const;
+const PAGE_SIZE = 100;
 
 // Initial Faculty data store (admin-managed)
 const INITIAL_FACULTY = [
@@ -111,10 +112,14 @@ export const AdminDashboardPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [sectionFilter, setSectionFilter] = useState('');
   const [yearFilter, setYearFilter] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
   const [hasUserChangedDept, setHasUserChangedDept] = useState(false);
   const [departmentFilter, setDepartmentFilter] = useState<string>(
     (isEffectiveSuperAdmin || isOversight) ? 'All' : (user?.department || 'CSE (Data Science)')
   );
+
+  // Reset to page 1 whenever filters change
+  React.useEffect(() => { setCurrentPage(1); }, [searchQuery, sectionFilter, yearFilter, departmentFilter]);
 
   React.useEffect(() => {
     if (hasUserChangedDept) return;
@@ -334,6 +339,11 @@ export const AdminDashboardPage: React.FC = () => {
     const matchesYear = !yearFilter || s.year === yearFilter;
     return matchesSearch && matchesSection && matchesYear;
   });
+
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(filteredStudents.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedStudents = filteredStudents.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   const filteredPerformers = performersData.filter((p) => {
     const matchesYear = !yearFilter || p.year === yearFilter;
@@ -961,14 +971,14 @@ export const AdminDashboardPage: React.FC = () => {
                     <input
                       type="checkbox"
                       className="w-4 h-4 accent-red-600 cursor-pointer"
-                      checked={filteredStudents.length > 0 && filteredStudents.every(s => selectedRollNos.has(s.roll_number))}
+                      checked={paginatedStudents.length > 0 && paginatedStudents.every(s => selectedRollNos.has(s.roll_number))}
                       onChange={(e) => {
                         if (e.target.checked) {
-                          setSelectedRollNos(prev => new Set([...prev, ...filteredStudents.map(s => s.roll_number)]));
+                          setSelectedRollNos(prev => new Set([...prev, ...paginatedStudents.map(s => s.roll_number)]));
                         } else {
                           setSelectedRollNos(prev => {
                             const next = new Set(prev);
-                            filteredStudents.forEach(s => next.delete(s.roll_number));
+                            paginatedStudents.forEach(s => next.delete(s.roll_number));
                             return next;
                           });
                         }
@@ -985,12 +995,12 @@ export const AdminDashboardPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-borderLine text-sm">
-                {filteredStudents.length === 0 && (
+                {paginatedStudents.length === 0 && (
                   <tr><td colSpan={8} className="py-10 text-center text-textSecondary text-xs">No students found matching your filters.</td></tr>
                 )}
-                {filteredStudents.length > 0 && (
+                {paginatedStudents.length > 0 && (
                   <VirtualStudentRows
-                    students={filteredStudents}
+                    students={paginatedStudents}
                     selectedRollNos={selectedRollNos}
                     setSelectedRollNos={setSelectedRollNos}
                     setInspectStudent={setInspectStudent}
@@ -1003,6 +1013,61 @@ export const AdminDashboardPage: React.FC = () => {
               </tbody>
             </table>
           </div>
+
+          {/* ── Pagination Controls ── */}
+          {filteredStudents.length > PAGE_SIZE && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-borderLine bg-surface rounded-b-2xl">
+              <span className="text-xs text-textSecondary">
+                Showing <span className="font-bold text-textPrimary">{(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filteredStudents.length)}</span> of{' '}
+                <span className="font-bold text-textPrimary">{filteredStudents.length}</span> students
+              </span>
+              <nav className="flex items-center gap-1">
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={safePage <= 1}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-borderLine bg-background text-textSecondary hover:bg-surface-2 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-1"
+                >
+                  ‹ Previous
+                </button>
+                {(() => {
+                  const pages: (number | '...')[] = [];
+                  if (totalPages <= 7) {
+                    for (let i = 1; i <= totalPages; i++) pages.push(i);
+                  } else {
+                    pages.push(1);
+                    if (safePage > 3) pages.push('...');
+                    for (let i = Math.max(2, safePage - 1); i <= Math.min(totalPages - 1, safePage + 1); i++) pages.push(i);
+                    if (safePage < totalPages - 2) pages.push('...');
+                    pages.push(totalPages);
+                  }
+                  return pages.map((p, idx) =>
+                    p === '...' ? (
+                      <span key={`dots-${idx}`} className="px-2 text-xs text-textSecondary">…</span>
+                    ) : (
+                      <button
+                        key={p}
+                        onClick={() => setCurrentPage(p)}
+                        className={`w-8 h-8 text-xs font-bold rounded-lg border transition-all ${
+                          p === safePage
+                            ? 'bg-brand-primary text-white border-brand-primary shadow-sm'
+                            : 'border-borderLine bg-background text-textSecondary hover:bg-surface-2 hover:text-textPrimary'
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    )
+                  );
+                })()}
+                <button
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={safePage >= totalPages}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-borderLine bg-background text-textSecondary hover:bg-surface-2 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-1"
+                >
+                  Next ›
+                </button>
+              </nav>
+            </div>
+          )}
         </div>
       </div>
       )}
