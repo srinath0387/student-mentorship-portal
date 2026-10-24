@@ -1834,14 +1834,30 @@ app.get('/students', requireAuth, async (req: Request, res: Response) => {
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
     const isSuper = req.auth?.isSuperAdmin || callerDept === '*';
+    const CSE_ALLIED_DEPTS = ['CSE', 'CSE (AI & ML)', 'CSE (Data Science)', 'CSE (BS)', 'CSE (CS)'];
+    const isProgramChairCaller = callerRole === 'program_chair';
 
     const targetDeptFilter = (callerRole === 'hod' && callerDept && !isSuper) ? callerDept
       : (callerRole === 'admin' && callerDept && !isSuper) ? callerDept
       : (department && String(department) !== 'All' && String(department) !== 'undefined' && String(department) !== 'null') ? String(department)
       : null;
 
+    // Program chair: restrict to CSE allied depts only
+    if (isProgramChairCaller) {
+      const reqDeptStr = department ? String(department) : null;
+      const scopedDept = reqDeptStr && reqDeptStr !== 'All' && CSE_ALLIED_DEPTS.includes(reqDeptStr)
+        ? reqDeptStr : null;
+      if (scopedDept) {
+        conditions.push(`s.department = $${paramIndex++}`);
+        params.push(scopedDept);
+      } else {
+        conditions.push(`s.department = ANY($${paramIndex++}::text[])`);
+        params.push(CSE_ALLIED_DEPTS);
+      }
+    }
+
     // Coordinator or S&H departments see ALL 1st-year students across all branches
-    if (callerRole === 'coordinator' || (callerDept && FIRST_YEAR_SCOPE_DEPTS.includes(callerDept))) {
+    else if (callerRole === 'coordinator' || (callerDept && FIRST_YEAR_SCOPE_DEPTS.includes(callerDept))) {
       conditions.push(`(s.year = '1st Year' OR s.year ILIKE '1%')`);
       if (department && String(department) !== 'All' && String(department) !== 'undefined' && String(department) !== 'null') {
         const d = String(department).toLowerCase().trim();
@@ -2004,8 +2020,13 @@ app.get('/students', requireAuth, async (req: Request, res: Response) => {
     }
 
     const result = await db.query(`
-      SELECT 
-        s.*,
+      SELECT
+        s.roll_number, s.name, s.email, s.year, s.phone, s.parent_phone,
+        s.address, s.native_place, s.department, s.batch, s.section,
+        s.hostel_day_scholar, s.driving_license, s.passport,
+        s.relocation_willingness, s.family_business, s.financial_background,
+        s.faculty_mentor_id, s.photo_url, s.resume_url, s.linkedin_url,
+        s.linkedin_updated, s.is_lateral_entry, s.created_at, s.updated_at,
         COALESCE(a.cgpa, s.cgpa, 0.00) AS cgpa,
         c.leetcode_handle,
         COALESCE(c.leetcode_solved, 0) AS leetcode_solved,
@@ -5617,20 +5638,28 @@ app.get('/faculty', requireRole('admin', 'hod', 'coordinator', 'faculty', 'direc
   try {
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
-    const isOversight = ['director', 'principal', 'management', 'program_chair'].includes(callerRole || '');
+    const isOversight = ['director', 'principal', 'management'].includes(callerRole || '');
+    const isProgramChair = callerRole === 'program_chair';
+    const CSE_ALLIED_DEPTS = ['CSE', 'CSE (AI & ML)', 'CSE (Data Science)', 'CSE (BS)', 'CSE (CS)'];
     const isSuper = req.auth?.isSuperAdmin === true || callerDept === '*' || callerDept === 'All' || callerRole === 'admin' || callerRole === 'coordinator' || isOversight;
     const reqDept = req.query.department ? String(req.query.department) : undefined;
 
     let targetDept: string | undefined;
     if (callerRole === 'student') {
       targetDept = callerDept || reqDept;
+    } else if (isProgramChair) {
+      // Program chair: lock to CSE allied depts; honour a sub-filter if it's within allied scope
+      if (reqDept && reqDept !== 'All' && CSE_ALLIED_DEPTS.includes(reqDept)) {
+        targetDept = reqDept;
+      }
+      // else targetDept stays undefined → we'll apply array filter below
     } else if (!isSuper && callerDept && callerDept !== 'All' && callerDept !== '*') {
       targetDept = callerDept;
     } else if (reqDept && reqDept !== 'All' && reqDept !== 'undefined' && reqDept !== 'null') {
       targetDept = reqDept;
     }
-    // Explicit 'All' parameter from allotment form bypasses all dept scoping
-    if (req.query.department === 'All') targetDept = undefined;
+    // Explicit 'All' parameter from allotment form bypasses all dept scoping (only for truly super roles)
+    if (req.query.department === 'All' && !isProgramChair) targetDept = undefined;
 
     // Normalize department strings for flexible matching (handles 'CSE (Data Science)', 'CSE(Data Science)', 'Data Science')
     const normalizeDeptKey = (dept: string): string => {
@@ -5700,7 +5729,11 @@ app.get('/faculty', requireRole('admin', 'hod', 'coordinator', 'faculty', 'direc
     `);
 
     let finalRows = result.rows;
-    if (targetDept) {
+    if (isProgramChair) {
+      // Program chair sees CSE allied depts only
+      const alliedKeys = CSE_ALLIED_DEPTS.map(normalizeDeptKey);
+      finalRows = finalRows.filter((f: any) => alliedKeys.includes(normalizeDeptKey(f.department || '')));
+    } else if (targetDept) {
       const targetKey = normalizeDeptKey(targetDept);
       finalRows = finalRows.filter((f: any) => normalizeDeptKey(f.department) === targetKey);
     }

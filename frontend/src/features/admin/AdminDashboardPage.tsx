@@ -90,7 +90,9 @@ export const AdminDashboardPage: React.FC = () => {
   // Detect super admin + tier level from user email
   const isSuperAdmin = user?.role === 'admin' && (Boolean(user?.isSuperAdmin) || SUPER_ADMIN_EMAILS.includes(user?.email ?? ''));
   const isTier1A = user?.role === 'admin' && TIER1A_EMAILS.includes(user?.email ?? '');
+  const isProgramChair = user?.role === 'program_chair';
   const isOversight = ['director', 'principal', 'management', 'program_chair'].includes(user?.role ?? '');
+  const CSE_ALLIED_DEPTS = ['CSE', 'CSE (AI & ML)', 'CSE (Data Science)', 'CSE (BS)', 'CSE (CS)'];
 
   // HOD Credentials panel state
   const [hodDept, setHodDept] = useState(user?.isSuperAdmin ? 'CSE (Data Science)' : (user?.department || 'CSE (Data Science)'));
@@ -825,6 +827,12 @@ export const AdminDashboardPage: React.FC = () => {
                   className="px-3 py-1.5 text-xs rounded-lg border border-borderLine bg-background text-textPrimary font-medium">
                   <option value="All">All Departments</option>
                   {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
+                </select>
+              ) : isProgramChair ? (
+                <select value={departmentFilter} onChange={(e) => { setHasUserChangedDept(true); setDepartmentFilter(e.target.value); }}
+                  className="px-3 py-1.5 text-xs rounded-lg border border-borderLine bg-background text-textPrimary font-medium">
+                  <option value="All">All CSE Allied</option>
+                  {CSE_ALLIED_DEPTS.map((d) => <option key={d} value={d}>{d}</option>)}
                 </select>
               ) : (
                 <span className="px-3 py-1.5 text-xs rounded-lg border border-brand-primary/30 bg-brand-soft text-brand-primary font-bold">
