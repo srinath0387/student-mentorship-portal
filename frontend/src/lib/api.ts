@@ -118,31 +118,32 @@ export const api = {
       });
     }
 
-    const pageSize = 1000;
+    // Safe page size — 200 rows per request to avoid Lambda 6MB response limit.
+    // At limit=1000, a full institute load (1500+ students with coding profiles) exceeds 6MB → 500 error → UI shows 0.
+    const pageSize = 200;
 
-    // Global query (no dept/search/section/batch filter) — fetch all pages in parallel
+    // Global query (no dept/search/section/batch filter) — paginate sequentially with safe page size
     const isGlobalQuery = (!cleanParams.department || cleanParams.department === 'All') && !cleanParams.search && !cleanParams.section && !cleanParams.batch;
     if (isGlobalQuery) {
       try {
-        const firstPage: StudentProfile[] = await fetchWithAuth(`/students?limit=${pageSize}&offset=0`);
-        if (Array.isArray(firstPage) && firstPage.length === pageSize) {
-          const subsequentPages = await Promise.all([
-            fetchWithAuth(`/students?limit=${pageSize}&offset=1000`).catch(() => []),
-            fetchWithAuth(`/students?limit=${pageSize}&offset=2000`).catch(() => []),
-            fetchWithAuth(`/students?limit=${pageSize}&offset=3000`).catch(() => []),
-            fetchWithAuth(`/students?limit=${pageSize}&offset=4000`).catch(() => []),
-          ]);
-          return [...firstPage, ...subsequentPages.flat()];
+        const allResults: StudentProfile[] = [];
+        let offset = 0;
+        while (true) {
+          const page: StudentProfile[] = await fetchWithAuth(`/students?limit=${pageSize}&offset=${offset}`).catch(() => []);
+          if (!Array.isArray(page) || page.length === 0) break;
+          allResults.push(...page);
+          if (page.length < pageSize) break;
+          offset += pageSize;
+          if (offset > 10000) break; // safety cap
         }
-        return Array.isArray(firstPage) ? firstPage : [];
+        return allResults;
       } catch (err) {
         console.warn('[getAllStudents] Global chunked query notice:', err);
         return [];
       }
     }
 
-    // Dept-scoped or filtered query — use deptPageSize=200 to avoid 6MB Lambda limit.
-    // EEE has 347 students; at limit=1000 the full payload exceeds 6MB — 500 error — UI shows 0.
+    // Dept-scoped or filtered query — same safe page size
     const deptPageSize = 200;
     const baseQuery = new URLSearchParams(cleanParams).toString();
     try {
