@@ -218,7 +218,19 @@ export const AttendanceSetupPage: React.FC = () => {
   const ttGrid = useMemo(()=>{
     const grid:Record<string,Record<number,any>> = {};
     DAYS.forEach(d=>{ grid[d]={}; PERIODS.forEach(p=>{ grid[d][p]=null; }); });
-    timetable.filter((t:any)=>(!ttSem||t.semester_label===ttSem)&&(!ttSection||t.section===ttSection)).forEach((t:any)=>{ if(grid[t.day_of_week]) grid[t.day_of_week][t.period_start]=t; });
+    timetable
+      .filter((t:any)=>(!ttSem||t.semester_label===ttSem)&&(!ttSection||t.section===ttSection))
+      .forEach((t:any)=>{
+        if(!grid[t.day_of_week]) return;
+        const span = Math.max(1, parseInt(t.num_periods||1));
+        // Store slot at period_start with its span
+        grid[t.day_of_week][t.period_start] = { ...t, _span: span };
+        // Mark subsequent spanned cells so renderer skips them
+        for(let s=1; s<span; s++){
+          const p = t.period_start + s;
+          if(p<=7) grid[t.day_of_week][p] = { _spanned: true };
+        }
+      });
     return grid;
   },[timetable,ttSem,ttSection]);
 
@@ -411,10 +423,27 @@ export const AttendanceSetupPage: React.FC = () => {
                   <input type="date" value={joiningDate} onChange={e=>setJoiningDate(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none"/>
                   <button type="submit" className="flex items-center justify-center gap-1.5 px-4 py-2 bg-brand-primary text-white font-bold text-xs rounded-xl hover:opacity-90"><Plus className="w-3.5 h-3.5"/>Add Student</button>
                 </form>
-                <label className="flex items-center gap-2 px-3 py-2 border border-dashed border-borderLine rounded-xl cursor-pointer hover:bg-surface-2 text-xs font-bold text-textSecondary w-fit">
-                  <Upload className="w-3.5 h-3.5"/>Bulk Upload Excel
-                  <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleBulkRosterUpload}/>
-                </label>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <label className="flex items-center gap-2 px-3 py-2 border border-dashed border-borderLine rounded-xl cursor-pointer hover:bg-surface-2 text-xs font-bold text-textSecondary w-fit">
+                    <Upload className="w-3.5 h-3.5"/>Bulk Upload Excel
+                    <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleBulkRosterUpload}/>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={()=>{
+                      const ws = XLSX.utils.json_to_sheet([
+                        {'Roll Number':'22BD1A0501','Student Name':'Student One','Joining Date':''},
+                        {'Roll Number':'22BD1A0502','Student Name':'Student Two','Joining Date':''},
+                      ]);
+                      const wb = XLSX.utils.book_new();
+                      XLSX.utils.book_append_sheet(wb, ws, 'Roster');
+                      XLSX.writeFile(wb, 'student_roster_template.xlsx');
+                    }}
+                    className="flex items-center gap-2 px-3 py-2 border border-emerald-400 text-emerald-700 dark:text-emerald-400 rounded-xl hover:bg-emerald-50 dark:hover:bg-emerald-950/30 text-xs font-bold w-fit"
+                  >
+                    ⬇ Download Template
+                  </button>
+                </div>
                 <StatusMsg msg={rosterStatus}/>
                 <div className="overflow-x-auto border border-borderLine rounded-xl">
                   <table className="w-full text-xs text-left">
@@ -553,12 +582,16 @@ export const AttendanceSetupPage: React.FC = () => {
                       <td className="px-4 py-2.5 font-bold bg-surface-2 border-r border-borderLine">{day}</td>
                       {PERIODS.map(period=>{
                         const slot = ttGrid[day]?.[period];
+                        // Skip cells that are covered by a multi-period colSpan
+                        if(slot?._spanned) return null;
+                        const span = slot?._span || 1;
                         return (
-                          <td key={period} className="px-2 py-2 border-r border-borderLine align-top">
-                            {slot ? (
-                              <div className="bg-brand-soft border border-brand-primary/20 rounded-xl p-2 space-y-1 relative group">
+                          <td key={period} colSpan={span} className="px-2 py-2 border-r border-borderLine align-top">
+                            {slot && !slot._spanned ? (
+                              <div className="bg-brand-soft border border-brand-primary/20 rounded-xl p-2 space-y-1 relative group h-full">
                                 <div className="text-[10px] font-black text-brand-primary truncate">{slot.subject_name}</div>
                                 <div className="text-[9px] text-textSecondary truncate">{slot.faculty_email}</div>
+                                {span > 1 && <div className="text-[9px] font-bold text-purple-600">Lab ({span} Hrs)</div>}
                                 <button onClick={async()=>{if(!window.confirm('Delete slot?'))return;await api.deleteTimetableEntry(slot.id);qc.invalidateQueries({queryKey:['attendanceTimetable']});}} className="absolute top-1 right-1 text-rose-400 hover:text-rose-600 opacity-0 group-hover:opacity-100 transition-opacity">
                                   <X className="w-3 h-3"/>
                                 </button>

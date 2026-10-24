@@ -597,7 +597,7 @@ export const FacultyAttendancePage: React.FC = () => {
                           🔵 {odCount} Student{odCount>1?'s':''} on Approved On-Duty (OD)
                         </div>
                       )}
-                      {isPosted&&<div className="text-[11px] font-bold text-amber-700 bg-amber-100 dark:bg-amber-950/40 px-3 py-1 rounded-lg border border-amber-300">Already Posted — You can edit attendance</div>}
+                      {isPosted&&<div className="text-[11px] font-bold text-amber-700 bg-amber-100 dark:bg-amber-950/40 px-3 py-1 rounded-lg border border-amber-300">✏️ Edit Mode — Attendance already posted. Changes will overwrite.</div>}
                     </div>
 
                     <div className="flex gap-2 pt-1">
@@ -674,12 +674,12 @@ export const FacultyAttendancePage: React.FC = () => {
                     </div>
                     <div className="p-4 bg-surface-2 border-t border-borderLine flex items-center justify-between flex-wrap gap-2">
                       <span className="text-xs font-bold text-textSecondary">Total: {records.length} | Present: {presentCount} {odCount>0&&`(${odCount} on OD)`} | Absentees: {absentList.length}</span>
-                      <button 
-                        onClick={()=>setShowAbsentModal(true)} 
+                      <button
+                        onClick={()=>setShowAbsentModal(true)}
                         disabled={isNonWorkingDay && !allowOverrideExtraClass}
-                        className="px-5 py-2.5 bg-[#007bff] hover:bg-blue-600 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-sm"
+                        className={`px-5 py-2.5 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-sm ${isPosted ? 'bg-amber-600 hover:bg-amber-500' : 'bg-[#007bff] hover:bg-blue-600'}`}
                       >
-                        Review & Submit Attendance ({totalActiveHours} Hr{totalActiveHours>1?'s':''})
+                        {isPosted ? `✏️ Review & Update Attendance (${totalActiveHours} Hr${totalActiveHours>1?'s':''})` : `Review & Submit Attendance (${totalActiveHours} Hr${totalActiveHours>1?'s':''})`}
                       </button>
                     </div>
                   </div>
@@ -1050,8 +1050,8 @@ export const FacultyAttendancePage: React.FC = () => {
             </div>
             <div className="flex gap-3 justify-end pt-1">
               <button onClick={()=>setShowAbsentModal(false)} className="px-4 py-2 text-xs font-bold text-textSecondary hover:bg-surface-2 rounded-xl border border-borderLine">Go Back</button>
-              <button onClick={()=>saveMutation.mutate()} disabled={saveMutation.isPending} className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-md disabled:opacity-60">
-                {saveMutation.isPending?'Saving...':'Confirm & Save Attendance'}
+              <button onClick={()=>saveMutation.mutate()} disabled={saveMutation.isPending} className={`px-5 py-2.5 font-bold text-xs rounded-xl shadow-md disabled:opacity-60 text-white ${isPosted ? 'bg-amber-600 hover:bg-amber-500' : 'bg-emerald-600 hover:bg-emerald-500'}`}>
+                {saveMutation.isPending ? 'Saving...' : isPosted ? '✏️ Update Attendance' : 'Confirm & Save Attendance'}
               </button>
             </div>
           </div>
