@@ -6699,11 +6699,25 @@ app.get('/oversight/executive-metrics', requireRole('director', 'principal', 'ma
     const hodDept = req.auth?.department;
 
     const cseAlliedDepts = ['CSE', 'CSE (AI & ML)', 'CSE (Data Science)', 'CSE (BS)', 'CSE (CS)'];
-    const allInstituteDepts = [
+    const fallbackInstituteDepts = [
       'Civil', 'EEE', 'Mechanical', 'ECE', 'CSE',
       'CSE (AI & ML)', 'CSE (Data Science)', 'CSE (BS)', 'CSE (CS)',
       'MCA', 'MBA', 'Mathematics', 'English', 'Physics', 'Chemistry', '1st Year'
     ];
+
+    // Dynamically discover all departments that actually have students OR faculty in DB
+    const [stuDeptsRes, facDeptsRes] = await Promise.all([
+      db.query(`SELECT DISTINCT department FROM students WHERE department IS NOT NULL AND department <> '' ORDER BY department`).catch(() => ({ rows: [] })),
+      db.query(`SELECT DISTINCT department FROM faculty WHERE department IS NOT NULL AND department <> '' ORDER BY department`).catch(() => ({ rows: [] })),
+    ]);
+    const dbDepts = Array.from(new Set([
+      ...stuDeptsRes.rows.map((r: any) => r.department as string),
+      ...facDeptsRes.rows.map((r: any) => r.department as string),
+    ])).sort();
+    // Merge DB depts with fallback list so we never drop known depts even if DB is empty
+    const allInstituteDepts = dbDepts.length > 0
+      ? Array.from(new Set([...dbDepts, ...fallbackInstituteDepts])).sort()
+      : fallbackInstituteDepts;
 
     let allowedDepts: string[];
     if (isHod && hodDept) {
@@ -6717,7 +6731,7 @@ app.get('/oversight/executive-metrics', requireRole('director', 'principal', 'ma
     const requestedDept = req.query.department ? String(req.query.department).trim() : 'All';
     const activeDepts = (isHod && hodDept)
       ? [hodDept]
-      : (requestedDept !== 'All' && allowedDepts.includes(requestedDept))
+      : (requestedDept !== 'All' && (allowedDepts.includes(requestedDept) || dbDepts.includes(requestedDept)))
       ? [requestedDept]
       : allowedDepts;
 
