@@ -1958,8 +1958,13 @@ app.get('/students', requireAuth, async (req: Request, res: Response) => {
     }
 
     const result = await db.query(`
-      SELECT 
-        s.*,
+      SELECT
+        s.roll_number, s.name, s.email, s.year, s.phone, s.parent_phone,
+        s.address, s.native_place, s.department, s.batch, s.section,
+        s.hostel_day_scholar, s.driving_license, s.passport,
+        s.relocation_willingness, s.family_business, s.financial_background,
+        s.faculty_mentor_id, s.photo_url, s.resume_url, s.linkedin_url,
+        s.linkedin_updated, s.is_lateral_entry, s.created_at, s.updated_at,
         COALESCE(a.cgpa, s.cgpa, 0.00) AS cgpa,
         c.leetcode_handle,
         COALESCE(c.leetcode_solved, 0) AS leetcode_solved,
