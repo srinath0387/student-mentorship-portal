@@ -31,6 +31,8 @@ import {
   GraduationCap,
   Briefcase,
   Microscope,
+  MessageSquare,
+  Download,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { StudentProfile } from '../../types';
@@ -44,10 +46,14 @@ import { TechSkillsTab } from '../profile/tabs/TechSkillsTab';
 import { CertificationsTab } from '../profile/tabs/CertificationsTab';
 import { SoftSkillsTab } from '../profile/tabs/SoftSkillsTab';
 import { AchievementsTab } from '../profile/tabs/AchievementsTab';
+import { DocumentsTab } from '../profile/tabs/DocumentsTab';
+import { MeetingLogModal } from './MeetingLogModal';
+import { generateMentorReport } from '../../utils/mentorReportGenerator';
 import { PlacementPreferencesTab } from '../profile/tabs/PlacementPreferencesTab';
 import { BulkImportModal } from '../admin/components/BulkImportModal';
 import { PlacementEligibilitySection } from '../hod/components/PlacementEligibilitySection';
 import { FacultyProfileTab } from './tabs/FacultyProfileTab';
+import MenteeScoreboard from './tabs/MenteeScoreboard';
 import { calculateFacultyProfileCompletion } from '../../lib/facultyUtils';
 import { FacultyAttendancePage } from '../attendance/faculty/FacultyAttendancePage';
 import { FacultyLeaveTab } from '../leave/FacultyLeaveTab';
@@ -77,6 +83,8 @@ export const FacultyDashboardPage: React.FC = () => {
   const [yearFilter, setYearFilter] = useState('');
   const [selectedMentee, setSelectedMentee] = useState<StudentProfile | null>(null);
   const [inspectMentee, setInspectMentee] = useState<StudentProfile | null>(null);
+  const [meetingLogMentee, setMeetingLogMentee] = useState<{ roll_number: string; name: string } | null>(null);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [inspectTab, setInspectTab] = useState('personal-info');
   const [remarkInput, setRemarkInput] = useState('');
   const [saving, setSaving] = useState(false);
@@ -235,6 +243,19 @@ export const FacultyDashboardPage: React.FC = () => {
     enabled: Boolean(inspectMentee) && Boolean(menteeId),
   });
 
+  const { data: inspectPlacement } = useQuery({
+    queryKey: ['inspectPlacement', menteeId],
+    queryFn: () => api.getPlacementProfile(menteeId),
+    enabled: Boolean(inspectMentee) && Boolean(menteeId),
+  });
+
+  const { data: inspectScore } = useQuery({
+    queryKey: ['inspectScore', menteeId],
+    queryFn: () => api.getEmployabilityScore(menteeId),
+    enabled: Boolean(inspectMentee) && Boolean(menteeId),
+    staleTime: 0,
+  });
+
   const filteredMentees = mentees.filter((m) => {
       const q = searchQuery.toLowerCase();
     const matchesSearch = !q || m.name.toLowerCase().includes(q) || m.roll_number.toLowerCase().includes(q);
@@ -242,6 +263,25 @@ export const FacultyDashboardPage: React.FC = () => {
     const matchesYear = !yearFilter || m.year === yearFilter;
     return matchesSearch && matchesSection && matchesYear;
   });
+
+  const handleDownloadMentorReport = async () => {
+    if (!user?.email || mentees.length === 0) return;
+    setIsGeneratingReport(true);
+    try {
+      await generateMentorReport({
+        facultyName: user.name || user.email || '',
+        facultyEmail: user.email || '',
+        department: user.department || '',
+        mentees: filteredMentees.length > 0 ? filteredMentees : mentees,
+        yearFilter: yearFilter || 'All',
+      });
+    } catch (err) {
+      console.error('Report generation failed:', err);
+      alert('Failed to generate report. Please try again.');
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  };
 
   // Group filtered mentees by year for collapsible sections
   const YEAR_ORDER = ['4th Year', '3rd Year', '2nd Year', '1st Year'];
@@ -958,6 +998,16 @@ export const FacultyDashboardPage: React.FC = () => {
             >
               <span>🎯 Placement Eligibility (T&P Drive)</span>
             </button>
+            <button
+              onClick={() => setSearchParams({ tab: 'scoreboard' })}
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold border-b-2 whitespace-nowrap transition-all rounded-t-lg ${
+                activeTab === 'scoreboard'
+                  ? 'border-amber-500 text-amber-600 bg-amber-500/10'
+                  : 'border-transparent text-textSecondary hover:text-textPrimary hover:bg-surface-2'
+              }`}
+            >
+              <span>🏆 Mentee Scoreboard</span>
+            </button>
             {inchargeSections.length > 0 && (
               <button
                 onClick={() => setSearchParams({ tab: 'incharge' })}
@@ -1283,6 +1333,29 @@ export const FacultyDashboardPage: React.FC = () => {
                 <option value="B">Section B</option>
                 <option value="C">Section C</option>
               </select>
+
+              {/* ── Download Mentor Report for HOD Meeting ── */}
+              <button
+                onClick={handleDownloadMentorReport}
+                disabled={isGeneratingReport || mentees.length === 0}
+                title="Download Excel report of your mentees for HOD review meeting"
+                className="flex items-center gap-2 px-4 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isGeneratingReport ? (
+                  <>
+                    <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                    </svg>
+                    Generating Report…
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-3.5 h-3.5" />
+                    📥 Mentor Report (.xlsx)
+                  </>
+                )}
+              </button>
             </div>
           </div>
 
@@ -1415,6 +1488,13 @@ export const FacultyDashboardPage: React.FC = () => {
                                       <Eye className="w-4 h-4" />
                                     </button>
                                     <button
+                                      onClick={() => setMeetingLogMentee({ roll_number: mentee.roll_number, name: mentee.name })}
+                                      className="p-1.5 rounded-lg border border-borderLine text-purple-500 hover:bg-purple-500/10"
+                                      title="Log Mentoring Meeting"
+                                    >
+                                      <MessageSquare className="w-4 h-4" />
+                                    </button>
+                                    <button
                                       onClick={() => { setSelectedMentee(mentee); setRemarkInput(''); }}
                                       className="p-1.5 rounded-lg border border-borderLine text-textPrimary hover:bg-background"
                                       title="Add Faculty Remarks"
@@ -1521,7 +1601,7 @@ export const FacultyDashboardPage: React.FC = () => {
 
             {/* Inspect Tabs Selector */}
             <div className="flex space-x-2 border-b border-borderLine pb-px mb-6 overflow-x-auto text-xs font-semibold">
-              {['personal-info', 'academics', 'coding-profiles', 'tech-skills', 'certifications', 'soft-skills', 'achievements', 'placement-preferences'].map((t) => (
+              {['personal-info', 'academics', 'coding-profiles', 'tech-skills', 'certifications', 'soft-skills', 'achievements', 'placement-preferences', 'documents'].map((t) => (
                 <button
                   key={t}
                   onClick={() => setInspectTab(t)}
@@ -1529,7 +1609,7 @@ export const FacultyDashboardPage: React.FC = () => {
                     inspectTab === t ? 'bg-brand-soft text-brand-primary font-bold border-b-2 border-brand-primary' : 'text-textSecondary hover:text-textPrimary'
                   }`}
                 >
-                  {t === 'placement-preferences' ? 'Academic Goals' : t.replace('-', ' ')}
+                  {t === 'placement-preferences' ? 'Academic Goals' : t === 'documents' ? '📁 Documents' : t.replace('-', ' ')}
                 </button>
               ))}
             </div>
@@ -1551,7 +1631,8 @@ export const FacultyDashboardPage: React.FC = () => {
               {inspectTab === 'certifications' && <CertificationsTab readOnly={true} certifications={inspectCerts} onRefresh={refetch} />}
               {inspectTab === 'soft-skills' && <SoftSkillsTab readOnly={true} softSkills={inspectSoft} onRefresh={refetch} />}
               {inspectTab === 'achievements' && <AchievementsTab readOnly={true} achievements={inspectAchievements} onRefresh={refetch} />}
-              {inspectTab === 'placement-preferences' && <PlacementPreferencesTab readOnly={true} placement={null} scoreData={null} onRefresh={refetch} />}
+              {inspectTab === 'placement-preferences' && <PlacementPreferencesTab readOnly={true} placement={inspectPlacement} scoreData={inspectScore} onRefresh={refetch} />}
+              {inspectTab === 'documents' && <DocumentsTab rollNumber={inspectMentee.roll_number} readOnly={true} isAdminView={false} />}
             </div>
           </div>
         </div>
@@ -1561,12 +1642,26 @@ export const FacultyDashboardPage: React.FC = () => {
         <PlacementEligibilitySection students={mentees} />
       )}
 
+      {activeTab === 'scoreboard' && (
+        <MenteeScoreboard />
+      )}
+
       {/* Bulk Import Modal */}
       <BulkImportModal
         isOpen={showBulkImportModal}
         onClose={() => setShowBulkImportModal(false)}
         onSuccess={refetch}
       />
+
+      {/* Meeting Log Modal */}
+      {meetingLogMentee && (
+        <MeetingLogModal
+          rollNumber={meetingLogMentee.roll_number}
+          studentName={meetingLogMentee.name}
+          facultyEmail={user?.email || ''}
+          onClose={() => setMeetingLogMentee(null)}
+        />
+      )}
 
       {/* Manual photo upload modal triggered via camera button */}
       <ProfilePhotoUploadModal

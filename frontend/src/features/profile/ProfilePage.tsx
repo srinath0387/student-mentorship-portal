@@ -13,6 +13,7 @@ import {
   Target,
   Camera,
   CalendarCheck,
+  FolderOpen,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../lib/api';
@@ -26,6 +27,9 @@ import { AchievementsTab } from './tabs/AchievementsTab';
 import { PlacementPreferencesTab } from './tabs/PlacementPreferencesTab';
 import { StudentAttendanceView } from '../attendance/student/StudentAttendanceView';
 import { StudentPermissionTab } from '../leave/StudentPermissionTab';
+import { DocumentsTab } from './tabs/DocumentsTab';
+import { PlacementTrackerSection } from '../placement/PlacementTrackerSection';
+import { MeetingLogsView } from '../../components/MeetingLogsView';
 
 export const ProfilePage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -61,42 +65,21 @@ export const ProfilePage: React.FC = () => {
     setSearchParams(params);
   };
 
-  // Unified profile fetch — 9 API calls → 1.
-  // All sub-resources (student, academics, codingProfiles, etc.) load in a single round-trip.
-  // staleTime: 5 min prevents re-fetching on tab switches; manual refresh via handleRefreshAll.
-  const PROFILE_STALE = 5 * 60 * 1000;
-  const PROFILE_OPTS = { staleTime: PROFILE_STALE, refetchOnWindowFocus: false, gcTime: 10 * 60 * 1000 } as const;
-
-  const {
-    data: fullProfile,
-    refetch: refetchAll,
-    isLoading: isStudentLoading,
-  } = useQuery({
-    queryKey: ['studentFullProfile', activeRollNo],
-    queryFn: () => api.getStudentFullProfile(activeRollNo),
-    enabled: Boolean(activeRollNo),
-    ...PROFILE_OPTS,
-  });
-
-  // Destructure all sub-resources from the single response
-  const student        = fullProfile?.student;
-  const academics      = fullProfile?.academics      ?? [];
-  const codingProfiles = fullProfile?.codingProfiles ?? [];
-  const techSkills     = fullProfile?.techSkills     ?? [];
-  const certifications = fullProfile?.certifications ?? [];
-  const softSkills     = fullProfile?.softSkills     ?? [];
-  const achievements   = fullProfile?.achievements   ?? [];
-  const placement      = fullProfile?.placement      ?? undefined;
-
-  // Employability score is compute-heavy — kept as a separate lazy query.
-  // Only fetched when the 'Academic Growth Target' tab is active.
-  const { data: scoreData, refetch: refetchScore } = useQuery({
-    queryKey: ['employabilityScore', activeRollNo],
-    queryFn: () => api.getEmployabilityScore(activeRollNo),
-    enabled: Boolean(activeRollNo) && currentTab === 'placement-preferences',
-    staleTime: PROFILE_STALE,
-    refetchOnWindowFocus: false,
-    gcTime: 10 * 60 * 1000,
+  // Queries for profile sections — all keyed by activeRollNo so switching students busts cache
+  const { data: student, refetch: refetchStudent, isLoading: isStudentLoading } = useQuery({ queryKey: ['studentProfile', activeRollNo], queryFn: () => api.getStudentProfile(activeRollNo), enabled: Boolean(activeRollNo) });
+  const { data: academics = [], refetch: refetchAcademics } = useQuery({ queryKey: ['academics', activeRollNo], queryFn: () => api.getAcademics(activeRollNo), enabled: Boolean(activeRollNo) });
+  const { data: codingProfiles = [], refetch: refetchCoding } = useQuery({ queryKey: ['codingProfiles', activeRollNo], queryFn: () => api.getCodingProfiles(activeRollNo), enabled: Boolean(activeRollNo) });
+  const { data: techSkills = [], refetch: refetchSkills } = useQuery({ queryKey: ['techSkills', activeRollNo], queryFn: () => api.getTechSkills(activeRollNo), enabled: Boolean(activeRollNo) });
+  const { data: certifications = [], refetch: refetchCerts } = useQuery({ queryKey: ['certifications', activeRollNo], queryFn: () => api.getCertifications(activeRollNo), enabled: Boolean(activeRollNo) });
+  const { data: softSkills = [], refetch: refetchSoft } = useQuery({ queryKey: ['softSkills', activeRollNo], queryFn: () => api.getSoftSkills(activeRollNo), enabled: Boolean(activeRollNo) });
+  const { data: achievements = [], refetch: refetchAchievements } = useQuery({ queryKey: ['achievements', activeRollNo], queryFn: () => api.getAchievements(activeRollNo), enabled: Boolean(activeRollNo) });
+  const { data: placement, refetch: refetchPlacement } = useQuery({ queryKey: ['placementProfile', activeRollNo], queryFn: () => api.getPlacementProfile(activeRollNo), enabled: Boolean(activeRollNo) });
+  const { data: scoreData, refetch: refetchScore } = useQuery({ queryKey: ['employabilityScore', activeRollNo], queryFn: () => api.getEmployabilityScore(activeRollNo), enabled: Boolean(activeRollNo), staleTime: 0, refetchOnMount: 'always' });
+  const { data: meetingLogs = [], isLoading: meetingsLoading } = useQuery({
+    queryKey: ['myMeetingLogs', activeRollNo],
+    queryFn: () => api.getMentorMeetings({ student_id: activeRollNo }),
+    enabled: Boolean(activeRollNo) && currentTab === 'meetings',
+    staleTime: 0,
   });
 
   // Guard: no roll number at all (admin/HOD on /profile with no ?id= param)
@@ -119,15 +102,15 @@ export const ProfilePage: React.FC = () => {
 
 
   const handleRefreshAll = () => {
-    // Re-fetch the unified profile (all sub-resources in one call)
-    refetchAll();
-    // Also refresh the employability score if we're on that tab
-    if (currentTab === 'placement-preferences') {
-      refetchScore();
-    }
-    // Invalidate all related query cache keys so any open sub-components also refresh
-    queryClient.invalidateQueries({ queryKey: ['studentFullProfile', activeRollNo] });
-    queryClient.invalidateQueries({ queryKey: ['employabilityScore', activeRollNo] });
+    refetchStudent();
+    refetchAcademics();
+    refetchCoding();
+    refetchSkills();
+    refetchCerts();
+    refetchSoft();
+    refetchAchievements();
+    refetchPlacement();
+    refetchScore();
   };
 
   const tabs = [
@@ -141,6 +124,9 @@ export const ProfilePage: React.FC = () => {
     { slug: 'soft-skills', label: 'Soft Skills & Extracurriculars', icon: Zap },
     { slug: 'achievements', label: 'Achievements', icon: Award },
     { slug: 'placement-preferences', label: 'Academic Growth Target', icon: Target },
+    { slug: 'my-placement', label: '🎓 My Placement', icon: Target },
+    { slug: 'documents', label: 'Documents', icon: FolderOpen },
+    { slug: 'meetings', label: '📋 Meeting Logs', icon: FolderOpen },
   ];
 
   const displayName = student?.name || user?.name || 'Student Profile';
@@ -246,11 +232,12 @@ export const ProfilePage: React.FC = () => {
               <div className="shrink-0 flex items-center gap-3 bg-surface-2 border border-borderLine rounded-2xl px-4 py-3 self-end">
                 <div className="text-center">
                   <div className="text-2xl font-extrabold text-brand-primary leading-none">{scoreData.overallScore}</div>
-                  <div className="text-[10px] text-textMuted font-semibold mt-0.5 uppercase tracking-widest">Score</div>
+                  <div className="text-[10px] text-textMuted font-semibold mt-0.5 uppercase tracking-widest">/ 1000 XP</div>
                 </div>
                 <div className="w-px h-8 bg-borderLine" />
                 <div className="text-center">
-                  <div className="text-xs font-bold text-textPrimary leading-snug">Employability<br />Index</div>
+                  {scoreData.badge && <div className="text-lg">{scoreData.badge}</div>}
+                  <div className="text-xs font-bold text-textPrimary leading-snug">{scoreData.levelTitle || 'RPG Score'}</div>
                 </div>
               </div>
             )}
@@ -287,11 +274,32 @@ export const ProfilePage: React.FC = () => {
           {currentTab === 'permissions' && <StudentPermissionTab rollNumber={activeRollNo} />}
           {currentTab === 'academics' && <AcademicsTab academics={academics} studentYear={student?.year} onRefresh={handleRefreshAll} readOnly={isReadOnly} />}
           {currentTab === 'tech-skills' && <TechSkillsTab skills={techSkills} onRefresh={handleRefreshAll} readOnly={isReadOnly} />}
-          {currentTab === 'certifications' && <CertificationsTab certifications={certifications} onRefresh={handleRefreshAll} readOnly={isReadOnly} />}
+          {currentTab === 'certifications' && <CertificationsTab certifications={certifications} onRefresh={handleRefreshAll} readOnly={isReadOnly} isAdminView={isViewingOther && user?.role === 'admin'} studentRollNo={activeRollNo} />}
           {currentTab === 'soft-skills' && <SoftSkillsTab softSkills={softSkills} onRefresh={handleRefreshAll} readOnly={isReadOnly} />}
           {currentTab === 'achievements' && <AchievementsTab achievements={achievements} onRefresh={handleRefreshAll} readOnly={isReadOnly} />}
           {currentTab === 'placement-preferences' && (
             <PlacementPreferencesTab placement={placement} scoreData={scoreData} onRefresh={handleRefreshAll} />
+          )}
+          {currentTab === 'my-placement' && !isReadOnly && (
+            <PlacementTrackerSection
+              isStudentView
+              studentRollNumber={activeRollNo}
+            />
+          )}
+          {currentTab === 'documents' && (
+            <DocumentsTab rollNumber={activeRollNo} readOnly={isReadOnly} isAdminView={isViewingOther && (user?.role === 'admin' || user?.role === 'hod')} />
+          )}
+          {currentTab === 'meetings' && (
+            <div className="space-y-4">
+              <h3 className="text-base font-semibold text-textPrimary flex items-center gap-2">
+                📋 Mentor Meeting Logs
+              </h3>
+              <MeetingLogsView
+                logs={meetingLogs}
+                isLoading={meetingsLoading}
+                emptyMessage="No mentor meetings recorded yet. Your mentor will log meetings here after your mentoring sessions."
+              />
+            </div>
           )}
         </div>
       </div>

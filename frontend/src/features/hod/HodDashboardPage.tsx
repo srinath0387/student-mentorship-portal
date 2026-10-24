@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { PlacementEligibilitySection } from './components/PlacementEligibilitySection';
 import { BulkImportModal } from '../admin/components/BulkImportModal';
+import DeptScoreboard from './tabs/DeptScoreboard';
 import {
   ResponsiveContainer,
   LineChart,
@@ -29,6 +30,7 @@ import {
   Legend,
 } from 'recharts';
 import { api } from '../../lib/api';
+import * as XLSX from 'xlsx';
 import type { AcademicRecord, TechSkill, Certification, SoftSkill, Achievement, PlacementProfile } from '../../types';
 import { StatCard } from '../../components/common/StatCard';
 import { PersonalInfoTab } from '../profile/tabs/PersonalInfoTab';
@@ -37,11 +39,15 @@ import { TechSkillsTab } from '../profile/tabs/TechSkillsTab';
 import { CertificationsTab } from '../profile/tabs/CertificationsTab';
 import { SoftSkillsTab } from '../profile/tabs/SoftSkillsTab';
 import { AchievementsTab } from '../profile/tabs/AchievementsTab';
+import { DocumentsTab } from '../profile/tabs/DocumentsTab';
 import { PlacementPreferencesTab } from '../profile/tabs/PlacementPreferencesTab';
 import { HodAttendancePage } from '../attendance/hod/HodAttendancePage';
 import { HodLeaveApprovalTab } from '../leave/HodLeaveApprovalTab';
 import { HolidayCalendarTab } from '../admin/tabs/HolidayCalendarTab';
 import { CertificationAnalyticsView } from '../certifications/components/CertificationAnalyticsView';
+import { MentoringComplianceTab } from './tabs/MentoringComplianceTab';
+import { PlacementTrackerSection } from '../placement/PlacementTrackerSection';
+import { BroadcastNoticePanel } from './BroadcastNoticePanel';
 import { HodPowerBiView } from './components/HodPowerBiView';
 import { UnregisteredStudentsTab } from '../admin/tabs/UnregisteredStudentsTab';
 
@@ -121,7 +127,7 @@ function mapStudentToHodEntry(student: any, index: number, liveSolved?: number):
 }
 
 export const HodDashboardPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'unregistered' | 'certifications' | 'leaves' | 'holidays' | 'attendance' | 'analytics' | 'students' | 'rankings' | 'placement' | 'mentees' | 'settings' | 'powerbi'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'unregistered' | 'certifications' | 'leaves' | 'holidays' | 'attendance' | 'analytics' | 'students' | 'rankings' | 'placement' | 'mentees' | 'settings' | 'powerbi' | 'mentoring' | 'placement-tracker'>('overview');
   const [hodAttendanceSubTab, setHodAttendanceSubTab] = useState<'grid' | 'unposted' | 'tracking' | 'allotments'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -172,6 +178,7 @@ export const HodDashboardPage: React.FC = () => {
   const [inspectStudentSoftSkills, setInspectStudentSoftSkills] = useState<SoftSkill[]>([]);
   const [inspectStudentAchievements, setInspectStudentAchievements] = useState<Achievement[]>([]);
   const [inspectStudentPlacement, setInspectStudentPlacement] = useState<PlacementProfile | null>(null);
+  const [inspectStudentScore, setInspectStudentScore] = useState<any>(null);
 
   // Analytics Tab — real semester-wise CGPA progression per selected year batch
   const [progressionYear, setProgressionYear] = useState('3rd Year');
@@ -183,7 +190,7 @@ export const HodDashboardPage: React.FC = () => {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const tab = params.get('tab');
-    if (tab === 'overview' || tab === 'unregistered' || tab === 'certifications' || tab === 'leaves' || tab === 'holidays' || tab === 'attendance' || tab === 'analytics' || tab === 'students' || tab === 'rankings' || tab === 'placement' || tab === 'mentees' || tab === 'settings' || tab === 'powerbi') {
+    if (tab === 'overview' || tab === 'unregistered' || tab === 'certifications' || tab === 'leaves' || tab === 'holidays' || tab === 'attendance' || tab === 'analytics' || tab === 'students' || tab === 'rankings' || tab === 'placement' || tab === 'mentees' || tab === 'settings' || tab === 'powerbi' || tab === 'mentoring' || tab === 'placement-tracker') {
       setActiveTab(tab as any);
     }
   }, [location.search]);
@@ -216,6 +223,7 @@ export const HodDashboardPage: React.FC = () => {
       setInspectStudentSoftSkills([]);
       setInspectStudentAchievements([]);
       setInspectStudentPlacement(null);
+      setInspectStudentScore(null);
       return;
     }
     let cancelled = false;
@@ -230,7 +238,8 @@ export const HodDashboardPage: React.FC = () => {
       api.getSoftSkills(regNo),
       api.getAchievements(regNo),
       api.getPlacementProfile(regNo),
-    ]).then(([profileRes, academicsRes, techRes, certsRes, softRes, achRes, placementRes]) => {
+      api.getEmployabilityScore(regNo),
+    ]).then(([profileRes, academicsRes, techRes, certsRes, softRes, achRes, placementRes, scoreRes]) => {
       if (cancelled) return;
       setInspectStudentFullProfile(profileRes.status === 'fulfilled' ? profileRes.value : null);
       setInspectStudentAcademics(academicsRes.status === 'fulfilled' ? academicsRes.value : []);
@@ -239,6 +248,7 @@ export const HodDashboardPage: React.FC = () => {
       setInspectStudentSoftSkills(softRes.status === 'fulfilled' ? softRes.value : []);
       setInspectStudentAchievements(achRes.status === 'fulfilled' ? achRes.value : []);
       setInspectStudentPlacement(placementRes.status === 'fulfilled' ? placementRes.value : null);
+      setInspectStudentScore(scoreRes.status === 'fulfilled' ? scoreRes.value : null);
       setInspectProfileLoading(false);
     });
 
@@ -561,29 +571,36 @@ export const HodDashboardPage: React.FC = () => {
   }, [inspectStudent, studentGraphData]);
 
   const exportAnalyticsReport = () => {
-    const headers = ['Rank', 'Name', 'Reg Number', 'Department', 'Year', 'Section', 'CGPA', 'LeetCode Solved', 'GitHub Repos', 'Standing', 'Placement Status'];
-    const rows = filteredDataset.map((p) => [
-      p.rank,
-      `"${p.name}"`,
-      p.regNo,
-      user?.department || 'CSE (Data Science)',
-      p.year,
-      p.section,
-      p.cgpa,
-      p.leetcode,
-      p.github,
-      p.standing,
-      `"${p.placementStatus}"`,
-    ]);
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `HOD_Department_Report_${Date.now()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
+    const wsData = [
+      ['Rank', 'Name', 'Reg Number', 'Department', 'Year', 'Section', 'CGPA', 'LeetCode Solved', 'GitHub Repos', 'Standing', 'Placement Status'],
+      ...filteredDataset.map((p: any) => [
+        p.rank, p.name, p.regNo, user?.department || '',
+        p.year, p.section, p.cgpa, p.leetcode, p.github, p.standing, p.placementStatus,
+      ]),
+    ];
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    const colWidths = wsData[0].map((_: any, ci: number) =>
+      Math.max(...wsData.map((row: any) => String(row[ci] ?? '').length + 2))
+    );
+    ws['!cols'] = colWidths.map((w: number) => ({ wch: Math.min(w, 40) }));
+    XLSX.utils.book_append_sheet(wb, ws, 'Department Report');
+    const dept = user?.department || 'All';
+    const summaryData = [
+      ['Department Report Summary', ''],
+      ['Department', dept],
+      ['Generated At', new Date().toLocaleString('en-IN')],
+      ['Total Students', filteredDataset.length],
+      ['Avg CGPA', filteredDataset.length > 0
+        ? (filteredDataset.reduce((s: number, p: any) => s + Number(p.cgpa || 0), 0) / filteredDataset.length).toFixed(2)
+        : '—'],
+    ];
+    const ws2 = XLSX.utils.aoa_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(wb, ws2, 'Summary');
+    const safeDept = dept.replace(/[^a-zA-Z0-9]/g, '_');
+    const dateStr = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `HOD_Department_Report_${safeDept}_${dateStr}.xlsx`);
+  }
 
   return (
     <div className="space-y-6">
@@ -604,6 +621,8 @@ export const HodDashboardPage: React.FC = () => {
               { key: 'unregistered', label: '⚠️ Unregistered Students' },
               { key: 'rankings', label: '🏆 Department Leaderboard' },
               { key: 'mentees', label: `👤 My Mentees${hodMentees.length > 0 ? ` (${hodMentees.length})` : ''}` },
+              { key: 'mentoring', label: '🤝 Mentoring Compliance' },
+              { key: 'placement-tracker', label: '🎓 Placement Tracker' },
               { key: 'settings', label: '⚙️ Account Settings' },
             ].map((t) => (
               <button
@@ -699,7 +718,7 @@ export const HodDashboardPage: React.FC = () => {
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-brand-primary text-white text-xs font-bold shadow-sm hover:bg-brand-primary/90 transition-all"
               >
                 <Download className="w-4 h-4" />
-                <span>Export Department Report (CSV)</span>
+                <span>Export Department Report (.xlsx)</span>
               </button>
             </div>
           </div>
@@ -1287,84 +1306,9 @@ export const HodDashboardPage: React.FC = () => {
       </div>
       )}
 
-      {/* ── TAB 4: Department Leaderboard ── */}
+      {/* ── TAB 4: Department Scoreboard (RPG) ── */}
       {activeTab === 'rankings' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* CGPA Leaderboard */}
-          <div className="bg-surface border border-borderLine rounded-2xl p-6 shadow-sm space-y-4">
-            <div className="flex items-center gap-2">
-              <Trophy className="w-5 h-5 text-amber-500" />
-              <h3 className="text-base font-bold text-textPrimary">Top Academic Performers (CGPA)</h3>
-            </div>
-            <div className="space-y-3">
-              {filteredDataset.filter((s) => s.cgpa > 0).length === 0 ? (
-                <div className="p-4 text-center text-xs text-textSecondary bg-background rounded-xl border border-borderLine">
-                  No academic CGPA records published yet.
-                </div>
-              ) : (
-                [...filteredDataset]
-                  .filter((s) => s.cgpa > 0)
-                  .sort((a, b) => b.cgpa - a.cgpa)
-                  .slice(0, 5)
-                  .map((s, idx) => (
-                    <div key={s.regNo} className="p-3.5 rounded-xl bg-background border border-borderLine flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded-full font-black text-xs flex items-center justify-center ${
-                          idx === 0 ? 'bg-amber-100 text-amber-700' : idx === 1 ? 'bg-borderLine text-textSecondary' : 'bg-orange-100 text-orange-700'
-                        }`}>
-                          #{idx + 1}
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold text-textPrimary">{s.name}</p>
-                          <p className="text-[11px] text-textSecondary">{s.regNo} • {s.year}</p>
-                        </div>
-                      </div>
-                      <span className="text-sm font-black text-brand-primary">{s.cgpa} CGPA</span>
-                    </div>
-                  ))
-              )}
-            </div>
-          </div>
-
-          {/* Coding Leaderboard */}
-          <div className="bg-surface border border-borderLine rounded-2xl p-6 shadow-sm space-y-4">
-            <div className="flex items-center gap-2">
-              <Code2 className="w-5 h-5 text-[#FFA116]" />
-              <h3 className="text-base font-bold text-textPrimary">Top Coding Rankers (LeetCode)</h3>
-            </div>
-            <div className="space-y-3">
-              {[...filteredDataset]
-                .sort((a, b) => {
-                  if (a.isLcLinked && !b.isLcLinked) return -1;
-                  if (!a.isLcLinked && b.isLcLinked) return 1;
-                  return b.leetcode - a.leetcode;
-                })
-                .slice(0, 5)
-                .map((s, idx) => (
-                  <div key={s.regNo} className="p-3.5 rounded-xl bg-background border border-borderLine flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-full font-black text-xs flex items-center justify-center ${
-                        idx === 0 && s.isLcLinked ? 'bg-amber-100 text-amber-700' : 'bg-brand-soft text-brand-primary'
-                      }`}>
-                        #{idx + 1}
-                      </div>
-                      <div>
-                        <p className="text-xs font-bold text-textPrimary">{s.name}</p>
-                        <p className="text-[11px] text-textSecondary">{s.regNo} • {s.section}</p>
-                      </div>
-                    </div>
-                    {s.isLcLinked ? (
-                      <span className="text-sm font-black text-[#FFA116]">{s.leetcode} Solved</span>
-                    ) : (
-                      <span className="text-xs font-semibold text-textSecondary bg-surface border border-borderLine px-2.5 py-1 rounded-lg">
-                        Not Linked
-                      </span>
-                    )}
-                  </div>
-                ))}
-            </div>
-          </div>
-        </div>
+        <DeptScoreboard />
       )}
 
       {/* ── TAB: Placement Eligibility Engine (T&P Drive) ── */}
@@ -1635,6 +1579,7 @@ export const HodDashboardPage: React.FC = () => {
                 { key: 'soft-skills', label: 'Soft Skills' },
                 { key: 'achievements', label: 'Achievements' },
                 { key: 'academic-goals', label: 'Placement Goals' },
+                { key: 'documents', label: '📁 Documents' },
               ].map((t) => (
                 <button
                   key={t.key}
@@ -1739,7 +1684,8 @@ export const HodDashboardPage: React.FC = () => {
               {inspectTab === 'certifications' && <CertificationsTab readOnly={true} certifications={inspectStudentCerts} onRefresh={() => {}} />}
               {inspectTab === 'soft-skills' && <SoftSkillsTab readOnly={true} softSkills={inspectStudentSoftSkills} onRefresh={() => {}} />}
               {inspectTab === 'achievements' && <AchievementsTab readOnly={true} achievements={inspectStudentAchievements} onRefresh={() => {}} />}
-              {inspectTab === 'academic-goals' && <PlacementPreferencesTab readOnly={true} placement={inspectStudentPlacement} scoreData={null} onRefresh={() => {}} />}
+              {inspectTab === 'academic-goals' && <PlacementPreferencesTab readOnly={true} placement={inspectStudentPlacement} scoreData={inspectStudentScore} onRefresh={() => {}} />}
+              {inspectTab === 'documents' && <DocumentsTab rollNumber={inspectStudent.regNo} readOnly={true} isAdminView={true} />}
             </div>
           </div>
         </div>
@@ -1750,6 +1696,23 @@ export const HodDashboardPage: React.FC = () => {
         onClose={() => setShowBulkImportModal(false)}
         onSuccess={refetch}
       />
+
+
+
+      {/* ── TAB: Mentoring Compliance ── */}
+      {activeTab === 'mentoring' && (
+        <div className="bg-[#0f0f1a] border border-white/10 rounded-2xl p-6 shadow-sm space-y-6">
+          <MentoringComplianceTab department={user?.department} />
+          <BroadcastNoticePanel department={user?.department} />
+        </div>
+      )}
+
+      {/* ── TAB: Placement Tracker ── */}
+      {activeTab === 'placement-tracker' && (
+        <div className="bg-[#0f0f1a] border border-white/10 rounded-2xl p-6 shadow-sm">
+          <PlacementTrackerSection isHodView department={user?.department} />
+        </div>
+      )}
 
       {/* ── TAB: Account Settings ── */}
       {activeTab === 'settings' && (

@@ -128,19 +128,29 @@ export const AttendanceSetupPage: React.FC = () => {
 
   const handleDeleteAllotment = async (id:string) => {
     if(!window.confirm('Remove this allotment?')) return;
-    await api.deleteAllotment(id);
-    qc.invalidateQueries({queryKey:['attendanceAllotments']});
+    try {
+      await api.deleteAllotment(id);
+      qc.invalidateQueries({queryKey:['attendanceAllotments']});
+      setAllotStatus({type:'success',message:'Allotment removed.'});
+    } catch(err:any) { setAllotStatus({type:'error',message:err.message||'Failed to delete allotment.'}); }
   };
 
   const handleBulkAllotUpload = (e:React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if(!file) return;
     const reader = new FileReader();
     reader.onload = async (evt) => {
-      const wb = XLSX.read(evt.target?.result,{type:'binary'});
-      const rows:any[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-      await api.uploadAllotments(allotSem, rows.map(r=>({ subject_name:r['Subject Name']||r['subject_name']||'', subject_type:(r['Subject Type']||'Theory').toLowerCase().includes('lab')?'Lab':'Theory', faculty_email:r['Faculty Email']||r['faculty_email']||'', faculty_name:r['Faculty Name']||r['faculty_name']||'', section:r['Section']||allotSection, department:allotDept })));
-      qc.invalidateQueries({queryKey:['attendanceAllotments']});
-      setAllotStatus({type:'success',message:`${rows.length} allotments imported.`});
+      try {
+        const wb = XLSX.read(evt.target?.result,{type:'binary'});
+        const rows:any[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+        if(rows.length===0){setAllotStatus({type:'error',message:'No rows found in the uploaded file.'});return;}
+        const result = await api.uploadAllotments(allotSem, rows.map(r=>({ subject_name:r['Subject Name']||r['subject_name']||'', subject_type:(r['Subject Type']||'Theory').toLowerCase().includes('lab')?'Lab':'Theory', faculty_email:r['Faculty Email']||r['faculty_email']||'', faculty_name:r['Faculty Name']||r['faculty_name']||'', section:r['Section']||allotSection, department:allotDept })));
+        qc.invalidateQueries({queryKey:['attendanceAllotments']});
+        // BUG-14 fix: show real imported/error counts from backend response
+        const imported = result?.importedCount ?? result?.addedCount ?? rows.length;
+        const errCount = result?.errorsCount ?? 0;
+        setAllotStatus({type:errCount>0?'error':'success',message:`${imported} allotments imported${errCount>0?`, ${errCount} failed — check console for details`:'.'}` });
+        if(errCount>0 && result?.errors) console.warn('[Allotment Upload Errors]', result.errors);
+      } catch(err:any){setAllotStatus({type:'error',message:err.message||'Bulk upload failed.'});}
     };
     reader.readAsBinaryString(file);
   };
@@ -170,11 +180,18 @@ export const AttendanceSetupPage: React.FC = () => {
     const file = e.target.files?.[0]; if(!file||!rosterAllotId) return;
     const reader = new FileReader();
     reader.onload = async (evt) => {
-      const wb = XLSX.read(evt.target?.result,{type:'binary'});
-      const rows:any[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-      await api.uploadRoster(rosterAllotId, rows.map(r=>({ roll_number:String(r['Roll Number']||r['roll_number']||r['Roll No']||'').trim().toUpperCase(), student_name:r['Student Name']||r['student_name']||'', joining_date:r['Joining Date']||undefined })));
-      qc.invalidateQueries({queryKey:['attendanceRoster']});
-      setRosterStatus({type:'success',message:`${rows.length} students enrolled.`});
+      try {
+        const wb = XLSX.read(evt.target?.result,{type:'binary'});
+        const rows:any[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+        if(rows.length===0){setRosterStatus({type:'error',message:'No rows found in the uploaded file.'});return;}
+        const result = await api.uploadRoster(rosterAllotId, rows.map(r=>({ roll_number:String(r['Roll Number']||r['roll_number']||r['Roll No']||'').trim().toUpperCase(), student_name:r['Student Name']||r['student_name']||'', joining_date:r['Joining Date']||undefined })));
+        qc.invalidateQueries({queryKey:['attendanceRoster']});
+        // BUG-14 fix: show real added/error counts from backend response
+        const added = result?.addedCount ?? rows.length;
+        const errCount = result?.errorsCount ?? 0;
+        setRosterStatus({type:errCount>0?'error':'success',message:`${added} students enrolled${errCount>0?`, ${errCount} failed — check console for details`:'.'}` });
+        if(errCount>0 && result?.errors) console.warn('[Roster Upload Errors]', result.errors);
+      } catch(err:any){setRosterStatus({type:'error',message:err.message||'Bulk roster upload failed.'});}
     };
     reader.readAsBinaryString(file);
   };
@@ -191,13 +208,29 @@ export const AttendanceSetupPage: React.FC = () => {
   const [ttRoom, setTtRoom] = useState('');
   const [ttStatus, setTtStatus] = useState<{type:string;message:string}|null>(null);
 
+  // BUG-11 fix: use a separate allotments query keyed on ttSem/ttDept (independent of Tab 2 state)
+  const {data:rawTtAllotments=[]} = useQuery({ queryKey:['ttAllotments',ttSem,ttDept], queryFn:()=>api.getAllotments(ttSem||undefined,ttDept||undefined).catch(()=>[]) });
+  const ttAllotments = Array.isArray(rawTtAllotments)?rawTtAllotments:[];
+
   const {data:rawTT=[]} = useQuery({ queryKey:['attendanceTimetable',ttSem,ttDept,ttSection], queryFn:()=>api.getTimetable({semester:ttSem||undefined,department:ttDept||undefined,section:ttSection||undefined}).catch(()=>[]) });
   const timetable = Array.isArray(rawTT)?rawTT:[];
 
   const ttGrid = useMemo(()=>{
     const grid:Record<string,Record<number,any>> = {};
     DAYS.forEach(d=>{ grid[d]={}; PERIODS.forEach(p=>{ grid[d][p]=null; }); });
-    timetable.filter((t:any)=>(!ttSem||t.semester_label===ttSem)&&(!ttSection||t.section===ttSection)).forEach((t:any)=>{ if(grid[t.day_of_week]) grid[t.day_of_week][t.period_start]=t; });
+    timetable
+      .filter((t:any)=>(!ttSem||t.semester_label===ttSem)&&(!ttSection||t.section===ttSection))
+      .forEach((t:any)=>{
+        if(!grid[t.day_of_week]) return;
+        const span = Math.max(1, parseInt(t.num_periods||1));
+        // Store slot at period_start with its span
+        grid[t.day_of_week][t.period_start] = { ...t, _span: span };
+        // Mark subsequent spanned cells so renderer skips them
+        for(let s=1; s<span; s++){
+          const p = t.period_start + s;
+          if(p<=7) grid[t.day_of_week][p] = { _spanned: true };
+        }
+      });
     return grid;
   },[timetable,ttSem,ttSection]);
 
@@ -329,7 +362,8 @@ export const AttendanceSetupPage: React.FC = () => {
               </select>
               <select value={allotFaculty} onChange={e=>setAllotFaculty(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none" required>
                 <option value="">Select Faculty *</option>
-                {facultyList.map((f:any)=><option key={f.email} value={f.email}>{f.name||f.email}</option>)}
+                {/* BUG-01 fix: show all departments' faculty with dept label */}
+                {facultyList.map((f:any)=><option key={f.email} value={f.email}>{f.name||f.email} {f.department ? `(${f.department})` : ''}</option>)}
               </select>
               <button type="submit" className="px-4 py-2 bg-brand-primary text-white font-bold text-xs rounded-xl hover:opacity-90">Allot</button>
             </div>
@@ -389,10 +423,27 @@ export const AttendanceSetupPage: React.FC = () => {
                   <input type="date" value={joiningDate} onChange={e=>setJoiningDate(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none"/>
                   <button type="submit" className="flex items-center justify-center gap-1.5 px-4 py-2 bg-brand-primary text-white font-bold text-xs rounded-xl hover:opacity-90"><Plus className="w-3.5 h-3.5"/>Add Student</button>
                 </form>
-                <label className="flex items-center gap-2 px-3 py-2 border border-dashed border-borderLine rounded-xl cursor-pointer hover:bg-surface-2 text-xs font-bold text-textSecondary w-fit">
-                  <Upload className="w-3.5 h-3.5"/>Bulk Upload Excel
-                  <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleBulkRosterUpload}/>
-                </label>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <label className="flex items-center gap-2 px-3 py-2 border border-dashed border-borderLine rounded-xl cursor-pointer hover:bg-surface-2 text-xs font-bold text-textSecondary w-fit">
+                    <Upload className="w-3.5 h-3.5"/>Bulk Upload Excel
+                    <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleBulkRosterUpload}/>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={()=>{
+                      const ws = XLSX.utils.json_to_sheet([
+                        {'Roll Number':'22BD1A0501','Student Name':'Student One','Joining Date':''},
+                        {'Roll Number':'22BD1A0502','Student Name':'Student Two','Joining Date':''},
+                      ]);
+                      const wb = XLSX.utils.book_new();
+                      XLSX.utils.book_append_sheet(wb, ws, 'Roster');
+                      XLSX.writeFile(wb, 'student_roster_template.xlsx');
+                    }}
+                    className="flex items-center gap-2 px-3 py-2 border border-emerald-400 text-emerald-700 dark:text-emerald-400 rounded-xl hover:bg-emerald-50 dark:hover:bg-emerald-950/30 text-xs font-bold w-fit"
+                  >
+                    ⬇ Download Template
+                  </button>
+                </div>
                 <StatusMsg msg={rosterStatus}/>
                 <div className="overflow-x-auto border border-borderLine rounded-xl">
                   <table className="w-full text-xs text-left">
@@ -472,7 +523,7 @@ export const AttendanceSetupPage: React.FC = () => {
                   {ttSubject ? 'Select Faculty *' : '— Pick subject first —'}
                 </option>
                 {ttSubject
-                  ? allotments
+                  ? ttAllotments
                       .filter((a: any) =>
                         a.subject_name?.toLowerCase().trim() === ttSubject.toLowerCase().trim() &&
                         a.faculty_email
@@ -531,12 +582,16 @@ export const AttendanceSetupPage: React.FC = () => {
                       <td className="px-4 py-2.5 font-bold bg-surface-2 border-r border-borderLine">{day}</td>
                       {PERIODS.map(period=>{
                         const slot = ttGrid[day]?.[period];
+                        // Skip cells that are covered by a multi-period colSpan
+                        if(slot?._spanned) return null;
+                        const span = slot?._span || 1;
                         return (
-                          <td key={period} className="px-2 py-2 border-r border-borderLine align-top">
-                            {slot ? (
-                              <div className="bg-brand-soft border border-brand-primary/20 rounded-xl p-2 space-y-1 relative group">
+                          <td key={period} colSpan={span} className="px-2 py-2 border-r border-borderLine align-top">
+                            {slot && !slot._spanned ? (
+                              <div className="bg-brand-soft border border-brand-primary/20 rounded-xl p-2 space-y-1 relative group h-full">
                                 <div className="text-[10px] font-black text-brand-primary truncate">{slot.subject_name}</div>
                                 <div className="text-[9px] text-textSecondary truncate">{slot.faculty_email}</div>
+                                {span > 1 && <div className="text-[9px] font-bold text-purple-600">Lab ({span} Hrs)</div>}
                                 <button onClick={async()=>{if(!window.confirm('Delete slot?'))return;await api.deleteTimetableEntry(slot.id);qc.invalidateQueries({queryKey:['attendanceTimetable']});}} className="absolute top-1 right-1 text-rose-400 hover:text-rose-600 opacity-0 group-hover:opacity-100 transition-opacity">
                                   <X className="w-3 h-3"/>
                                 </button>

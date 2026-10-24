@@ -210,14 +210,46 @@ export interface PlacementProfile {
 }
 
 export interface ScoreBreakdown {
-  overallScore: number;
-  academicsScore: number;
-  codingScore: number;
-  techSkillsScore: number;
-  certsScore: number;
-  softSkillsScore: number;
-  achievementsScore: number;
+  // 1000-XP RPG System
+  overallScore: number;          // max 1000
+  codingScore: number;           // max 350
+  githubScore: number;           // max 200
+  academicsScore: number;        // max 250
+  certsScore: number;            // max 200
+  levelNumber: number;           // 1-10
+  levelTitle: string;
+  badge: string;
+  nextLevelXp: number;
+  progressPercentage: number;
+  codingBreakdown?: { easy: number; medium: number; hard: number; contestRating: number; streak: number };
+  githubBreakdown?: { langScore: number; repoScore: number; socialScore: number; topLanguage?: string };
+  academicsBreakdown?: { cgpaScore: number; attendanceScore: number };
+  certsBreakdown?: { totalCerts: number; verifiedBonus: number };
+  quests?: string[];
   feedback: string[];
+  // Legacy compat fields
+  techSkillsScore?: number;
+  softSkillsScore?: number;
+  achievementsScore?: number;
+}
+
+export interface LeaderboardEntry {
+  rank: number;
+  studentId: string;
+  name: string;
+  section: string;
+  year: string;
+  department: string;
+  mentorEmail?: string;
+  overallScore: number;
+  codingScore: number;
+  githubScore: number;
+  academicsScore: number;
+  certsScore: number;
+  levelNumber: number;
+  levelTitle: string;
+  badge: string;
+  computedAt?: string;
 }
 
 // ── Faculty Profile Types ──────────────────────────────────────────────────
@@ -809,3 +841,103 @@ export interface UnregisteredStudent {
   assigned_at?: string;
 }
 
+
+export interface StudentDocument {
+  id: number;
+  roll_number: string;
+  doc_type: 'CSP Project' | 'Major Project' | 'Short-term Internship' | 'Long-term Internship' | 'Assignment';
+  semester: string;
+  title: string;
+  description?: string;
+  file_key: string;
+  file_name: string;
+  file_size_kb?: number;
+  verification_status: 'Pending' | 'Verified' | 'Rejected';
+  admin_note?: string;
+  verified_by?: string;
+  verified_at?: string;
+  uploaded_at: string;
+  updated_at: string;
+}
+
+export const STUDENT_DOC_TYPES = [
+  'CSP Project',
+  'Major Project',
+  'Short-term Internship',
+  'Long-term Internship',
+  'Assignment',
+] as const;
+
+export const STUDENT_SEMESTERS = [
+  '1st Semester', '2nd Semester', '3rd Semester', '4th Semester',
+  '5th Semester', '6th Semester', '7th Semester', '8th Semester',
+] as const;
+
+// ── Feature 1: At-Risk Student ────────────────────────────────────────────
+export interface AtRiskStudent {
+  roll_number: string;
+  name: string;
+  year: string;
+  section: string;
+  department: string;
+  batch: string;
+  avg_cgpa: number;
+  attendance_pct: number | null;
+  risk_reasons: string[];
+  severity: 'high' | 'medium';
+  mentor_email: string | null;
+}
+
+// ── Feature 4: Mentor Meeting Log ─────────────────────────────────────────
+export interface MentorMeeting {
+  id: number;
+  faculty_id: string;
+  faculty_email: string;
+  roll_number: string;
+  student_name: string | null;
+  meeting_date: string;
+  topics: string;
+  action_items: string | null;
+  next_meeting: string | null;
+  tag: string;
+  created_at: string;
+}
+
+export interface MentoringCompliance {
+  faculty_email: string;
+  faculty_name: string;
+  department: string;
+  total_meetings: number;
+  meetings_this_month: number;
+  last_meeting_date: string | null;
+  students_met: number;
+}
+
+// ── Feature 6: Student Placement Tracker ──────────────────────────────────
+export interface StudentPlacement {
+  id: number;
+  roll_number: string;
+  student_name: string | null;
+  department: string | null;
+  batch: string | null;
+  company_name: string;
+  role_title: string;
+  package_lpa: number | null;
+  offer_date: string | null;
+  placement_type: 'On-Campus' | 'Off-Campus' | 'CGAP' | 'Internship';
+  verified: boolean;
+  verified_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlacementSummary {
+  department: string;
+  total_placed: number;
+  verified_placements: number;
+  avg_package_lpa: number;
+  max_package_lpa: number;
+  placement_rate: number;
+  by_type: { on_campus: number; off_campus: number; cgap: number; internship: number };
+  top_companies: { company_name: string; count: number }[];
+}

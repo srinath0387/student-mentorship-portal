@@ -25,13 +25,14 @@ export const CoordinatorAttendancePage: React.FC = () => {
   const uniqueDepts = useMemo(() => [...new Set(allotments.map((a: any) => a.department))].sort(), [allotments]);
 
   // Not posted
-  const { data: rawNotPosted = [], refetch: refetchNP } = useQuery({
+  const { data: rawNotPosted = {}, refetch: refetchNP } = useQuery({
     queryKey: ['coordinatorNotPosted', sem, dept],
-    queryFn: () => api.getNotPostedAttendance({ semester: sem, department: dept || undefined }).catch(() => []),
+    queryFn: () => api.getNotPostedAttendance({ semester: sem, department: dept || undefined }).catch(() => ({})),
     staleTime: 0,
     refetchOnMount: 'always',
   });
-  const notPosted = Array.isArray(rawNotPosted) ? rawNotPosted : [];
+  // BUG-03 fix: backend returns { pendingSlots: [...] }, not a plain array
+  const notPosted: any[] = Array.isArray((rawNotPosted as any)?.pendingSlots) ? (rawNotPosted as any).pendingSlots : [];
 
   const TABS: { id: TabId; label: string }[] = [
     { id: 'overview', label: '📊 Section Overview' },

@@ -8,6 +8,7 @@ import {
   Achievement,
   PlacementProfile,
   ScoreBreakdown,
+  LeaderboardEntry,
   BroadcastNotification,
   CreateBroadcastPayload,
   UnregisteredStudent,
@@ -117,42 +118,58 @@ export const api = {
       });
     }
 
-    // Universal chunking: guarantees NO query ever exceeds AWS API Gateway's 6MB payload limit.
-    // Works for 'All' departments (super admin) as well as branch admins and filter queries.
     const pageSize = 1000;
-    const baseQuery = new URLSearchParams(cleanParams).toString();
-    const delimiter = baseQuery ? '&' : '';
 
-    try {
-      // Fast path: fetch page 0
-      const firstChunk = await fetchWithAuth(`/students?${baseQuery}${delimiter}limit=${pageSize}&offset=0`);
-      if (!Array.isArray(firstChunk)) return [];
-
-      // If records fit in the first page (< 1,000), return immediately (1 single HTTP call)
-      if (firstChunk.length < pageSize) {
-        return firstChunk;
+    // Global query (no dept/search/section/batch filter) — fetch all pages in parallel
+    const isGlobalQuery = (!cleanParams.department || cleanParams.department === 'All') && !cleanParams.search && !cleanParams.section && !cleanParams.batch;
+    if (isGlobalQuery) {
+      try {
+        const firstPage: StudentProfile[] = await fetchWithAuth(`/students?limit=${pageSize}&offset=0`);
+        if (Array.isArray(firstPage) && firstPage.length === pageSize) {
+          const subsequentPages = await Promise.all([
+            fetchWithAuth(`/students?limit=${pageSize}&offset=1000`).catch(() => []),
+            fetchWithAuth(`/students?limit=${pageSize}&offset=2000`).catch(() => []),
+            fetchWithAuth(`/students?limit=${pageSize}&offset=3000`).catch(() => []),
+            fetchWithAuth(`/students?limit=${pageSize}&offset=4000`).catch(() => []),
+          ]);
+          return [...firstPage, ...subsequentPages.flat()];
+        }
+        return Array.isArray(firstPage) ? firstPage : [];
+      } catch (err) {
+        console.warn('[getAllStudents] Global chunked query notice:', err);
+        return [];
       }
+    }
 
-      // If 1,000+ records exist, fetch subsequent pages in parallel (supports up to 6,000+ students)
-      const additionalOffsets = [1000, 2000, 3000, 4000, 5000];
-      const additionalPages = await Promise.all(
-        additionalOffsets.map(offset =>
-          fetchWithAuth(`/students?${baseQuery}${delimiter}limit=${pageSize}&offset=${offset}`).catch(() => [])
-        )
-      );
-
-      const all = [firstChunk, ...additionalPages].flat().filter(Boolean) as StudentProfile[];
-      // De-duplicate by roll_number — guards against offset-boundary duplicates
-      return Array.from(
-        new Map(all.map(s => [s.roll_number.toUpperCase(), s])).values()
-      );
+    // Dept-scoped or filtered query — use deptPageSize=200 to avoid 6MB Lambda limit.
+    // EEE has 347 students; at limit=1000 the full payload exceeds 6MB — 500 error — UI shows 0.
+    const deptPageSize = 200;
+    const baseQuery = new URLSearchParams(cleanParams).toString();
+    try {
+      const firstPage: StudentProfile[] = await fetchWithAuth(`/students?${baseQuery}&limit=${deptPageSize}&offset=0`);
+      if (!Array.isArray(firstPage)) return [];
+      if (firstPage.length < deptPageSize) return firstPage; // fits in one page
+      // Need more pages
+      const allResults = [...firstPage];
+      let offset = deptPageSize;
+      while (true) {
+        const nextPage: StudentProfile[] = await fetchWithAuth(
+          `/students?${baseQuery}&limit=${deptPageSize}&offset=${offset}`
+        ).catch(() => []);
+        if (!Array.isArray(nextPage) || nextPage.length === 0) break;
+        allResults.push(...nextPage);
+        if (nextPage.length < deptPageSize) break;
+        offset += deptPageSize;
+        if (offset > 10000) break; // safety cap
+      }
+      return allResults;
     } catch (err) {
-      console.warn('[getAllStudents chunking warning]:', err);
-      return fetchWithAuth(`/students${baseQuery ? `?${baseQuery}` : ''}`);
+      console.warn('[getAllStudents] Dept-scoped chunked query notice:', err);
+      return [];
     }
   },
 
-  createStudent: async (data: Partial<StudentProfile>): Promise<{ message: string; student: StudentProfile }> => {
+    createStudent: async (data: Partial<StudentProfile>): Promise<{ message: string; student: StudentProfile }> => {
     return fetchWithAuth(`/students`, {
       method: 'POST',
       body: JSON.stringify(data),
@@ -320,12 +337,119 @@ export const api = {
     });
   },
 
-  // Employability Score
+  // Employability Score (1000-XP RPG)
   getEmployabilityScore: async (id: string): Promise<ScoreBreakdown> => {
     return fetchWithAuth(`/students/${id}/employability-score`);
   },
 
+  // Leaderboards
+  getFacultyLeaderboard: async (): Promise<LeaderboardEntry[]> => {
+    return fetchWithAuth(`/leaderboard/faculty`);
+  },
+  getHodLeaderboard: async (filters?: { department?: string; year?: string; section?: string; limit?: number }): Promise<LeaderboardEntry[]> => {
+    const params = new URLSearchParams();
+    if (filters?.department) params.set('department', filters.department);
+    if (filters?.year) params.set('year', filters.year);
+    if (filters?.section) params.set('section', filters.section);
+    if (filters?.limit) params.set('limit', String(filters.limit));
+    const qs = params.toString();
+    return fetchWithAuth(`/leaderboard/hod${qs ? '?' + qs : ''}`);
+  },
+
   // Upload Presigned URL
+  // Student Documents
+  getStudentDocuments: async (rollNo: string) => {
+    return fetchWithAuth(`/students/${rollNo}/documents`);
+  },
+  createStudentDocument: async (rollNo: string, data: {
+    doc_type: string; semester: string; title: string;
+    description?: string; file_key: string; file_name: string; file_size_kb?: number;
+  }) => {
+    return fetchWithAuth(`/students/${rollNo}/documents`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  updateDocumentStatus: async (rollNo: string, docId: number, status: 'Verified' | 'Rejected', admin_note?: string) => {
+    return fetchWithAuth(`/students/${rollNo}/documents/${docId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ verification_status: status, admin_note }),
+    });
+  },
+  getDocumentViewUrl: async (rollNo: string, docId: number): Promise<{ viewUrl: string }> => {
+    return fetchWithAuth(`/students/${rollNo}/documents/${docId}/view-url`);
+  },
+  deleteStudentDocument: async (rollNo: string, docId: number) => {
+    return fetchWithAuth(`/students/${rollNo}/documents/${docId}`, { method: 'DELETE' });
+  },
+  // ── Feature 1: At-Risk Students ──────────────────────────────────────────
+  getAtRiskStudents: async (department?: string) => {
+    const q = department ? `?department=${encodeURIComponent(department)}` : ``;
+    return fetchWithAuth(`/hod/at-risk-students${q}`);
+  },
+
+  // ── Feature 4: Mentor Meeting Log ─────────────────────────────────────────
+  getMentorMeetings: async (params: { student_id?: string; faculty_email?: string }) => {
+    const q = new URLSearchParams();
+    if (params.student_id) q.set('student_id', params.student_id);
+    if (params.faculty_email) q.set('faculty_email', params.faculty_email);
+    return fetchWithAuth(`/mentor-meetings?${q.toString()}`);
+  },
+  createMentorMeeting: async (data: {
+    roll_number: string; student_name?: string; meeting_date: string; topics: string;
+    action_items?: string; next_meeting?: string; tag?: string;
+  }) => {
+    return fetchWithAuth('/mentor-meetings', { method: 'POST', body: JSON.stringify(data) });
+  },
+  deleteMentorMeeting: async (id: number) => {
+    return fetchWithAuth(`/mentor-meetings/${id}`, { method: 'DELETE' });
+  },
+  getDeptMeetingLogs: async (department?: string): Promise<any[]> => {
+    const params = department ? `?department=${encodeURIComponent(department)}` : '';
+    return fetchWithAuth(`/mentor-meetings/department${params}`);
+  },
+  getMentoringCompliance: async (department?: string) => {
+    const q = department ? `?department=${encodeURIComponent(department)}` : ``;
+    return fetchWithAuth(`/hod/mentoring-compliance${q}`);
+  },
+
+  // ── Feature 5: Broadcast Notifications ────────────────────────────────────
+  broadcastNotice: async (data: {
+    title: string; message: string; target_department?: string; target_year?: string;
+    target_roles?: string[]; priority?: string; expires_at?: string;
+  }) => {
+    return fetchWithAuth('/notices/broadcast', { method: 'POST', body: JSON.stringify(data) });
+  },
+  getBroadcastNotices: async (department?: string) => {
+    const q = department ? `?department=${encodeURIComponent(department)}` : ``;
+    return fetchWithAuth(`/notices/broadcast${q}`);
+  },
+
+  // ── Feature 6: Student Placement Tracker ──────────────────────────────────
+  getStudentPlacements: async (params?: { roll_number?: string; department?: string; verified?: boolean }) => {
+    const q = new URLSearchParams();
+    if (params?.roll_number) q.set('roll_number', params.roll_number);
+    if (params?.department) q.set('department', params.department);
+    if (params?.verified) q.set('verified', 'true');
+    return fetchWithAuth(`/student-placements?${q.toString()}`);
+  },
+  createStudentPlacement: async (data: {
+    company_name: string; role_title: string; package_lpa?: number; offer_date?: string;
+    placement_type?: string; roll_number?: string;
+  }) => {
+    return fetchWithAuth('/student-placements', { method: 'POST', body: JSON.stringify(data) });
+  },
+  verifyPlacement: async (id: number) => {
+    return fetchWithAuth(`/student-placements/${id}/verify`, { method: 'PATCH', body: JSON.stringify({}) });
+  },
+  deleteStudentPlacement: async (id: number) => {
+    return fetchWithAuth(`/student-placements/${id}`, { method: 'DELETE' });
+  },
+  getHodPlacementSummary: async (department?: string) => {
+    const q = department ? `?department=${encodeURIComponent(department)}` : ``;
+    return fetchWithAuth(`/hod/placement-summary${q}`);
+  },
+
   getUploadUrl: async (id: string, fileName: string, uploadType: string) => {
     return fetchWithAuth(`/students/${id}/upload-url?fileName=${encodeURIComponent(fileName)}&uploadType=${uploadType}`);
   },
@@ -401,7 +525,9 @@ export const api = {
 
   // Get all faculty with mentee counts (admin/HOD)
   getAllFaculty: async (department?: string): Promise<any[]> => {
-    return fetchWithAuth(`/faculty${department && department !== 'All' ? `?department=${encodeURIComponent(department)}` : ''}`);
+    // BUG-01 fix: pass department=All explicitly to bypass per-dept scoping on backend
+    const param = department ? `?department=${encodeURIComponent(department)}` : '?department=All';
+    return fetchWithAuth(`/faculty${param}`);
   },
 
   // Verify student password set by admin if Cognito rejects credentials

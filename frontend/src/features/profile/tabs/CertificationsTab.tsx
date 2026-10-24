@@ -8,6 +8,8 @@ import { PillButton } from '../../../components/common/PillButton';
 interface CertificationsTabProps {
   certifications: Certification[];
   readOnly?: boolean;
+  isAdminView?: boolean;
+  studentRollNo?: string; // the student's roll number (used when admin views someone else's profile)
   onRefresh: () => void;
 }
 
@@ -27,7 +29,7 @@ const PROVIDERS = [
   'Other',
 ];
 
-export const CertificationsTab: React.FC<CertificationsTabProps> = ({ certifications, readOnly = false, onRefresh }) => {
+export const CertificationsTab: React.FC<CertificationsTabProps> = ({ certifications, readOnly = false, isAdminView = false, studentRollNo, onRefresh }) => {
   const [showModal, setShowModal] = useState(false);
   const [provider, setProvider] = useState('AWS');
   const [title, setTitle] = useState('');
@@ -36,7 +38,8 @@ export const CertificationsTab: React.FC<CertificationsTabProps> = ({ certificat
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [editingCert, setEditingCert] = useState<Certification | null>(null);
   const { user } = useAuth();
-  const activeRollNo = user?.rollNumber || '';
+  // Use the provided studentRollNo (when admin views someone else's profile) or fall back to the logged-in user's roll number
+  const activeRollNo = studentRollNo || user?.rollNumber || '';
 
   const completedCerts = certifications.filter((c) => !c.suggested);
   const suggestedCerts = certifications.filter((c) => c.suggested);
@@ -179,7 +182,9 @@ export const CertificationsTab: React.FC<CertificationsTabProps> = ({ certificat
   };
 
   const handleDeleteCert = async (cert: Certification) => {
-    if (readOnly || !cert.id) return;
+    // readOnly students can't delete; admin can delete even in readOnly view
+    if (readOnly && !isAdminView) return;
+    if (!cert.id) return;
     if (!window.confirm(`Delete "${cert.title}"? This cannot be undone.`)) return;
     try {
       await api.deleteCertification(activeRollNo, cert.id);
@@ -236,6 +241,16 @@ export const CertificationsTab: React.FC<CertificationsTabProps> = ({ certificat
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
+                )}
+                {/* Admin-only delete shown even in readOnly view */}
+                {readOnly && isAdminView && (
+                  <button
+                    onClick={() => handleDeleteCert(cert)}
+                    className="p-1.5 rounded-lg text-textSecondary hover:text-red-500 hover:bg-red-50 transition-all"
+                    title="Delete certification (Admin)"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 )}
               </div>
               <h4 className="text-sm font-bold text-textPrimary mt-1.5">{cert.title}</h4>
