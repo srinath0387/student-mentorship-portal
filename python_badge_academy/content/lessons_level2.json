@@ -1,0 +1,499 @@
+[
+  {
+    "id": "l2_t1_if_statements",
+    "title": "Making Decisions: The if Statement",
+    "badge_skill": "Forms valid boolean comparison conditions",
+    "ask_the_logic": {
+      "question": "If score is 45 and the check is 'if score >= 50:', does Python crash, skip the indented block, or print an error?",
+      "options": [
+        "It skips the indented block silently and moves on to the code after it.",
+        "It crashes with a FalseConditionError.",
+        "It prints 'False' on the screen."
+      ],
+      "correct_index": 0,
+      "explanation": "When an if condition evaluates to False, Python skips the indented block entirely and continues running whatever code comes afterwards."
+    },
+    "cards": [
+      {
+        "step_number": 1,
+        "step_name": "The Problem",
+        "title": "Passing or Failing an Exam",
+        "text": "You already know how variables store numbers. But a college grading system cannot treat every student the same way. If a student scores 75, we must print 'Pass'. If they score 30, we must print 'Retry'. Without decision making, code runs blindly from top to bottom.",
+        "code": null,
+        "visual_type": "problem_scenario"
+      },
+      {
+        "step_number": 2,
+        "step_name": "The Idea in One Sentence",
+        "title": "An if Statement is a Fork in the Road",
+        "text": "An if statement checks a true-or-false condition like a toll gate: if the condition is True, code enters the gate; if False, the gate stays closed and code skips past.",
+        "code": "score = 75\nif score >= 50:\n    print(\"Pass!\")",
+        "visual_type": "analogy"
+      },
+      {
+        "step_number": 3,
+        "step_name": "The Rule",
+        "title": "Smallest Valid Syntax Labelled",
+        "text": "The colon (:) at the end of the line signals a block. Indentation (4 spaces) defines what code belongs inside the condition.",
+        "code": "if score >= 50:\n    print(\"Pass!\")\n# 1. 'if' keyword\n# 2. Condition (score >= 50) evaluates to True or False\n# 3. Colon ':' mandatory\n# 4. Indented body (4 spaces) executes ONLY if True",
+        "visual_type": "syntax_card"
+      },
+      {
+        "step_number": 4,
+        "step_name": "Logic First, Code Second",
+        "title": "Side-by-Side: Checking Pass Mark",
+        "text": "Plan the decision logic in plain words before writing the Python statement.",
+        "logic_plan": [
+          "1. Set score to 75.",
+          "2. Check if score is at least 50.",
+          "3. If yes, display 'Pass!'.",
+          "4. Always print 'Evaluation complete'."
+        ],
+        "code": "score = 75\nif score >= 50:\n    print(\"Pass!\")\nprint(\"Evaluation complete\")",
+        "visual_type": "logic_vs_code"
+      },
+      {
+        "step_number": 5,
+        "step_name": "See It Run",
+        "title": "Step-by-Step Visualizer & Trace Table",
+        "text": "Step through execution and watch the trace table check the condition.",
+        "visualizer": {
+          "lines": [
+            "score = 75",
+            "if score >= 50:",
+            "    print(\"Pass!\")",
+            "print(\"Evaluation complete\")"
+          ],
+          "steps": [
+            {
+              "line": 0,
+              "memory": {"score": 75},
+              "output": "",
+              "explanation": "Line 1: 'score' is initialized to 75."
+            },
+            {
+              "line": 1,
+              "memory": {"score": 75},
+              "output": "",
+              "explanation": "Line 2: 75 >= 50 evaluates to True. Python enters the indented block."
+            },
+            {
+              "line": 2,
+              "memory": {"score": 75},
+              "output": "Pass!\n",
+              "explanation": "Line 3: Prints 'Pass!'."
+            },
+            {
+              "line": 3,
+              "memory": {"score": 75},
+              "output": "Pass!\nEvaluation complete\n",
+              "explanation": "Line 4: Unindented code runs unconditionally."
+            }
+          ],
+          "trace_table": [
+            {"step": 1, "line": "score = 75", "condition": "-", "result": "-", "output": "-"},
+            {"step": 2, "line": "if score >= 50:", "condition": "75 >= 50", "result": "True (enter block)", "output": "-"},
+            {"step": 3, "line": "print('Pass!')", "condition": "-", "result": "-", "output": "'Pass!'"},
+            {"step": 4, "line": "print('Evaluation...')", "condition": "-", "result": "-", "output": "'Evaluation complete'"}
+          ]
+        },
+        "visual_type": "step_visualizer"
+      },
+      {
+        "step_number": 6,
+        "step_name": "A Diagram",
+        "title": "Decision Flowchart",
+        "text": "The diamond represents the condition split.",
+        "diagram": {
+          "type": "flowchart",
+          "steps": [
+            "Start: score = 75",
+            "Decision: Is score >= 50?",
+            "True Branch: print('Pass!')",
+            "Join: print('Evaluation complete')"
+          ]
+        },
+        "visual_type": "diagram"
+      },
+      {
+        "step_number": 7,
+        "step_name": "What If...?",
+        "title": "Predict First, Then Try",
+        "text": "What if score is changed to 40? Predict before running: 40 >= 50 evaluates to False. Line 3 is skipped completely, so only 'Evaluation complete' is printed!",
+        "code": "score = 40\nif score >= 50:\n    print(\"Pass!\")\nprint(\"Evaluation complete\")",
+        "visual_type": "what_if"
+      },
+      {
+        "step_number": 8,
+        "step_name": "Common Mistake",
+        "title": "Using '=' Instead of '==' for Comparison",
+        "text": "Mistake: Writing if score = 50: instead of ==. Single '=' assigns a value. Double '==' checks equality. Python raises a SyntaxError to protect you.",
+        "code": "# WRONG:\n# if score = 50:  # SyntaxError: invalid syntax\n\n# FIXED:\nscore = 50\nif score == 50:\n    print(\"Exact pass mark!\")",
+        "visual_type": "common_mistake"
+      },
+      {
+        "step_number": 9,
+        "step_name": "Check Yourself",
+        "title": "Test Your Understanding",
+        "text": "Check your grasp of conditions and comparison operators.",
+        "questions": [
+          {
+            "q": "Which operator checks if two numbers are NOT equal in Python?",
+            "options": ["<>", "!=", "not =", "!=="],
+            "ans": 1,
+            "why": "!= is the not-equal comparison operator in Python."
+          },
+          {
+            "q": "What happens if you omit the colon ':' at the end of an if line?",
+            "options": ["Python inserts it automatically", "SyntaxError is raised", "The code runs normally", "Warning is printed"],
+            "ans": 1,
+            "why": "The colon ':' is required syntax to tell Python that an indented code block follows."
+          }
+        ],
+        "visual_type": "check_yourself"
+      },
+      {
+        "step_number": 10,
+        "step_name": "Skill Recap",
+        "title": "Skill Earned!",
+        "text": "You can now form boolean comparison conditions and control program flow with if statements.",
+        "badge_link": "Forms valid boolean comparison conditions",
+        "visual_type": "recap"
+      }
+    ]
+  },
+  {
+    "id": "l2_t2_if_elif_else",
+    "title": "Multi-Way Decisions: elif & else",
+    "badge_skill": "Structures if-elif-else branching correctly",
+    "ask_the_logic": {
+      "question": "In an if-elif-else chain, if the first 'if' condition is True, does Python evaluate the 'elif' condition below it?",
+      "options": [
+        "No, once any branch in an if-elif chain is True, all subsequent elif and else branches are skipped.",
+        "Yes, Python always evaluates every elif in the file.",
+        "Only if the score is greater than 100."
+      ],
+      "correct_index": 0,
+      "explanation": "An if-elif-else ladder is mutually exclusive. The very first branch that matches runs, and the rest are skipped immediately."
+    },
+    "cards": [
+      {
+        "step_number": 1,
+        "step_name": "The Problem",
+        "title": "More Than Just Two Options",
+        "text": "You already know how if handles one check. But letter grades have many tiers: A (>=90), B (>=75), C (>=50), and F (below 50). Writing separate if statements is messy and redundant. We need clean multi-way branching.",
+        "code": null,
+        "visual_type": "problem_scenario"
+      },
+      {
+        "step_number": 2,
+        "step_name": "The Idea in One Sentence",
+        "title": "An if-elif-else Chain is an Ordered Priority Ladder",
+        "text": "Python tests branches from top to bottom. As soon as one condition matches, its block runs, and Python jumps past the entire rest of the chain.",
+        "code": "marks = 82\nif marks >= 90:\n    grade = \"A\"\nelif marks >= 75:\n    grade = \"B\"\nelse:\n    grade = \"C\"",
+        "visual_type": "analogy"
+      },
+      {
+        "step_number": 3,
+        "step_name": "The Rule",
+        "title": "The elif-else Syntax Rules",
+        "text": "'elif' means 'else if'. You can have zero or many elif blocks. 'else' has no condition and acts as the catch-all safety net.",
+        "code": "if condition_1:\n    # Runs if condition_1 is True\nelif condition_2:\n    # Runs if condition_1 is False AND condition_2 is True\nelse:\n    # Runs if ALL preceding conditions were False",
+        "visual_type": "syntax_card"
+      },
+      {
+        "step_number": 4,
+        "step_name": "Logic First, Code Second",
+        "title": "Side-by-Side: Assigning Grades",
+        "text": "Structure conditions from most restrictive to least restrictive.",
+        "logic_plan": [
+          "1. Set student marks to 82.",
+          "2. If marks >= 90: Grade is A.",
+          "3. Else if marks >= 75: Grade is B.",
+          "4. Else: Grade is C.",
+          "5. Display final grade."
+        ],
+        "code": "marks = 82\nif marks >= 90:\n    grade = \"A\"\nelif marks >= 75:\n    grade = \"B\"\nelse:\n    grade = \"C\"\nprint(f\"Grade: {grade}\")",
+        "visual_type": "logic_vs_code"
+      },
+      {
+        "step_number": 5,
+        "step_name": "See It Run",
+        "title": "Step-by-Step Visualizer & Trace Table",
+        "text": "Watch Python skip the remaining branches once a match is found.",
+        "visualizer": {
+          "lines": [
+            "marks = 82",
+            "if marks >= 90:",
+            "    grade = \"A\"",
+            "elif marks >= 75:",
+            "    grade = \"B\"",
+            "else:",
+            "    grade = \"C\"",
+            "print(f\"Grade: {grade}\")"
+          ],
+          "steps": [
+            {
+              "line": 0,
+              "memory": {"marks": 82},
+              "output": "",
+              "explanation": "Store 82 in 'marks'."
+            },
+            {
+              "line": 1,
+              "memory": {"marks": 82},
+              "output": "",
+              "explanation": "82 >= 90 is False. Skip to line 3."
+            },
+            {
+              "line": 3,
+              "memory": {"marks": 82},
+              "output": "",
+              "explanation": "82 >= 75 is True! Enter this block."
+            },
+            {
+              "line": 4,
+              "memory": {"marks": 82, "grade": "\"B\""},
+              "output": "",
+              "explanation": "Assign 'grade' = 'B'. Now skip past 'else' to line 7!"
+            },
+            {
+              "line": 7,
+              "memory": {"marks": 82, "grade": "\"B\""},
+              "output": "Grade: B\n",
+              "explanation": "Prints 'Grade: B'."
+            }
+          ],
+          "trace_table": [
+            {"step": 1, "line": "if marks >= 90", "condition": "82 >= 90", "result": "False", "output": "-"},
+            {"step": 2, "line": "elif marks >= 75", "condition": "82 >= 75", "result": "True (matched!)", "output": "grade = 'B'"},
+            {"step": 3, "line": "else", "condition": "-", "result": "Skipped", "output": "-"},
+            {"step": 4, "line": "print", "condition": "-", "result": "-", "output": "'Grade: B'"}
+          ]
+        },
+        "visual_type": "step_visualizer"
+      },
+      {
+        "step_number": 6,
+        "step_name": "A Diagram",
+        "title": "Grade Decision Tree",
+        "text": "Shows how code branches and exits cleanly.",
+        "diagram": {
+          "type": "flowchart",
+          "steps": [
+            "Is marks >= 90? -> No",
+            "Is marks >= 75? -> YES (grade = 'B')",
+            "Bypass else -> Jump to print"
+          ]
+        },
+        "visual_type": "diagram"
+      },
+      {
+        "step_number": 7,
+        "step_name": "What If...?",
+        "title": "Predict First, Then Try",
+        "text": "What if marks is 95? Predict: 95 >= 90 is True on the very first line! 'grade' becomes 'A', and Python skips the elif entirely even though 95 is ALSO >= 75.",
+        "code": "marks = 95\nif marks >= 90:\n    grade = \"A\"\nelif marks >= 75:\n    grade = \"B\"\nprint(grade)  # Prints: A",
+        "visual_type": "what_if"
+      },
+      {
+        "step_number": 8,
+        "step_name": "Common Mistake",
+        "title": "Wrong Condition Ordering",
+        "text": "Mistake: Putting if marks >= 50 first before marks >= 90. Because 95 is >= 50, the first check catches it and gives grade C instead of A! Always check most specific condition first.",
+        "code": "# WRONG:\n# if marks >= 50: grade = 'C' # 95 gets caught here!\n# elif marks >= 90: grade = 'A'\n\n# FIXED: Order from highest threshold down to lowest",
+        "visual_type": "common_mistake"
+      },
+      {
+        "step_number": 9,
+        "step_name": "Check Yourself",
+        "title": "Test Your Understanding",
+        "text": "Verify your mental model of branch execution.",
+        "questions": [
+          {
+            "q": "Can you have an 'else' block without an 'if' block?",
+            "options": ["Yes", "No, else must always be paired with a preceding if", "Only inside a loop", "Yes, if elif exists"],
+            "ans": 1,
+            "why": "Every else block must belong to a preceding if statement."
+          },
+          {
+            "q": "How many branches in an if-elif-else ladder can execute?",
+            "options": ["All that evaluate to True", "At most one", "Exactly two", "Always all of them"],
+            "ans": 1,
+            "why": "In any if-elif-else chain, at most ONE block ever runs."
+          }
+        ],
+        "visual_type": "check_yourself"
+      },
+      {
+        "step_number": 10,
+        "step_name": "Skill Recap",
+        "title": "Skill Earned!",
+        "text": "You can now structure mutually exclusive if-elif-else ladders with proper condition ordering.",
+        "badge_link": "Structures if-elif-else branching correctly",
+        "visual_type": "recap"
+      }
+    ]
+  },
+  {
+    "id": "l2_t3_logical_operators",
+    "title": "Combining Logic: and, or, not",
+    "badge_skill": "Combines conditions with and, or, and not",
+    "ask_the_logic": {
+      "question": "If condition A is False, does Python even check condition B in 'if A and B:'?",
+      "options": [
+        "No, this is called short-circuit evaluation: if the left of 'and' is False, the whole thing is already False.",
+        "Yes, Python always evaluates both sides no matter what.",
+        "Only when numbers are negative."
+      ],
+      "correct_index": 0,
+      "explanation": "Python uses short-circuit evaluation. For 'and', if the first part is False, the whole condition cannot possibly be True, so Python skips evaluating the second part."
+    },
+    "cards": [
+      {
+        "step_number": 1,
+        "step_name": "The Problem",
+        "title": "Checking Multiple Conditions at Once",
+        "text": "You already know how to test a single condition like score >= 50. But real-world rules require multiple criteria: for campus placements, a student needs CGPA >= 7.5 AND attendance >= 75%. Testing these with nested if statements gets ugly fast.",
+        "code": null,
+        "visual_type": "problem_scenario"
+      },
+      {
+        "step_number": 2,
+        "step_name": "The Idea in One Sentence",
+        "title": "Logical Operators Glue Conditions Together",
+        "text": "'and' requires BOTH sides to be True. 'or' requires AT LEAST ONE side to be True. 'not' flips True to False and False to True.",
+        "code": "cgpa = 8.2\nattendance = 80\nif cgpa >= 7.5 and attendance >= 75:\n    print(\"Eligible for interview!\")",
+        "visual_type": "analogy"
+      },
+      {
+        "step_number": 3,
+        "step_name": "The Rule",
+        "title": "Truth Tables in Code",
+        "text": "Remember: True and False is False. True or False is True. not True is False.",
+        "code": "A and B -> True ONLY when both A and B are True\nA or B  -> True if either A is True, B is True, or both\nnot A   -> Reverses boolean (not False == True)",
+        "visual_type": "syntax_card"
+      },
+      {
+        "step_number": 4,
+        "step_name": "Logic First, Code Second",
+        "title": "Side-by-Side: Placement Eligibility",
+        "text": "Express the compound requirement cleanly.",
+        "logic_plan": [
+          "1. Record student cgpa as 8.2 and attendance as 80.",
+          "2. Check if cgpa is >= 7.5 AND attendance >= 75.",
+          "3. If both pass, output 'Eligible!'.",
+          "4. Otherwise output 'Not eligible'."
+        ],
+        "code": "cgpa = 8.2\nattendance = 80\nif cgpa >= 7.5 and attendance >= 75:\n    print(\"Eligible!\")\nelse:\n    print(\"Not eligible\")",
+        "visual_type": "logic_vs_code"
+      },
+      {
+        "step_number": 5,
+        "step_name": "See It Run",
+        "title": "Step-by-Step Visualizer & Trace Table",
+        "text": "Trace both parts of the compound condition.",
+        "visualizer": {
+          "lines": [
+            "cgpa = 8.2",
+            "attendance = 80",
+            "if cgpa >= 7.5 and attendance >= 75:",
+            "    print(\"Eligible!\")"
+          ],
+          "steps": [
+            {
+              "line": 0,
+              "memory": {"cgpa": 8.2},
+              "output": "",
+              "explanation": "Store 8.2 in 'cgpa'."
+            },
+            {
+              "line": 1,
+              "memory": {"cgpa": 8.2, "attendance": 80},
+              "output": "",
+              "explanation": "Store 80 in 'attendance'."
+            },
+            {
+              "line": 2,
+              "memory": {"cgpa": 8.2, "attendance": 80},
+              "output": "",
+              "explanation": "Check: 8.2 >= 7.5 (True) AND 80 >= 75 (True). Both True -> Enter block!"
+            },
+            {
+              "line": 3,
+              "memory": {"cgpa": 8.2, "attendance": 80},
+              "output": "Eligible!\n",
+              "explanation": "Print 'Eligible!'."
+            }
+          ],
+          "trace_table": [
+            {"step": 1, "line": "cgpa >= 7.5", "condition": "8.2 >= 7.5", "result": "True", "output": "-"},
+            {"step": 2, "line": "attendance >= 75", "condition": "80 >= 75", "result": "True", "output": "-"},
+            {"step": 3, "line": "True and True", "condition": "Compound", "result": "True", "output": "'Eligible!'"}
+          ]
+        },
+        "visual_type": "step_visualizer"
+      },
+      {
+        "step_number": 6,
+        "step_name": "A Diagram",
+        "title": "Compound Decision Diagram",
+        "text": "Visualizing how AND demands both gates to open.",
+        "diagram": {
+          "type": "flowchart",
+          "steps": [
+            "Check CGPA >= 7.5? (Yes)",
+            "Check Attendance >= 75%? (Yes)",
+            "Both Passed -> Eligible!"
+          ]
+        },
+        "visual_type": "diagram"
+      },
+      {
+        "step_number": 7,
+        "step_name": "What If...?",
+        "title": "Predict First, Then Try",
+        "text": "What if we replace 'and' with 'or' and set attendance = 60? Predict: 8.2 >= 7.5 is True. Because it is 'or', one True is enough, so it STILL prints 'Eligible!'!",
+        "code": "cgpa = 8.2\nattendance = 60\nif cgpa >= 7.5 or attendance >= 75:\n    print(\"Eligible via OR!\")",
+        "visual_type": "what_if"
+      },
+      {
+        "step_number": 8,
+        "step_name": "Common Mistake",
+        "title": "Writing 'if x == 1 or 2:'",
+        "text": "Mistake: Writing if x == 1 or 2:. Python evaluates (x == 1) or (2). Since 2 is a non-zero number, it is always truthy, so the condition is ALWAYS True regardless of x! Write if x == 1 or x == 2: instead.",
+        "code": "# WRONG:\n# if x == 1 or 2:  # Always True!\n\n# FIXED:\nx = 5\nif x == 1 or x == 2:\n    print(\"Matched!\")",
+        "visual_type": "common_mistake"
+      },
+      {
+        "step_number": 9,
+        "step_name": "Check Yourself",
+        "title": "Test Your Understanding",
+        "text": "Test your compound logic reasoning.",
+        "questions": [
+          {
+            "q": "What is the result of: not (5 > 2)?",
+            "options": ["True", "False", "Error", "None"],
+            "ans": 1,
+            "why": "5 > 2 is True. not True inverts it to False."
+          },
+          {
+            "q": "What does True or False evaluate to?",
+            "options": ["True", "False", "None", "Error"],
+            "ans": 0,
+            "why": "With the 'or' operator, if at least one operand is True, the result is True."
+          }
+        ],
+        "visual_type": "check_yourself"
+      },
+      {
+        "step_number": 10,
+        "step_name": "Skill Recap",
+        "title": "Skill Earned!",
+        "text": "You can now combine complex requirements using and, or, and not with short-circuit awareness.",
+        "badge_link": "Combines conditions with and, or, and not",
+        "visual_type": "recap"
+      }
+    ]
+  }
+]

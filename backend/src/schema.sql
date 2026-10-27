@@ -289,7 +289,26 @@ CREATE INDEX IF NOT EXISTS idx_rosters_allotment ON subject_rosters(allotment_id
 CREATE INDEX IF NOT EXISTS idx_rosters_roll ON subject_rosters(roll_number);
 CREATE INDEX IF NOT EXISTS idx_sessions_allotment ON attendance_sessions(allotment_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_date ON attendance_sessions(session_date);
--- 19. Class Incharges (1st Year Only: 1-1 and 1-2)
+
+-- 19. Workload Settings (configurable thresholds per designation)
+CREATE TABLE IF NOT EXISTS workload_settings (
+  id SERIAL PRIMARY KEY,
+  designation TEXT NOT NULL DEFAULT 'default',
+  min_hours_week INT NOT NULL DEFAULT 12,
+  max_hours_week INT NOT NULL DEFAULT 20,
+  updated_by TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(designation)
+);
+-- Seed defaults
+INSERT INTO workload_settings (designation, min_hours_week, max_hours_week) VALUES
+  ('default', 12, 20),
+  ('Professor', 12, 18),
+  ('Associate Professor', 12, 20),
+  ('Assistant Professor', 14, 22)
+ON CONFLICT (designation) DO NOTHING;
+
+-- 20. Class Incharges (1st Year Only: 1-1 and 1-2)
 CREATE TABLE IF NOT EXISTS class_incharges (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     semester_label VARCHAR(5) NOT NULL CHECK (semester_label IN ('1-1', '1-2')),

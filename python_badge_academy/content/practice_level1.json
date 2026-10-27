@@ -1,0 +1,214 @@
+[
+  {
+    "id": "ex_l1_1_welcome_banner",
+    "title": "Exercise 1: Student Welcome Banner",
+    "badge_skill": "Reads user input and prints clean formatted output",
+    "difficulty": "Easy",
+    "xp": 30,
+    "problem": "Write a program that takes a student's name on line 1 and their department branch (e.g., 'CSE', 'ECE') on line 2, and prints a welcome message in the exact format: 'Welcome <Name> to <Branch> Department!'",
+    "starter_code": "# Read student name and branch, then print the welcome message\nname = input()\nbranch = input()\n\n# Your code here:\n",
+    "plan_options": [
+      {
+        "id": "p1",
+        "text": "Read name and branch with input(), then use an f-string to print: Welcome {name} to {branch} Department!",
+        "correct": true
+      },
+      {
+        "id": "p2",
+        "text": "Add name + branch together as integers with int().",
+        "correct": false
+      },
+      {
+        "id": "p3",
+        "text": "Print 'Welcome Name to Branch Department' literally without variables.",
+        "correct": false
+      }
+    ],
+    "model_plan": "1. Read name from first input line.\n2. Read branch from second input line.\n3. Construct and print the message using f-string: f\"Welcome {name} to {branch} Department!\"",
+    "plan_hint": "Plan Hint: You have two inputs. Use an f-string f\"Welcome {name} to {branch} Department!\" to insert both variables into one clean sentence.",
+    "code_hint": "Code Hint: print(f\"Welcome {name} to {branch} Department!\")",
+    "solution_code": "name = input()\nbranch = input()\nprint(f\"Welcome {name} to {branch} Department!\")",
+    "visible_test_cases": [
+      {
+        "input": "Alex\nCSE",
+        "expected": "Welcome Alex to CSE Department!\n"
+      },
+      {
+        "input": "Priya\nECE",
+        "expected": "Welcome Priya to ECE Department!\n"
+      },
+      {
+        "input": "Rahul\nIT",
+        "expected": "Welcome Rahul to IT Department!\n"
+      }
+    ]
+  },
+  {
+    "id": "ex_l1_2_bill_splitter",
+    "title": "Exercise 2: Canteen Bill Splitter",
+    "badge_skill": "Performs arithmetic and string operations",
+    "difficulty": "Easy",
+    "xp": 30,
+    "problem": "A group of B.Tech students had lunch in the canteen. Read the total bill amount (float) on line 1 and the number of friends (int) on line 2. Calculate each person's exact share rounded to 2 decimal places, and print: 'Each person pays: Rs <share>' (e.g. 'Each person pays: Rs 85.50').",
+    "starter_code": "total_bill = float(input())\nnum_friends = int(input())\n\n# Calculate each person's share and format to 2 decimal places:\n",
+    "plan_options": [
+      {
+        "id": "p1",
+        "text": "Divide total_bill by num_friends, format the result to 2 decimal places with f\"{share:.2f}\", and print.",
+        "correct": true
+      },
+      {
+        "id": "p2",
+        "text": "Multiply total_bill by num_friends and print the integer part.",
+        "correct": false
+      },
+      {
+        "id": "p3",
+        "text": "Subtract num_friends from total_bill.",
+        "correct": false
+      }
+    ],
+    "model_plan": "1. Convert bill to float and friends count to int.\n2. Calculate share = total_bill / num_friends.\n3. Output formatted string: f\"Each person pays: Rs {share:.2f}\"",
+    "plan_hint": "Plan Hint: Use the division operator '/' to divide total bill by the number of friends. In your f-string, format to 2 decimals using {share:.2f}.",
+    "code_hint": "Code Hint:\nshare = total_bill / num_friends\nprint(f\"Each person pays: Rs {share:.2f}\")",
+    "solution_code": "total_bill = float(input())\nnum_friends = int(input())\nshare = total_bill / num_friends\nprint(f\"Each person pays: Rs {share:.2f}\")",
+    "visible_test_cases": [
+      {
+        "input": "342.0\n4",
+        "expected": "Each person pays: Rs 85.50\n"
+      },
+      {
+        "input": "500.0\n3",
+        "expected": "Each person pays: Rs 166.67\n"
+      },
+      {
+        "input": "120.0\n2",
+        "expected": "Each person pays: Rs 60.00\n"
+      }
+    ]
+  },
+  {
+    "id": "ex_l1_3_seconds_converter",
+    "title": "Exercise 3: Seconds to Hours, Minutes, Seconds",
+    "badge_skill": "Converts types safely using int(), str(), and float()",
+    "difficulty": "Medium",
+    "xp": 35,
+    "problem": "Given an integer representing total seconds, convert it into hours, minutes, and remaining seconds. Print in the format: '<H>h <M>m <S>s'. (Example: 3665 seconds -> '1h 1m 5s').",
+    "starter_code": "total_sec = int(input())\n\n# Calculate hours, minutes, and seconds using // and %\n",
+    "plan_options": [
+      {
+        "id": "p1",
+        "text": "Find hours = total_sec // 3600. Remainder seconds = total_sec % 3600. Minutes = rem // 60. Final seconds = rem % 60.",
+        "correct": true
+      },
+      {
+        "id": "p2",
+        "text": "Divide total_sec by 60 for hours, and divide by 3600 for minutes.",
+        "correct": false
+      },
+      {
+        "id": "p3",
+        "text": "Multiply total_sec by 3600 to get hours.",
+        "correct": false
+      }
+    ],
+    "model_plan": "1. Hours = total_sec // 3600 (number of whole hours).\n2. Remainder = total_sec % 3600 (seconds left over).\n3. Minutes = remainder // 60 (number of whole minutes).\n4. Seconds = remainder % 60 (remaining seconds).\n5. Print f\"{h}h {m}m {s}s\".",
+    "plan_hint": "Plan Hint: There are 3600 seconds in an hour and 60 seconds in a minute. Use integer division '//' for the whole units and modulus '%' for remaining seconds.",
+    "code_hint": "Code Hint:\nh = total_sec // 3600\nrem = total_sec % 3600\nm = rem // 60\ns = rem % 60\nprint(f\"{h}h {m}m {s}s\")",
+    "solution_code": "total_sec = int(input())\nh = total_sec // 3600\nrem = total_sec % 3600\nm = rem // 60\ns = rem % 60\nprint(f\"{h}h {m}m {s}s\")",
+    "visible_test_cases": [
+      {
+        "input": "3665",
+        "expected": "1h 1m 5s\n"
+      },
+      {
+        "input": "7200",
+        "expected": "2h 0m 0s\n"
+      },
+      {
+        "input": "45",
+        "expected": "0h 0m 45s\n"
+      }
+    ]
+  },
+  {
+    "id": "ex_l1_4_swap_variables",
+    "title": "Exercise 4: Value Swapper",
+    "badge_skill": "Declares and names meaningful variables",
+    "difficulty": "Easy",
+    "xp": 30,
+    "problem": "Read two inputs: 'a' on line 1 and 'b' on line 2. Swap their values so that 'a' gets b's value and 'b' gets a's value. Print: 'a = <new_a>, b = <new_b>'.",
+    "starter_code": "a = input()\nb = input()\n\n# Swap a and b, then print:\n",
+    "plan_options": [
+      {
+        "id": "p1",
+        "text": "Swap using Python tuple unpacking: a, b = b, a, then print formatted string.",
+        "correct": true
+      },
+      {
+        "id": "p2",
+        "text": "Do a = b and then b = a directly without saving a's old value.",
+        "correct": false
+      },
+      {
+        "id": "p3",
+        "text": "Delete variable a and recreate it.",
+        "correct": false
+      }
+    ],
+    "model_plan": "1. Read a and b.\n2. Swap values: a, b = b, a (or using a temporary variable temp = a; a = b; b = temp).\n3. Print f\"a = {a}, b = {b}\".",
+    "plan_hint": "Plan Hint: In Python, you can swap two variables in one clean line using: a, b = b, a",
+    "code_hint": "Code Hint:\na, b = b, a\nprint(f\"a = {a}, b = {b}\")",
+    "solution_code": "a = input()\nb = input()\na, b = b, a\nprint(f\"a = {a}, b = {b}\")",
+    "visible_test_cases": [
+      {
+        "input": "Alpha\nBeta",
+        "expected": "a = Beta, b = Alpha\n"
+      },
+      {
+        "input": "100\n200",
+        "expected": "a = 200, b = 100\n"
+      }
+    ]
+  },
+  {
+    "id": "ex_l1_5_rectangle_geometry",
+    "title": "Exercise 5: Rectangle Geometry",
+    "badge_skill": "Performs arithmetic and string operations",
+    "difficulty": "Easy",
+    "xp": 30,
+    "problem": "Read length (float) on line 1 and width (float) on line 2. Calculate the area (length * width) and perimeter (2 * (length + width)). Print: 'Area: <area>, Perimeter: <perimeter>' formatted to 1 decimal place.",
+    "starter_code": "length = float(input())\nwidth = float(input())\n\n# Compute area and perimeter, format to 1 decimal place:\n",
+    "plan_options": [
+      {
+        "id": "p1",
+        "text": "Calculate area = length * width, perimeter = 2 * (length + width), and format with :.1f.",
+        "correct": true
+      },
+      {
+        "id": "p2",
+        "text": "Add length and width and divide by 2.",
+        "correct": false
+      },
+      {
+        "id": "p3",
+        "text": "Square both numbers and add them.",
+        "correct": false
+      }
+    ],
+    "model_plan": "1. Convert inputs to float.\n2. area = length * width.\n3. perimeter = 2 * (length + width).\n4. Print f\"Area: {area:.1f}, Perimeter: {perimeter:.1f}\".",
+    "plan_hint": "Plan Hint: Area = length * width. Perimeter = 2 * (length + width). Don't forget parentheses around length + width before multiplying by 2!",
+    "code_hint": "Code Hint:\narea = length * width\nperimeter = 2 * (length + width)\nprint(f\"Area: {area:.1f}, Perimeter: {perimeter:.1f}\")",
+    "solution_code": "length = float(input())\nwidth = float(input())\narea = length * width\nperimeter = 2 * (length + width)\nprint(f\"Area: {area:.1f}, Perimeter: {perimeter:.1f}\")",
+    "visible_test_cases": [
+      {
+        "input": "5.0\n3.0",
+        "expected": "Area: 15.0, Perimeter: 16.0\n"
+      },
+      {
+        "input": "10.5\n4.2",
+        "expected": "Area: 44.1, Perimeter: 29.4\n"
+      }
+    ]
+  }
+]

@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as XLSX from 'xlsx';
 import { BookOpen, Users, Clock, Trash2, Plus, Upload, Search, Edit2, Check, X, RotateCcw } from 'lucide-react';
@@ -207,6 +208,9 @@ export const AttendanceSetupPage: React.FC = () => {
   const [ttNumPeriods, setTtNumPeriods] = useState(1);
   const [ttRoom, setTtRoom] = useState('');
   const [ttStatus, setTtStatus] = useState<{type:string;message:string}|null>(null);
+  const [clashResult, setClashResult] = useState<any>(null);
+  const [clashLoading, setClashLoading] = useState(false);
+  const [overrideReason, setOverrideReason] = useState('');
 
   // BUG-11 fix: use a separate allotments query keyed on ttSem/ttDept (independent of Tab 2 state)
   const {data:rawTtAllotments=[]} = useQuery({ queryKey:['ttAllotments',ttSem,ttDept], queryFn:()=>api.getAllotments(ttSem||undefined,ttDept||undefined).catch(()=>[]) });
@@ -244,6 +248,35 @@ export const AttendanceSetupPage: React.FC = () => {
       setTtSubject(''); setTtFacEmail(''); setTtRoom('');
     } catch(err:any) { setTtStatus({type:'error',message:err.message||'Failed.'}); }
   };
+
+  // Auto clash-check when faculty/day/period/room changes
+  React.useEffect(() => {
+    if (!ttSem || !ttDept || !ttSection || !ttDay || !ttPeriod || !ttFacEmail) {
+      setClashResult(null);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setClashLoading(true);
+      try {
+        const result = await (api as any).checkTimetableClash({
+          semester_label: ttSem,
+          department: ttDept,
+          section: ttSection,
+          day_of_week: ttDay,
+          period_start: Number(ttPeriod),
+          num_periods: Number(ttNumPeriods) || 1,
+          faculty_email: ttFacEmail,
+          room_no: ttRoom || undefined,
+        });
+        setClashResult(result);
+      } catch {
+        setClashResult(null);
+      } finally {
+        setClashLoading(false);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [ttSem, ttDept, ttSection, ttDay, ttPeriod, ttNumPeriods, ttFacEmail, ttRoom]);
 
   const TABS: {id:TabId;label:string;icon:React.ReactNode}[] = [
     {id:'subjects',label:'📚 Subject Master',icon:<BookOpen className="w-3.5 h-3.5"/>},
@@ -545,9 +578,66 @@ export const AttendanceSetupPage: React.FC = () => {
                 }
               </select>
 
-              <button type="submit" className="col-span-2 md:col-span-4 lg:col-span-8 px-4 py-2.5 bg-brand-primary text-white font-bold text-xs rounded-xl hover:opacity-90 transition-opacity">Save Timetable Slot</button>
+              <input
+                value={ttRoom}
+                onChange={e => setTtRoom(e.target.value)}
+                placeholder="Room / Lab (optional)"
+                className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold"
+              />
+
+              <button type="submit" disabled={clashLoading || (clashResult?.clashes?.some((c: any) => c.severity === 'hard') && !overrideReason)} className="col-span-2 md:col-span-4 lg:col-span-8 px-4 py-2.5 bg-brand-primary text-white font-bold text-xs rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50">Save Timetable Slot</button>
             </div>
             <StatusMsg msg={ttStatus}/>
+
+              {/* Clash Detection Panel */}
+              {clashLoading && (
+                <div className="mt-3 p-3 rounded-xl border border-borderLine bg-surface text-xs text-muted flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                  Checking for clashes…
+                </div>
+              )}
+              {!clashLoading && clashResult && (
+                <div className={`mt-3 p-3 rounded-xl border text-xs ${
+                  clashResult.clashes?.some((c: any) => c.severity === 'hard')
+                    ? 'border-red-300 bg-red-50 dark:bg-red-950/20'
+                    : clashResult.clashes?.length > 0
+                    ? 'border-amber-300 bg-amber-50 dark:bg-amber-950/20'
+                    : 'border-green-300 bg-green-50 dark:bg-green-950/20'
+                }`}>
+                  {clashResult.clashes?.length === 0 ? (
+                    <p className="text-green-700 dark:text-green-400 font-semibold">✓ No clashes — slot is free</p>
+                  ) : (
+                    <>
+                      <p className="font-bold text-red-700 dark:text-red-400 mb-1">Clash Detected</p>
+                      <ul className="space-y-1 mb-2">
+                        {clashResult.clashes.map((c: any, i: number) => (
+                          <li key={i} className={`flex gap-2 ${c.severity === 'hard' ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                            <span>{c.severity === 'hard' ? '🔴' : '🟡'}</span>
+                            <span><strong>{c.type}:</strong> {c.message}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      {clashResult.clashes?.some((c: any) => c.severity === 'hard') && (
+                        <div className="mt-2">
+                          <p className="text-xs text-muted mb-1">Override reason (required to save despite warning):</p>
+                          <input
+                            value={overrideReason}
+                            onChange={e => setOverrideReason(e.target.value)}
+                            placeholder="Reason for override…"
+                            className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold"
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
+                  {clashResult.free_periods?.length > 0 && (
+                    <p className="mt-2 text-xs text-muted">Free periods for this faculty today: {clashResult.free_periods.join(', ')}</p>
+                  )}
+                  {clashResult.free_faculty?.length > 0 && (
+                    <p className="mt-1 text-xs text-muted">Free faculty for this slot: {clashResult.free_faculty.slice(0, 3).join(', ')}</p>
+                  )}
+                </div>
+              )}
           </form>
 
           {/* Timetable Grid */}

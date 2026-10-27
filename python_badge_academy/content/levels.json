@@ -1,0 +1,145 @@
+[
+  {
+    "id": 1,
+    "title": "Python Basics",
+    "badge_title": "Python Foundations Novice",
+    "badge_icon": "🐍",
+    "status": "available",
+    "summary": "Master variables, data types, inputs, arithmetic, and type conversion.",
+    "skills": [
+      "Declares and names meaningful variables",
+      "Identifies int, float, str, and bool data types",
+      "Performs arithmetic and string operations",
+      "Converts types safely using int(), str(), and float()",
+      "Reads user input and prints clean formatted output"
+    ]
+  },
+  {
+    "id": 2,
+    "title": "Decision Maker",
+    "badge_title": "Logic Pathfinder",
+    "badge_icon": "⚖️",
+    "status": "available",
+    "summary": "Control code execution using if, elif, else, and boolean conditions.",
+    "skills": [
+      "Forms valid boolean comparison conditions",
+      "Combines conditions with and, or, and not",
+      "Structures if-elif-else branching correctly",
+      "Recognizes truthy and falsy values",
+      "Predicts execution flow through nested conditionals"
+    ]
+  },
+  {
+    "id": 3,
+    "title": "Loop Master",
+    "badge_title": "Iteration Architect",
+    "badge_icon": "🔁",
+    "status": "available",
+    "summary": "Automate repetitive tasks with while and for loops, range, break, and continue.",
+    "skills": [
+      "Writes while loops with guaranteed stop conditions",
+      "Traverses sequences and ranges with for loops",
+      "Uses range(start, stop, step) effectively",
+      "Controls loop termination with break",
+      "Skips iterations cleanly with continue"
+    ]
+  },
+  {
+    "id": 4,
+    "title": "Pattern Builder",
+    "badge_title": "Pattern Craftsman",
+    "badge_icon": "💠",
+    "status": "locked",
+    "summary": "Construct nested loops, star patterns, number triangles, and coordinate grids.",
+    "skills": [
+      "Designs nested loops for rows and columns",
+      "Prints star and number pyramids",
+      "Solves 2D coordinate grid problems",
+      "Controls line formatting with end=' '"
+    ]
+  },
+  {
+    "id": 5,
+    "title": "String Handler",
+    "badge_title": "Text Maestro",
+    "badge_icon": "🔤",
+    "status": "locked",
+    "summary": "Index, slice, clean, search, and format strings with f-strings and methods.",
+    "skills": [
+      "Extracts substrings with [start:stop:step] slicing",
+      "Transforms case and strips whitespace",
+      "Splits and joins strings effortlessly",
+      "Formats dynamic strings with f-strings"
+    ]
+  },
+  {
+    "id": 6,
+    "title": "List & Tuple Tamer",
+    "badge_title": "Collection Wrangler",
+    "badge_icon": "📋",
+    "status": "locked",
+    "summary": "Store and organize sequences, understand mutability, slicing, and copies.",
+    "skills": [
+      "Appends, inserts, and removes list items",
+      "Distinguishes mutable lists from immutable tuples",
+      "Prevents aliasing bugs with list.copy()",
+      "Sorts and filters data collections"
+    ]
+  },
+  {
+    "id": 7,
+    "title": "Dictionary & Set Explorer",
+    "badge_title": "Key-Value Cartographer",
+    "badge_icon": "🗂️",
+    "status": "locked",
+    "summary": "Work with fast key-value lookups, hash maps, and unique mathematical sets.",
+    "skills": [
+      "Creates dictionaries and accesses keys safely with .get()",
+      "Loops through keys, values, and .items()",
+      "Eliminates duplicates using sets",
+      "Computes set union, intersection, and difference"
+    ]
+  },
+  {
+    "id": 8,
+    "title": "Function Builder",
+    "badge_title": "Modular Engineer",
+    "badge_icon": "⚙️",
+    "status": "locked",
+    "summary": "Write reusable code blocks with def, parameters, return values, and scope.",
+    "skills": [
+      "Defines functions with positional and keyword arguments",
+      "Returns values cleanly to callers",
+      "Manages local and global variable scope",
+      "Breaks large problems into pure functions"
+    ]
+  },
+  {
+    "id": 9,
+    "title": "Error Handler",
+    "badge_title": "Resilient Coder",
+    "badge_icon": "🛡️",
+    "status": "locked",
+    "summary": "Prevent crashes using try/except blocks and handle file reading/writing.",
+    "skills": [
+      "Catches specific exceptions gracefully",
+      "Uses finally for cleanup routines",
+      "Reads and writes text files with with open()",
+      "Validates user inputs defensively"
+    ]
+  },
+  {
+    "id": 10,
+    "title": "Object Builder",
+    "badge_title": "Object Artisan",
+    "badge_icon": "🏗️",
+    "status": "locked",
+    "summary": "Model real-world entities using classes, __init__, self, and inheritance.",
+    "skills": [
+      "Defines custom classes with attributes",
+      "Initializes instances with __init__ and self",
+      "Writes instance methods that update state",
+      "Builds class hierarchies with single inheritance"
+    ]
+  }
+]

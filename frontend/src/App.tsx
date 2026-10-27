@@ -27,6 +27,7 @@ const FacultyManagementPage = lazy(() => import('./features/admin/FacultyManagem
 const MyMentorPage = lazy(() => import('./features/mentor/MyMentorPage'));
 const AttendancePage = lazy(() => import('./features/attendance/AttendancePage').then(m => ({ default: m.AttendancePage })));
 const OversightDashboardPage = lazy(() => import('./features/oversight/OversightDashboardPage'));
+const FacultyWorkloadPage = lazy(() => import('./features/attendance/workload/FacultyWorkloadPage').then(m => ({ default: m.FacultyWorkloadPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -303,6 +304,7 @@ export const App: React.FC = () => {
               <Route path="/mentor" element={<MyMentorPage />} />
               <Route path="/coding-analytics" element={<CodingAnalyticsPage />} />
               <Route path="/attendance" element={<AttendancePage />} />
+              <Route path="/attendance/workload" element={<FacultyWorkloadPage />} />
 
               {/* Oversight (View-Only) routes */}
               <Route element={<ProtectedRoute allowedRoles={['director', 'principal', 'management', 'program_chair', 'admin']} />}>

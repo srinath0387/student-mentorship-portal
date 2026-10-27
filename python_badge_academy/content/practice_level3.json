@@ -1,0 +1,222 @@
+[
+  {
+    "id": "ex_l3_1_sum_of_n",
+    "title": "Exercise 1: Sum of First N Numbers",
+    "badge_skill": "Writes while loops with guaranteed stop conditions",
+    "difficulty": "Easy",
+    "xp": 30,
+    "problem": "Read a positive integer N. Using a while or for loop, calculate the sum of all integers from 1 up to N (inclusive), and print: 'Sum is <total>'.",
+    "starter_code": "N = int(input())\n\n# Accumulate sum from 1 to N using a loop:\n",
+    "plan_options": [
+      {
+        "id": "p1",
+        "text": "Initialize total = 0. Loop i from 1 to N: add i to total. Print total.",
+        "correct": true
+      },
+      {
+        "id": "p2",
+        "text": "Multiply N by itself.",
+        "correct": false
+      },
+      {
+        "id": "p3",
+        "text": "Print N numbers without adding them.",
+        "correct": false
+      }
+    ],
+    "model_plan": "1. Read integer N.\n2. Initialize total = 0.\n3. For i in range(1, N + 1): total += i.\n4. Print f\"Sum is {total}\".",
+    "plan_hint": "Plan Hint: Use an accumulator variable 'total = 0' before the loop. Inside for i in range(1, N + 1):, add i to total on each pass.",
+    "code_hint": "Code Hint:\ntotal = 0\nfor i in range(1, N + 1):\n    total += i\nprint(f\"Sum is {total}\")",
+    "solution_code": "N = int(input())\ntotal = 0\nfor i in range(1, N + 1):\n    total += i\nprint(f\"Sum is {total}\")",
+    "visible_test_cases": [
+      {
+        "input": "5",
+        "expected": "Sum is 15\n"
+      },
+      {
+        "input": "10",
+        "expected": "Sum is 55\n"
+      },
+      {
+        "input": "1",
+        "expected": "Sum is 1\n"
+      }
+    ]
+  },
+  {
+    "id": "ex_l3_2_multiplication_table",
+    "title": "Exercise 2: Multiplication Table Generator",
+    "badge_skill": "Uses range(start, stop, step) effectively",
+    "difficulty": "Easy",
+    "xp": 30,
+    "problem": "Read an integer K. Generate and print the multiplication table of K from 1 to 5. Format each line as: '<K> x <i> = <product>'.",
+    "starter_code": "K = int(input())\n\n# Print multiplication table from 1 to 5:\n",
+    "plan_options": [
+      {
+        "id": "p1",
+        "text": "Loop i through range(1, 6), compute product = K * i, and print f\"{K} x {i} = {product}\".",
+        "correct": true
+      },
+      {
+        "id": "p2",
+        "text": "Print K * 5 only.",
+        "correct": false
+      },
+      {
+        "id": "p3",
+        "text": "Add K five times in one line.",
+        "correct": false
+      }
+    ],
+    "model_plan": "1. Read integer K.\n2. For i in range(1, 6):\n3. Print f\"{K} x {i} = {K * i}\".",
+    "plan_hint": "Plan Hint: Use for i in range(1, 6):. Note that range stops before 6, so it runs for 1, 2, 3, 4, 5.",
+    "code_hint": "Code Hint:\nfor i in range(1, 6):\n    print(f\"{K} x {i} = {K * i}\")",
+    "solution_code": "K = int(input())\nfor i in range(1, 6):\n    print(f\"{K} x {i} = {K * i}\")",
+    "visible_test_cases": [
+      {
+        "input": "7",
+        "expected": "7 x 1 = 7\n7 x 2 = 14\n7 x 3 = 21\n7 x 4 = 28\n7 x 5 = 35\n"
+      },
+      {
+        "input": "3",
+        "expected": "3 x 1 = 3\n3 x 2 = 6\n3 x 3 = 9\n3 x 4 = 12\n3 x 5 = 15\n"
+      }
+    ]
+  },
+  {
+    "id": "ex_l3_3_count_digits",
+    "title": "Exercise 3: Counting Digits",
+    "badge_skill": "Writes while loops with guaranteed stop conditions",
+    "difficulty": "Medium",
+    "xp": 35,
+    "problem": "Read a positive integer num. Using a while loop with integer division '// 10', count how many digits num has, and print: 'Digits: <count>'. (Example: 4059 has 4 digits).",
+    "starter_code": "num = int(input())\n\n# Count the number of digits in num using a while loop:\n",
+    "plan_options": [
+      {
+        "id": "p1",
+        "text": "Initialize count = 0. While num > 0: count += 1, num = num // 10. Print count.",
+        "correct": true
+      },
+      {
+        "id": "p2",
+        "text": "Multiply num by 10 in a loop.",
+        "correct": false
+      },
+      {
+        "id": "p3",
+        "text": "Print the number itself.",
+        "correct": false
+      }
+    ],
+    "model_plan": "1. Read positive integer num.\n2. Handle edge case if num == 0 -> count = 1.\n3. Otherwise, count = 0; while num > 0: num = num // 10, count += 1.\n4. Print f\"Digits: {count}\".",
+    "plan_hint": "Plan Hint: In Python, dividing by 10 (num // 10) strips off the rightmost digit. Repeat until num becomes 0, incrementing your counter each time.",
+    "code_hint": "Code Hint:\ncount = 0\nif num == 0:\n    count = 1\nelse:\n    while num > 0:\n        count += 1\n        num = num // 10\nprint(f\"Digits: {count}\")",
+    "solution_code": "num = int(input())\ncount = 0\nif num == 0:\n    count = 1\nelse:\n    while num > 0:\n        count += 1\n        num = num // 10\nprint(f\"Digits: {count}\")",
+    "visible_test_cases": [
+      {
+        "input": "4059",
+        "expected": "Digits: 4\n"
+      },
+      {
+        "input": "7",
+        "expected": "Digits: 1\n"
+      },
+      {
+        "input": "100000",
+        "expected": "Digits: 6\n"
+      }
+    ]
+  },
+  {
+    "id": "ex_l3_4_factorial",
+    "title": "Exercise 4: Factorial Calculator",
+    "badge_skill": "Traverses sequences and ranges with for loops",
+    "difficulty": "Medium",
+    "xp": 35,
+    "problem": "Read a non-negative integer n (where n >= 0). Compute its factorial n! = 1 * 2 * ... * n (note: 0! = 1). Print: 'Factorial: <result>'.",
+    "starter_code": "n = int(input())\n\n# Compute factorial of n:\n",
+    "plan_options": [
+      {
+        "id": "p1",
+        "text": "Start fact = 1. For i in range(1, n + 1): fact *= i. Print fact.",
+        "correct": true
+      },
+      {
+        "id": "p2",
+        "text": "Add all numbers from 1 to n.",
+        "correct": false
+      },
+      {
+        "id": "p3",
+        "text": "Divide n by 2 until 0.",
+        "correct": false
+      }
+    ],
+    "model_plan": "1. Read integer n.\n2. Initialize fact = 1.\n3. For i from 1 up to n: fact = fact * i.\n4. Print f\"Factorial: {fact}\".",
+    "plan_hint": "Plan Hint: Multiply an accumulator starting at 1. If n is 0, the range(1, 1) does not run and fact remains 1, which correctly matches 0! = 1.",
+    "code_hint": "Code Hint:\nfact = 1\nfor i in range(1, n + 1):\n    fact *= i\nprint(f\"Factorial: {fact}\")",
+    "solution_code": "n = int(input())\nfact = 1\nfor i in range(1, n + 1):\n    fact *= i\nprint(f\"Factorial: {fact}\")",
+    "visible_test_cases": [
+      {
+        "input": "5",
+        "expected": "Factorial: 120\n"
+      },
+      {
+        "input": "4",
+        "expected": "Factorial: 24\n"
+      },
+      {
+        "input": "0",
+        "expected": "Factorial: 1\n"
+      }
+    ]
+  },
+  {
+    "id": "ex_l3_5_prime_checker",
+    "title": "Exercise 5: Prime Number Verifier",
+    "badge_skill": "Controls loop termination with break",
+    "difficulty": "Hard",
+    "xp": 40,
+    "problem": "Read an integer n (where n >= 2). A prime number has no divisors other than 1 and itself. Using a loop and a 'break' statement, test if any divisor from 2 up to n-1 divides n evenly. If a divisor is found, print 'Not Prime'. If no divisors are found, print 'Prime'.",
+    "starter_code": "n = int(input())\n\n# Test if n is prime using a loop and break:\n",
+    "plan_options": [
+      {
+        "id": "p1",
+        "text": "Flag is_prime = True. For d in range(2, int(n**0.5) + 1): if n % d == 0: is_prime = False; break. If is_prime print 'Prime' else 'Not Prime'.",
+        "correct": true
+      },
+      {
+        "id": "p2",
+        "text": "Check if n is even only.",
+        "correct": false
+      },
+      {
+        "id": "p3",
+        "text": "Always print Prime for odd numbers.",
+        "correct": false
+      }
+    ],
+    "model_plan": "1. Read integer n >= 2.\n2. Set boolean flag is_prime = True.\n3. Loop divisor d from 2 up to int(n**0.5) + 1 (or n-1):\n     if n % d == 0:\n         is_prime = False\n         break (no need to keep checking!)\n4. If is_prime is True -> print('Prime'), else -> print('Not Prime').",
+    "plan_hint": "Plan Hint: Use a boolean flag `is_prime = True`. As soon as `n % d == 0` for any divisor `d`, set `is_prime = False` and `break` immediately out of the loop.",
+    "code_hint": "Code Hint:\nis_prime = True\nfor d in range(2, int(n**0.5) + 1):\n    if n % d == 0:\n        is_prime = False\n        break\nif is_prime:\n    print(\"Prime\")\nelse:\n    print(\"Not Prime\")",
+    "solution_code": "n = int(input())\nis_prime = True\nfor d in range(2, int(n**0.5) + 1):\n    if n % d == 0:\n        is_prime = False\n        break\nif is_prime:\n    print(\"Prime\")\nelse:\n    print(\"Not Prime\")",
+    "visible_test_cases": [
+      {
+        "input": "17",
+        "expected": "Prime\n"
+      },
+      {
+        "input": "25",
+        "expected": "Not Prime\n"
+      },
+      {
+        "input": "2",
+        "expected": "Prime\n"
+      },
+      {
+        "input": "91",
+        "expected": "Not Prime\n"
+      }
+    ]
+  }
+]

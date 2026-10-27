@@ -1,0 +1,222 @@
+[
+  {
+    "id": "ex_l2_1_even_or_odd",
+    "title": "Exercise 1: Even or Odd Identifier",
+    "badge_skill": "Forms valid boolean comparison conditions",
+    "difficulty": "Easy",
+    "xp": 30,
+    "problem": "Read an integer 'num'. If the number is evenly divisible by 2 (remainder is 0), print 'Even'. Otherwise, print 'Odd'.",
+    "starter_code": "num = int(input())\n\n# Check if num is even or odd, then print:\n",
+    "plan_options": [
+      {
+        "id": "p1",
+        "text": "Check if num % 2 == 0. If True, print 'Even'. Else, print 'Odd'.",
+        "correct": true
+      },
+      {
+        "id": "p2",
+        "text": "Divide num by 2 and print the float result.",
+        "correct": false
+      },
+      {
+        "id": "p3",
+        "text": "Check if num is greater than 2.",
+        "correct": false
+      }
+    ],
+    "model_plan": "1. Read integer num.\n2. Evaluate condition: num % 2 == 0.\n3. If True, print 'Even'.\n4. Otherwise, print 'Odd'.",
+    "plan_hint": "Plan Hint: A number is even if dividing by 2 leaves no remainder. Test: if num % 2 == 0:",
+    "code_hint": "Code Hint:\nif num % 2 == 0:\n    print(\"Even\")\nelse:\n    print(\"Odd\")",
+    "solution_code": "num = int(input())\nif num % 2 == 0:\n    print(\"Even\")\nelse:\n    print(\"Odd\")",
+    "visible_test_cases": [
+      {
+        "input": "42",
+        "expected": "Even\n"
+      },
+      {
+        "input": "7",
+        "expected": "Odd\n"
+      },
+      {
+        "input": "0",
+        "expected": "Even\n"
+      }
+    ]
+  },
+  {
+    "id": "ex_l2_2_movie_ticket",
+    "title": "Exercise 2: Cinema Ticket Price Calculator",
+    "badge_skill": "Structures if-elif-else branching correctly",
+    "difficulty": "Easy",
+    "xp": 30,
+    "problem": "A cinema charges different prices based on age:\n- Age under 12: Rs 100 (Child)\n- Age 12 to 59: Rs 200 (Standard)\n- Age 60 and above: Rs 150 (Senior)\nRead age as integer and print: 'Ticket Price: Rs <price>'.",
+    "starter_code": "age = int(input())\n\n# Calculate ticket price based on age brackets:\n",
+    "plan_options": [
+      {
+        "id": "p1",
+        "text": "Use if age < 12 price=100, elif age <= 59 price=200, else price=150.",
+        "correct": true
+      },
+      {
+        "id": "p2",
+        "text": "Multiply age by 10 and print.",
+        "correct": false
+      },
+      {
+        "id": "p3",
+        "text": "Charge 200 for everyone regardless of age.",
+        "correct": false
+      }
+    ],
+    "model_plan": "1. Read age.\n2. If age < 12: price = 100.\n3. Elif age <= 59: price = 200.\n4. Else: price = 150.\n5. Print f\"Ticket Price: Rs {price}\".",
+    "plan_hint": "Plan Hint: Use an if-elif-else ladder. First check age < 12. In the elif, since you already know age >= 12, check if age <= 59. The else catches age 60 and above.",
+    "code_hint": "Code Hint:\nif age < 12:\n    price = 100\nelif age <= 59:\n    price = 200\nelse:\n    price = 150\nprint(f\"Ticket Price: Rs {price}\")",
+    "solution_code": "age = int(input())\nif age < 12:\n    price = 100\nelif age <= 59:\n    price = 200\nelse:\n    price = 150\nprint(f\"Ticket Price: Rs {price}\")",
+    "visible_test_cases": [
+      {
+        "input": "8",
+        "expected": "Ticket Price: Rs 100\n"
+      },
+      {
+        "input": "25",
+        "expected": "Ticket Price: Rs 200\n"
+      },
+      {
+        "input": "65",
+        "expected": "Ticket Price: Rs 150\n"
+      }
+    ]
+  },
+  {
+    "id": "ex_l2_3_max_of_three",
+    "title": "Exercise 3: Greatest of Three Numbers",
+    "badge_skill": "Predicts execution flow through nested conditionals",
+    "difficulty": "Medium",
+    "xp": 35,
+    "problem": "Read three integers a, b, and c (each on a separate line). Without using Python's built-in max() function, find and print the largest value in the format: 'Maximum: <value>'.",
+    "starter_code": "a = int(input())\nb = int(input())\nc = int(input())\n\n# Find the maximum among a, b, c without using max():\n",
+    "plan_options": [
+      {
+        "id": "p1",
+        "text": "Assume largest = a. If b > largest, set largest = b. If c > largest, set largest = c. Print largest.",
+        "correct": true
+      },
+      {
+        "id": "p2",
+        "text": "Add a + b + c and divide by 3.",
+        "correct": false
+      },
+      {
+        "id": "p3",
+        "text": "Print a * b * c.",
+        "correct": false
+      }
+    ],
+    "model_plan": "1. Initialize largest = a.\n2. Check: if b > largest, update largest = b.\n3. Check: if c > largest, update largest = c.\n4. Output: f\"Maximum: {largest}\".",
+    "plan_hint": "Plan Hint: King-of-the-hill strategy: assume 'a' is the largest. Then compare with 'b', and update if 'b' is bigger. Then compare with 'c', and update if 'c' is bigger.",
+    "code_hint": "Code Hint:\nlargest = a\nif b > largest:\n    largest = b\nif c > largest:\n    largest = c\nprint(f\"Maximum: {largest}\")",
+    "solution_code": "a = int(input())\nb = int(input())\nc = int(input())\nlargest = a\nif b > largest:\n    largest = b\nif c > largest:\n    largest = c\nprint(f\"Maximum: {largest}\")",
+    "visible_test_cases": [
+      {
+        "input": "12\n45\n30",
+        "expected": "Maximum: 45\n"
+      },
+      {
+        "input": "99\n5\n14",
+        "expected": "Maximum: 99\n"
+      },
+      {
+        "input": "7\n7\n7",
+        "expected": "Maximum: 7\n"
+      }
+    ]
+  },
+  {
+    "id": "ex_l2_4_academic_result",
+    "title": "Exercise 4: Academic Performance Classifier",
+    "badge_skill": "Structures if-elif-else branching correctly",
+    "difficulty": "Easy",
+    "xp": 30,
+    "problem": "Read an exam score (0 to 100) as an integer. Output:\n- If score >= 75: 'Distinction'\n- If score >= 50 and < 75: 'Pass'\n- If score < 50: 'Fail'",
+    "starter_code": "score = int(input())\n\n# Classify score into Distinction, Pass, or Fail:\n",
+    "plan_options": [
+      {
+        "id": "p1",
+        "text": "If score >= 75 print Distinction, elif score >= 50 print Pass, else print Fail.",
+        "correct": true
+      },
+      {
+        "id": "p2",
+        "text": "Print 'Pass' for any number above 0.",
+        "correct": false
+      },
+      {
+        "id": "p3",
+        "text": "Divide score by 75 and print.",
+        "correct": false
+      }
+    ],
+    "model_plan": "1. Read integer score.\n2. If score >= 75 -> print('Distinction').\n3. Elif score >= 50 -> print('Pass').\n4. Else -> print('Fail').",
+    "plan_hint": "Plan Hint: Place the strictest condition first (score >= 75). If that fails, score is less than 75, so elif score >= 50 catches the middle bracket.",
+    "code_hint": "Code Hint:\nif score >= 75:\n    print(\"Distinction\")\nelif score >= 50:\n    print(\"Pass\")\nelse:\n    print(\"Fail\")",
+    "solution_code": "score = int(input())\nif score >= 75:\n    print(\"Distinction\")\nelif score >= 50:\n    print(\"Pass\")\nelse:\n    print(\"Fail\")",
+    "visible_test_cases": [
+      {
+        "input": "88",
+        "expected": "Distinction\n"
+      },
+      {
+        "input": "62",
+        "expected": "Pass\n"
+      },
+      {
+        "input": "38",
+        "expected": "Fail\n"
+      }
+    ]
+  },
+  {
+    "id": "ex_l2_5_triangle_validity",
+    "title": "Exercise 5: Valid Triangle Geometry",
+    "badge_skill": "Combines conditions with and, or, and not",
+    "difficulty": "Medium",
+    "xp": 35,
+    "problem": "Read three side lengths a, b, c (integers, each on a new line). For 3 sides to form a valid triangle, the sum of any two sides must be strictly greater than the third side: (a + b > c) AND (a + c > b) AND (b + c > a). If valid, print 'Valid Triangle', else print 'Invalid Triangle'.",
+    "starter_code": "a = int(input())\nb = int(input())\nc = int(input())\n\n# Test if a, b, c form a valid triangle:\n",
+    "plan_options": [
+      {
+        "id": "p1",
+        "text": "Check if (a + b > c) and (a + c > b) and (b + c > a). If True print 'Valid Triangle', else 'Invalid Triangle'.",
+        "correct": true
+      },
+      {
+        "id": "p2",
+        "text": "Check if a + b == c.",
+        "correct": false
+      },
+      {
+        "id": "p3",
+        "text": "Check if all three sides are equal.",
+        "correct": false
+      }
+    ],
+    "model_plan": "1. Read integers a, b, c.\n2. Test triangle inequality with 'and': (a + b > c) and (a + c > b) and (b + c > a).\n3. If all hold, print 'Valid Triangle'. Else print 'Invalid Triangle'.",
+    "plan_hint": "Plan Hint: Use the 'and' operator to link the three inequality checks: (a + b > c) and (a + c > b) and (b + c > a).",
+    "code_hint": "Code Hint:\nif (a + b > c) and (a + c > b) and (b + c > a):\n    print(\"Valid Triangle\")\nelse:\n    print(\"Invalid Triangle\")",
+    "solution_code": "a = int(input())\nb = int(input())\nc = int(input())\nif (a + b > c) and (a + c > b) and (b + c > a):\n    print(\"Valid Triangle\")\nelse:\n    print(\"Invalid Triangle\")",
+    "visible_test_cases": [
+      {
+        "input": "3\n4\n5",
+        "expected": "Valid Triangle\n"
+      },
+      {
+        "input": "1\n2\n10",
+        "expected": "Invalid Triangle\n"
+      },
+      {
+        "input": "5\n5\n5",
+        "expected": "Valid Triangle\n"
+      }
+    ]
+  }
+]

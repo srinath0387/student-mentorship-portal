@@ -896,6 +896,21 @@ export const api = {
     });
   },
 
+  // Faculty Workload
+  getWorkload: async (params?: { department?: string; semester?: string; section?: string; search?: string; status?: string }) => {
+    const q = params ? '?' + new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([,v]) => v && v !== 'All'))).toString() : '';
+    return fetchWithAuth(`/attendance/workload${q}`);
+  },
+  getWorkloadSettings: async () => fetchWithAuth('/attendance/workload/settings'),
+  saveWorkloadSettings: async (designation: string, min_hours_week: number, max_hours_week: number) =>
+    fetchWithAuth('/attendance/workload/settings', { method: 'POST', body: JSON.stringify({ designation, min_hours_week, max_hours_week }) }),
+
+  // Timetable Clash Check
+  checkTimetableClash: async (payload: {
+    semester_label: string; department: string; section: string; day_of_week: string;
+    period_start: number; num_periods?: number; faculty_email?: string; room_no?: string; exclude_id?: string;
+  }) => fetchWithAuth('/attendance/timetable/check-clash', { method: 'POST', body: JSON.stringify(payload) }),
+
   getAttendanceSessions: async (allotmentId?: string, dateFrom?: string, dateTo?: string) => {
     const params = new URLSearchParams();
     if (allotmentId) params.append('allotment_id', allotmentId);

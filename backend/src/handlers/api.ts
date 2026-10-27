@@ -7539,7 +7539,7 @@ app.get('/reports/placement-summary', async (_req: Request, res: Response) => {
 // Feature 1: At-Risk Student Alert System
 // ============================================================================
 
-app.get('/hod/at-risk-students', requireRole('hod', 'admin', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
+app.get('/hod/at-risk-students', requireRole('hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const department = (req.query.department as string) || (req.auth as any)?.department;
 
@@ -10131,6 +10131,273 @@ app.delete('/attendance/timetable/clear/section', requireRole('admin', 'hod', 'c
   }
 });
 
+// ── Faculty Workload ───────────────────────────────────────────────────────
+// GET /attendance/workload?department=CSE&semester=3-1&section=A&search=&status=
+app.get('/attendance/workload', requireRole('admin', 'hod', 'faculty', 'director', 'principal', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    const callerRole = req.auth?.role;
+    const callerEmail = req.auth?.email?.toLowerCase();
+    const callerDept = req.auth?.department;
+    const CSE_ALLIED = ['CSE', 'CSE (AI & ML)', 'CSE (Data Science)', 'CSE (BS)', 'CSE (CS)'];
+
+    const deptParam = req.query.department ? String(req.query.department).trim() : '';
+    const semParam = req.query.semester ? String(req.query.semester).trim() : '';
+    const sectionParam = req.query.section ? String(req.query.section).trim() : '';
+    const searchParam = req.query.search ? String(req.query.search).trim().toLowerCase() : '';
+    const statusParam = req.query.status ? String(req.query.status).trim().toLowerCase() : '';
+
+    // Fetch workload settings
+    let settings: Record<string, { min: number; max: number }> = {};
+    const settingsRes = await db.query(`SELECT designation, min_hours_week, max_hours_week FROM workload_settings`).catch(() => ({ rows: [] }));
+    for (const r of settingsRes.rows) {
+      settings[r.designation] = { min: parseInt(r.min_hours_week), max: parseInt(r.max_hours_week) };
+    }
+    const getThreshold = (desig: string) => {
+      for (const key of Object.keys(settings)) {
+        if (key !== 'default' && desig.toLowerCase().includes(key.toLowerCase())) return settings[key];
+      }
+      return settings['default'] || { min: 12, max: 20 };
+    };
+
+    // Build department filter
+    let deptCondition = '';
+    const deptParams: any[] = [];
+    let pi = 1;
+
+    if (callerRole === 'faculty') {
+      // Faculty sees only their own workload
+      deptCondition = `AND LOWER(t.faculty_email) = LOWER($${pi++})`;
+      deptParams.push(callerEmail);
+    } else if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+      deptCondition = `AND t.department = $${pi++}`;
+      deptParams.push(callerDept);
+    } else if (callerRole === 'program_chair') {
+      deptCondition = `AND t.department = ANY($${pi++}::text[])`;
+      deptParams.push(CSE_ALLIED);
+    } else if (deptParam && deptParam !== 'All') {
+      deptCondition = `AND t.department = $${pi++}`;
+      deptParams.push(deptParam);
+    }
+
+    if (semParam) { deptCondition += ` AND t.semester_label = $${pi++}`; deptParams.push(semParam); }
+    if (sectionParam) { deptCondition += ` AND t.section = $${pi++}`; deptParams.push(sectionParam); }
+
+    const rows = await db.query(`
+      SELECT
+        t.faculty_email,
+        t.faculty_name,
+        t.department,
+        f.role AS faculty_role,
+        COALESCE(fp.personal->>'designation', '') AS designation,
+        COUNT(DISTINCT t.section || '|' || t.semester_label || '|' || t.subject_name) AS section_count,
+        COUNT(DISTINCT t.subject_name) AS subject_count,
+        COALESCE(SUM(CASE WHEN t.subject_type = 'Theory' THEN t.num_periods ELSE 0 END) FILTER (WHERE t.day_of_week IS NOT NULL), 0)::int AS theory_periods_week,
+        COALESCE(SUM(CASE WHEN t.subject_type = 'Lab' THEN t.num_periods ELSE 0 END) FILTER (WHERE t.day_of_week IS NOT NULL), 0)::int AS lab_periods_week,
+        COALESCE(SUM(t.num_periods), 0)::int AS total_periods_week,
+        COUNT(DISTINCT ma.roll_number)::int AS mentee_count,
+        json_agg(json_build_object(
+          'semester_label', t.semester_label,
+          'department', t.department,
+          'section', t.section,
+          'subject_name', t.subject_name,
+          'subject_type', t.subject_type,
+          'day_of_week', t.day_of_week,
+          'period_start', t.period_start,
+          'num_periods', t.num_periods,
+          'room_no', t.room_no
+        ) ORDER BY t.semester_label, t.subject_name) AS slots
+      FROM timetable_entries t
+      LEFT JOIN faculty f ON LOWER(f.email) = LOWER(t.faculty_email)
+      LEFT JOIN faculty_full_profiles fp ON LOWER(fp.email) = LOWER(t.faculty_email)
+      LEFT JOIN mentor_assignments ma ON UPPER(ma.faculty_id) = UPPER(COALESCE(f.faculty_id,''))
+      WHERE t.faculty_email IS NOT NULL AND t.faculty_email != ''
+        ${deptCondition}
+      GROUP BY t.faculty_email, t.faculty_name, t.department, f.role, fp.personal
+      ORDER BY t.department, t.faculty_name
+    `, deptParams).catch(() => ({ rows: [] }));
+
+    let workload = rows.rows.map((r: any) => {
+      const threshold = getThreshold(r.designation || '');
+      const totalHrs = parseInt(r.total_periods_week) || 0;
+      const status = totalHrs === 0 ? 'no_data' : totalHrs < threshold.min ? 'underloaded' : totalHrs > threshold.max ? 'overloaded' : 'optimal';
+      return {
+        faculty_email: r.faculty_email,
+        faculty_name: r.faculty_name || r.faculty_email,
+        department: r.department,
+        designation: r.designation || 'Faculty',
+        section_count: parseInt(r.section_count) || 0,
+        subject_count: parseInt(r.subject_count) || 0,
+        theory_hours_week: parseInt(r.theory_periods_week) || 0,
+        lab_hours_week: parseInt(r.lab_periods_week) || 0,
+        total_hours_week: totalHrs,
+        mentee_count: parseInt(r.mentee_count) || 0,
+        status,
+        threshold,
+        slots: Array.isArray(r.slots) ? r.slots.filter((s: any) => s.subject_name) : [],
+      };
+    });
+
+    // Apply search and status filters
+    if (searchParam) workload = workload.filter((w: any) => w.faculty_name.toLowerCase().includes(searchParam) || w.faculty_email.toLowerCase().includes(searchParam));
+    if (statusParam && statusParam !== 'all') workload = workload.filter((w: any) => w.status === statusParam);
+
+    // Dept averages
+    const deptMap: Record<string, number[]> = {};
+    for (const w of workload) {
+      if (!deptMap[w.department]) deptMap[w.department] = [];
+      deptMap[w.department].push(w.total_hours_week);
+    }
+    const deptAverages = Object.entries(deptMap).map(([dept, hrs]) => ({
+      department: dept,
+      avg_hours: hrs.length > 0 ? parseFloat((hrs.reduce((a, b) => a + b, 0) / hrs.length).toFixed(1)) : 0,
+      faculty_count: hrs.length,
+    }));
+
+    res.json({ workload, dept_averages: deptAverages, settings: Object.fromEntries(Object.entries(settings)) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /attendance/workload/settings
+app.get('/attendance/workload/settings', requireRole('admin', 'hod', 'director', 'principal', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS workload_settings (
+        id SERIAL PRIMARY KEY, designation TEXT NOT NULL DEFAULT 'default',
+        min_hours_week INT NOT NULL DEFAULT 12, max_hours_week INT NOT NULL DEFAULT 20,
+        updated_by TEXT, updated_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(designation)
+      )
+    `).catch(() => {});
+    await db.query(`
+      INSERT INTO workload_settings (designation, min_hours_week, max_hours_week) VALUES
+        ('default',12,20),('Professor',12,18),('Associate Professor',12,20),('Assistant Professor',14,22)
+      ON CONFLICT (designation) DO NOTHING
+    `).catch(() => {});
+    const result = await db.query(`SELECT * FROM workload_settings ORDER BY id`);
+    res.json(result.rows);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /attendance/workload/settings
+app.post('/attendance/workload/settings', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    const { designation, min_hours_week, max_hours_week } = req.body;
+    if (!designation || !min_hours_week || !max_hours_week) return res.status(400).json({ error: 'designation, min_hours_week, max_hours_week required' });
+    await db.query(`
+      INSERT INTO workload_settings (designation, min_hours_week, max_hours_week, updated_by, updated_at)
+      VALUES ($1,$2,$3,$4,NOW())
+      ON CONFLICT (designation) DO UPDATE SET min_hours_week=$2, max_hours_week=$3, updated_by=$4, updated_at=NOW()
+    `, [designation, parseInt(min_hours_week), parseInt(max_hours_week), req.auth?.email || 'admin']);
+    res.json({ message: 'Settings saved.' });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Timetable Clash Detection ──────────────────────────────────────────────
+// POST /attendance/timetable/check-clash
+app.post('/attendance/timetable/check-clash', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
+  try {
+    const { semester_label, department, section, day_of_week, period_start, num_periods, faculty_email, room_no, exclude_id } = req.body;
+
+    if (!semester_label || !department || !section || !day_of_week || !period_start) {
+      return res.status(400).json({ error: 'semester_label, department, section, day_of_week, period_start are required.' });
+    }
+
+    const pStart = parseInt(period_start);
+    const nPeriods = parseInt(num_periods) || 1;
+    const slots = Array.from({ length: nPeriods }, (_, i) => pStart + i);
+    const clashes: any[] = [];
+    const warnings: any[] = [];
+
+    const baseExclude = exclude_id ? `AND id != $1` : '';
+    const baseParams = exclude_id ? [exclude_id] : [];
+    let pi = baseParams.length + 1;
+
+    // 1. Section clash — same section already has something in any of these periods
+    const sectionClashRes = await db.query(`
+      SELECT * FROM timetable_entries
+      WHERE semester_label = $${pi} AND department = $${pi+1} AND section = $${pi+2}
+        AND day_of_week = $${pi+3}
+        AND period_start = ANY($${pi+4}::int[])
+        ${baseExclude}
+      ORDER BY period_start
+    `, [...baseParams, semester_label, department, section, day_of_week, slots]);
+    for (const r of sectionClashRes.rows) {
+      clashes.push({ type: 'section', severity: 'hard', message: `${section} already has "${r.subject_name}" on ${day_of_week} Period ${r.period_start}`, existing: r });
+    }
+
+    // 2. Faculty clash — same faculty already has a class in that slot in any dept/section
+    if (faculty_email) {
+      const facClashRes = await db.query(`
+        SELECT * FROM timetable_entries
+        WHERE LOWER(faculty_email) = LOWER($${pi}) AND day_of_week = $${pi+1}
+          AND period_start = ANY($${pi+2}::int[])
+          AND NOT (semester_label = $${pi+3} AND department = $${pi+4} AND section = $${pi+5})
+          ${baseExclude}
+        ORDER BY period_start
+      `, [...baseParams, faculty_email, day_of_week, slots, semester_label, department, section]);
+      for (const r of facClashRes.rows) {
+        clashes.push({ type: 'faculty', severity: 'hard', message: `${r.faculty_name || faculty_email} already has "${r.subject_name}" for ${r.department} Section ${r.section} on ${day_of_week} Period ${r.period_start}`, existing: r });
+      }
+    }
+
+    // 3. Room clash
+    if (room_no && room_no.trim()) {
+      const roomClashRes = await db.query(`
+        SELECT * FROM timetable_entries
+        WHERE LOWER(room_no) = LOWER($${pi}) AND day_of_week = $${pi+1}
+          AND period_start = ANY($${pi+2}::int[])
+          AND NOT (semester_label = $${pi+3} AND department = $${pi+4} AND section = $${pi+5})
+          ${baseExclude}
+        ORDER BY period_start
+      `, [...baseParams, room_no.trim(), day_of_week, slots, semester_label, department, section]);
+      for (const r of roomClashRes.rows) {
+        clashes.push({ type: 'room', severity: 'hard', message: `Room "${room_no}" is already booked for "${r.subject_name}" (${r.department} Section ${r.section}) on ${day_of_week} Period ${r.period_start}`, existing: r });
+      }
+    }
+
+    // 4. Holiday check
+    const holidayRes = await db.query(`SELECT date, name FROM holiday_calendar WHERE day_of_week = $1 LIMIT 5`, [day_of_week]).catch(() => ({ rows: [] }));
+    if (holidayRes.rows.length > 0) {
+      warnings.push({ type: 'holiday', severity: 'warning', message: `${day_of_week} may fall on a holiday: ${holidayRes.rows.map((h: any) => h.name).join(', ')}` });
+    }
+
+    // 5. Suggest free periods for this faculty on this day
+    let freePeriods: number[] = [];
+    if (faculty_email) {
+      const busyRes = await db.query(`
+        SELECT period_start, num_periods FROM timetable_entries
+        WHERE LOWER(faculty_email) = LOWER($1) AND day_of_week = $2
+      `, [faculty_email, day_of_week]).catch(() => ({ rows: [] }));
+      const busySlots = new Set<number>();
+      for (const r of busyRes.rows) {
+        for (let i = 0; i < (r.num_periods || 1); i++) busySlots.add(r.period_start + i);
+      }
+      freePeriods = [1,2,3,4,5,6,7].filter(p => !busySlots.has(p));
+    }
+
+    // 6. Suggest free faculty for this slot
+    const allFacRes = await db.query(`
+      SELECT DISTINCT faculty_email, faculty_name, department FROM timetable_entries
+      WHERE department = $1
+    `, [department]).catch(() => ({ rows: [] }));
+    const busyFacultyInSlot = new Set(clashes.filter(c => c.type === 'faculty').map(c => c.existing?.faculty_email?.toLowerCase()));
+    const freeFaculty = allFacRes.rows.filter((f: any) => !busyFacultyInSlot.has(f.faculty_email?.toLowerCase()))
+      .slice(0, 5)
+      .map((f: any) => ({ email: f.faculty_email, name: f.faculty_name }));
+
+    res.json({
+      has_hard_clash: clashes.filter(c => c.severity === 'hard').length > 0,
+      clashes,
+      warnings,
+      free_periods: freePeriods,
+      free_faculty: freeFaculty,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 18. Timetable: Get Today's Scheduled Session Slots (Auto-Generator for Faculty & Students)
 app.get('/attendance/timetable/today-slots', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -10215,7 +10482,7 @@ app.get('/attendance/timetable/today-slots', requireAuth, async (req: Request, r
 
 // 19. Year-Wise Attendance Summary Report (for PDF & Excel Export)
 // Accessible by Admin, HOD, Faculty, and Coordinator (for 1st year)
-app.get('/attendance/reports/year-summary', requireRole('admin', 'hod', 'faculty', 'coordinator'), async (req: Request, res: Response) => {
+app.get('/attendance/reports/year-summary', requireRole('admin', 'hod', 'faculty', 'coordinator', 'director', 'principal', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const yearParam = (req.query.year as string) || '2nd Year';
     const departmentParam = (req.query.department as string) || '';
@@ -10367,7 +10634,7 @@ app.get('/attendance/reports/year-summary', requireRole('admin', 'hod', 'faculty
 // ============================================================================
 // 18. SEMESTER ATTENDANCE ANALYTICS (SUMMARY, SECTION DRILL-DOWN, MENTOR VIEW)
 // ============================================================================
-app.get('/attendance/analytics/semester-summary', requireRole('admin', 'hod', 'faculty', 'coordinator'), async (req: Request, res: Response) => {
+app.get('/attendance/analytics/semester-summary', requireRole('admin', 'hod', 'faculty', 'coordinator', 'director', 'principal', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const semester = (req.query.semester as string) || '2-1';
     const departmentParam = (req.query.department as string) || '';
