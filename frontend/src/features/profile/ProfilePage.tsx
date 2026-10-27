@@ -111,7 +111,6 @@ export const ProfilePage: React.FC = () => {
     refetchAchievements();
     refetchPlacement();
     refetchScore();
-    queryClient.invalidateQueries();
   };
 
   const tabs = [

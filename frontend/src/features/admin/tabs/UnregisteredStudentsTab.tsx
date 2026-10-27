@@ -18,7 +18,7 @@ import {
 import { api } from '../../../lib/api';
 import { useAuth } from '../../../context/AuthContext';
 import { UnregisteredStudent } from '../../../types';
-import { normalizeDepartmentName, VALID_DEPARTMENT_NAMES } from '../../../lib/validation/auth';
+import { normalizeDepartmentName, VALID_DEPARTMENT_NAMES, getDeptFromRollNumber } from '../../../lib/validation/auth';
 
 export const UnregisteredStudentsTab: React.FC = () => {
   const { user } = useAuth();
@@ -51,8 +51,18 @@ export const UnregisteredStudentsTab: React.FC = () => {
   });
 
   const students: UnregisteredStudent[] = useMemo(() => {
-    return Array.isArray(data?.students) ? data.students : [];
-  }, [data]);
+    const rawList = Array.isArray(data?.students) ? data.students : [];
+    if (!activeDeptFilter || activeDeptFilter === 'All' || activeDeptFilter === '*') {
+      return rawList;
+    }
+    const targetNorm = normalizeDepartmentName(activeDeptFilter);
+    return rawList.filter((s) => {
+      const inferred = getDeptFromRollNumber(s.roll_number);
+      const stuDept = (inferred && inferred !== 'Unknown') ? inferred : (s.department || '');
+      const stuNorm = normalizeDepartmentName(stuDept);
+      return stuNorm === targetNorm;
+    });
+  }, [data, activeDeptFilter]);
 
   // Extract available batches from roll numbers (e.g. "22" -> "2022")
   const batches = useMemo(() => {

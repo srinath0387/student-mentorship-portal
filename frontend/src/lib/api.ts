@@ -112,7 +112,7 @@ export const api = {
     const cleanParams: Record<string, string> = {};
     if (params) {
       Object.entries(params).forEach(([key, val]) => {
-        if (val !== undefined && val !== null && val !== '') {
+        if (val !== undefined && val !== null && val !== '' && val !== 'All' && val !== '*') {
           cleanParams[key] = val;
         }
       });
@@ -206,6 +206,22 @@ export const api = {
   // Student Profile
   getStudentProfile: async (id: string): Promise<StudentProfile> => {
     return fetchWithAuth(`/students/${id}`);
+  },
+
+  // Unified full profile — returns student + all 8 sub-resources in one API call.
+  // Replaces 9 separate calls (getStudentProfile + 8 sub-resource fetches) on the profile page.
+  // Falls back gracefully: if full-profile endpoint fails, callers can fall back to individual endpoints.
+  getStudentFullProfile: async (id: string): Promise<{
+    student: StudentProfile;
+    academics: AcademicRecord[];
+    codingProfiles: CodingProfile[];
+    techSkills: TechSkill[];
+    certifications: Certification[];
+    softSkills: SoftSkill[];
+    achievements: Achievement[];
+    placement: PlacementProfile | null;
+  }> => {
+    return fetchWithAuth(`/students/${id}/full-profile`);
   },
 
   updateStudentProfile: async (id: string, data: Partial<StudentProfile>): Promise<StudentProfile> => {
