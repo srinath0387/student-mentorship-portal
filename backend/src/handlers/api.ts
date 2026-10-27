@@ -10303,10 +10303,10 @@ app.get('/attendance/workload', requireRole('admin', 'hod', 'faculty', 'director
         COALESCE(fp.personal->>'designation', '') AS designation,
         COUNT(DISTINCT t.section || '|' || t.semester_label || '|' || t.subject_name) AS section_count,
         COUNT(DISTINCT t.subject_name) AS subject_count,
-        COALESCE(SUM(CASE WHEN t.subject_type = 'Theory' THEN t.num_periods ELSE 0 END) FILTER (WHERE t.day_of_week IS NOT NULL), 0)::int AS theory_periods_week,
-        COALESCE(SUM(CASE WHEN t.subject_type = 'Lab' THEN t.num_periods ELSE 0 END) FILTER (WHERE t.day_of_week IS NOT NULL), 0)::int AS lab_periods_week,
+        COALESCE(SUM(CASE WHEN t.subject_type = 'Theory' THEN t.num_periods ELSE 0 END), 0)::int AS theory_periods_week,
+        COALESCE(SUM(CASE WHEN t.subject_type = 'Lab' THEN t.num_periods ELSE 0 END), 0)::int AS lab_periods_week,
         COALESCE(SUM(t.num_periods), 0)::int AS total_periods_week,
-        COUNT(DISTINCT ma.roll_number)::int AS mentee_count,
+        COALESCE(mc.mentee_count, 0)::int AS mentee_count,
         json_agg(json_build_object(
           'semester_label', t.semester_label,
           'department', t.department,
@@ -10321,10 +10321,14 @@ app.get('/attendance/workload', requireRole('admin', 'hod', 'faculty', 'director
       FROM timetable_entries t
       LEFT JOIN faculty f ON LOWER(f.email) = LOWER(t.faculty_email)
       LEFT JOIN faculty_full_profiles fp ON LOWER(fp.email) = LOWER(t.faculty_email)
-      LEFT JOIN mentor_assignments ma ON UPPER(ma.faculty_id) = UPPER(COALESCE(f.faculty_id,''))
+      LEFT JOIN (
+        SELECT UPPER(ma.faculty_id) AS faculty_id, COUNT(DISTINCT ma.roll_number)::int AS mentee_count
+        FROM mentor_assignments ma
+        GROUP BY ma.faculty_id
+      ) mc ON UPPER(COALESCE(f.faculty_id, '')) = mc.faculty_id
       WHERE t.faculty_email IS NOT NULL AND t.faculty_email != ''
         ${deptCondition}
-      GROUP BY t.faculty_email, t.faculty_name, t.department, f.role, fp.personal
+      GROUP BY t.faculty_email, t.faculty_name, t.department, f.role, fp.personal, mc.mentee_count
       ORDER BY t.department, t.faculty_name
     `, deptParams).catch(() => ({ rows: [] }));
 
