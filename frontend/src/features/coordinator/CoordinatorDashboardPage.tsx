@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '../../context/AuthContext';
 import {
   Users,
   Upload,
@@ -43,12 +44,22 @@ import { FirstYearOnboardingTab } from './FirstYearOnboardingTab';
 
 export const CoordinatorDashboardPage: React.FC = () => {
   const queryClient = useQueryClient();
+  const { user } = useAuth();  // must be before any useState that uses user?.department
 
   const [activeTab, setActiveTab] = useState<
     'onboarding' | 'freshers' | 'subjects' | 'attendance' | 'manage-attendance' | 'leaves' | 'calendar' | 'incharge' | 'promotion'
   >('onboarding');
   const location = useLocation();
   const navigate = useNavigate();
+
+  // Sync dept states from user?.department once auth resolves
+  useEffect(() => {
+    if (user?.department) {
+      setSubjDept(user.department);
+      setInchargeDept(user.department);
+      setPromoDept(user.department);
+    }
+  }, [user?.department]);
 
   // Sync tab from URL on mount and navigation
   useEffect(() => {
@@ -889,16 +900,12 @@ export const CoordinatorDashboardPage: React.FC = () => {
                 </button>
               </div>
 
-              {/* Department Dropdown */}
-              <select
-                value={subjDept}
-                onChange={(e) => setSubjDept(e.target.value)}
-                className="px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-background text-textPrimary focus:outline-none focus:ring-2 focus:ring-pink-500 font-semibold"
+              {/* Department — locked to coordinator's own dept */}
+              <span
+                className="px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary font-semibold"
               >
-                {VALID_DEPARTMENT_NAMES.map((d) => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
-              </select>
+                🏫 {subjDept}
+              </span>
 
               {/* Section Dropdown */}
               <select
@@ -1118,16 +1125,10 @@ export const CoordinatorDashboardPage: React.FC = () => {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-textPrimary mb-1">Select Department *</label>
-              <select
-                value={promoDept}
-                onChange={(e) => setPromoDept(e.target.value)}
-                className="w-full px-3.5 py-2 text-xs rounded-xl border border-borderLine bg-background text-textPrimary focus:outline-none focus:ring-2 focus:ring-pink-500 font-semibold"
-              >
-                {VALID_DEPARTMENT_NAMES.map((d) => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
-              </select>
+              <label className="block text-xs font-semibold text-textPrimary mb-1">Department</label>
+              <span className="block w-full px-3.5 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary font-semibold">
+                🏫 {promoDept}
+              </span>
             </div>
 
             <div>
@@ -1311,16 +1312,10 @@ export const CoordinatorDashboardPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-textPrimary mb-1">Host Department *</label>
-                <select
-                  value={inchargeDept}
-                  onChange={(e) => setInchargeDept(e.target.value)}
-                  className="w-full px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-background text-textPrimary font-semibold"
-                >
-                  {VALID_DEPARTMENT_NAMES.map((d) => (
-                    <option key={d} value={d}>{d}</option>
-                  ))}
-                </select>
+                <label className="block text-xs font-semibold text-textPrimary mb-1">Host Department</label>
+                <span className="block w-full px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary font-semibold">
+                  🏫 {inchargeDept}
+                </span>
               </div>
 
               <div>

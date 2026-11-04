@@ -2,14 +2,17 @@ import React, { useState, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Calendar, AlertTriangle, Users, Download, RefreshCw, Check, X } from 'lucide-react';
 import { api } from '../../../lib/api';
+import { useAuth } from '../../../context/AuthContext';
 
 type TabId = 'overview' | 'not_posted' | 'setup' | 'reports';
 
 export const CoordinatorAttendancePage: React.FC = () => {
   const qc = useQueryClient();
+  const { user } = useAuth();
   const [tab, setTab] = useState<TabId>('overview');
   const [sem, setSem] = useState<'1-1' | '1-2'>('1-1');
-  const [dept, setDept] = useState('');
+  // dept is read from auth — coordinator can only see their own department (enforced at backend too)
+  const dept = user?.department || '';
   const [section, setSection] = useState('');
 
   // Fetch 1st year allotments
@@ -22,7 +25,7 @@ export const CoordinatorAttendancePage: React.FC = () => {
   // Filter by section
   const filteredAllotments = allotments.filter((a: any) => !section || a.section === section);
   const uniqueSections = useMemo(() => [...new Set(allotments.map((a: any) => a.section))].sort(), [allotments]);
-  const uniqueDepts = useMemo(() => [...new Set(allotments.map((a: any) => a.department))].sort(), [allotments]);
+  // uniqueDepts removed — coordinator is scoped to own department
 
   // Not posted
   const { data: rawNotPosted = {}, refetch: refetchNP } = useQuery({
@@ -70,12 +73,11 @@ export const CoordinatorAttendancePage: React.FC = () => {
           <button onClick={() => setSem('1-1')} className={`px-4 py-2 text-xs font-black ${sem === '1-1' ? 'bg-brand-primary text-white' : 'bg-surface text-textSecondary hover:bg-surface-2'}`}>Semester 1-1</button>
           <button onClick={() => setSem('1-2')} className={`px-4 py-2 text-xs font-black ${sem === '1-2' ? 'bg-brand-primary text-white' : 'bg-surface text-textSecondary hover:bg-surface-2'}`}>Semester 1-2</button>
         </div>
-        {uniqueDepts.length > 0 && (
-          <select value={dept} onChange={e => setDept(e.target.value)}
-            className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
-            <option value="">All Departments</option>
-            {uniqueDepts.map(d => <option key={d}>{d}</option>)}
-          </select>
+        {/* Dept scoped to coordinator's own department — no cross-dept filter */}
+        {dept && (
+          <span className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textSecondary font-semibold">
+            🏫 {dept}
+          </span>
         )}
         <select value={section} onChange={e => setSection(e.target.value)}
           className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
@@ -270,8 +272,8 @@ export const CoordinatorAttendancePage: React.FC = () => {
               <h3 className="text-sm font-black flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-rose-500" />All 1st Year Defaulters (Below 75%)</h3>
               <div className="space-y-2">
                 <select className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
-                  <option value="">All Departments</option>
-                  {uniqueDepts.map(d => <option key={d}>{d}</option>)}
+                  <option value="">All Sections</option>
+                  {uniqueSections.map((s: string) => <option key={s} value={s}>Section {s}</option>)}
                 </select>
               </div>
               <button onClick={() => window.print()} className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 bg-rose-500 text-white font-bold text-xs rounded-xl hover:bg-rose-600">
