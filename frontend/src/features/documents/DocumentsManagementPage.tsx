@@ -58,7 +58,10 @@ export function DocumentsManagementPage() {
   const qc = useQueryClient();
   const role = user?.role || '';
   const isFaculty = role === 'faculty';
-  const isAdmin = role === 'admin';
+  // isSuperAdmin = truly global admin (dept='*'); dept-admins (admin-EEE) are scoped like HOD
+  const isSuperAdmin = user?.isSuperAdmin === true || user?.department === '*';
+  const isAdmin = role === 'admin'; // kept for UI conditionals (approve button etc.)
+  const userDept = isSuperAdmin ? '' : (user?.department || '');
 
   // Filters
   const [search, setSearch] = useState('');
@@ -78,12 +81,13 @@ export function DocumentsManagementPage() {
   const [zipDownloading, setZipDownloading] = useState(false);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
 
-  // Fetch documents list (uses existing zip-urls endpoint which returns structured doc list)
+  // Fetch documents list — always scoped to own dept unless super-admin
   const { data: rawData, isLoading, refetch } = useQuery({
-    queryKey: ['documents-management', filterYear, filterDept, filterDocType],
+    queryKey: ['documents-management', filterYear, filterDept, filterDocType, userDept],
     queryFn: () => api.getDocumentZipUrls({
       academic_year: filterYear || undefined,
-      department: (!isAdmin && user?.department) ? user.department : (filterDept || undefined),
+      // Super-admin can filter by any dept; everyone else is locked to their own dept
+      department: isSuperAdmin ? (filterDept || undefined) : (userDept || undefined),
       doc_type: filterDocType || undefined,
     }),
     staleTime: 30000,
@@ -255,8 +259,8 @@ export function DocumentsManagementPage() {
             {SEMESTERS.map(s => <option key={s} value={s}>Sem {s}</option>)}
           </select>
 
-          {/* Dept (Admin only) */}
-          {isAdmin && (
+          {/* Dept (Super-Admin: free-text filter; dept-scoped roles: show locked badge) */}
+          {isSuperAdmin ? (
             <input
               type="text"
               placeholder="Department…"
@@ -264,7 +268,11 @@ export function DocumentsManagementPage() {
               onChange={e => setFilterDept(e.target.value)}
               className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none"
             />
-          )}
+          ) : userDept ? (
+            <span className="px-3 py-1.5 text-xs font-bold rounded-xl bg-brand-primary/10 text-brand-primary border border-brand-primary/20">
+              {userDept}
+            </span>
+          ) : null}
         </div>
       </div>
 

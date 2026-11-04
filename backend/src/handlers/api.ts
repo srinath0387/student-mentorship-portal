@@ -4623,12 +4623,11 @@ app.get('/documents/download-zip-urls', requireRole('hod', 'admin', 'principal',
     const department = (req.query.department as string) || '';
     const docType = (req.query.doc_type as string) || '';
 
-    // Dept scoping: HOD locked to their own dept, admin/others can filter
-    const isAdmin = callerRole === 'admin';
-    const isSuperUser = callerDept === '*' || callerDept === 'All';
-    const targetDept = (!isAdmin && !isSuperUser && callerDept && callerDept !== '*')
-      ? callerDept
-      : (department && department !== 'All' ? department : '');
+    // Dept scoping: only super-admin (dept='*') sees all depts; dept-admins and HOD are locked to their own dept
+    const isSuperUser = req.auth?.isSuperAdmin === true || callerDept === '*' || callerDept === 'All';
+    const targetDept = isSuperUser
+      ? (department && department !== 'All' ? department : '')
+      : (callerDept && callerDept !== '*' ? callerDept : (department && department !== 'All' ? department : ''));
 
     const params: any[] = [];
     let query = `
