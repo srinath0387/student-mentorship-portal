@@ -4525,15 +4525,29 @@ app.post('/students/:id/documents', requireOwnerOrRole('id', 'admin', 'hod'), as
 });
 
 // PATCH /students/:id/documents/:docId/status \u2014 admin/hod approves or rejects
-app.patch('/students/:id/documents/:docId/status', requireAuth, requireRole('admin', 'hod', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
+app.patch('/students/:id/documents/:docId/status', requireAuth, requireRole('admin', 'hod', 'principal', 'director', 'management', 'faculty'), async (req: Request, res: Response) => {
   try {
     const studentId = req.params.id.toUpperCase();
     const docId = parseInt(req.params.docId, 10);
     const { verification_status, admin_note } = req.body;
+    const callerRole = req.auth?.role;
+    const callerEmail = req.auth?.email || 'unknown';
+
     if (!['Verified', 'Rejected'].includes(verification_status)) {
       return res.status(400).json({ error: 'verification_status must be Verified or Rejected.' });
     }
-    const callerEmail = req.auth?.email || 'unknown';
+
+    // Faculty can only approve docs for their assigned mentees
+    if (callerRole === 'faculty') {
+      const menteeCheck = await db.query(
+        `SELECT 1 FROM mentor_assignments WHERE faculty_email = $1 AND roll_number = $2 LIMIT 1`,
+        [callerEmail, studentId]
+      );
+      if (menteeCheck.rowCount === 0) {
+        return res.status(403).json({ error: 'You can only approve documents for your assigned mentees.' });
+      }
+    }
+
     const result = await db.query(
       `UPDATE student_documents SET verification_status=$1, admin_note=$2, verified_by=$3, verified_at=NOW(), updated_at=NOW()
        WHERE id=$4 AND roll_number=$5 RETURNING *`,
@@ -4619,10 +4633,11 @@ app.get('/documents/download-zip-urls', requireRole('hod', 'admin', 'principal',
     const params: any[] = [];
     let query = `
       SELECT sd.id, sd.roll_number, sd.doc_type, sd.semester, sd.title, sd.file_key, sd.file_name, sd.file_size_kb,
+             sd.verification_status, sd.admin_note, sd.verified_by, sd.verified_at, sd.uploaded_at, sd.description,
              s.name AS student_name, s.department, s.section, s.year AS academic_year
       FROM student_documents sd
       JOIN students s ON s.roll_number = sd.roll_number
-      WHERE sd.verification_status IN ('approved', 'pending')
+      WHERE 1=1  -- include all statuses for management view
     `;
 
     if (targetDept) {
@@ -4673,8 +4688,14 @@ app.get('/documents/download-zip-urls', requireRole('hod', 'admin', 'principal',
           doc_type: d.doc_type,
           semester: d.semester,
           title: d.title,
+          description: d.description,
           file_name: d.file_name,
           file_size_kb: d.file_size_kb,
+          verification_status: d.verification_status || 'Pending',
+          admin_note: d.admin_note,
+          verified_by: d.verified_by,
+          verified_at: d.verified_at,
+          uploaded_at: d.uploaded_at,
           download_url: url,
           // Suggested ZIP path: department/year/rollno/doctype_filename
           zip_path: `${(d.department || 'Unknown').replace(/[^a-zA-Z0-9 ]/g, '')}/${d.academic_year || 'Unknown Year'}/${d.roll_number}/${d.doc_type}_${d.file_name}`,

@@ -1632,7 +1632,7 @@ export const FacultyDashboardPage: React.FC = () => {
               {inspectTab === 'soft-skills' && <SoftSkillsTab readOnly={true} softSkills={inspectSoft} onRefresh={refetch} />}
               {inspectTab === 'achievements' && <AchievementsTab readOnly={true} achievements={inspectAchievements} onRefresh={refetch} />}
               {inspectTab === 'placement-preferences' && <PlacementPreferencesTab readOnly={true} placement={inspectPlacement} scoreData={inspectScore} onRefresh={refetch} />}
-              {inspectTab === 'documents' && <DocumentsTab rollNumber={inspectMentee.roll_number} readOnly={true} isAdminView={false} />}
+              {inspectTab === 'documents' && <DocumentsTab rollNumber={inspectMentee.roll_number} readOnly={false} isAdminView={true} />}
             </div>
           </div>
         </div>

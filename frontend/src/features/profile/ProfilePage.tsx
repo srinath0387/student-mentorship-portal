@@ -287,7 +287,7 @@ export const ProfilePage: React.FC = () => {
             />
           )}
           {currentTab === 'documents' && (
-            <DocumentsTab rollNumber={activeRollNo} readOnly={isReadOnly} isAdminView={isViewingOther && (user?.role === 'admin' || user?.role === 'hod')} />
+            <DocumentsTab rollNumber={activeRollNo} readOnly={isReadOnly} isAdminView={isViewingOther && (user?.role === 'admin' || user?.role === 'hod' || user?.role === 'faculty')} />
           )}
           {currentTab === 'meetings' && (
             <div className="space-y-4">
