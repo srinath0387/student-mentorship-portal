@@ -32,8 +32,10 @@ export const AttendanceSetupPage: React.FC = () => {
   const [tab, setTab] = useState<TabId>('subjects');
   const qc = useQueryClient();
   const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
-  const userDept = user?.department || 'CSE';
+  // isSuperAdmin = truly global admin (department='*'); dept admins (admin-EEE) are scoped like HOD
+  const isSuperAdmin = user?.isSuperAdmin === true || user?.department === '*';
+  const isAdmin = isSuperAdmin; // kept as alias for JSX conditionals below
+  const userDept = (isSuperAdmin ? '' : user?.department) || 'CSE';
 
   // ── TAB 1: SUBJECT MASTER ──────────────────────────────────────────────────
   const [subSearch, setSubSearch] = useState('');
@@ -50,7 +52,7 @@ export const AttendanceSetupPage: React.FC = () => {
   const { data: rawMasterSubjects = [], refetch: refetchMaster, isLoading: isMasterLoading, error: masterError } = useQuery({
     queryKey: ['masterSubjects', masterFetchTs],
     queryFn: async () => {
-      const result = await api.getMasterSubjects();
+      const result = await api.getMasterSubjects(undefined, isSuperAdmin ? undefined : userDept);
       if (Array.isArray(result) && result.length > 0) {
         setLocalSubjects(result);
       }
@@ -206,14 +208,14 @@ export const AttendanceSetupPage: React.FC = () => {
   const [ttSem, setTtSem] = useState('');
   const [ttDept, setTtDept] = useState('CSE'); // synced to userDept for non-admin via useEffect
 
-  // ── Dept scoping: non-admin roles locked to own department ─────────────────
+  // ── Dept scoping: only super-admin (dept='*') sees all departments ─────────
   React.useEffect(() => {
-    if (!isAdmin && userDept) {
+    if (!isSuperAdmin && userDept) {
       setSubDeptFilter(userDept);
       setAllotDept(userDept);
       setTtDept(userDept);
     }
-  }, [isAdmin, userDept]);
+  }, [isSuperAdmin, userDept]);
 
   const [ttSection, setTtSection] = useState('A');
   const [ttDay, setTtDay] = useState('Monday');

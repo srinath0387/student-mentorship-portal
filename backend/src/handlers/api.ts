@@ -14774,6 +14774,8 @@ app.get('/subjects/master', requireAuth, async (req: Request, res: Response) => 
       )
     `).catch(() => {});
 
+    const callerDept = req.auth?.department;
+    const isSuperUser = req.auth?.isSuperAdmin === true || callerDept === '*' || callerDept === 'All';
     const { semester, department } = req.query;
     let query = `SELECT * FROM master_subjects WHERE 1=1`;
     const params: any[] = [];
@@ -14782,8 +14784,12 @@ app.get('/subjects/master', requireAuth, async (req: Request, res: Response) => 
       params.push(semester);
       query += ` AND semester_label = $${params.length}`;
     }
-    if (department && department !== 'All') {
-      params.push(department);
+    // Role-based dept scoping: non-super-admin callers are always restricted to their own dept
+    const effectiveDept = isSuperUser
+      ? (department && department !== 'All' ? String(department) : null)
+      : (callerDept && callerDept !== '*' ? callerDept : (department && department !== 'All' ? String(department) : null));
+    if (effectiveDept) {
+      params.push(effectiveDept);
       query += ` AND department = $${params.length}`;
     }
 
