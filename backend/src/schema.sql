@@ -268,6 +268,29 @@ CREATE TABLE IF NOT EXISTS timetable_entries (
     UNIQUE(semester_label, department, section, day_of_week, period_start)
 );
 
+-- No-Class Request: faculty requests admin to remove a specific date slot from not-posted count
+CREATE TABLE IF NOT EXISTS attendance_no_class_requests (
+  id              SERIAL PRIMARY KEY,
+  faculty_email   TEXT NOT NULL,
+  faculty_name    TEXT,
+  date            DATE NOT NULL,
+  semester_label  TEXT NOT NULL,
+  department      TEXT NOT NULL,
+  section         TEXT NOT NULL,
+  subject_name    TEXT NOT NULL,
+  period_start    INT NOT NULL,
+  reason          TEXT,
+  status          TEXT NOT NULL DEFAULT 'Pending',
+  reviewed_by     TEXT,
+  reviewed_at     TIMESTAMPTZ,
+  reject_reason   TEXT,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(faculty_email, date, semester_label, section, subject_name, period_start)
+);
+CREATE INDEX IF NOT EXISTS idx_no_class_req_email ON attendance_no_class_requests(faculty_email);
+CREATE INDEX IF NOT EXISTS idx_no_class_req_date ON attendance_no_class_requests(date);
+CREATE INDEX IF NOT EXISTS idx_no_class_req_status ON attendance_no_class_requests(status);
+
 -- 18. Timetable Official Documents (Uploaded PDF Timetable per Section & Semester)
 CREATE TABLE IF NOT EXISTS timetable_documents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

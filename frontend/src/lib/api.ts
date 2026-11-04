@@ -1627,6 +1627,45 @@ export const api = {
     const q = department && department !== 'All' ? `?department=${encodeURIComponent(department)}` : '';
     return fetchWithAuth(`/admin/unregistered-students${q}`);
   },
+
+  async getNotPostedRange(params: { from: string; to: string; department?: string; semester?: string; section?: string }) {
+    const p = new URLSearchParams();
+    p.set('from', params.from);
+    p.set('to', params.to);
+    if (params.department) p.set('department', params.department);
+    if (params.semester) p.set('semester', params.semester);
+    if (params.section) p.set('section', params.section);
+    return fetchWithAuth(`/attendance/not-posted?${p.toString()}`);
+  },
+
+  async submitNoClassRequest(data: { date: string; semester_label: string; department: string; section: string; subject_name: string; period_start: number; reason: string }) {
+    return fetchWithAuth('/attendance/no-class-request', { method: 'POST', body: JSON.stringify(data) });
+  },
+
+  async getNoClassRequests(status?: string) {
+    const q = status ? `?status=${status}` : '';
+    return fetchWithAuth(`/attendance/no-class-requests${q}`);
+  },
+
+  async approveNoClassRequest(id: number) {
+    return fetchWithAuth(`/attendance/no-class-requests/${id}/approve`, { method: 'PATCH' });
+  },
+
+  async rejectNoClassRequest(id: number, reject_reason: string) {
+    return fetchWithAuth(`/attendance/no-class-requests/${id}/reject`, { method: 'PATCH', body: JSON.stringify({ reject_reason }) });
+  },
+
+  async sendAttendanceReminder(data: { faculty_email: string; date: string; period_start: number; subject_name: string; section: string; semester_label: string }) {
+    return fetchWithAuth('/attendance/send-reminder', { method: 'POST', body: JSON.stringify(data) });
+  },
+
+  async getMonthlyAttendanceReport(params: { month: string; department?: string; semester?: string }) {
+    const p = new URLSearchParams();
+    p.set('month', params.month);
+    if (params.department) p.set('department', params.department);
+    if (params.semester) p.set('semester', params.semester);
+    return fetchWithAuth(`/attendance/monthly-report?${p.toString()}`);
+  },
 };
 
 

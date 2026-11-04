@@ -9291,118 +9291,333 @@ app.put('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coor
   }
 });
 
-// 10c. Not Posted Attendance Tracker (ported from dsattendance not_posted_attendance.php & not_posted_faculty.php)
-// Compares scheduled timetable slots against recorded attendance sessions for any date or range.
+// 10c. Not Posted Attendance Tracker — supports single date (?date=) or range (?from=&to=)
 app.get('/attendance/not-posted', requireRole('faculty', 'hod', 'coordinator', 'admin'), async (req: Request, res: Response) => {
   try {
-    const dateStr = (req.query.date as string) || new Date().toISOString().split('T')[0];
+    const callerRole = req.auth?.role;
+    const callerDept = req.auth?.department;
+    const callerEmail = req.auth?.email?.toLowerCase();
+
+    // Support both single date and range
+    const fromStr = (req.query.from as string) || (req.query.date as string) || new Date().toISOString().split('T')[0];
+    const toStr = (req.query.to as string) || fromStr;
     const semester = (req.query.semester as string) || '';
     const department = (req.query.department as string) || '';
     const section = (req.query.section as string) || '';
-    const facultyEmail = req.auth?.role === 'faculty'
-      ? req.auth.email.toLowerCase()
+    const facultyEmail = callerRole === 'faculty'
+      ? callerEmail!
       : ((req.query.faculty_email as string) || '').toLowerCase();
 
-    const dateObj = new Date(dateStr);
-    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    let dayOfWeek = dayNames[dateObj.getDay()];
+    const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 
-    if (dayOfWeek === 'Sunday') {
-      return res.json({ date: dateStr, dayOfWeek, isWorkingDay: false, pendingSlots: [], message: 'Sunday is a non-working day.' });
+    // Build date list
+    const dates: string[] = [];
+    const cur = new Date(fromStr);
+    const end = new Date(toStr);
+    while (cur <= end) {
+      dates.push(cur.toISOString().split('T')[0]);
+      cur.setDate(cur.getDate() + 1);
     }
 
-    // Check holiday or calendar substitution day
-    const calCheck = await db.query(
-      `SELECT * FROM holiday_calendar WHERE date = $1 LIMIT 1`,
-      [dateStr]
+    // Fetch holidays once
+    const holidayRes = await db.query(`SELECT date::text AS date, holiday_name FROM holiday_calendar WHERE date BETWEEN $1 AND $2`, [fromStr, toStr]);
+    const holidays = new Set(holidayRes.rows.map((h: any) => h.date));
+    const holidayNames: Record<string,string> = {};
+    for (const h of holidayRes.rows) holidayNames[h.date] = h.holiday_name;
+
+    // Fetch approved no-class requests in range
+    const noClassRes = await db.query(
+      `SELECT date::text AS date, semester_label, section, subject_name, period_start, faculty_email
+       FROM attendance_no_class_requests
+       WHERE status = 'Approved' AND date BETWEEN $1 AND $2`,
+      [fromStr, toStr]
     );
-    if (calCheck.rows.length > 0) {
-      return res.json({
+    const noClassSet = new Set(noClassRes.rows.map((r: any) =>
+      `${r.date}|${r.semester_label}|${r.section.toUpperCase()}|${r.subject_name.toLowerCase()}|${r.period_start}`
+    ));
+
+    // Build timetable filter condition
+    let deptCondition = '';
+    const deptParams: any[] = [];
+    let pi = 1;
+    if (callerRole === 'faculty') {
+      deptCondition = `AND LOWER(t.faculty_email) = LOWER($${pi++})`;
+      deptParams.push(callerEmail);
+    } else if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+      deptCondition = `AND t.department = $${pi++}`;
+      deptParams.push(callerDept);
+    } else if (callerRole === 'coordinator') {
+      deptCondition = `AND t.semester_label IN ('1-1', '1-2')`;
+    }
+    if (department && department !== 'All' && callerRole !== 'hod' && callerRole !== 'faculty') {
+      deptCondition += ` AND t.department = $${pi++}`;
+      deptParams.push(department);
+    }
+    if (semester) { deptCondition += ` AND t.semester_label = $${pi++}`; deptParams.push(semester); }
+    if (section && section !== 'All') { deptCondition += ` AND t.section = $${pi++}`; deptParams.push(section.toUpperCase()); }
+    if (facultyEmail && callerRole !== 'faculty') { deptCondition += ` AND LOWER(t.faculty_email) = LOWER($${pi++})`; deptParams.push(facultyEmail); }
+
+    let totalScheduled = 0, totalPosted = 0, totalPending = 0;
+    const byDate: any[] = [];
+
+    for (const dateStr of dates) {
+      const dateObj = new Date(dateStr);
+      const dayOfWeek = dayNames[dateObj.getDay()];
+
+      if (dayOfWeek === 'Sunday') {
+        byDate.push({ date: dateStr, dayOfWeek, isWorkingDay: false, pendingSlots: [], postedCount: 0, pendingCount: 0 });
+        continue;
+      }
+      if (holidays.has(dateStr)) {
+        byDate.push({ date: dateStr, dayOfWeek, isWorkingDay: false, holidayName: holidayNames[dateStr], pendingSlots: [], postedCount: 0, pendingCount: 0 });
+        continue;
+      }
+
+      const timetableSlots = await db.query(
+        `SELECT t.* FROM timetable_entries t WHERE t.day_of_week = $1 ${deptCondition} ORDER BY t.semester_label, t.department, t.section, t.period_start`,
+        [dayOfWeek, ...deptParams]
+      );
+
+      const postedSessions = await db.query(
+        `SELECT s.*, a.subject_name, a.section, a.semester_label, a.department, a.faculty_email
+         FROM attendance_sessions s
+         JOIN subject_allotments a ON a.id = s.allotment_id
+         WHERE s.session_date = $1`,
+        [dateStr]
+      );
+
+      const pendingSlots: any[] = [];
+      let postedCount = 0;
+
+      for (const slot of timetableSlots.rows) {
+        const noClassKey = `${dateStr}|${slot.semester_label}|${(slot.section||'').toUpperCase()}|${(slot.subject_name||'').toLowerCase()}|${slot.period_start}`;
+        if (noClassSet.has(noClassKey)) { postedCount++; continue; } // approved no-class = treated as resolved
+
+        const posted = postedSessions.rows.some((sess: any) =>
+          sess.semester_label === slot.semester_label &&
+          (sess.section||'').toUpperCase() === (slot.section||'').toUpperCase() &&
+          (sess.subject_name||'').toLowerCase() === (slot.subject_name||'').toLowerCase() &&
+          parseInt(sess.period_start) === parseInt(slot.period_start)
+        );
+
+        if (posted) { postedCount++; }
+        else { pendingSlots.push(slot); }
+      }
+
+      totalScheduled += timetableSlots.rows.length;
+      totalPosted += postedCount;
+      totalPending += pendingSlots.length;
+
+      byDate.push({
         date: dateStr,
         dayOfWeek,
-        isWorkingDay: false,
-        holidayName: calCheck.rows[0].holiday_name,
-        pendingSlots: [],
-        message: `Date is marked as Holiday: ${calCheck.rows[0].holiday_name}`,
+        isWorkingDay: true,
+        totalScheduled: timetableSlots.rows.length,
+        postedCount,
+        pendingCount: pendingSlots.length,
+        pendingSlots,
       });
-    }
-
-    // Fetch timetable slots for this effective day
-    let ttQuery = `SELECT t.* FROM timetable_entries t WHERE t.day_of_week = $1`;
-    const ttParams: any[] = [dayOfWeek];
-
-    if (semester) {
-      ttParams.push(semester);
-      ttQuery += ` AND t.semester_label = $${ttParams.length}`;
-    }
-    if (department && department !== 'All') {
-      ttParams.push(department);
-      ttQuery += ` AND t.department = $${ttParams.length}`;
-    }
-    if (section && section !== 'All') {
-      ttParams.push(section.toUpperCase());
-      ttQuery += ` AND t.section = $${ttParams.length}`;
-    }
-    if (facultyEmail) {
-      ttParams.push(facultyEmail);
-      ttQuery += ` AND LOWER(t.faculty_email) = $${ttParams.length}`;
-    }
-
-    // If HOD: restrict to their department (for 2nd-4th years)
-    if (req.auth?.role === 'hod' && req.auth.department && req.auth.department !== 'All') {
-      ttParams.push(req.auth.department);
-      ttQuery += ` AND t.department = $${ttParams.length}`;
-    }
-    // If Coordinator: restrict to 1st year (1-1 & 1-2)
-    if (req.auth?.role === 'coordinator') {
-      ttQuery += ` AND t.semester_label IN ('1-1', '1-2')`;
-    }
-
-    ttQuery += ` ORDER BY t.semester_label, t.department, t.section, t.period_start`;
-
-    const timetableSlots = await db.query(ttQuery, ttParams);
-
-    // Fetch all attendance sessions recorded for this date
-    const postedSessions = await db.query(
-      `SELECT s.*, a.subject_name, a.section, a.semester_label, a.department, a.faculty_email
-       FROM attendance_sessions s
-       JOIN subject_allotments a ON a.id = s.allotment_id
-       WHERE s.session_date = $1`,
-      [dateStr]
-    );
-
-    // Helper to test if a timetable slot has a posted session
-    const isPosted = (slot: any) => {
-      return postedSessions.rows.some((sess: any) => {
-        const matchSem = sess.semester_label === slot.semester_label;
-        const matchSec = (sess.section || '').toUpperCase() === (slot.section || '').toUpperCase();
-        const matchSubj = (sess.subject_name || '').toLowerCase() === (slot.subject_name || '').toLowerCase();
-        const matchPeriod = parseInt(sess.period_start) === parseInt(slot.period_start);
-        return matchSem && matchSec && matchSubj && matchPeriod;
-      });
-    };
-
-    const pendingSlots: any[] = [];
-    const postedSlots: any[] = [];
-
-    for (const slot of timetableSlots.rows) {
-      if (isPosted(slot)) {
-        postedSlots.push(slot);
-      } else {
-        pendingSlots.push(slot);
-      }
     }
 
     res.json({
-      date: dateStr,
-      dayOfWeek,
-      isWorkingDay: true,
-      totalScheduled: timetableSlots.rows.length,
-      postedCount: postedSlots.length,
-      pendingCount: pendingSlots.length,
-      pendingSlots,
-      postedSlots,
+      from: fromStr,
+      to: toStr,
+      summary: { total_scheduled: totalScheduled, total_posted: totalPosted, total_pending: totalPending },
+      byDate,
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// No-Class Request: faculty submits request to mark a slot as no class held for a specific date
+app.post('/attendance/no-class-request', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const { date, semester_label, department, section, subject_name, period_start, reason } = req.body;
+    if (!date || !semester_label || !department || !section || !subject_name || period_start === undefined) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    const facultyEmail = req.auth!.email.toLowerCase();
+    const facultyRes = await db.query(`SELECT faculty_name FROM faculty WHERE LOWER(email) = $1 LIMIT 1`, [facultyEmail]);
+    const facultyName = facultyRes.rows[0]?.faculty_name || req.auth!.email;
+
+    await db.query(
+      `INSERT INTO attendance_no_class_requests
+        (faculty_email, faculty_name, date, semester_label, department, section, subject_name, period_start, reason, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Pending')
+       ON CONFLICT (faculty_email, date, semester_label, section, subject_name, period_start) DO UPDATE
+       SET reason = EXCLUDED.reason, status = 'Pending', reviewed_by = NULL, reviewed_at = NULL, reject_reason = NULL`,
+      [facultyEmail, facultyName, date, semester_label, department, section.toUpperCase(), subject_name, period_start, reason || '']
+    );
+    res.json({ success: true, message: 'No-class request submitted. Awaiting admin approval.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get no-class requests (admin sees all, hod sees their dept)
+app.get('/attendance/no-class-requests', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const callerRole = req.auth?.role;
+    const callerDept = req.auth?.department;
+    const statusFilter = (req.query.status as string) || 'Pending';
+    let query = `SELECT * FROM attendance_no_class_requests WHERE 1=1`;
+    const params: any[] = [];
+    let pi = 1;
+    if (statusFilter && statusFilter !== 'all') { query += ` AND status = $${pi++}`; params.push(statusFilter); }
+    if (callerRole === 'hod' && callerDept && callerDept !== '*') { query += ` AND department = $${pi++}`; params.push(callerDept); }
+    query += ` ORDER BY created_at DESC`;
+    const result = await db.query(query, params);
+    res.json({ requests: result.rows });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Approve a no-class request (admin only)
+app.patch('/attendance/no-class-requests/:id/approve', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    await db.query(
+      `UPDATE attendance_no_class_requests SET status='Approved', reviewed_by=$1, reviewed_at=NOW() WHERE id=$2`,
+      [req.auth!.email, id]
+    );
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Reject a no-class request (admin only)
+app.patch('/attendance/no-class-requests/:id/reject', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { reject_reason } = req.body;
+    await db.query(
+      `UPDATE attendance_no_class_requests SET status='Rejected', reviewed_by=$1, reviewed_at=NOW(), reject_reason=$2 WHERE id=$3`,
+      [req.auth!.email, reject_reason || '', id]
+    );
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Send attendance reminder to faculty for an unposted slot
+app.post('/attendance/send-reminder', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const { faculty_email, date, period_start, subject_name, section, semester_label } = req.body;
+    if (!faculty_email || !date) return res.status(400).json({ error: 'Missing faculty_email or date' });
+    // Insert notification if notifications table exists
+    await db.query(
+      `INSERT INTO notifications (recipient_email, type, title, message, created_at)
+       VALUES ($1, 'attendance_reminder', 'Attendance Reminder', $2, NOW())
+       ON CONFLICT DO NOTHING`,
+      [faculty_email.toLowerCase(), `Please post attendance for ${subject_name} – Section ${section} – Period ${period_start} on ${date}.`]
+    ).catch(() => {}); // silent fail if notifications table doesn't exist yet
+    res.json({ success: true, message: `Reminder sent to ${faculty_email}` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Monthly Attendance Report — per-student attendance % for a month, dept-wise
+app.get('/attendance/monthly-report', requireRole('hod', 'admin', 'director', 'principal', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    const callerRole = req.auth?.role;
+    const callerDept = req.auth?.department;
+    const monthParam = (req.query.month as string) || new Date().toISOString().slice(0, 7); // YYYY-MM
+    const deptParam = (req.query.department as string) || '';
+    const semParam = (req.query.semester as string) || '';
+
+    const [year, month] = monthParam.split('-').map(Number);
+    const fromDate = `${monthParam}-01`;
+    const lastDay = new Date(year, month, 0).getDate();
+    const toDate = `${monthParam}-${String(lastDay).padStart(2, '0')}`;
+
+    // Fetch holidays in month
+    const holidayRes = await db.query(`SELECT date::text FROM holiday_calendar WHERE date BETWEEN $1 AND $2`, [fromDate, toDate]);
+    const holidays = new Set(holidayRes.rows.map((h: any) => h.date));
+
+    // Build student filter
+    let studentCond = '';
+    const studentParams: any[] = [];
+    let spi = 1;
+    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+      studentCond += ` AND s.department = $${spi++}`; studentParams.push(callerDept);
+    } else if (deptParam && deptParam !== 'All') {
+      studentCond += ` AND s.department = $${spi++}`; studentParams.push(deptParam);
+    }
+    // students table uses 'year' not 'current_semester'; no 'status' column
+    // semester filter maps to year for approximate matching
+    if (semParam) {
+      // e.g. '1-1','1-2' → 1st Year; '2-1','2-2' → 2nd Year etc.
+      const yearNum = parseInt(semParam.split('-')[0]);
+      const yearMap: Record<number,string> = { 1:'1st Year', 2:'2nd Year', 3:'3rd Year', 4:'4th Year' };
+      if (yearMap[yearNum]) { studentCond += ` AND s.year = $${spi++}`; studentParams.push(yearMap[yearNum]); }
+    }
+
+    const studentsRes = await db.query(
+      `SELECT s.roll_number, s.name AS student_name, s.section, s.year AS semester_label, s.department
+       FROM students s WHERE 1=1 ${studentCond} ORDER BY s.department, s.section, s.roll_number`,
+      studentParams
+    );
+
+    if (studentsRes.rows.length === 0) {
+      return res.json({ month: monthParam, students: [], working_days: 0 });
+    }
+
+    // Count working days in month
+    let workingDays = 0;
+    const cur = new Date(fromDate);
+    const endDate = new Date(toDate);
+    while (cur <= endDate) {
+      const ds = cur.toISOString().split('T')[0];
+      const dow = cur.getDay();
+      if (dow !== 0 && !holidays.has(ds)) workingDays++;
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    // Fetch all attendance records for the month in bulk
+    const rollNumbers = studentsRes.rows.map((s: any) => s.roll_number);
+    const recordsRes = await db.query(
+      `SELECT ar.roll_number, ar.status,
+              s.session_date,
+              s.allotment_id
+       FROM attendance_records ar
+       JOIN attendance_sessions s ON s.id = ar.session_id
+       WHERE ar.roll_number = ANY($1::text[])
+         AND s.session_date BETWEEN $2 AND $3`,
+      [rollNumbers, fromDate, toDate]
+    );
+
+    // Count per student
+    const scheduledMap: Record<string, number> = {};
+    const attendedMap: Record<string, number> = {};
+    for (const rec of recordsRes.rows) {
+      scheduledMap[rec.roll_number] = (scheduledMap[rec.roll_number] || 0) + 1;
+      if (rec.status === 'present') attendedMap[rec.roll_number] = (attendedMap[rec.roll_number] || 0) + 1;
+    }
+
+    const students = studentsRes.rows.map((s: any) => {
+      const scheduled = scheduledMap[s.roll_number] || 0;
+      const attended = attendedMap[s.roll_number] || 0;
+      const pct = scheduled > 0 ? parseFloat(((attended / scheduled) * 100).toFixed(1)) : 0;
+      const status = scheduled === 0 ? 'No Data' : pct < 65 ? 'Defaulter' : pct < 75 ? 'Warning' : 'Safe';
+      return {
+        roll_number: s.roll_number,
+        student_name: s.student_name,
+        section: s.section,
+        semester_label: s.semester_label,
+        department: s.department,
+        scheduled_periods: scheduled,
+        attended_periods: attended,
+        attendance_pct: pct,
+        status,
+      };
+    });
+
+    res.json({ month: monthParam, working_days: workingDays, total_students: students.length, students });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
