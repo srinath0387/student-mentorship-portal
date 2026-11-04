@@ -872,9 +872,6 @@ export const STUDENT_DOC_TYPES = [
   'Short-term Internship',
   'Long-term Internship',
   'Assignment',
-  'Co-Curricular Activity',
-  'Extra Curricular Activity (EAA)',
-  'Games & Sports',
 ] as const;
 
 export const STUDENT_SEMESTERS = [
