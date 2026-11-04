@@ -310,7 +310,11 @@ export const App: React.FC = () => {
               <Route path="/attendance/workload" element={<FacultyWorkloadPage />} />
               <Route path="/attendance/reports" element={<AttendanceReportsPage />} />
               <Route path="/documents" element={<DocumentsManagementPage />} />
-              <Route path="/faculty/api" element={<FacultyApiPage />} />
+
+              {/* Faculty API leaderboard — HOD & Admin only */}
+              <Route element={<ProtectedRoute allowedRoles={['hod', 'admin', 'director', 'principal', 'management', 'program_chair']} />}>
+                <Route path="/faculty/api" element={<FacultyApiPage />} />
+              </Route>
 
               {/* Oversight (View-Only) routes */}
               <Route element={<ProtectedRoute allowedRoles={['director', 'principal', 'management', 'program_chair', 'admin']} />}>
