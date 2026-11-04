@@ -199,6 +199,11 @@ export const FacultyProfileTab: React.FC = () => {
     year: number;
     doi_link: string;
     co_authors: string;
+    inventor_position: string;
+    application_number: string;
+    patent_status: 'Published' | 'Granted' | '';
+    patent_date: string;
+    affiliation_institute: string;
   }>({
     category: 'SCOPUS',
     title: '',
@@ -206,6 +211,11 @@ export const FacultyProfileTab: React.FC = () => {
     year: new Date().getFullYear(),
     doi_link: '',
     co_authors: '',
+    inventor_position: '',
+    application_number: '',
+    patent_status: '',
+    patent_date: '',
+    affiliation_institute: '',
   });
 
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
@@ -726,13 +736,21 @@ export const FacultyProfileTab: React.FC = () => {
       year: p.year,
       doi_link: p.doi_link || '',
       co_authors: p.co_authors || '',
+      inventor_position: p.inventor_position || '',
+      application_number: p.application_number || '',
+      patent_status: p.patent_status || '',
+      patent_date: p.patent_date || '',
+      affiliation_institute: p.affiliation_institute || '',
     });
     setShowPubModal(true);
   };
 
   // Publication Modal actions
   const handleAddPublication = () => {
-    if (!newPub.title.trim() || !newPub.journal_name.trim()) return;
+    const isPatent = newPub.category === 'Patent';
+    if (!newPub.title.trim()) return;
+    if (!isPatent && !newPub.journal_name.trim()) return;
+    if (isPatent && (!newPub.application_number.trim() || !newPub.affiliation_institute.trim() || !newPub.patent_status || !newPub.patent_date)) return;
 
     if (editingPubId) {
       setPublications((prev) =>
@@ -746,6 +764,13 @@ export const FacultyProfileTab: React.FC = () => {
                 year: Number(newPub.year) || new Date().getFullYear(),
                 doi_link: newPub.doi_link.trim() || undefined,
                 co_authors: newPub.co_authors.trim() || undefined,
+                ...(newPub.category === 'Patent' && {
+                  inventor_position: newPub.inventor_position.trim() || undefined,
+                  application_number: newPub.application_number.trim() || undefined,
+                  patent_status: (newPub.patent_status as 'Published' | 'Granted') || undefined,
+                  patent_date: newPub.patent_date || undefined,
+                  affiliation_institute: newPub.affiliation_institute.trim() || undefined,
+                }),
                 needs_review: false,
               }
             : p
@@ -761,6 +786,13 @@ export const FacultyProfileTab: React.FC = () => {
         year: Number(newPub.year) || new Date().getFullYear(),
         doi_link: newPub.doi_link.trim() || undefined,
         co_authors: newPub.co_authors.trim() || undefined,
+        ...(newPub.category === 'Patent' && {
+          inventor_position: newPub.inventor_position.trim() || undefined,
+          application_number: newPub.application_number.trim() || undefined,
+          patent_status: (newPub.patent_status as 'Published' | 'Granted') || undefined,
+          patent_date: newPub.patent_date || undefined,
+          affiliation_institute: newPub.affiliation_institute.trim() || undefined,
+        }),
         needs_review: false,
       };
       setPublications((prev) => [record, ...prev]);
@@ -774,6 +806,11 @@ export const FacultyProfileTab: React.FC = () => {
       year: new Date().getFullYear(),
       doi_link: '',
       co_authors: '',
+      inventor_position: '',
+      application_number: '',
+      patent_status: '',
+      patent_date: '',
+      affiliation_institute: '',
     });
   };
 
@@ -1570,6 +1607,29 @@ export const FacultyProfileTab: React.FC = () => {
                     </a>
                   )}
 
+                  {/* ── Patent-specific details display ── */}
+                  {p.category === 'Patent' && (p.application_number || p.patent_status || p.affiliation_institute) && (
+                    <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-textSecondary">
+                      {p.inventor_position && (
+                        <span>🧑‍🔬 <strong>Position:</strong> {p.inventor_position}</span>
+                      )}
+                      {p.application_number && (
+                        <span>📋 <strong>App No:</strong> {p.application_number}</span>
+                      )}
+                      {p.patent_status && (
+                        <span className={`px-1.5 py-0.5 rounded font-semibold ${p.patent_status === 'Granted' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+                          {p.patent_status === 'Granted' ? '✅' : '📄'} {p.patent_status}
+                        </span>
+                      )}
+                      {p.patent_date && (
+                        <span>📅 <strong>Date:</strong> {new Date(p.patent_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                      )}
+                      {p.affiliation_institute && (
+                        <span>🏛️ {p.affiliation_institute}</span>
+                      )}
+                    </div>
+                  )}
+
                   {/* ── Category Quick-Selection for Unclassified / Fetched publications ── */}
                   {(p.category === 'Unclassified' || p.needs_review) && (
                     <div className="pt-2 flex items-center gap-1.5 flex-wrap">
@@ -2178,6 +2238,72 @@ export const FacultyProfileTab: React.FC = () => {
                   className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
                 />
               </div>
+
+              {/* ── Patent-specific fields ── */}
+              {newPub.category === 'Patent' && (
+                <>
+                  <div className="border-t border-borderLine pt-3 mt-1">
+                    <p className="text-xs font-bold text-indigo-600 uppercase tracking-wide mb-3">🏛️ Patent Details</p>
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block font-semibold text-textPrimary mb-1">Inventor Position *</label>
+                          <input
+                            type="text"
+                            placeholder="e.g. Principal Inventor"
+                            value={newPub.inventor_position}
+                            onChange={(e) => setNewPub({ ...newPub, inventor_position: e.target.value })}
+                            className="w-full px-3 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                          />
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-textPrimary mb-1">Application Number *</label>
+                          <input
+                            type="text"
+                            placeholder="e.g. 202241012345"
+                            value={newPub.application_number}
+                            onChange={(e) => setNewPub({ ...newPub, application_number: e.target.value })}
+                            className="w-full px-3 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block font-semibold text-textPrimary mb-1">Status *</label>
+                          <select
+                            value={newPub.patent_status}
+                            onChange={(e) => setNewPub({ ...newPub, patent_status: e.target.value as 'Published' | 'Granted' | '' })}
+                            className="w-full px-3 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                          >
+                            <option value="">Select status…</option>
+                            <option value="Published">Published</option>
+                            <option value="Granted">Granted</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-textPrimary mb-1">Published / Granted Date *</label>
+                          <input
+                            type="date"
+                            value={newPub.patent_date}
+                            onChange={(e) => setNewPub({ ...newPub, patent_date: e.target.value })}
+                            className="w-full px-3 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-textPrimary mb-1">Affiliation Institute *</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. RGM College of Engineering & Technology"
+                          value={newPub.affiliation_institute}
+                          onChange={(e) => setNewPub({ ...newPub, affiliation_institute: e.target.value })}
+                          className="w-full px-3 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="flex justify-end gap-2 pt-3 border-t border-borderLine">

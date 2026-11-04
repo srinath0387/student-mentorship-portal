@@ -93,7 +93,7 @@ export const CertificationAnalyticsView: React.FC = () => {
 
   const handleExportCSV = () => {
     if (!filteredStudents || filteredStudents.length === 0) return;
-    const headers = ['Roll Number', 'Student Name', 'Department', 'Section', 'Year', 'Certificate', 'Issuer', 'Issue Date', 'Source', 'Status'];
+    const headers = ['Roll Number', 'Student Name', 'Department', 'Section', 'Year', 'Certificate', 'Issuer', 'Issue Date', 'Source', 'Status', 'Certificate Link'];
     const rows = filteredStudents.map((s: any) => [
       s.roll_number,
       s.student_name,
@@ -104,7 +104,8 @@ export const CertificationAnalyticsView: React.FC = () => {
       s.issuer,
       s.issue_date || 'N/A',
       s.source,
-      s.verification_status
+      s.verification_status,
+      s.verification_url || s.proof_document_url || s.badge_image_url || '',
     ]);
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.map(val => `"${String(val || '').replace(/"/g, '""')}"`).join(','))].join('\n');
     const encodedUri = encodeURI(csvContent);

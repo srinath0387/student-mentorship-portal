@@ -1666,6 +1666,60 @@ export const api = {
     if (params.semester) p.set('semester', params.semester);
     return fetchWithAuth(`/attendance/monthly-report?${p.toString()}`);
   },
+
+  // ── Faculty API Score ──────────────────────────────────────────────────────
+  async getFacultyApiScore(email: string) {
+    return fetchWithAuth(`/faculty/${encodeURIComponent(email)}/api-score`);
+  },
+
+  async getFacultyApiScores(params?: { department?: string }) {
+    const q = params?.department ? `?department=${encodeURIComponent(params.department)}` : '';
+    return fetchWithAuth(`/faculty/api-scores${q}`);
+  },
+
+  async submitFacultyDuty(email: string, data: {
+    duty_type: string;
+    title: string;
+    description?: string;
+    duty_date: string;
+    proof_url?: string;
+  }) {
+    return fetchWithAuth(`/faculty/${encodeURIComponent(email)}/api-duties`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async getFacultyDuties(email: string) {
+    return fetchWithAuth(`/faculty/${encodeURIComponent(email)}/api-duties`);
+  },
+
+  async approveFacultyDuty(id: number, points_awarded?: number) {
+    return fetchWithAuth(`/faculty/api-duties/${id}/approve`, {
+      method: 'PATCH',
+      body: JSON.stringify({ points_awarded }),
+    });
+  },
+
+  async rejectFacultyDuty(id: number, reject_reason: string) {
+    return fetchWithAuth(`/faculty/api-duties/${id}/reject`, {
+      method: 'PATCH',
+      body: JSON.stringify({ reject_reason }),
+    });
+  },
+
+  async getPendingFacultyDuties() {
+    return fetchWithAuth('/faculty/api-duties/pending');
+  },
+
+  // ── Bulk Document ZIP Download ─────────────────────────────────────────────
+  async getDocumentZipUrls(params: { academic_year?: string; department?: string; doc_type?: string }) {
+    const p = new URLSearchParams();
+    if (params.academic_year) p.set('academic_year', params.academic_year);
+    if (params.department) p.set('department', params.department);
+    if (params.doc_type) p.set('doc_type', params.doc_type);
+    return fetchWithAuth(`/documents/download-zip-urls?${p.toString()}`);
+  },
 };
 
 

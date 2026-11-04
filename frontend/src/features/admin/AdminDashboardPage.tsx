@@ -45,6 +45,7 @@ import { CertificationsTab } from '../profile/tabs/CertificationsTab';
 import { SoftSkillsTab } from '../profile/tabs/SoftSkillsTab';
 import { AchievementsTab } from '../profile/tabs/AchievementsTab';
 import { DocumentsTab } from '../profile/tabs/DocumentsTab';
+import { BulkDocumentDownload } from '../documents/BulkDocumentDownload';
 import { PlacementPreferencesTab } from '../profile/tabs/PlacementPreferencesTab';
 import { BulkImportModal } from './components/BulkImportModal';
 import { FacultyRecordsTable } from './components/FacultyRecordsTable';
@@ -698,6 +699,9 @@ export const AdminDashboardPage: React.FC = () => {
       {/* ── TAB 1: Student Directory ── */}
       {activeTab === 'students' && (
         <div className="space-y-4">
+
+          {/* ── BULK DOCUMENT DOWNLOAD (Admin - all depts) ── */}
+          <BulkDocumentDownload showDeptFilter={true} />
 
           {/* ── STUDENT → MENTOR LOOKUP WIDGET ── */}
           <div className="bg-surface border border-borderLine rounded-2xl p-5 shadow-xs">

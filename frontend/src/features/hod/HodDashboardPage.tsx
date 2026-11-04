@@ -40,6 +40,7 @@ import { CertificationsTab } from '../profile/tabs/CertificationsTab';
 import { SoftSkillsTab } from '../profile/tabs/SoftSkillsTab';
 import { AchievementsTab } from '../profile/tabs/AchievementsTab';
 import { DocumentsTab } from '../profile/tabs/DocumentsTab';
+import { BulkDocumentDownload } from '../documents/BulkDocumentDownload';
 import { PlacementPreferencesTab } from '../profile/tabs/PlacementPreferencesTab';
 import { HodAttendancePage } from '../attendance/hod/HodAttendancePage';
 import { HodLeaveApprovalTab } from '../leave/HodLeaveApprovalTab';
@@ -1046,6 +1047,9 @@ export const HodDashboardPage: React.FC = () => {
       {/* ── TAB 3: Student Directory & 360 Inspection ── */}
       {activeTab === 'students' && (
         <div className="space-y-4">
+
+          {/* ── BULK DOCUMENT DOWNLOAD ── */}
+          <BulkDocumentDownload department={user?.department} showDeptFilter={false} />
 
           {/* ── STUDENT → MENTOR LOOKUP WIDGET ── */}
           <div className="bg-surface border border-borderLine rounded-2xl p-5 shadow-xs">

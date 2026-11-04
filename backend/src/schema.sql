@@ -474,3 +474,24 @@ CREATE INDEX IF NOT EXISTS idx_placements_batch ON student_placements(batch);
 
 -- End of schema.sql
 
+-- Faculty Academic Performance Index (API) Duties Log
+CREATE TABLE IF NOT EXISTS faculty_api_duties (
+  id              SERIAL PRIMARY KEY,
+  faculty_email   TEXT NOT NULL,
+  faculty_name    TEXT,
+  duty_type       TEXT NOT NULL,
+  title           TEXT NOT NULL,
+  description     TEXT,
+  duty_date       DATE NOT NULL,
+  proof_url       TEXT,
+  points_awarded  NUMERIC(5,2),
+  approved_by     TEXT,
+  approved_at     TIMESTAMPTZ,
+  reject_reason   TEXT,
+  status          TEXT NOT NULL DEFAULT 'Pending',
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_api_duties_email  ON faculty_api_duties(faculty_email);
+CREATE INDEX IF NOT EXISTS idx_api_duties_status ON faculty_api_duties(status);
+CREATE INDEX IF NOT EXISTS idx_api_duties_type   ON faculty_api_duties(duty_type);
+

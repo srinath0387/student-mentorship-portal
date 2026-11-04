@@ -4600,6 +4600,96 @@ app.delete('/students/:id/documents/:docId', requireOwnerOrRole('id', 'admin', '
   }
 });
 
+// GET /documents/download-zip-urls — HOD/Admin: get presigned download URLs for all docs, filtered by academic_year & department
+app.get('/documents/download-zip-urls', requireRole('hod', 'admin', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
+  try {
+    const callerRole = req.auth?.role;
+    const callerDept = req.auth?.department;
+    const academicYear = (req.query.academic_year as string) || '';
+    const department = (req.query.department as string) || '';
+    const docType = (req.query.doc_type as string) || '';
+
+    // Dept scoping: HOD locked to their own dept, admin/others can filter
+    const isAdmin = callerRole === 'admin';
+    const isSuperUser = callerDept === '*' || callerDept === 'All';
+    const targetDept = (!isAdmin && !isSuperUser && callerDept && callerDept !== '*')
+      ? callerDept
+      : (department && department !== 'All' ? department : '');
+
+    const params: any[] = [];
+    let query = `
+      SELECT sd.id, sd.roll_number, sd.doc_type, sd.semester, sd.title, sd.file_key, sd.file_name, sd.file_size_kb,
+             s.name AS student_name, s.department, s.section, s.year AS academic_year
+      FROM student_documents sd
+      JOIN students s ON s.roll_number = sd.roll_number
+      WHERE sd.verification_status IN ('approved', 'pending')
+    `;
+
+    if (targetDept) {
+      params.push(targetDept);
+      query += ` AND LOWER(TRIM(s.department)) = LOWER(TRIM($${params.length}))`;
+    }
+    if (academicYear) {
+      params.push(academicYear);
+      query += ` AND s.year = $${params.length}`;
+    }
+    if (docType) {
+      params.push(docType);
+      query += ` AND LOWER(sd.doc_type) = LOWER($${params.length})`;
+    }
+    query += ` ORDER BY s.roll_number, sd.uploaded_at DESC LIMIT 500`;
+
+    const result = await db.query(query, params);
+    const docs = result.rows;
+
+    if (docs.length === 0) {
+      return res.json({ files: [], message: 'No documents found for the selected filters.' });
+    }
+
+    const bucketName = process.env.UPLOADS_BUCKET_NAME;
+    if (!bucketName) {
+      // Dev fallback: return metadata only without presigned URLs
+      return res.json({ files: docs.map((d: any) => ({ ...d, download_url: null })) });
+    }
+
+    const { S3Client, GetObjectCommand } = await import('@aws-sdk/client-s3');
+    const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
+    const s3Client = new S3Client({});
+
+    const files = await Promise.all(docs.map(async (d: any) => {
+      try {
+        const url = await getSignedUrl(
+          s3Client,
+          new GetObjectCommand({ Bucket: bucketName, Key: d.file_key }),
+          { expiresIn: 3600 }
+        );
+        return {
+          id: d.id,
+          roll_number: d.roll_number,
+          student_name: d.student_name,
+          department: d.department,
+          section: d.section,
+          academic_year: d.academic_year,
+          doc_type: d.doc_type,
+          semester: d.semester,
+          title: d.title,
+          file_name: d.file_name,
+          file_size_kb: d.file_size_kb,
+          download_url: url,
+          // Suggested ZIP path: department/year/rollno/doctype_filename
+          zip_path: `${(d.department || 'Unknown').replace(/[^a-zA-Z0-9 ]/g, '')}/${d.academic_year || 'Unknown Year'}/${d.roll_number}/${d.doc_type}_${d.file_name}`,
+        };
+      } catch {
+        return { ...d, download_url: null, zip_path: null };
+      }
+    }));
+
+    res.json({ files, total: files.length });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/students/:id/upload-url', requireOwnerOrRole('id', 'faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { fileName, uploadType } = req.query;
@@ -8507,7 +8597,12 @@ app.get('/attendance/allotments', requireRole('admin', 'hod', 'coordinator', 'fa
       query += ` AND a.semester_label = $${params.length}`;
     }
 
-    const targetDept = (callerRole === 'hod' && callerDept && callerDept !== '*') ? callerDept : (department && department !== 'All' ? department : '');
+    // Fix: coordinator and faculty must always be scoped to their own department
+    const isAdmin = callerRole === 'admin';
+    const isSuperUser = callerDept === '*' || callerDept === 'All';
+    const targetDept = (!isAdmin && !isSuperUser && callerDept && callerDept !== '*')
+      ? callerDept  // HOD, coordinator, faculty -> always own dept only
+      : (department && department !== 'All' ? department : '');  // Admin may filter by any dept
     if (targetDept) {
       params.push(targetDept);
       query += ` AND (LOWER(REPLACE(a.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($${params.length}, ' ', '')) || '%' OR LOWER(REPLACE($${params.length}, ' ', '')) ILIKE '%' || LOWER(REPLACE(a.department, ' ', '')) || '%')`;
@@ -9286,6 +9381,314 @@ app.put('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coor
       success: true,
       message: `Attendance updated successfully (${records.length} records updated).`,
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ══════════════════════════════════════════════════════════════════
+// Faculty Academic Performance Index (API) — 100-point score
+// Pillars: Teaching&Learning(40) + Research(10) + Mentoring(15)
+//          + Academic Duties(15) + Industry&Professional(20)
+// ══════════════════════════════════════════════════════════════════
+
+// GET /faculty/:email/api-score
+app.get('/faculty/:email/api-score', requireRole('faculty', 'hod', 'admin', 'director', 'principal', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    const callerRole = req.auth?.role;
+    const callerEmail = req.auth?.email?.toLowerCase();
+    const targetEmail = req.params.email.toLowerCase();
+
+    // Faculty can only see their own score
+    if (callerRole === 'faculty' && callerEmail !== targetEmail) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Auto-create duties table if missing
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS faculty_api_duties (
+        id SERIAL PRIMARY KEY, faculty_email TEXT NOT NULL, faculty_name TEXT,
+        duty_type TEXT NOT NULL, title TEXT NOT NULL, description TEXT,
+        duty_date DATE NOT NULL, proof_url TEXT, points_awarded NUMERIC(5,2),
+        approved_by TEXT, approved_at TIMESTAMPTZ, reject_reason TEXT,
+        status TEXT NOT NULL DEFAULT 'Pending', created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `).catch(() => {});
+
+    // ── Pillar 1: Teaching & Learning (40 pts) ────────────────────
+    // 1a. Workload compliance (10 pts)
+    const workloadRes = await db.query(`
+      SELECT COALESCE(SUM(num_periods), 0)::int AS total_periods
+      FROM timetable_entries WHERE LOWER(faculty_email) = $1
+    `, [targetEmail]);
+    const totalPeriods = workloadRes.rows[0]?.total_periods || 0;
+    const workloadScore = totalPeriods === 0 ? 0 : totalPeriods < 12 ? 6 : totalPeriods > 20 ? 7 : 10;
+
+    // 1b. Attendance posting compliance (20 pts)
+    const scheduledRes = await db.query(`
+      SELECT COUNT(*)::int AS cnt FROM timetable_entries WHERE LOWER(faculty_email) = $1
+    `, [targetEmail]);
+    const scheduledSlots = scheduledRes.rows[0]?.cnt || 0;
+
+    const postedRes = await db.query(`
+      SELECT COUNT(DISTINCT s.id)::int AS cnt
+      FROM attendance_sessions s
+      JOIN subject_allotments a ON a.id = s.allotment_id
+      WHERE LOWER(a.faculty_email) = $1 AND s.session_date >= NOW() - INTERVAL '90 days'
+    `, [targetEmail]);
+    const postedSessions = postedRes.rows[0]?.cnt || 0;
+    const postingPct = scheduledSlots > 0 ? Math.min(postedSessions / (scheduledSlots * 13), 1) : 0;
+    const postingScore = Math.round(postingPct * 20);
+
+    // 1c. Student attendance outcome (10 pts)
+    const studentAttRes = await db.query(`
+      SELECT AVG(pct)::numeric(5,1) AS avg_pct FROM (
+        SELECT ar.roll_number,
+          CASE WHEN COUNT(*) > 0 THEN (SUM(CASE WHEN ar.status='present' THEN 1 ELSE 0 END)::float / COUNT(*)) * 100 ELSE 0 END AS pct
+        FROM attendance_records ar
+        JOIN attendance_sessions s ON s.id = ar.session_id
+        JOIN subject_allotments a ON a.id = s.allotment_id
+        WHERE LOWER(a.faculty_email) = $1 AND s.session_date >= NOW() - INTERVAL '90 days'
+        GROUP BY ar.roll_number
+      ) sub
+    `, [targetEmail]);
+    const avgStudentAtt = parseFloat(studentAttRes.rows[0]?.avg_pct || '0');
+    const studentAttScore = avgStudentAtt >= 85 ? 10 : avgStudentAtt >= 75 ? 8 : avgStudentAtt >= 65 ? 6 : avgStudentAtt > 0 ? 3 : 0;
+
+    const teachingScore = workloadScore + postingScore + studentAttScore;
+
+    // ── Pillar 2: Research & Certifications (10 pts) ──────────────
+    const profileRes = await db.query(`
+      SELECT certifications, activities, publications FROM faculty_full_profiles
+      WHERE LOWER(email) = $1 LIMIT 1
+    `, [targetEmail]);
+    const profile = profileRes.rows[0] || {};
+    const certs: any[] = Array.isArray(profile.certifications) ? profile.certifications : [];
+    const activities: any[] = Array.isArray(profile.activities) ? profile.activities : [];
+    const publications: any[] = Array.isArray(profile.publications) ? profile.publications : [];
+    const fdps = activities.filter((a: any) => (a.type || '').toLowerCase().includes('fdp') || (a.category || '').toLowerCase().includes('fdp'));
+    const fdpScore = Math.min(fdps.length * 1, 4);
+    const pubScore = Math.min(publications.length * 2, 4);
+    const certScore = Math.min(certs.length * 1, 2);
+    const researchScore = fdpScore + pubScore + certScore;
+
+    // ── Pillar 3: Mentoring (15 pts) ──────────────────────────────
+    const menteesRes = await db.query(`
+      SELECT COUNT(DISTINCT ma.roll_number)::int AS cnt
+      FROM mentor_assignments ma
+      JOIN faculty f ON UPPER(f.faculty_id) = UPPER(ma.faculty_id)
+      WHERE LOWER(f.email) = $1
+    `, [targetEmail]);
+    const menteeCount = menteesRes.rows[0]?.cnt || 0;
+
+    const sessionsRes = await db.query(`
+      SELECT COUNT(*)::int AS cnt FROM mentor_meetings
+      WHERE LOWER(faculty_email) = $1 AND meeting_date >= NOW() - INTERVAL '180 days'
+    `, [targetEmail]);
+    const sessionCount = sessionsRes.rows[0]?.cnt || 0;
+    const sessionsScore = menteeCount > 0 ? Math.min(Math.round((sessionCount / menteeCount) * 10), 10) : 0;
+
+    // At-risk follow-up: students with <65% attendance who have a meeting logged
+    const atRiskRes = await db.query(`
+      SELECT COUNT(DISTINCT ar2.roll_number)::int AS total_atrisk FROM attendance_records ar2
+      JOIN attendance_sessions s2 ON s2.id = ar2.session_id
+      JOIN subject_allotments a2 ON a2.id = s2.allotment_id
+      WHERE LOWER(a2.faculty_email) = $1
+      GROUP BY ar2.roll_number
+      HAVING (SUM(CASE WHEN ar2.status='present' THEN 1 ELSE 0 END)::float / COUNT(*)) < 0.65
+    `, [targetEmail]);
+    const totalAtRisk = atRiskRes.rows[0]?.total_atrisk || 0;
+
+    const followedRes = await db.query(`
+      SELECT COUNT(DISTINCT mm.roll_number)::int AS cnt FROM mentor_meetings mm
+      WHERE LOWER(mm.faculty_email) = $1 AND mm.tag = 'Attendance'
+        AND mm.meeting_date >= NOW() - INTERVAL '90 days'
+    `, [targetEmail]);
+    const followedUp = followedRes.rows[0]?.cnt || 0;
+    const atRiskScore = totalAtRisk > 0 ? Math.min(Math.round((followedUp / totalAtRisk) * 5), 5) : 5;
+
+    const mentoringScore = sessionsScore + atRiskScore;
+
+    // ── Pillars 4 & 5: Duties (approved from faculty_api_duties) ──
+    const dutiesRes = await db.query(`
+      SELECT duty_type, COALESCE(points_awarded, 0) AS pts
+      FROM faculty_api_duties
+      WHERE LOWER(faculty_email) = $1 AND status = 'Approved'
+    `, [targetEmail]);
+
+    const ACADEMIC_TYPES = ['NAAC', 'NBA', 'JNTU', 'Exam Duty', 'Monthly Duty', 'Other Academic'];
+    const INDUSTRY_TYPES = ['Industry Visit', 'Guest Lecture', 'Workshop Conducted', 'Workshop Attended', 'FDP Conducted', 'FDP Attended', 'Professional Activity'];
+
+    let academicRaw = 0, industryRaw = 0;
+    for (const d of dutiesRes.rows) {
+      const pts = parseFloat(d.pts) || 0;
+      if (ACADEMIC_TYPES.includes(d.duty_type)) academicRaw += pts;
+      else if (INDUSTRY_TYPES.includes(d.duty_type)) industryRaw += pts;
+    }
+    const academicScore = Math.min(academicRaw, 15);
+    const industryScore = Math.min(industryRaw, 20);
+
+    // ── Total ─────────────────────────────────────────────────────
+    const totalScore = teachingScore + researchScore + mentoringScore + academicScore + industryScore;
+    const grade = totalScore >= 90 ? 'Excellent' : totalScore >= 75 ? 'Good' : totalScore >= 60 ? 'Average' : 'Needs Improvement';
+
+    // Fetch pending+approved duties list
+    const allDutiesRes = await db.query(`
+      SELECT * FROM faculty_api_duties WHERE LOWER(faculty_email) = $1 ORDER BY created_at DESC LIMIT 50
+    `, [targetEmail]);
+
+    res.json({
+      faculty_email: targetEmail,
+      total_score: parseFloat(totalScore.toFixed(1)),
+      grade,
+      pillars: {
+        teaching_learning: {
+          score: teachingScore, max: 40,
+          breakdown: { workload: workloadScore, posting_compliance: postingScore, student_attendance: studentAttScore }
+        },
+        research: {
+          score: researchScore, max: 10,
+          breakdown: { fdp: fdpScore, publications: pubScore, certifications: certScore }
+        },
+        mentoring: {
+          score: mentoringScore, max: 15,
+          breakdown: { sessions_logged: sessionsScore, atrisk_followup: atRiskScore }
+        },
+        academic_duties: { score: academicScore, max: 15 },
+        industry_professional: { score: industryScore, max: 20 },
+      },
+      duties: allDutiesRes.rows,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /faculty/api-scores — HOD/Admin list view
+app.get('/faculty/api-scores', requireRole('hod', 'admin', 'director', 'principal', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    const callerRole = req.auth?.role;
+    const callerDept = req.auth?.department;
+    const CSE_ALLIED = ['CSE', 'CSE (AI & ML)', 'CSE (Data Science)', 'CSE (BS)', 'CSE (CS)'];
+    const deptParam = (req.query.department as string) || '';
+
+    let deptCond = '';
+    const params: any[] = [];
+    let pi = 1;
+    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+      deptCond = `AND f.department = $${pi++}`; params.push(callerDept);
+    } else if (callerRole === 'program_chair') {
+      deptCond = `AND f.department = ANY($${pi++}::text[])`; params.push(CSE_ALLIED);
+    } else if (deptParam && deptParam !== 'All') {
+      deptCond = `AND f.department = $${pi++}`; params.push(deptParam);
+    }
+
+    const facRes = await db.query(`
+      SELECT f.email, f.name AS faculty_name, f.department,
+             COALESCE(fp.personal->>'designation','Faculty') AS designation
+      FROM faculty f
+      LEFT JOIN faculty_full_profiles fp ON LOWER(fp.email) = LOWER(f.email)
+      WHERE f.role NOT IN ('admin','hod') ${deptCond}
+      ORDER BY f.department, f.name
+    `, params);
+
+    // For list view, just return basic info — full score computed on demand per faculty
+    res.json({ faculty: facRes.rows });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /faculty/:email/api-duties — Faculty submits a duty
+app.post('/faculty/:email/api-duties', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const callerRole = req.auth?.role;
+    const callerEmail = req.auth?.email?.toLowerCase();
+    const targetEmail = req.params.email.toLowerCase();
+    if (callerRole === 'faculty' && callerEmail !== targetEmail) return res.status(403).json({ error: 'Access denied' });
+
+    const { duty_type, title, description, duty_date, proof_url } = req.body;
+    if (!duty_type || !title || !duty_date) return res.status(400).json({ error: 'Missing required fields' });
+
+    const facRes = await db.query(`SELECT name FROM faculty WHERE LOWER(email) = $1 LIMIT 1`, [targetEmail]);
+    const faculty_name = facRes.rows[0]?.name || targetEmail;
+
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS faculty_api_duties (
+        id SERIAL PRIMARY KEY, faculty_email TEXT NOT NULL, faculty_name TEXT,
+        duty_type TEXT NOT NULL, title TEXT NOT NULL, description TEXT,
+        duty_date DATE NOT NULL, proof_url TEXT, points_awarded NUMERIC(5,2),
+        approved_by TEXT, approved_at TIMESTAMPTZ, reject_reason TEXT,
+        status TEXT NOT NULL DEFAULT 'Pending', created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `).catch(() => {});
+
+    const result = await db.query(`
+      INSERT INTO faculty_api_duties (faculty_email, faculty_name, duty_type, title, description, duty_date, proof_url)
+      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *
+    `, [targetEmail, faculty_name, duty_type, title, description || '', duty_date, proof_url || '']);
+
+    res.json({ success: true, duty: result.rows[0] });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /faculty/:email/api-duties
+app.get('/faculty/:email/api-duties', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const callerRole = req.auth?.role;
+    const callerEmail = req.auth?.email?.toLowerCase();
+    const targetEmail = req.params.email.toLowerCase();
+    if (callerRole === 'faculty' && callerEmail !== targetEmail) return res.status(403).json({ error: 'Access denied' });
+    await db.query(`CREATE TABLE IF NOT EXISTS faculty_api_duties (id SERIAL PRIMARY KEY, faculty_email TEXT NOT NULL, faculty_name TEXT, duty_type TEXT NOT NULL, title TEXT NOT NULL, description TEXT, duty_date DATE NOT NULL, proof_url TEXT, points_awarded NUMERIC(5,2), approved_by TEXT, approved_at TIMESTAMPTZ, reject_reason TEXT, status TEXT NOT NULL DEFAULT 'Pending', created_at TIMESTAMPTZ DEFAULT NOW())`).catch(() => {});
+    const result = await db.query(`SELECT * FROM faculty_api_duties WHERE LOWER(faculty_email) = $1 ORDER BY created_at DESC`, [targetEmail]);
+    res.json({ duties: result.rows });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /faculty/api-duties/:id/approve — HOD/Admin approve
+app.patch('/faculty/api-duties/:id/approve', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const { points_awarded } = req.body;
+    await db.query(`
+      UPDATE faculty_api_duties SET status='Approved', approved_by=$1, approved_at=NOW(), points_awarded=COALESCE($2, points_awarded)
+      WHERE id=$3
+    `, [req.auth!.email, points_awarded || null, req.params.id]);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /faculty/api-duties/:id/reject — HOD/Admin reject
+app.patch('/faculty/api-duties/:id/reject', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const { reject_reason } = req.body;
+    await db.query(`
+      UPDATE faculty_api_duties SET status='Rejected', approved_by=$1, approved_at=NOW(), reject_reason=$2 WHERE id=$3
+    `, [req.auth!.email, reject_reason || '', req.params.id]);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /faculty/api-duties/pending — HOD/Admin pending approvals
+app.get('/faculty/api-duties/pending', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const callerRole = req.auth?.role;
+    const callerDept = req.auth?.department;
+    await db.query(`CREATE TABLE IF NOT EXISTS faculty_api_duties (id SERIAL PRIMARY KEY, faculty_email TEXT NOT NULL, faculty_name TEXT, duty_type TEXT NOT NULL, title TEXT NOT NULL, description TEXT, duty_date DATE NOT NULL, proof_url TEXT, points_awarded NUMERIC(5,2), approved_by TEXT, approved_at TIMESTAMPTZ, reject_reason TEXT, status TEXT NOT NULL DEFAULT 'Pending', created_at TIMESTAMPTZ DEFAULT NOW())`).catch(() => {});
+    let q = `SELECT d.*, f.department FROM faculty_api_duties d LEFT JOIN faculty f ON LOWER(f.email) = LOWER(d.faculty_email) WHERE d.status = 'Pending'`;
+    const params: any[] = [];
+    if (callerRole === 'hod' && callerDept && callerDept !== '*') { q += ` AND f.department = $1`; params.push(callerDept); }
+    q += ` ORDER BY d.created_at DESC`;
+    const result = await db.query(q, params);
+    res.json({ duties: result.rows });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

@@ -320,6 +320,12 @@ export interface FacultyPublicationRecord {
   co_authors?: string;
   document_url?: string;
   needs_review?: boolean;
+  // Patent-specific fields
+  inventor_position?: string;
+  application_number?: string;
+  patent_status?: 'Published' | 'Granted';
+  patent_date?: string;
+  affiliation_institute?: string;
 }
 
 export interface FacultyFullProfile {
@@ -866,6 +872,9 @@ export const STUDENT_DOC_TYPES = [
   'Short-term Internship',
   'Long-term Internship',
   'Assignment',
+  'Co-Curricular Activity',
+  'Extra Curricular Activity (EAA)',
+  'Games & Sports',
 ] as const;
 
 export const STUDENT_SEMESTERS = [
