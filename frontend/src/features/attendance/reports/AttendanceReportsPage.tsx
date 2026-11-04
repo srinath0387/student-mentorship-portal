@@ -188,11 +188,13 @@ export const AttendanceReportsPage: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b border-borderLine overflow-x-auto">
+      <div className="flex border-b-2 border-borderLine overflow-x-auto gap-0">
         {tabs.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
-            className={`px-4 py-2 text-xs font-semibold rounded-t-lg whitespace-nowrap transition-colors ${
-              tab === t.key ? 'bg-primary text-white' : 'text-muted hover:bg-surface'
+            className={`px-5 py-2.5 text-xs font-semibold whitespace-nowrap transition-all border-b-2 -mb-[2px] ${
+              tab === t.key
+                ? 'border-primary text-primary bg-primary/5'
+                : 'border-transparent text-textSecondary hover:text-foreground hover:border-borderLine bg-transparent'
             }`}>
             {t.label}
           </button>
