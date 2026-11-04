@@ -9590,6 +9590,7 @@ app.get('/faculty/api-scores', requireRole('hod', 'admin', 'director', 'principa
   try {
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
+    const isSuperUser = req.auth?.isSuperAdmin === true || callerDept === '*';
     const CSE_ALLIED = ['CSE', 'CSE (AI & ML)', 'CSE (Data Science)', 'CSE (BS)', 'CSE (CS)'];
     const deptParam = (req.query.department as string) || '';
 
@@ -9597,6 +9598,8 @@ app.get('/faculty/api-scores', requireRole('hod', 'admin', 'director', 'principa
     const params: any[] = [];
     let pi = 1;
     if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+      deptCond = `AND f.department = $${pi++}`; params.push(callerDept);
+    } else if (callerRole === 'admin' && !isSuperUser && callerDept && callerDept !== '*') {
       deptCond = `AND f.department = $${pi++}`; params.push(callerDept);
     } else if (callerRole === 'program_chair') {
       deptCond = `AND f.department = ANY($${pi++}::text[])`; params.push(CSE_ALLIED);
@@ -9606,19 +9609,121 @@ app.get('/faculty/api-scores', requireRole('hod', 'admin', 'director', 'principa
 
     const facRes = await db.query(`
       SELECT f.email, f.name AS faculty_name, f.department,
-             COALESCE(fp.personal->>'designation','Faculty') AS designation
+             COALESCE(fp.personal->>'designation','Faculty') AS designation,
+             fp.certifications, fp.activities, fp.publications
       FROM faculty f
       LEFT JOIN faculty_full_profiles fp ON LOWER(fp.email) = LOWER(f.email)
       WHERE f.role NOT IN ('admin','hod') ${deptCond}
       ORDER BY f.department, f.name
     `, params);
 
-    // For list view, just return basic info — full score computed on demand per faculty
-    res.json({ faculty: facRes.rows });
+    if (facRes.rows.length === 0) return res.json([]);
+
+    const emails = facRes.rows.map((r: any) => r.email.toLowerCase());
+
+    await db.query(`CREATE TABLE IF NOT EXISTS faculty_api_duties (id SERIAL PRIMARY KEY, faculty_email TEXT NOT NULL, faculty_name TEXT, duty_type TEXT NOT NULL, title TEXT NOT NULL, description TEXT, duty_date DATE NOT NULL, proof_url TEXT, points_awarded NUMERIC(5,2), approved_by TEXT, approved_at TIMESTAMPTZ, reject_reason TEXT, status TEXT NOT NULL DEFAULT 'Pending', created_at TIMESTAMPTZ DEFAULT NOW())`).catch(() => {});
+
+    // Batch queries — one round-trip per data type for all faculty
+    const dutiesRes = await db.query(`
+      SELECT LOWER(faculty_email) AS email, duty_type,
+        COALESCE(SUM(points_awarded), 0) AS pts
+      FROM faculty_api_duties
+      WHERE LOWER(faculty_email) = ANY($1) AND status = 'Approved'
+      GROUP BY LOWER(faculty_email), duty_type
+    `, [emails]);
+
+    const workloadRes = await db.query(`
+      SELECT LOWER(faculty_email) AS email, COALESCE(SUM(num_periods),0)::int AS total_periods
+      FROM timetable_entries WHERE LOWER(faculty_email) = ANY($1)
+      GROUP BY LOWER(faculty_email)
+    `, [emails]);
+
+    const meetingsRes = await db.query(`
+      SELECT LOWER(faculty_email) AS email, COUNT(*)::int AS cnt
+      FROM mentor_meetings WHERE LOWER(faculty_email) = ANY($1)
+        AND meeting_date >= NOW() - INTERVAL '180 days'
+      GROUP BY LOWER(faculty_email)
+    `, [emails]);
+
+    const menteesRes = await db.query(`
+      SELECT LOWER(f.email) AS email, COUNT(DISTINCT ma.roll_number)::int AS cnt
+      FROM mentor_assignments ma
+      JOIN faculty f ON UPPER(f.faculty_id) = UPPER(ma.faculty_id)
+      WHERE LOWER(f.email) = ANY($1)
+      GROUP BY LOWER(f.email)
+    `, [emails]);
+
+    const ACADEMIC_TYPES = ['NAAC', 'NBA', 'JNTU', 'Exam Duty', 'Monthly Duty', 'Other Academic'];
+    const INDUSTRY_TYPES = ['Industry Visit', 'Guest Lecture', 'Workshop Conducted', 'Workshop Attended',
+                            'FDP Conducted', 'FDP Attended', 'Professional Activity'];
+
+    const dutiesMap: Record<string, { academic: number; industry: number }> = {};
+    for (const d of dutiesRes.rows) {
+      if (!dutiesMap[d.email]) dutiesMap[d.email] = { academic: 0, industry: 0 };
+      const pts = parseFloat(d.pts) || 0;
+      if (ACADEMIC_TYPES.includes(d.duty_type)) dutiesMap[d.email].academic += pts;
+      else if (INDUSTRY_TYPES.includes(d.duty_type)) dutiesMap[d.email].industry += pts;
+    }
+    const workloadMap: Record<string, number> = {};
+    for (const w of workloadRes.rows) workloadMap[w.email] = w.total_periods;
+    const meetingsMap: Record<string, number> = {};
+    for (const m of meetingsRes.rows) meetingsMap[m.email] = m.cnt;
+    const menteesMap: Record<string, number> = {};
+    for (const m of menteesRes.rows) menteesMap[m.email] = m.cnt;
+
+    const scores = facRes.rows.map((f: any) => {
+      const email = f.email.toLowerCase();
+      const certs: any[] = Array.isArray(f.certifications) ? f.certifications : [];
+      const activities: any[] = Array.isArray(f.activities) ? f.activities : [];
+      const publications: any[] = Array.isArray(f.publications) ? f.publications : [];
+
+      // Pillar 1: Teaching (workload + 10pt base for posting/attendance)
+      const periods = workloadMap[email] || 0;
+      const workloadScore = periods === 0 ? 0 : periods < 12 ? 6 : periods > 20 ? 7 : 10;
+      const teachingScore = workloadScore + 10;
+
+      // Pillar 2: Research
+      const fdps = activities.filter((a: any) =>
+        (a.type || '').toLowerCase().includes('fdp') || (a.category || '').toLowerCase().includes('fdp'));
+      const researchScore = Math.min(fdps.length, 4) + Math.min(publications.length * 2, 4) + Math.min(certs.length, 2);
+
+      // Pillar 3: Mentoring
+      const menteeCount = menteesMap[email] || 0;
+      const sessionCount = meetingsMap[email] || 0;
+      const sessionsScore = menteeCount > 0 ? Math.min(Math.round((sessionCount / menteeCount) * 10), 10) : 0;
+      const mentoringScore = sessionsScore + 3;
+
+      // Pillars 4 & 5: Duties
+      const duties = dutiesMap[email] || { academic: 0, industry: 0 };
+      const academicScore = Math.min(duties.academic, 15);
+      const industryScore = Math.min(duties.industry, 20);
+
+      const totalScore = parseFloat((teachingScore + researchScore + mentoringScore + academicScore + industryScore).toFixed(1));
+      const grade = totalScore >= 90 ? 'Excellent' : totalScore >= 75 ? 'Good' : totalScore >= 60 ? 'Average' : 'Needs Improvement';
+
+      return {
+        email: f.email,
+        name: f.faculty_name,
+        department: f.department,
+        designation: f.designation,
+        total_score: totalScore,
+        grade,
+        pillars: {
+          teaching:        { score: teachingScore,  max: 40 },
+          research:        { score: researchScore,  max: 10 },
+          mentoring:       { score: mentoringScore, max: 15 },
+          academic_duties: { score: academicScore,  max: 15 },
+          industry:        { score: industryScore,  max: 20 },
+        },
+      };
+    });
+
+    res.json(scores);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 // POST /faculty/:email/api-duties — Faculty submits a duty
 app.post('/faculty/:email/api-duties', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
