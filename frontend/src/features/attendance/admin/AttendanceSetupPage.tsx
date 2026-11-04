@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx';
 import { BookOpen, Users, Clock, Trash2, Plus, Upload, Search, Edit2, Check, X, RotateCcw } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { VALID_DEPARTMENT_NAMES } from '../../../lib/validation/auth';
+import { useAuth } from '../../../context/AuthContext';
 
 const DEPARTMENTS = VALID_DEPARTMENT_NAMES;
 const SEMESTERS = ['1-1','1-2','2-1','2-2','3-1','3-2','4-1','4-2'];
@@ -30,11 +31,15 @@ const StatusMsg:React.FC<{msg:{type:string;message:string}|null}> = ({msg}) => {
 export const AttendanceSetupPage: React.FC = () => {
   const [tab, setTab] = useState<TabId>('subjects');
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const userDept = user?.department || 'CSE';
 
   // ── TAB 1: SUBJECT MASTER ──────────────────────────────────────────────────
   const [subSearch, setSubSearch] = useState('');
   const [subSemFilter, setSubSemFilter] = useState('');
   const [subDeptFilter, setSubDeptFilter] = useState('');
+  // Lock non-admin to their own dept (populated via useEffect below)
   const [subForm, setSubForm] = useState({ semester_label:'', department:'CSE', subject_code:'', subject_name:'', short_name:'', subject_type:'Theory' as 'Theory'|'Lab', regulation:'R22' });
   const [subStatus, setSubStatus] = useState<{type:string;message:string}|null>(null);
   const [editingSubId, setEditingSubId] = useState<string|null>(null);
@@ -102,7 +107,7 @@ export const AttendanceSetupPage: React.FC = () => {
 
   // ── TAB 2: FACULTY ALLOTMENT ───────────────────────────────────────────────
   const [allotSem, setAllotSem] = useState('');
-  const [allotDept, setAllotDept] = useState('CSE');
+  const [allotDept, setAllotDept] = useState('CSE'); // synced to userDept for non-admin via useEffect
   const [allotSection, setAllotSection] = useState('A');
   const [allotSubjectId, setAllotSubjectId] = useState('');
   const [allotFaculty, setAllotFaculty] = useState('');
@@ -199,7 +204,17 @@ export const AttendanceSetupPage: React.FC = () => {
 
   // ── TAB 4: TIMETABLE ──────────────────────────────────────────────────────
   const [ttSem, setTtSem] = useState('');
-  const [ttDept, setTtDept] = useState('CSE');
+  const [ttDept, setTtDept] = useState('CSE'); // synced to userDept for non-admin via useEffect
+
+  // ── Dept scoping: non-admin roles locked to own department ─────────────────
+  React.useEffect(() => {
+    if (!isAdmin && userDept) {
+      setSubDeptFilter(userDept);
+      setAllotDept(userDept);
+      setTtDept(userDept);
+    }
+  }, [isAdmin, userDept]);
+
   const [ttSection, setTtSection] = useState('A');
   const [ttDay, setTtDay] = useState('Monday');
   const [ttPeriod, setTtPeriod] = useState(1);
@@ -306,10 +321,13 @@ export const AttendanceSetupPage: React.FC = () => {
               <select value={subForm.semester_label} onChange={e=>setSubForm(f=>({...f,semester_label:e.target.value}))} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold" required>
                 <option value="">Class *</option>{SEMESTERS.map(s=><option key={s}>{s}</option>)}
               </select>
+              {isAdmin ? (
               <select value={subForm.department} onChange={e=>setSubForm(f=>({...f,department:e.target.value}))} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold" required>
-                <option value="">Department *</option>
                 {DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
               </select>
+            ) : (
+              <span className="px-3 py-1.5 text-xs font-bold rounded-xl bg-brand-primary/10 text-brand-primary border border-brand-primary/20">{userDept}</span>
+            )}
               <input value={subForm.subject_code} onChange={e=>setSubForm(f=>({...f,subject_code:e.target.value}))} placeholder="Subject Code *" className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none" required/>
               <input value={subForm.subject_name} onChange={e=>setSubForm(f=>({...f,subject_name:e.target.value}))} placeholder="Subject Title *" className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none" required/>
               <input value={subForm.short_name} onChange={e=>setSubForm(f=>({...f,short_name:e.target.value}))} placeholder="Short Name" className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none"/>
@@ -332,9 +350,13 @@ export const AttendanceSetupPage: React.FC = () => {
               <select value={subSemFilter} onChange={e=>setSubSemFilter(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
                 <option value="">All Classes</option>{SEMESTERS.map(s=><option key={s}>{s}</option>)}
               </select>
-              <select value={subDeptFilter} onChange={e=>setSubDeptFilter(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
-                <option value="">All Departments</option>{DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
-              </select>
+              {isAdmin ? (
+                <select value={subDeptFilter} onChange={e=>setSubDeptFilter(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
+                  <option value="">All Departments</option>{DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
+                </select>
+              ) : (
+                <span className="px-3 py-1.5 text-xs font-bold rounded-xl bg-brand-primary/10 text-brand-primary border border-brand-primary/20">{userDept}</span>
+              )}
               <div className="ml-auto flex items-center gap-3 text-xs">
                 <button type="button" onClick={()=>{setMasterFetchTs(Date.now());refetchMaster();}} className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-borderLine hover:bg-surface-2 text-textSecondary font-bold text-[11px]" title="Refresh Catalog">
                   <RotateCcw className={`w-3 h-3 ${isMasterLoading?'animate-spin text-brand-primary':''}`}/> Refresh
@@ -383,9 +405,13 @@ export const AttendanceSetupPage: React.FC = () => {
               <select value={allotSem} onChange={e=>setAllotSem(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
                 <option value="">All Classes</option>{SEMESTERS.map(s=><option key={s}>{s}</option>)}
               </select>
-              <select value={allotDept} onChange={e=>setAllotDept(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
-                {DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
-              </select>
+{isAdmin ? (
+                <select value={allotDept} onChange={e=>setAllotDept(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
+                  <option value="">All Departments</option>{DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
+                </select>
+              ) : (
+                <span className="px-3 py-1.5 text-xs font-bold rounded-xl bg-brand-primary/10 text-brand-primary border border-brand-primary/20">{userDept}</span>
+              )}
               <select value={allotSection} onChange={e=>setAllotSection(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
                 {SECTIONS.map(s=><option key={s}>{s}</option>)}
               </select>
@@ -511,9 +537,13 @@ export const AttendanceSetupPage: React.FC = () => {
               <select value={ttSem} onChange={e=>setTtSem(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
                 <option value="">Class *</option>{SEMESTERS.map(s=><option key={s} value={s}>{s}</option>)}
               </select>
-              <select value={ttDept} onChange={e=>setTtDept(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
-                {DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
-              </select>
+              {isAdmin ? (
+                <select value={ttDept} onChange={e=>setTtDept(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
+                  <option value="">All Departments</option>{DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
+                </select>
+              ) : (
+                <span className="px-3 py-1.5 text-xs font-bold rounded-xl bg-brand-primary/10 text-brand-primary border border-brand-primary/20">{userDept}</span>
+              )}
               <select value={ttSection} onChange={e=>setTtSection(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
                 {SECTIONS.map(s=><option key={s} value={s}>Section {s}</option>)}
               </select>
