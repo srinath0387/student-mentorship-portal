@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Users,
@@ -46,6 +47,15 @@ export const CoordinatorDashboardPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
     'onboarding' | 'freshers' | 'subjects' | 'attendance' | 'manage-attendance' | 'leaves' | 'calendar' | 'incharge' | 'promotion'
   >('onboarding');
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Sync tab from URL on mount and navigation
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const tab = params.get('tab');
+    if (tab) setActiveTab(tab as any);
+  }, [location.search]);
 
   // Inspection Modal State for 360 Fresher Profile
   const [inspectStudentRoll, setInspectStudentRoll] = useState<string | null>(null);
@@ -452,7 +462,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
       {/* ── Main Tab Navigation ── */}
       <div className="flex flex-wrap bg-surface-2 p-1 rounded-2xl border border-borderLine max-w-5xl gap-1">
         <button
-          onClick={() => setActiveTab('onboarding')}
+          onClick={() => navigate('/coordinator/dashboard?tab=onboarding')}
           className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'onboarding'
               ? 'bg-pink-600 text-white shadow-md'
@@ -464,7 +474,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('freshers')}
+          onClick={() => navigate('/coordinator/dashboard?tab=freshers')}
           className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'freshers'
               ? 'bg-pink-600 text-white shadow-md'
@@ -476,7 +486,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('subjects')}
+          onClick={() => navigate('/coordinator/dashboard?tab=subjects')}
           className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'subjects'
               ? 'bg-pink-600 text-white shadow-md'
@@ -488,7 +498,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('attendance')}
+          onClick={() => navigate('/coordinator/dashboard?tab=attendance')}
           className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'attendance'
               ? 'bg-pink-600 text-white shadow-md'
@@ -500,7 +510,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('manage-attendance')}
+          onClick={() => navigate('/coordinator/dashboard?tab=manage-attendance')}
           className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'manage-attendance'
               ? 'bg-pink-600 text-white shadow-md'
@@ -512,7 +522,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('leaves')}
+          onClick={() => navigate('/coordinator/dashboard?tab=leaves')}
           className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'leaves'
               ? 'bg-pink-600 text-white shadow-md'
@@ -524,7 +534,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('calendar')}
+          onClick={() => navigate('/coordinator/dashboard?tab=calendar')}
           className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'calendar'
               ? 'bg-pink-600 text-white shadow-md'
@@ -536,7 +546,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('incharge')}
+          onClick={() => navigate('/coordinator/dashboard?tab=incharge')}
           className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'incharge'
               ? 'bg-pink-600 text-white shadow-md'
@@ -548,7 +558,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('promotion')}
+          onClick={() => navigate('/coordinator/dashboard?tab=promotion')}
           className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'promotion'
               ? 'bg-pink-600 text-white shadow-md'

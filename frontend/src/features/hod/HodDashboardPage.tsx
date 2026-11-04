@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -186,6 +186,7 @@ export const HodDashboardPage: React.FC = () => {
   const [progressionLoading, setProgressionLoading] = useState(false);
 
   const location = useLocation();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -627,7 +628,7 @@ export const HodDashboardPage: React.FC = () => {
             ].map((t) => (
               <button
                 key={t.key}
-                onClick={() => setActiveTab(t.key as any)}
+                onClick={() => navigate('/hod/dashboard?tab=' + t.key)}
                 className={`flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold border-b-2 whitespace-nowrap transition-all rounded-t-lg ${
                   activeTab === t.key
                     ? 'border-brand-primary text-brand-primary bg-brand-soft'
