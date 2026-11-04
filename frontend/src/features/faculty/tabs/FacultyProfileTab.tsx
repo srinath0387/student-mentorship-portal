@@ -57,6 +57,7 @@ import {
 import { PillButton } from '../../../components/common/PillButton';
 import { formatExternalUrl } from '../../../lib/urlUtils';
 import { SubjectsHandledSection } from '../components/SubjectsHandledSection';
+import { FacultyApiScoreCard } from '../FacultyApiScoreCard';
 import { VALID_DEPARTMENT_NAMES } from '../../../lib/validation/auth';
 
 const BLOOD_GROUPS: BloodGroup[] = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'];
@@ -855,6 +856,9 @@ export const FacultyProfileTab: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* ── API Score Card ── */}
+      <FacultyApiScoreCard facultyEmail={email} />
+
       {/* ── 1. Profile Completion Banner & Progress Bar ── */}
       <div className="bg-surface border border-borderLine rounded-2xl p-5 sm:p-6 shadow-sm">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">

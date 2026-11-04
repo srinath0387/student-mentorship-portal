@@ -19,6 +19,7 @@ import {
   Calendar,
   ClipboardCheck,
   FolderOpen,
+  Star,
   LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -122,6 +123,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
         { label: 'Holiday Calendar', path: '/admin/dashboard?tab=holidays', icon: Calendar },
         { label: 'Attendance Mgmt', path: '/admin/dashboard?tab=attendance', icon: CalendarCheck },
         { label: 'Faculty Workload', path: '/attendance/workload', icon: BarChart2 },
+        { label: 'Faculty API Score', path: '/faculty/api', icon: Star },
         { label: 'Attendance Reports', path: '/attendance/reports', icon: FileBarChart },
         { label: 'Documents', path: '/documents', icon: FolderOpen },
         { label: 'Student Directory', path: '/admin/dashboard?tab=students', icon: Users },
@@ -142,6 +144,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
         { label: 'Leave & OD Approvals', path: '/hod/dashboard?tab=leaves', icon: ShieldCheck },
         { label: 'Attendance Tracker', path: '/hod/dashboard?tab=attendance', icon: CalendarCheck },
         { label: 'Faculty Workload', path: '/attendance/workload', icon: BarChart2 },
+        { label: 'Faculty API Score', path: '/faculty/api', icon: Star },
         { label: 'Attendance Reports', path: '/attendance/reports', icon: FileBarChart },
         { label: 'Documents', path: '/documents', icon: FolderOpen },
         { label: 'Student Directory', path: '/hod/dashboard?tab=students', icon: Users },
