@@ -167,6 +167,8 @@ export const LandingPage: React.FC = () => {
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotError, setForgotError] = useState<string | null>(null);
   const [forgotSuccess, setForgotSuccess] = useState<string | null>(null);
+  // "not in directory" soft-state — email exists in DB but not in faculty directory
+  const [forgotNotInDirectory, setForgotNotInDirectory] = useState(false);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -234,6 +236,7 @@ export const LandingPage: React.FC = () => {
     }
     setForgotLoading(true);
     setForgotError(null);
+    setForgotNotInDirectory(false);
     try {
       await cognitoForgotPassword(email);
       setForgotStep('otp');
@@ -255,12 +258,30 @@ export const LandingPage: React.FC = () => {
             setForgotSuccess(`OTP sent to ${email}. Check your inbox & spam folder.`);
             return;
           }
-        } catch { /* proceed to user-friendly message */ }
+        } catch { /* fall through to soft-state */ }
 
-        setForgotError('No faculty record found for this email in college records. Please verify your address or contact the administrator.');
+        // Could not provision — show soft recovery UI (don't block; they may already be in Cognito)
+        setForgotNotInDirectory(true);
         return;
       }
       setForgotError(msg || 'Failed to send OTP. Please check your email and try again.');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  // "Try OTP anyway" — skips provision check, goes straight to OTP step
+  const handleForceOtpStep = async () => {
+    const email = forgotEmail.trim().toLowerCase();
+    setForgotLoading(true);
+    setForgotError(null);
+    setForgotNotInDirectory(false);
+    try {
+      await cognitoForgotPassword(email);
+      setForgotStep('otp');
+      setForgotSuccess(`OTP sent to ${email}. Check your inbox & spam folder.`);
+    } catch (err: any) {
+      setForgotError(err?.message || 'Could not send OTP. Please contact your administrator.');
     } finally {
       setForgotLoading(false);
     }
@@ -998,6 +1019,46 @@ export const LandingPage: React.FC = () => {
               <div className="flex items-start gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-200 mb-4 text-xs text-emerald-700 font-medium">
                 <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0 text-emerald-600" />
                 <span>{forgotSuccess}</span>
+              </div>
+            )}
+
+            {/* "Not in directory" soft-state — email exists in DB but not found in faculty directory */}
+            {forgotNotInDirectory && forgotStep === 'email' && (
+              <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-xs font-semibold text-amber-800">Account not found in faculty directory</p>
+                    <p className="text-xs text-amber-700 mt-0.5">
+                      <span className="font-medium">{forgotEmail}</span> isn't registered in the faculty records yet — but your profile data is safe and won't be lost.
+                    </p>
+                  </div>
+                </div>
+                <div className="text-xs text-amber-700 bg-amber-100 rounded-lg p-3 space-y-1">
+                  <p className="font-semibold">What you can do:</p>
+                  <ul className="list-disc ml-4 space-y-0.5">
+                    <li>Ask your HOD or Admin to add <span className="font-medium">{forgotEmail}</span> to the faculty directory</li>
+                    <li>If you've already logged in before, tap <span className="font-medium">"Try OTP Anyway"</span> below</li>
+                  </ul>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleForceOtpStep}
+                    disabled={forgotLoading}
+                    className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5"
+                  >
+                    {forgotLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />}
+                    {forgotLoading ? 'Sending…' : 'Try OTP Anyway'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setForgotNotInDirectory(false); setForgotEmail(''); }}
+                    className="flex-1 py-2.5 rounded-xl border border-amber-300 text-amber-700 text-xs font-semibold hover:bg-amber-100 transition-colors"
+                  >
+                    Change Email
+                  </button>
+                </div>
               </div>
             )}
 

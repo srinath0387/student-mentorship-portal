@@ -1452,6 +1452,20 @@ app.post('/auth/provision-faculty', async (req: Request, res: Response) => {
       } catch { /* ignore */ }
     }
 
+    // 3rd fallback: check faculty_full_profiles (covers faculty who have profile data but aren't in faculty directory yet)
+    if (!faculty) {
+      try {
+        const profRes = await db.query(
+          `SELECT email, faculty_id, personal->>'name' AS name, personal->>'department' AS department
+           FROM faculty_full_profiles WHERE LOWER(email) = $1 LIMIT 1`,
+          [cleanEmail]
+        );
+        if (profRes.rows.length > 0) {
+          faculty = profRes.rows[0];
+        }
+      } catch { /* ignore */ }
+    }
+
     if (!faculty) {
       return res.status(404).json({ success: false, error: 'Faculty account not found in institutional records.' });
     }
