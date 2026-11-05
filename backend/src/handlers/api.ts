@@ -9436,36 +9436,46 @@ app.get('/faculty/:email/api-score', requireRole('faculty', 'hod', 'admin', 'dir
       )
     `).catch(() => {});
 
+    // Helper — safe query that returns empty rows on any error (table may not exist)
+    const safeQuery = async (sql: string, params: any[] = []) => {
+      try {
+        const r = await db.query(sql, params);
+        return r.rows || [];
+      } catch {
+        return [];
+      }
+    };
+
     // ── Pillar 1: Teaching & Learning (40 pts) ────────────────────
     // 1a. Workload compliance (10 pts)
-    const workloadRes = await db.query(`
-      SELECT COALESCE(SUM(num_periods), 0)::int AS total_periods
-      FROM timetable_entries WHERE LOWER(faculty_email) = $1
-    `, [targetEmail]);
-    const totalPeriods = workloadRes.rows[0]?.total_periods || 0;
+    const workloadRows = await safeQuery(
+      `SELECT COALESCE(SUM(num_periods), 0)::int AS total_periods
+       FROM timetable_entries WHERE LOWER(faculty_email) = $1`, [targetEmail]);
+    const totalPeriods = workloadRows[0]?.total_periods || 0;
     const workloadScore = totalPeriods === 0 ? 0 : totalPeriods < 12 ? 6 : totalPeriods > 20 ? 7 : 10;
 
     // 1b. Attendance posting compliance (20 pts)
-    const scheduledRes = await db.query(`
-      SELECT COUNT(*)::int AS cnt FROM timetable_entries WHERE LOWER(faculty_email) = $1
-    `, [targetEmail]);
-    const scheduledSlots = scheduledRes.rows[0]?.cnt || 0;
+    const scheduledRows = await safeQuery(
+      `SELECT COUNT(*)::int AS cnt FROM timetable_entries WHERE LOWER(faculty_email) = $1`, [targetEmail]);
+    const scheduledSlots = scheduledRows[0]?.cnt || 0;
 
-    const postedRes = await db.query(`
+    const postedRows = await safeQuery(`
       SELECT COUNT(DISTINCT s.id)::int AS cnt
       FROM attendance_sessions s
       JOIN subject_allotments a ON a.id = s.allotment_id
       WHERE LOWER(a.faculty_email) = $1 AND s.session_date >= NOW() - INTERVAL '90 days'
     `, [targetEmail]);
-    const postedSessions = postedRes.rows[0]?.cnt || 0;
+    const postedSessions = postedRows[0]?.cnt || 0;
     const postingPct = scheduledSlots > 0 ? Math.min(postedSessions / (scheduledSlots * 13), 1) : 0;
     const postingScore = Math.round(postingPct * 20);
 
     // 1c. Student attendance outcome (10 pts)
-    const studentAttRes = await db.query(`
+    const studentAttRows = await safeQuery(`
       SELECT AVG(pct)::numeric(5,1) AS avg_pct FROM (
         SELECT ar.roll_number,
-          CASE WHEN COUNT(*) > 0 THEN (SUM(CASE WHEN ar.status='present' THEN 1 ELSE 0 END)::float / COUNT(*)) * 100 ELSE 0 END AS pct
+          CASE WHEN COUNT(*) > 0
+               THEN (SUM(CASE WHEN ar.status='present' THEN 1 ELSE 0 END)::float / COUNT(*)) * 100
+               ELSE 0 END AS pct
         FROM attendance_records ar
         JOIN attendance_sessions s ON s.id = ar.session_id
         JOIN subject_allotments a ON a.id = s.allotment_id
@@ -9473,75 +9483,79 @@ app.get('/faculty/:email/api-score', requireRole('faculty', 'hod', 'admin', 'dir
         GROUP BY ar.roll_number
       ) sub
     `, [targetEmail]);
-    const avgStudentAtt = parseFloat(studentAttRes.rows[0]?.avg_pct || '0');
+    const avgStudentAtt = parseFloat(studentAttRows[0]?.avg_pct || '0');
     const studentAttScore = avgStudentAtt >= 85 ? 10 : avgStudentAtt >= 75 ? 8 : avgStudentAtt >= 65 ? 6 : avgStudentAtt > 0 ? 3 : 0;
 
     const teachingScore = workloadScore + postingScore + studentAttScore;
 
     // ── Pillar 2: Research & Certifications (10 pts) ──────────────
-    const profileRes = await db.query(`
+    const profileRows = await safeQuery(`
       SELECT certifications, activities, publications FROM faculty_full_profiles
       WHERE LOWER(email) = $1 LIMIT 1
     `, [targetEmail]);
-    const profile = profileRes.rows[0] || {};
+    const profile = profileRows[0] || {};
     const certs: any[] = Array.isArray(profile.certifications) ? profile.certifications : [];
     const activities: any[] = Array.isArray(profile.activities) ? profile.activities : [];
     const publications: any[] = Array.isArray(profile.publications) ? profile.publications : [];
-    const fdps = activities.filter((a: any) => (a.type || '').toLowerCase().includes('fdp') || (a.category || '').toLowerCase().includes('fdp'));
-    const fdpScore = Math.min(fdps.length * 1, 4);
+    const fdps = activities.filter((a: any) =>
+      (a.type || '').toLowerCase().includes('fdp') || (a.category || '').toLowerCase().includes('fdp'));
+    const fdpScore = Math.min(fdps.length, 4);
     const pubScore = Math.min(publications.length * 2, 4);
-    const certScore = Math.min(certs.length * 1, 2);
+    const certScore = Math.min(certs.length, 2);
     const researchScore = fdpScore + pubScore + certScore;
 
     // ── Pillar 3: Mentoring (15 pts) ──────────────────────────────
-    const menteesRes = await db.query(`
+    const menteesRows = await safeQuery(`
       SELECT COUNT(DISTINCT ma.roll_number)::int AS cnt
       FROM mentor_assignments ma
       JOIN faculty f ON UPPER(f.faculty_id) = UPPER(ma.faculty_id)
       WHERE LOWER(f.email) = $1
     `, [targetEmail]);
-    const menteeCount = menteesRes.rows[0]?.cnt || 0;
+    const menteeCount = menteesRows[0]?.cnt || 0;
 
-    const sessionsRes = await db.query(`
+    const sessionsRows = await safeQuery(`
       SELECT COUNT(*)::int AS cnt FROM mentor_meetings
       WHERE LOWER(faculty_email) = $1 AND meeting_date >= NOW() - INTERVAL '180 days'
     `, [targetEmail]);
-    const sessionCount = sessionsRes.rows[0]?.cnt || 0;
+    const sessionCount = sessionsRows[0]?.cnt || 0;
     const sessionsScore = menteeCount > 0 ? Math.min(Math.round((sessionCount / menteeCount) * 10), 10) : 0;
 
-    // At-risk follow-up: students with <65% attendance who have a meeting logged
-    const atRiskRes = await db.query(`
-      SELECT COUNT(DISTINCT ar2.roll_number)::int AS total_atrisk FROM attendance_records ar2
-      JOIN attendance_sessions s2 ON s2.id = ar2.session_id
-      JOIN subject_allotments a2 ON a2.id = s2.allotment_id
-      WHERE LOWER(a2.faculty_email) = $1
-      GROUP BY ar2.roll_number
-      HAVING (SUM(CASE WHEN ar2.status='present' THEN 1 ELSE 0 END)::float / COUNT(*)) < 0.65
+    // At-risk follow-up (5 pts)
+    const atRiskRows = await safeQuery(`
+      SELECT COUNT(DISTINCT roll_number)::int AS total_atrisk FROM (
+        SELECT ar2.roll_number,
+          SUM(CASE WHEN ar2.status='present' THEN 1 ELSE 0 END)::float / COUNT(*) AS pct
+        FROM attendance_records ar2
+        JOIN attendance_sessions s2 ON s2.id = ar2.session_id
+        JOIN subject_allotments a2 ON a2.id = s2.allotment_id
+        WHERE LOWER(a2.faculty_email) = $1
+        GROUP BY ar2.roll_number
+      ) sub WHERE pct < 0.65
     `, [targetEmail]);
-    const totalAtRisk = atRiskRes.rows[0]?.total_atrisk || 0;
+    const totalAtRisk = atRiskRows[0]?.total_atrisk || 0;
 
-    const followedRes = await db.query(`
+    const followedRows = await safeQuery(`
       SELECT COUNT(DISTINCT mm.roll_number)::int AS cnt FROM mentor_meetings mm
       WHERE LOWER(mm.faculty_email) = $1 AND mm.tag = 'Attendance'
         AND mm.meeting_date >= NOW() - INTERVAL '90 days'
     `, [targetEmail]);
-    const followedUp = followedRes.rows[0]?.cnt || 0;
+    const followedUp = followedRows[0]?.cnt || 0;
     const atRiskScore = totalAtRisk > 0 ? Math.min(Math.round((followedUp / totalAtRisk) * 5), 5) : 5;
 
     const mentoringScore = sessionsScore + atRiskScore;
 
     // ── Pillars 4 & 5: Duties (approved from faculty_api_duties) ──
-    const dutiesRes = await db.query(`
+    const dutiesRows = await safeQuery(`
       SELECT duty_type, COALESCE(points_awarded, 0) AS pts
       FROM faculty_api_duties
-      WHERE LOWER(faculty_email) = $1 AND status = 'Approved'
+      WHERE LOWER(faculty_email) = $1 AND LOWER(status) = 'approved'
     `, [targetEmail]);
 
     const ACADEMIC_TYPES = ['NAAC', 'NBA', 'JNTU', 'Exam Duty', 'Monthly Duty', 'Other Academic'];
-    const INDUSTRY_TYPES = ['Industry Visit', 'Guest Lecture', 'Workshop Conducted', 'Workshop Attended', 'FDP Conducted', 'FDP Attended', 'Professional Activity'];
-
+    const INDUSTRY_TYPES = ['Industry Visit', 'Guest Lecture', 'Workshop Conducted', 'Workshop Attended',
+                            'FDP Conducted', 'FDP Attended', 'Professional Activity'];
     let academicRaw = 0, industryRaw = 0;
-    for (const d of dutiesRes.rows) {
+    for (const d of dutiesRows) {
       const pts = parseFloat(d.pts) || 0;
       if (ACADEMIC_TYPES.includes(d.duty_type)) academicRaw += pts;
       else if (INDUSTRY_TYPES.includes(d.duty_type)) industryRaw += pts;
@@ -9553,37 +9567,38 @@ app.get('/faculty/:email/api-score', requireRole('faculty', 'hod', 'admin', 'dir
     const totalScore = teachingScore + researchScore + mentoringScore + academicScore + industryScore;
     const grade = totalScore >= 90 ? 'Excellent' : totalScore >= 75 ? 'Good' : totalScore >= 60 ? 'Average' : 'Needs Improvement';
 
-    // Fetch pending+approved duties list
-    const allDutiesRes = await db.query(`
-      SELECT * FROM faculty_api_duties WHERE LOWER(faculty_email) = $1 ORDER BY created_at DESC LIMIT 50
-    `, [targetEmail]);
+    // All duties list (pending + approved)
+    const allDutiesRows = await safeQuery(
+      `SELECT * FROM faculty_api_duties WHERE LOWER(faculty_email) = $1 ORDER BY created_at DESC LIMIT 50`,
+      [targetEmail]);
 
     res.json({
       faculty_email: targetEmail,
       total_score: parseFloat(totalScore.toFixed(1)),
       grade,
       pillars: {
-        teaching_learning: {
+        teaching: {
           score: teachingScore, max: 40,
-          breakdown: { workload: workloadScore, posting_compliance: postingScore, student_attendance: studentAttScore }
+          workload: workloadScore, posting: postingScore, attendance: studentAttScore
         },
         research: {
           score: researchScore, max: 10,
-          breakdown: { fdp: fdpScore, publications: pubScore, certifications: certScore }
+          fdp: fdpScore, publications: pubScore, certifications: certScore
         },
         mentoring: {
           score: mentoringScore, max: 15,
-          breakdown: { sessions_logged: sessionsScore, atrisk_followup: atRiskScore }
+          sessions: sessionsScore, at_risk_followups: atRiskScore
         },
         academic_duties: { score: academicScore, max: 15 },
-        industry_professional: { score: industryScore, max: 20 },
+        industry: { score: industryScore, max: 20 },
       },
-      duties: allDutiesRes.rows,
+      duties: allDutiesRows,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 // GET /faculty/api-scores — HOD/Admin list view
 app.get('/faculty/api-scores', requireRole('hod', 'admin', 'director', 'principal', 'management', 'program_chair'), async (req: Request, res: Response) => {
