@@ -9915,6 +9915,8 @@ const ACAD_DDL = `
     department            TEXT NOT NULL,
     coordinator_email     TEXT,
     co_coordinator_email  TEXT,
+    is_recurring          BOOLEAN NOT NULL DEFAULT FALSE,
+    recurrence_period     TEXT,
     status                TEXT NOT NULL DEFAULT 'Active',
     created_at            TIMESTAMPTZ DEFAULT NOW()
   );
@@ -9928,6 +9930,8 @@ const ACAD_DDL = `
     completed_at        DATE,
     submission_status   TEXT NOT NULL DEFAULT 'Pending',
     points_awarded      NUMERIC(5,2),
+    total_points_earned NUMERIC(7,2) NOT NULL DEFAULT 0,
+    cycles_approved     INT NOT NULL DEFAULT 0,
     approved_by         TEXT,
     approved_at         TIMESTAMPTZ,
     reject_reason       TEXT,
@@ -9938,7 +9942,17 @@ const ACAD_DDL = `
   );
 `;
 
-const ensureAcadTables = async () => { try { await db.query(ACAD_DDL); } catch { /* ignore */ } };
+// ALTER TABLE to add new columns if table already exists (safe no-op if already present)
+const ensureAcadTables = async () => {
+  try { await db.query(ACAD_DDL); } catch { /* ignore */ }
+  const alters = [
+    `ALTER TABLE academic_duty_assignments ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN NOT NULL DEFAULT FALSE`,
+    `ALTER TABLE academic_duty_assignments ADD COLUMN IF NOT EXISTS recurrence_period TEXT`,
+    `ALTER TABLE academic_duty_assignees ADD COLUMN IF NOT EXISTS total_points_earned NUMERIC(7,2) NOT NULL DEFAULT 0`,
+    `ALTER TABLE academic_duty_assignees ADD COLUMN IF NOT EXISTS cycles_approved INT NOT NULL DEFAULT 0`,
+  ];
+  for (const sql of alters) { try { await db.query(sql); } catch { /* ignore */ } }
+};
 
 // ── GET /academic-duties/my — Faculty: list duties assigned to me ─────────────
 app.get('/academic-duties/my', requireRole('faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
@@ -9950,9 +9964,11 @@ app.get('/academic-duties/my', requireRole('faculty', 'hod', 'admin', 'coordinat
         da.id AS assignment_id, da.duty_type, da.title, da.description,
         da.deadline, da.assigned_by, da.department, da.status AS assignment_status,
         da.coordinator_email, da.co_coordinator_email,
+        da.is_recurring, da.recurrence_period,
         ae.id AS assignee_id, ae.submission_status, ae.submission_text,
         ae.proof_url, ae.completed_at, ae.hod_remarks, ae.reject_reason,
         ae.points_awarded, ae.resubmit_count, ae.submitted_at,
+        ae.total_points_earned, ae.cycles_approved,
         f.name AS assigned_by_name
       FROM academic_duty_assignees ae
       JOIN academic_duty_assignments da ON da.id = ae.assignment_id
@@ -9981,30 +9997,61 @@ function LOWER_EQ(a: string | null, b: string | null) {
 app.post('/academic-duties/assignees/:aId/approve', requireRole('hod', 'admin', 'director', 'principal'), async (req: Request, res: Response) => {
   try {
     await ensureAcadTables();
-    const { points_awarded, hod_remarks } = req.body;
+    const { hod_remarks, points_override } = req.body; // points_override is optional
     const aId = parseInt(req.params.aId);
     const approver = req.auth!.email;
 
-    await db.query(`
-      UPDATE academic_duty_assignees
-      SET submission_status='Approved', points_awarded=$1, approved_by=$2,
-          approved_at=NOW(), hod_remarks=$3
-      WHERE id=$4
-    `, [points_awarded || 0, approver, hod_remarks || null, aId]);
+    // Fetch assignee + duty type for auto-calculation
+    const infoRes = await db.query(`
+      SELECT ae.*, da.duty_type, da.is_recurring, da.title
+      FROM academic_duty_assignees ae
+      JOIN academic_duty_assignments da ON da.id = ae.assignment_id
+      WHERE ae.id = $1
+    `, [aId]);
+    if (!infoRes.rows.length) return res.status(404).json({ error: 'Assignee not found' });
+    const info = infoRes.rows[0];
+
+    // Auto-calculate points from duty type; HOD can override via points_override
+    const SUGGESTED: Record<string, number> = {
+      'NAAC': 5, 'NBA': 5, 'JNTU Report': 4, 'Exam Duty': 3,
+      'Question Paper Setting': 3, 'Valuation Duty': 3,
+      'Monthly Duty': 2, 'Committee Work': 3, 'Department Event': 2, 'Other Academic': 2,
+    };
+    const autoPoints = points_override != null ? parseFloat(points_override) : (SUGGESTED[info.duty_type] ?? 2);
+
+    if (info.is_recurring) {
+      // Recurring: accumulate points, increment cycles, then RESET submission to Pending for next cycle
+      await db.query(`
+        UPDATE academic_duty_assignees
+        SET submission_status='Pending',
+            points_awarded=$1,
+            total_points_earned = COALESCE(total_points_earned,0) + $1,
+            cycles_approved = COALESCE(cycles_approved,0) + 1,
+            approved_by=$2, approved_at=NOW(), hod_remarks=$3,
+            submission_text=NULL, proof_url=NULL, completed_at=NULL,
+            submitted_at=NULL
+        WHERE id=$4
+      `, [autoPoints, approver, hod_remarks || null, aId]);
+    } else {
+      // One-time: approve and lock
+      await db.query(`
+        UPDATE academic_duty_assignees
+        SET submission_status='Approved', points_awarded=$1, approved_by=$2,
+            approved_at=NOW(), hod_remarks=$3
+        WHERE id=$4
+      `, [autoPoints, approver, hod_remarks || null, aId]);
+    }
 
     // Mirror to faculty_api_duties so API Score pillar auto-updates
     await db.query(`
       INSERT INTO faculty_api_duties
         (faculty_email, faculty_name, duty_type, title, duty_date, points_awarded, status, approved_by, approved_at)
-      SELECT ae.faculty_email, ae.faculty_name, da.duty_type, da.title,
-             COALESCE(ae.completed_at, NOW()::date), $1, 'Approved', $2, NOW()
-      FROM academic_duty_assignees ae
-      JOIN academic_duty_assignments da ON da.id = ae.assignment_id
-      WHERE ae.id = $3
+      VALUES ($1, $2, $3, $4, COALESCE($5::date, NOW()::date), $6, 'Approved', $7, NOW())
       ON CONFLICT DO NOTHING
-    `, [points_awarded || 0, approver, aId]).catch(() => {});
+    `, [info.faculty_email, info.faculty_name, info.duty_type, info.title,
+        info.completed_at || null, autoPoints, approver]).catch(() => {});
 
-    res.json({ success: true });
+    res.json({ success: true, points_awarded: autoPoints, is_recurring: info.is_recurring });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
@@ -10035,6 +10082,7 @@ app.post('/academic-duties', requireRole('hod', 'admin', 'director', 'principal'
       duty_type, title, description, deadline,
       coordinator_email, co_coordinator_email,
       faculty_emails, department,
+      is_recurring, recurrence_period,
     } = req.body;
 
     if (!duty_type || !title || !faculty_emails?.length) {
@@ -10046,11 +10094,12 @@ app.post('/academic-duties', requireRole('hod', 'admin', 'director', 'principal'
     const asgn = await db.query(`
       INSERT INTO academic_duty_assignments
         (duty_type, title, description, deadline, assigned_by, department,
-         coordinator_email, co_coordinator_email)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         coordinator_email, co_coordinator_email, is_recurring, recurrence_period)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
       RETURNING id
     `, [duty_type, title, description || null, deadline || null, callerEmail, dept,
-        coordinator_email || null, co_coordinator_email || null]);
+        coordinator_email || null, co_coordinator_email || null,
+        !!is_recurring, recurrence_period || null]);
 
     const assignmentId = asgn.rows[0].id;
 
@@ -10118,7 +10167,8 @@ app.get('/academic-duties', requireRole('hod', 'admin', 'director', 'principal',
           'points_awarded', ae.points_awarded, 'submission_text', ae.submission_text,
           'proof_url', ae.proof_url, 'completed_at', ae.completed_at,
           'hod_remarks', ae.hod_remarks, 'reject_reason', ae.reject_reason,
-          'resubmit_count', ae.resubmit_count
+          'resubmit_count', ae.resubmit_count,
+          'total_points_earned', ae.total_points_earned, 'cycles_approved', ae.cycles_approved
         ) ORDER BY ae.faculty_name) AS assignees
       FROM academic_duty_assignments da
       LEFT JOIN academic_duty_assignees ae ON ae.assignment_id = da.id

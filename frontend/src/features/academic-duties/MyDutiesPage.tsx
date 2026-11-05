@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CheckSquare, Clock, CheckCircle2, XCircle, FileText,
-  ExternalLink, RefreshCw, AlertTriangle,
+  ExternalLink, RefreshCw, AlertTriangle, Repeat,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
@@ -57,10 +57,23 @@ function DutyStatusBlock({ d }: { d: any }) {
       </div>
     </div>
   );
+  // Pending state — check if recurring with prior approved cycles
+  const isRecurringWithHistory = d.is_recurring && d.cycles_approved > 0;
   return (
-    <div className="flex items-center gap-2 p-3 bg-amber-50 rounded-xl border border-amber-100">
-      <Clock className="w-4 h-4 text-amber-500 flex-shrink-0" />
-      <p className="text-sm font-medium text-amber-700">Pending — submit your work before the deadline</p>
+    <div className={`flex items-center gap-2 p-3 rounded-xl border ${isRecurringWithHistory ? 'bg-indigo-50 border-indigo-100' : 'bg-amber-50 border-amber-100'}`}>
+      {isRecurringWithHistory ? <Repeat className="w-4 h-4 text-indigo-500 flex-shrink-0" /> : <Clock className="w-4 h-4 text-amber-500 flex-shrink-0" />}
+      <div>
+        <p className={`text-sm font-medium ${isRecurringWithHistory ? 'text-indigo-700' : 'text-amber-700'}`}>
+          {isRecurringWithHistory
+            ? `Cycle ${d.cycles_approved + 1} pending — submit next cycle's work`
+            : 'Pending — submit your work before the deadline'}
+        </p>
+        {isRecurringWithHistory && (
+          <p className="text-xs text-indigo-500 mt-0.5">
+            {d.cycles_approved} cycle{d.cycles_approved !== 1 ? 's' : ''} approved · {d.total_points_earned} pts earned so far
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -107,12 +120,22 @@ export default function MyDutiesPage() {
           <div className="flex items-start gap-3 min-w-0">
             <span className="mt-0.5 inline-flex px-2 py-1 rounded-lg bg-indigo-100 text-indigo-700 text-xs font-bold flex-shrink-0">{d.duty_type}</span>
             <div className="min-w-0">
-              <h3 className="text-sm font-semibold text-gray-900">{d.title}</h3>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm font-semibold text-gray-900">{d.title}</h3>
+                {d.is_recurring && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 text-xs font-semibold">
+                    <Repeat className="w-3 h-3" /> {d.recurrence_period || 'Recurring'}
+                  </span>
+                )}
+              </div>
               {d.description && <p className="text-xs text-gray-500 mt-0.5">{d.description}</p>}
               <div className="flex flex-wrap items-center gap-x-3 mt-1.5 text-xs text-gray-400">
                 <span>Assigned by: {d.assigned_by_name || d.assigned_by}</span>
                 <span>Dept: {d.department}</span>
                 {d.resubmit_count > 0 && <span>Resubmitted {d.resubmit_count}×</span>}
+                {d.is_recurring && d.cycles_approved > 0 && (
+                  <span className="text-violet-500 font-medium">{d.cycles_approved} cycle{d.cycles_approved !== 1 ? 's' : ''} done · {d.total_points_earned} pts total</span>
+                )}
               </div>
             </div>
           </div>

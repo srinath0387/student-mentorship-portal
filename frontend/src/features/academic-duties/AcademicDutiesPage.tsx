@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ClipboardList, Plus, ChevronDown, ChevronUp, CheckCircle2,
   Clock, XCircle, FileText, ExternalLink, AlertTriangle, Users,
-  Trash2, Edit3, Download,
+  Trash2, Download, RefreshCw, Repeat,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
@@ -19,6 +19,8 @@ const DUTY_SUGGESTED_POINTS: Record<string, number> = {
   'Question Paper Setting': 3, 'Valuation Duty': 3,
   'Monthly Duty': 2, 'Committee Work': 3, 'Department Event': 2, 'Other Academic': 2,
 };
+
+const RECURRENCE_OPTIONS = ['Monthly', 'Quarterly', 'Semester', 'Annual'];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function deadlineBadge(deadline: string | null) {
@@ -59,14 +61,15 @@ function roleBadge(role: string) {
 }
 
 function exportToCSV(duty: any) {
-  const rows = [['Faculty Name', 'Email', 'Role', 'Status', 'Points', 'Submitted At', 'Proof URL']];
+  const rows = [['Faculty Name', 'Email', 'Role', 'Status', 'Points', 'Total Points', 'Cycles', 'Submitted At', 'Proof URL']];
   for (const a of duty.assignees || []) {
     const role = duty.coordinator_email?.toLowerCase() === a.faculty_email?.toLowerCase()
       ? 'Coordinator'
       : duty.co_coordinator_email?.toLowerCase() === a.faculty_email?.toLowerCase()
       ? 'Co-Coordinator' : 'Assigned';
     rows.push([a.faculty_name || '', a.faculty_email, role, a.submission_status,
-      a.points_awarded ?? '', a.submitted_at ? new Date(a.submitted_at).toLocaleDateString() : '', a.proof_url || '']);
+      a.points_awarded ?? '', a.total_points_earned ?? '', a.cycles_approved ?? '',
+      a.submitted_at ? new Date(a.submitted_at).toLocaleDateString() : '', a.proof_url || '']);
   }
   const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
@@ -76,9 +79,13 @@ function exportToCSV(duty: any) {
   URL.revokeObjectURL(url);
 }
 
-// ── Review Panel (inline in expanded row) ────────────────────────────────────
-function ReviewPanel({ assignee, onDone }: { assignee: any; onDone: () => void }) {
-  const [pts, setPts] = useState(assignee.points_awarded ?? '');
+// ── Review Panel ─────────────────────────────────────────────────────────────
+function ReviewPanel({ assignee, dutyType, isRecurring, onDone }: {
+  assignee: any; dutyType: string; isRecurring: boolean; onDone: () => void;
+}) {
+  // Auto-calculate points, HOD can override
+  const autoPoints = DUTY_SUGGESTED_POINTS[dutyType] ?? 2;
+  const [pts, setPts] = useState<string>(String(autoPoints));
   const [remarks, setRemarks] = useState(assignee.hod_remarks ?? '');
   const [rejectReason, setRejectReason] = useState('');
   const [mode, setMode] = useState<'approve' | 'reject' | null>(null);
@@ -89,32 +96,52 @@ function ReviewPanel({ assignee, onDone }: { assignee: any; onDone: () => void }
     setLoading(true);
     try {
       if (mode === 'approve') {
-        await api.approveAcademicDutyAssignee(assignee.id, { points_awarded: parseFloat(String(pts)) || 0, hod_remarks: remarks || undefined });
+        await api.approveAcademicDutyAssignee(assignee.id, {
+          points_override: parseFloat(pts) || autoPoints,
+          hod_remarks: remarks || undefined,
+        } as any);
       } else {
-        await api.rejectAcademicDutyAssignee(assignee.id, { reject_reason: rejectReason, hod_remarks: remarks || undefined });
+        await api.rejectAcademicDutyAssignee(assignee.id, {
+          reject_reason: rejectReason,
+          hod_remarks: remarks || undefined,
+        });
       }
       setDone(true);
       setTimeout(onDone, 800);
     } catch { /* ignore */ } finally { setLoading(false); }
   };
 
-  if (done) return <div className="text-xs text-green-600 font-medium py-2">✅ Saved</div>;
+  if (done) return (
+    <div className={`text-xs font-medium py-2 ${isRecurring ? 'text-blue-600' : 'text-green-600'}`}>
+      {isRecurring ? '🔄 Approved & reset for next cycle' : '✅ Saved'}
+    </div>
+  );
 
   return (
     <div className="mt-3 p-4 bg-gray-50 rounded-xl border border-gray-200 space-y-3">
       {/* Submission text */}
       <div>
         <p className="text-xs font-semibold text-gray-600 mb-1">Submission</p>
-        <p className="text-sm text-gray-800 whitespace-pre-wrap">{assignee.submission_text}</p>
+        <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{assignee.submission_text}</p>
       </div>
-      {assignee.proof_url && (
-        <a href={assignee.proof_url} target="_blank" rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:underline">
-          <ExternalLink className="w-3 h-3" /> View Proof
-        </a>
+
+      {/* Proof URL — always visible prominently */}
+      {assignee.proof_url ? (
+        <div className="flex items-center gap-2 p-2.5 bg-indigo-50 rounded-lg border border-indigo-100">
+          <ExternalLink className="w-3.5 h-3.5 text-indigo-500 flex-shrink-0" />
+          <a href={assignee.proof_url} target="_blank" rel="noopener noreferrer"
+            className="text-sm text-indigo-700 font-medium hover:underline truncate">
+            View Proof / Document
+          </a>
+        </div>
+      ) : (
+        <p className="text-xs text-gray-400 italic">No proof URL submitted</p>
       )}
+
       {assignee.completed_at && (
-        <p className="text-xs text-gray-500">Completed: {new Date(assignee.completed_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+        <p className="text-xs text-gray-500">
+          Completed: {new Date(assignee.completed_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+        </p>
       )}
 
       {/* HOD remarks */}
@@ -128,11 +155,21 @@ function ReviewPanel({ assignee, onDone }: { assignee: any; onDone: () => void }
       {mode === 'approve' && (
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">
-            Points to award (suggested: {DUTY_SUGGESTED_POINTS[assignee.duty_type] ?? 2})
+            Points
+            <span className="ml-1 text-gray-400">(auto: {autoPoints} for {dutyType})</span>
           </label>
-          <input type="number" min={0} max={15} step={0.5} value={pts}
-            onChange={e => setPts(e.target.value)}
-            className="w-24 border border-gray-200 rounded-lg px-3 py-1.5 text-xs focus:ring-1 focus:ring-indigo-400 focus:outline-none" />
+          <div className="flex items-center gap-2">
+            <input type="number" min={0} max={15} step={0.5} value={pts}
+              onChange={e => setPts(e.target.value)}
+              className="w-24 border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:ring-1 focus:ring-indigo-400 focus:outline-none" />
+            <button type="button" onClick={() => setPts(String(autoPoints))}
+              className="text-xs text-indigo-500 hover:underline">Reset to auto</button>
+          </div>
+          {isRecurring && (
+            <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
+              <Repeat className="w-3 h-3" /> Recurring duty — will reset to Pending for next cycle after approval
+            </p>
+          )}
         </div>
       )}
       {mode === 'reject' && (
@@ -147,14 +184,16 @@ function ReviewPanel({ assignee, onDone }: { assignee: any; onDone: () => void }
       <div className="flex gap-2">
         {!mode ? (
           <>
-            <button onClick={() => setMode('approve')} className="flex-1 py-2 rounded-lg bg-green-600 text-white text-xs font-semibold hover:bg-green-700 transition-colors">Approve</button>
+            <button onClick={() => setMode('approve')} className="flex-1 py-2 rounded-lg bg-green-600 text-white text-xs font-semibold hover:bg-green-700 transition-colors">
+              {isRecurring ? '✓ Approve Cycle' : 'Approve'}
+            </button>
             <button onClick={() => setMode('reject')} className="flex-1 py-2 rounded-lg bg-red-100 text-red-700 text-xs font-semibold hover:bg-red-200 transition-colors">Reject</button>
           </>
         ) : (
           <>
             <button onClick={submit} disabled={loading || (mode === 'reject' && !rejectReason.trim())}
               className="flex-1 py-2 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors">
-              {loading ? 'Saving…' : mode === 'approve' ? 'Confirm Approve' : 'Confirm Reject'}
+              {loading ? 'Saving…' : mode === 'approve' ? 'Confirm' : 'Confirm Reject'}
             </button>
             <button onClick={() => setMode(null)} className="px-4 py-2 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50 transition-colors">Back</button>
           </>
@@ -180,13 +219,19 @@ function DutyCard({ duty, refetch }: { duty: any; refetch: () => void }) {
 
   return (
     <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-      {/* Card header */}
       <div className="p-5">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div className="flex items-start gap-3 min-w-0">
-            <span className="mt-0.5 inline-flex px-2 py-1 rounded-lg bg-indigo-100 text-indigo-700 text-xs font-bold flex-shrink-0">{duty.duty_type}</span>
+            <div className="flex flex-col gap-1 flex-shrink-0 mt-0.5">
+              <span className="inline-flex px-2 py-1 rounded-lg bg-indigo-100 text-indigo-700 text-xs font-bold">{duty.duty_type}</span>
+              {duty.is_recurring && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-purple-100 text-purple-700 text-xs font-medium">
+                  <Repeat className="w-3 h-3" /> {duty.recurrence_period || 'Recurring'}
+                </span>
+              )}
+            </div>
             <div className="min-w-0">
-              <h3 className="text-sm font-semibold text-gray-900 truncate">{duty.title}</h3>
+              <h3 className="text-sm font-semibold text-gray-900">{duty.title}</h3>
               {duty.description && <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{duty.description}</p>}
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-xs text-gray-500">
                 {duty.coordinator_name && (
@@ -216,7 +261,10 @@ function DutyCard({ duty, refetch }: { duty: any; refetch: () => void }) {
         <div className="mt-4">
           <div className="flex items-center justify-between text-xs text-gray-500 mb-1.5">
             <span>{duty.approved}/{duty.total} approved</span>
-            <span>{duty.submitted - duty.approved} pending review · {duty.total - duty.submitted} not submitted</span>
+            <span>
+              {duty.submitted - duty.approved > 0 && `${duty.submitted - duty.approved} pending review · `}
+              {duty.total - duty.submitted} not submitted
+            </span>
           </div>
           <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
             <div className="h-full bg-indigo-500 rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
@@ -239,7 +287,11 @@ function DutyCard({ duty, refetch }: { duty: any; refetch: () => void }) {
                 <th className="text-left px-5 py-2.5 font-semibold text-gray-600">Faculty</th>
                 <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Role</th>
                 <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Status</th>
-                <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Pts</th>
+                {/* Proof link column — always visible */}
+                <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Proof</th>
+                {duty.is_recurring && (
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Cycles / Pts</th>
+                )}
                 <th className="px-3 py-2.5" />
               </tr>
             </thead>
@@ -257,14 +309,33 @@ function DutyCard({ duty, refetch }: { duty: any; refetch: () => void }) {
                       <div className="text-gray-400">{a.faculty_email}</div>
                       {isReviewing && (
                         <ReviewPanel
-                          assignee={{ ...a, duty_type: duty.duty_type }}
+                          assignee={a}
+                          dutyType={duty.duty_type}
+                          isRecurring={!!duty.is_recurring}
                           onDone={() => { setReviewing(null); refetch(); }}
                         />
                       )}
                     </td>
                     <td className="px-3 py-3">{roleBadge(role)}</td>
                     <td className="px-3 py-3">{statusBadge(a.submission_status)}</td>
-                    <td className="px-3 py-3 text-gray-700 font-medium">{a.points_awarded != null ? `${a.points_awarded}pt` : '—'}</td>
+                    {/* Proof URL — always visible in table row */}
+                    <td className="px-3 py-3">
+                      {a.proof_url ? (
+                        <a href={a.proof_url} target="_blank" rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 hover:underline font-medium">
+                          <ExternalLink className="w-3 h-3" /> View
+                        </a>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+                    {duty.is_recurring && (
+                      <td className="px-3 py-3 text-gray-600">
+                        <span className="font-semibold">{a.cycles_approved ?? 0}</span>
+                        <span className="text-gray-400"> cycles · </span>
+                        <span className="font-semibold text-indigo-600">{a.total_points_earned ?? 0}pt</span>
+                      </td>
+                    )}
                     <td className="px-3 py-3 text-right">
                       {a.submission_status === 'Submitted' && (
                         <button onClick={() => setReviewing(isReviewing ? null : a.id)}
@@ -294,7 +365,6 @@ export default function AcademicDutiesPage() {
   const [tab, setTab] = useState<typeof TABS[number]>('Active Duties');
   const [deptFilter, setDeptFilter] = useState(isSuperAdmin ? '' : callerDept);
 
-  // Faculty list for dept (for assign form)
   const { data: facultyData } = useQuery({
     queryKey: ['faculty-list', deptFilter],
     queryFn: () => api.getAllFaculty(deptFilter || undefined),
@@ -302,14 +372,12 @@ export default function AcademicDutiesPage() {
   });
   const facultyList: any[] = Array.isArray(facultyData) ? facultyData : [];
 
-  // Active duties
   const { data: activeDuties, refetch: refetchActive } = useQuery({
     queryKey: ['academic-duties', 'Active', deptFilter],
     queryFn: () => api.getAcademicDuties({ status: 'Active', department: deptFilter || undefined }),
     enabled: tab === 'Active Duties',
   });
 
-  // Completed + Cancelled
   const { data: completedDuties, refetch: refetchCompleted } = useQuery({
     queryKey: ['academic-duties', 'Completed', deptFilter],
     queryFn: async () => {
@@ -322,11 +390,12 @@ export default function AcademicDutiesPage() {
     enabled: tab === 'Completed / Archived',
   });
 
-  // ── Assign Form state ──────────────────────────────────────────────────────
+  // ── Assign Form ──────────────────────────────────────────────────────────
   const [form, setForm] = useState({
     duty_type: '', title: '', description: '', deadline: '',
     coordinator_email: '', co_coordinator_email: '',
     faculty_emails: [] as string[],
+    is_recurring: false, recurrence_period: '',
   });
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState('');
@@ -351,6 +420,7 @@ export default function AcademicDutiesPage() {
     e.preventDefault();
     if (!form.duty_type || !form.title) { setFormError('Duty type and title are required.'); return; }
     if (!form.faculty_emails.length) { setFormError('Select at least one faculty member.'); return; }
+    if (form.is_recurring && !form.recurrence_period) { setFormError('Select a recurrence period for recurring duty.'); return; }
     setFormLoading(true); setFormError(''); setFormSuccess('');
     try {
       await api.createAcademicDuty({
@@ -361,16 +431,20 @@ export default function AcademicDutiesPage() {
         co_coordinator_email: form.co_coordinator_email || undefined,
         faculty_emails: form.faculty_emails,
         department: deptFilter || callerDept,
+        is_recurring: form.is_recurring,
+        recurrence_period: form.is_recurring ? form.recurrence_period : undefined,
       });
       setFormSuccess('Duty assigned successfully!');
-      setForm({ duty_type: '', title: '', description: '', deadline: '', coordinator_email: '', co_coordinator_email: '', faculty_emails: [] });
+      setForm({ duty_type: '', title: '', description: '', deadline: '', coordinator_email: '', co_coordinator_email: '', faculty_emails: [], is_recurring: false, recurrence_period: '' });
       setTimeout(() => { setFormSuccess(''); setTab('Active Duties'); }, 1200);
     } catch (err: unknown) {
       setFormError(err instanceof Error ? err.message : 'Failed to assign duty');
     } finally { setFormLoading(false); }
   };
 
-  const duties = tab === 'Active Duties' ? (Array.isArray(activeDuties) ? activeDuties : []) : (Array.isArray(completedDuties) ? completedDuties : []);
+  const duties = tab === 'Active Duties'
+    ? (Array.isArray(activeDuties) ? activeDuties : [])
+    : (Array.isArray(completedDuties) ? completedDuties : []);
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -385,16 +459,11 @@ export default function AcademicDutiesPage() {
             <p className="text-sm text-gray-500">Assign, track, and approve faculty academic duties</p>
           </div>
         </div>
-        {isSuperAdmin && (
-          <input
-            type="text"
-            placeholder="Filter by department…"
-            value={deptFilter}
+        {isSuperAdmin ? (
+          <input type="text" placeholder="Filter by department…" value={deptFilter}
             onChange={e => setDeptFilter(e.target.value)}
-            className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-48"
-          />
-        )}
-        {!isSuperAdmin && (
+            className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-48" />
+        ) : (
           <span className="px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-full text-sm font-semibold">{callerDept}</span>
         )}
       </div>
@@ -411,7 +480,7 @@ export default function AcademicDutiesPage() {
         ))}
       </div>
 
-      {/* ── Tab: Assign ── */}
+      {/* ── Assign Tab ── */}
       {tab === 'Assign Duty' && (
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
           <h2 className="text-base font-semibold text-gray-900 mb-5 flex items-center gap-2">
@@ -429,7 +498,7 @@ export default function AcademicDutiesPage() {
               </div>
             )}
 
-            {/* Duty Type + Title */}
+            {/* Type + Title */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Duty Type <span className="text-red-500">*</span></label>
@@ -438,7 +507,11 @@ export default function AcademicDutiesPage() {
                   <option value="">Select type…</option>
                   {ACADEMIC_DUTY_TYPES.map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
-                {form.duty_type && <p className="text-xs text-indigo-600 mt-1">Suggested points: {DUTY_SUGGESTED_POINTS[form.duty_type] ?? 2}</p>}
+                {form.duty_type && (
+                  <p className="text-xs text-indigo-600 mt-1">
+                    Auto points: <strong>{DUTY_SUGGESTED_POINTS[form.duty_type] ?? 2} pts</strong> per approval
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Title <span className="text-red-500">*</span></label>
@@ -446,6 +519,33 @@ export default function AcademicDutiesPage() {
                   value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
               </div>
+            </div>
+
+            {/* Recurring toggle */}
+            <div className="flex items-start gap-4 p-4 rounded-xl border border-gray-200 bg-gray-50">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <div className="relative">
+                  <input type="checkbox" className="sr-only" checked={form.is_recurring}
+                    onChange={e => setForm(f => ({ ...f, is_recurring: e.target.checked, recurrence_period: '' }))} />
+                  <div className={`w-10 h-5 rounded-full transition-colors ${form.is_recurring ? 'bg-indigo-600' : 'bg-gray-300'}`} />
+                  <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${form.is_recurring ? 'translate-x-5' : ''}`} />
+                </div>
+                <div>
+                  <span className="text-sm font-medium text-gray-800 flex items-center gap-1.5">
+                    <Repeat className="w-4 h-4 text-indigo-500" /> Recurring Duty
+                  </span>
+                  <p className="text-xs text-gray-500 mt-0.5">Faculty submits every cycle; HOD approves each cycle. No re-assignment needed.</p>
+                </div>
+              </label>
+              {form.is_recurring && (
+                <div className="ml-auto flex-shrink-0">
+                  <select value={form.recurrence_period} onChange={e => setForm(f => ({ ...f, recurrence_period: e.target.value }))}
+                    className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+                    <option value="">Select period…</option>
+                    {RECURRENCE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
+              )}
             </div>
 
             {/* Description + Deadline */}
@@ -457,9 +557,10 @@ export default function AcademicDutiesPage() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Deadline <span className="text-gray-400">(optional)</span></label>
-                <input type="date" value={form.deadline}
-                  onChange={e => setForm(f => ({ ...f, deadline: e.target.value }))}
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  {form.is_recurring ? 'Next Deadline' : 'Deadline'} <span className="text-gray-400">(optional)</span>
+                </label>
+                <input type="date" value={form.deadline} onChange={e => setForm(f => ({ ...f, deadline: e.target.value }))}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
               </div>
             </div>
@@ -496,7 +597,9 @@ export default function AcademicDutiesPage() {
                 </button>
               </div>
               {facultyList.length === 0 ? (
-                <p className="text-sm text-gray-400 py-4 text-center">Select a department to load faculty list</p>
+                <p className="text-sm text-gray-400 py-4 text-center border border-dashed border-gray-200 rounded-xl">
+                  {deptFilter ? 'No faculty found for this department' : 'Select a department first to load faculty'}
+                </p>
               ) : (
                 <div className="max-h-52 overflow-y-auto border border-gray-200 rounded-xl divide-y divide-gray-50">
                   {facultyList.map((f: any) => (
@@ -516,15 +619,26 @@ export default function AcademicDutiesPage() {
 
             <button type="submit" disabled={formLoading}
               className="px-6 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60 transition-colors flex items-center gap-2">
-              {formLoading ? <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Assigning…</> : <><Plus className="w-4 h-4" /> Assign Duty</>}
+              {formLoading ? (
+                <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Assigning…</>
+              ) : (
+                <><Plus className="w-4 h-4" /> Assign Duty</>
+              )}
             </button>
           </form>
         </div>
       )}
 
-      {/* ── Tabs: Active / Completed ── */}
+      {/* ── Active / Completed ── */}
       {tab !== 'Assign Duty' && (
         <div className="space-y-4">
+          {/* Recurring duties notice */}
+          {tab === 'Active Duties' && duties.some((d: any) => d.is_recurring) && (
+            <div className="flex items-center gap-2 p-3 bg-purple-50 border border-purple-100 rounded-xl text-xs text-purple-700">
+              <Repeat className="w-4 h-4 flex-shrink-0" />
+              <span><strong>Recurring duties</strong> auto-reset to Pending after each approval cycle — no re-assignment needed.</span>
+            </div>
+          )}
           {!duties.length ? (
             <div className="text-center py-16 text-gray-400">
               <ClipboardList className="w-12 h-12 mx-auto mb-3 opacity-30" />

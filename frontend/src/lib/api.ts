@@ -585,7 +585,7 @@ export const api = {
     fetchWithAuth(`/academic-duties/${id}`, { method: 'DELETE' }),
   submitAcademicDutyWork: async (assignmentId: number, body: any) =>
     fetchWithAuth(`/academic-duties/${assignmentId}/submit`, { method: 'POST', body: JSON.stringify(body) }),
-  approveAcademicDutyAssignee: async (assigneeId: number, body: { points_awarded: number; hod_remarks?: string }) =>
+  approveAcademicDutyAssignee: async (assigneeId: number, body: { points_override?: number; hod_remarks?: string }) =>
     fetchWithAuth(`/academic-duties/assignees/${assigneeId}/approve`, { method: 'POST', body: JSON.stringify(body) }),
   rejectAcademicDutyAssignee: async (assigneeId: number, body: { reject_reason: string; hod_remarks?: string }) =>
     fetchWithAuth(`/academic-duties/assignees/${assigneeId}/reject`, { method: 'POST', body: JSON.stringify(body) }),
