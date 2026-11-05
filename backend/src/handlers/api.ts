@@ -9898,6 +9898,306 @@ app.patch('/faculty/api-duties/:id/reject', requireRole('hod', 'admin'), async (
   }
 });
 
+// ============================================================================
+// ACADEMIC DUTIES MANAGEMENT
+// HOD/Admin assigns duties to faculty; faculty submits work; HOD approves.
+// Approval auto-mirrors to faculty_api_duties for API Score computation.
+// ============================================================================
+
+const ACAD_DDL = `
+  CREATE TABLE IF NOT EXISTS academic_duty_assignments (
+    id                    SERIAL PRIMARY KEY,
+    duty_type             TEXT NOT NULL,
+    title                 TEXT NOT NULL,
+    description           TEXT,
+    deadline              DATE,
+    assigned_by           TEXT NOT NULL,
+    department            TEXT NOT NULL,
+    coordinator_email     TEXT,
+    co_coordinator_email  TEXT,
+    status                TEXT NOT NULL DEFAULT 'Active',
+    created_at            TIMESTAMPTZ DEFAULT NOW()
+  );
+  CREATE TABLE IF NOT EXISTS academic_duty_assignees (
+    id                  SERIAL PRIMARY KEY,
+    assignment_id       INT REFERENCES academic_duty_assignments(id) ON DELETE CASCADE,
+    faculty_email       TEXT NOT NULL,
+    faculty_name        TEXT,
+    submission_text     TEXT,
+    proof_url           TEXT,
+    completed_at        DATE,
+    submission_status   TEXT NOT NULL DEFAULT 'Pending',
+    points_awarded      NUMERIC(5,2),
+    approved_by         TEXT,
+    approved_at         TIMESTAMPTZ,
+    reject_reason       TEXT,
+    hod_remarks         TEXT,
+    resubmit_count      INT DEFAULT 0,
+    submitted_at        TIMESTAMPTZ,
+    UNIQUE(assignment_id, faculty_email)
+  );
+`;
+
+const ensureAcadTables = async () => { try { await db.query(ACAD_DDL); } catch { /* ignore */ } };
+
+// ── GET /academic-duties/my — Faculty: list duties assigned to me ─────────────
+app.get('/academic-duties/my', requireRole('faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
+  try {
+    await ensureAcadTables();
+    const myEmail = req.auth?.email?.toLowerCase();
+    const rows = await db.query(`
+      SELECT
+        da.id AS assignment_id, da.duty_type, da.title, da.description,
+        da.deadline, da.assigned_by, da.department, da.status AS assignment_status,
+        da.coordinator_email, da.co_coordinator_email,
+        ae.id AS assignee_id, ae.submission_status, ae.submission_text,
+        ae.proof_url, ae.completed_at, ae.hod_remarks, ae.reject_reason,
+        ae.points_awarded, ae.resubmit_count, ae.submitted_at,
+        f.name AS assigned_by_name
+      FROM academic_duty_assignees ae
+      JOIN academic_duty_assignments da ON da.id = ae.assignment_id
+      LEFT JOIN faculty f ON LOWER(f.email) = LOWER(da.assigned_by)
+      WHERE LOWER(ae.faculty_email) = $1 AND da.status != 'Cancelled'
+      ORDER BY da.deadline ASC NULLS LAST, da.created_at DESC
+    `, [myEmail]);
+
+    const result = rows.rows.map((r: any) => ({
+      ...r,
+      my_role: LOWER_EQ(r.coordinator_email ?? null, myEmail ?? null)
+        ? 'coordinator'
+        : LOWER_EQ(r.co_coordinator_email ?? null, myEmail ?? null)
+        ? 'co_coordinator'
+        : 'assigned',
+    }));
+    res.json(result);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+function LOWER_EQ(a: string | null, b: string | null) {
+  return a && b && a.toLowerCase() === b.toLowerCase();
+}
+
+// ── POST /academic-duties/assignees/:aId/approve — HOD approves one assignee ──
+app.post('/academic-duties/assignees/:aId/approve', requireRole('hod', 'admin', 'director', 'principal'), async (req: Request, res: Response) => {
+  try {
+    await ensureAcadTables();
+    const { points_awarded, hod_remarks } = req.body;
+    const aId = parseInt(req.params.aId);
+    const approver = req.auth!.email;
+
+    await db.query(`
+      UPDATE academic_duty_assignees
+      SET submission_status='Approved', points_awarded=$1, approved_by=$2,
+          approved_at=NOW(), hod_remarks=$3
+      WHERE id=$4
+    `, [points_awarded || 0, approver, hod_remarks || null, aId]);
+
+    // Mirror to faculty_api_duties so API Score pillar auto-updates
+    await db.query(`
+      INSERT INTO faculty_api_duties
+        (faculty_email, faculty_name, duty_type, title, duty_date, points_awarded, status, approved_by, approved_at)
+      SELECT ae.faculty_email, ae.faculty_name, da.duty_type, da.title,
+             COALESCE(ae.completed_at, NOW()::date), $1, 'Approved', $2, NOW()
+      FROM academic_duty_assignees ae
+      JOIN academic_duty_assignments da ON da.id = ae.assignment_id
+      WHERE ae.id = $3
+      ON CONFLICT DO NOTHING
+    `, [points_awarded || 0, approver, aId]).catch(() => {});
+
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ── POST /academic-duties/assignees/:aId/reject — HOD rejects one assignee ───
+app.post('/academic-duties/assignees/:aId/reject', requireRole('hod', 'admin', 'director', 'principal'), async (req: Request, res: Response) => {
+  try {
+    await ensureAcadTables();
+    const { reject_reason, hod_remarks } = req.body;
+    const aId = parseInt(req.params.aId);
+    await db.query(`
+      UPDATE academic_duty_assignees
+      SET submission_status='Rejected', reject_reason=$1, hod_remarks=$2,
+          approved_by=$3, approved_at=NOW()
+      WHERE id=$4
+    `, [reject_reason || '', hod_remarks || null, req.auth!.email, aId]);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ── POST /academic-duties — HOD/Admin creates a new duty assignment ───────────
+app.post('/academic-duties', requireRole('hod', 'admin', 'director', 'principal'), async (req: Request, res: Response) => {
+  try {
+    await ensureAcadTables();
+    const callerEmail = req.auth!.email;
+    const callerDept = req.auth?.department;
+    const isSuperUser = req.auth?.isSuperAdmin === true || callerDept === '*';
+    const {
+      duty_type, title, description, deadline,
+      coordinator_email, co_coordinator_email,
+      faculty_emails, department,
+    } = req.body;
+
+    if (!duty_type || !title || !faculty_emails?.length) {
+      return res.status(400).json({ error: 'duty_type, title, and faculty_emails are required.' });
+    }
+
+    const dept = isSuperUser ? (department || callerDept) : callerDept;
+
+    const asgn = await db.query(`
+      INSERT INTO academic_duty_assignments
+        (duty_type, title, description, deadline, assigned_by, department,
+         coordinator_email, co_coordinator_email)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      RETURNING id
+    `, [duty_type, title, description || null, deadline || null, callerEmail, dept,
+        coordinator_email || null, co_coordinator_email || null]);
+
+    const assignmentId = asgn.rows[0].id;
+
+    // Build unique set of emails (include coordinator/co even if not in list)
+    const allEmails = new Set<string>([
+      ...faculty_emails.map((e: string) => e.toLowerCase()),
+    ]);
+    if (coordinator_email) allEmails.add(coordinator_email.toLowerCase());
+    if (co_coordinator_email) allEmails.add(co_coordinator_email.toLowerCase());
+
+    // Look up faculty names
+    const nameRes = await db.query(
+      `SELECT LOWER(email) AS email, name FROM faculty WHERE LOWER(email) = ANY($1)`,
+      [[...allEmails]]
+    ).catch(() => ({ rows: [] }));
+    const nameMap: Record<string, string> = {};
+    for (const r of nameRes.rows) nameMap[r.email] = r.name;
+
+    for (const em of allEmails) {
+      await db.query(`
+        INSERT INTO academic_duty_assignees (assignment_id, faculty_email, faculty_name)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (assignment_id, faculty_email) DO NOTHING
+      `, [assignmentId, em, nameMap[em] || em.split('@')[0]]);
+    }
+
+    res.json({ success: true, id: assignmentId });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ── GET /academic-duties — HOD/Admin list (with assignees embedded) ───────────
+app.get('/academic-duties', requireRole('hod', 'admin', 'director', 'principal', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    await ensureAcadTables();
+    const callerRole = req.auth?.role;
+    const callerDept = req.auth?.department;
+    const isSuperUser = req.auth?.isSuperAdmin === true || callerDept === '*';
+    const CSE_ALLIED = ['CSE', 'CSE (AI & ML)', 'CSE (Data Science)', 'CSE (BS)', 'CSE (CS)'];
+    const statusParam = (req.query.status as string) || 'Active';
+    const deptParam = (req.query.department as string) || '';
+
+    const params: any[] = [statusParam];
+    let deptCond = '';
+    let pi = 2;
+
+    if (!isSuperUser) {
+      if (callerRole === 'program_chair') {
+        deptCond = `AND da.department = ANY($${pi++}::text[])`; params.push(CSE_ALLIED);
+      } else {
+        deptCond = `AND da.department = $${pi++}`; params.push(callerDept);
+      }
+    } else if (deptParam && deptParam !== 'All') {
+      deptCond = `AND da.department = $${pi++}`; params.push(deptParam);
+    }
+
+    const rows = await db.query(`
+      SELECT
+        da.*,
+        fc.name  AS coordinator_name,
+        fcc.name AS co_coordinator_name,
+        fab.name AS assigned_by_name,
+        json_agg(json_build_object(
+          'id', ae.id, 'faculty_email', ae.faculty_email, 'faculty_name', ae.faculty_name,
+          'submission_status', ae.submission_status, 'submitted_at', ae.submitted_at,
+          'points_awarded', ae.points_awarded, 'submission_text', ae.submission_text,
+          'proof_url', ae.proof_url, 'completed_at', ae.completed_at,
+          'hod_remarks', ae.hod_remarks, 'reject_reason', ae.reject_reason,
+          'resubmit_count', ae.resubmit_count
+        ) ORDER BY ae.faculty_name) AS assignees
+      FROM academic_duty_assignments da
+      LEFT JOIN academic_duty_assignees ae ON ae.assignment_id = da.id
+      LEFT JOIN faculty fc  ON LOWER(fc.email)  = LOWER(da.coordinator_email)
+      LEFT JOIN faculty fcc ON LOWER(fcc.email) = LOWER(da.co_coordinator_email)
+      LEFT JOIN faculty fab ON LOWER(fab.email) = LOWER(da.assigned_by)
+      WHERE da.status = $1 ${deptCond}
+      GROUP BY da.id, fc.name, fcc.name, fab.name
+      ORDER BY da.deadline ASC NULLS LAST, da.created_at DESC
+    `, params);
+
+    const result = rows.rows.map((r: any) => {
+      const assignees = r.assignees || [];
+      return {
+        ...r,
+        total:     assignees.length,
+        submitted: assignees.filter((a: any) => ['Submitted','Approved'].includes(a.submission_status)).length,
+        approved:  assignees.filter((a: any) => a.submission_status === 'Approved').length,
+      };
+    });
+
+    res.json(result);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ── PUT /academic-duties/:id — HOD edits assignment ──────────────────────────
+app.put('/academic-duties/:id', requireRole('hod', 'admin', 'director', 'principal'), async (req: Request, res: Response) => {
+  try {
+    await ensureAcadTables();
+    const { title, description, deadline, coordinator_email, co_coordinator_email, status } = req.body;
+    await db.query(`
+      UPDATE academic_duty_assignments
+      SET title=$1, description=$2, deadline=$3, coordinator_email=$4,
+          co_coordinator_email=$5, status=COALESCE($6, status)
+      WHERE id=$7
+    `, [title, description || null, deadline || null, coordinator_email || null,
+        co_coordinator_email || null, status || null, req.params.id]);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ── DELETE /academic-duties/:id — HOD cancels (soft delete) ──────────────────
+app.delete('/academic-duties/:id', requireRole('hod', 'admin', 'director', 'principal'), async (req: Request, res: Response) => {
+  try {
+    await ensureAcadTables();
+    await db.query(`UPDATE academic_duty_assignments SET status='Cancelled' WHERE id=$1`, [req.params.id]);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ── POST /academic-duties/:id/submit — Faculty submits work ──────────────────
+app.post('/academic-duties/:id/submit', requireRole('faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
+  try {
+    await ensureAcadTables();
+    const myEmail = req.auth!.email.toLowerCase();
+    const assignmentId = parseInt(req.params.id);
+    const { submission_text, proof_url, completed_at } = req.body;
+    if (!submission_text) return res.status(400).json({ error: 'submission_text is required.' });
+
+    const existing = await db.query(
+      `SELECT id, submission_status FROM academic_duty_assignees WHERE assignment_id=$1 AND LOWER(faculty_email)=$2`,
+      [assignmentId, myEmail]
+    );
+    if (!existing.rows.length) return res.status(403).json({ error: 'You are not assigned to this duty.' });
+    if (existing.rows[0].submission_status === 'Approved') return res.status(400).json({ error: 'Already approved.' });
+
+    await db.query(`
+      UPDATE academic_duty_assignees
+      SET submission_text=$1, proof_url=$2, completed_at=$3,
+          submission_status='Submitted', submitted_at=NOW(),
+          resubmit_count = resubmit_count + 1
+      WHERE id=$4
+    `, [submission_text, proof_url || null, completed_at || null, existing.rows[0].id]);
+
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+
     let q = `SELECT d.*, f.department FROM faculty_api_duties d LEFT JOIN faculty f ON LOWER(f.email) = LOWER(d.faculty_email) WHERE d.status = 'Pending'`;
     const params: any[] = [];
     if (callerRole === 'hod' && callerDept && callerDept !== '*') { q += ` AND f.department = $1`; params.push(callerDept); }
@@ -9908,6 +10208,358 @@ app.patch('/faculty/api-duties/:id/reject', requireRole('hod', 'admin'), async (
     res.status(500).json({ error: err.message });
   }
 });
+
+// ════════════════════════════════════════════════════════════════════
+// ACADEMIC DUTIES MANAGEMENT — 8 endpoints
+// ════════════════════════════════════════════════════════════════════
+
+const ensureAcademicDutyTables = async () => {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS academic_duty_assignments (
+      id                    SERIAL PRIMARY KEY,
+      duty_type             TEXT NOT NULL,
+      title                 TEXT NOT NULL,
+      description           TEXT,
+      deadline              DATE,
+      assigned_by           TEXT NOT NULL,
+      department            TEXT NOT NULL,
+      coordinator_email     TEXT,
+      co_coordinator_email  TEXT,
+      status                TEXT NOT NULL DEFAULT 'Active',
+      created_at            TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {});
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS academic_duty_assignees (
+      id                  SERIAL PRIMARY KEY,
+      assignment_id       INT REFERENCES academic_duty_assignments(id) ON DELETE CASCADE,
+      faculty_email       TEXT NOT NULL,
+      faculty_name        TEXT,
+      submission_text     TEXT,
+      proof_url           TEXT,
+      completed_at        DATE,
+      submission_status   TEXT NOT NULL DEFAULT 'Pending',
+      points_awarded      NUMERIC(5,2),
+      approved_by         TEXT,
+      approved_at         TIMESTAMPTZ,
+      reject_reason       TEXT,
+      hod_remarks         TEXT,
+      resubmit_count      INT DEFAULT 0,
+      submitted_at        TIMESTAMPTZ,
+      UNIQUE(assignment_id, faculty_email)
+    )
+  `).catch(() => {});
+};
+
+// 1. GET /academic-duties/my — Faculty sees their own duties (must be before /:id)
+app.get('/academic-duties/my', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureAcademicDutyTables();
+    const email = req.auth?.email?.toLowerCase();
+    if (!email) return res.status(401).json({ error: 'Unauthorized' });
+
+    const result = await db.query(`
+      SELECT
+        da.id AS assignment_id,
+        da.duty_type,
+        da.title,
+        da.deadline,
+        da.assigned_by,
+        da.department,
+        da.coordinator_email,
+        da.co_coordinator_email,
+        da.status AS assignment_status,
+        ae.id AS assignee_id,
+        ae.submission_status,
+        ae.submission_text,
+        ae.proof_url,
+        ae.completed_at,
+        ae.hod_remarks,
+        ae.reject_reason,
+        ae.resubmit_count,
+        ae.submitted_at,
+        ae.points_awarded,
+        CASE
+          WHEN LOWER(da.coordinator_email) = $1 THEN 'coordinator'
+          WHEN LOWER(da.co_coordinator_email) = $1 THEN 'co_coordinator'
+          ELSE 'assigned'
+        END AS my_role
+      FROM academic_duty_assignees ae
+      JOIN academic_duty_assignments da ON da.id = ae.assignment_id
+      WHERE LOWER(ae.faculty_email) = $1
+      ORDER BY da.created_at DESC
+    `, [email]);
+
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. POST /academic-duties/assignees/:aId/approve — HOD approves one assignee
+app.post('/academic-duties/assignees/:aId/approve', requireRole('hod', 'admin', 'director', 'principal'), async (req: Request, res: Response) => {
+  try {
+    await ensureAcademicDutyTables();
+    const { aId } = req.params;
+    const { points_awarded, hod_remarks } = req.body;
+    const approver = req.auth?.email;
+
+    await db.query(`
+      UPDATE academic_duty_assignees
+      SET submission_status = 'Approved',
+          points_awarded     = $1,
+          approved_by        = $2,
+          approved_at        = NOW(),
+          hod_remarks        = $3
+      WHERE id = $4
+    `, [points_awarded ?? null, approver, hod_remarks ?? null, aId]);
+
+    // Mirror to faculty_api_duties for API Score pillar
+    await db.query(`
+      INSERT INTO faculty_api_duties (faculty_email, faculty_name, duty_type, title, duty_date, points_awarded, status, approved_by, approved_at)
+      SELECT ae.faculty_email, ae.faculty_name, da.duty_type, da.title,
+             COALESCE(ae.completed_at, NOW()::date),
+             $1, 'Approved', $2, NOW()
+      FROM academic_duty_assignees ae
+      JOIN academic_duty_assignments da ON da.id = ae.assignment_id
+      WHERE ae.id = $3
+      ON CONFLICT DO NOTHING
+    `, [points_awarded ?? null, approver, aId]).catch(() => {});
+
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3. POST /academic-duties/assignees/:aId/reject — HOD rejects one assignee
+app.post('/academic-duties/assignees/:aId/reject', requireRole('hod', 'admin', 'director', 'principal'), async (req: Request, res: Response) => {
+  try {
+    await ensureAcademicDutyTables();
+    const { aId } = req.params;
+    const { reject_reason, hod_remarks } = req.body;
+    const approver = req.auth?.email;
+
+    await db.query(`
+      UPDATE academic_duty_assignees
+      SET submission_status = 'Rejected',
+          reject_reason      = $1,
+          hod_remarks        = $2,
+          approved_by        = $3,
+          approved_at        = NOW()
+      WHERE id = $4
+    `, [reject_reason ?? '', hod_remarks ?? null, approver, aId]);
+
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. POST /academic-duties — HOD/Admin creates assignment
+app.post('/academic-duties', requireRole('hod', 'admin', 'director', 'principal'), async (req: Request, res: Response) => {
+  try {
+    await ensureAcademicDutyTables();
+    const isSuperUser = req.auth?.isSuperAdmin === true || req.auth?.department === '*';
+    const { duty_type, title, description, deadline, coordinator_email, co_coordinator_email, faculty_emails, department } = req.body;
+
+    const dept = isSuperUser ? (department || req.auth?.department) : req.auth?.department;
+    if (!dept) return res.status(400).json({ error: 'Department is required' });
+
+    const assignedBy = req.auth?.email;
+
+    // Insert assignment
+    const asnRes = await db.query(`
+      INSERT INTO academic_duty_assignments (duty_type, title, description, deadline, assigned_by, department, coordinator_email, co_coordinator_email, status)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Active')
+      RETURNING id
+    `, [duty_type, title, description ?? null, deadline ?? null, assignedBy, dept, coordinator_email ?? null, co_coordinator_email ?? null]);
+
+    const assignmentId = asnRes.rows[0].id;
+
+    // Build set of emails to assign (include coordinator/co_coordinator if not already in list)
+    const emailSet: Set<string> = new Set((faculty_emails || []).map((e: string) => e.toLowerCase()));
+    if (coordinator_email) emailSet.add(coordinator_email.toLowerCase());
+    if (co_coordinator_email) emailSet.add(co_coordinator_email.toLowerCase());
+
+    // Look up faculty names
+    const emailArr = Array.from(emailSet);
+    const nameRes = await db.query(
+      `SELECT LOWER(email) AS email, name FROM faculty WHERE LOWER(email) = ANY($1)`,
+      [emailArr]
+    );
+    const nameMap: Record<string, string> = {};
+    for (const row of nameRes.rows) nameMap[row.email] = row.name;
+
+    // Bulk insert assignees
+    for (const em of emailArr) {
+      await db.query(`
+        INSERT INTO academic_duty_assignees (assignment_id, faculty_email, faculty_name, submission_status)
+        VALUES ($1, $2, $3, 'Pending')
+        ON CONFLICT (assignment_id, faculty_email) DO NOTHING
+      `, [assignmentId, em, nameMap[em] ?? null]);
+    }
+
+    res.json({ success: true, id: assignmentId });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 5. GET /academic-duties — HOD/Admin list all assignments
+app.get('/academic-duties', requireRole('hod', 'admin', 'director', 'principal', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    await ensureAcademicDutyTables();
+    const isSuperUser = req.auth?.isSuperAdmin === true || req.auth?.department === '*';
+    const statusFilter = (req.query.status as string) || 'Active';
+    const deptFilter = (req.query.department as string) || '';
+
+    let q = `
+      SELECT
+        da.*,
+        fc.name AS coordinator_name,
+        fcc.name AS co_coordinator_name
+      FROM academic_duty_assignments da
+      LEFT JOIN faculty fc  ON LOWER(fc.email)  = LOWER(da.coordinator_email)
+      LEFT JOIN faculty fcc ON LOWER(fcc.email) = LOWER(da.co_coordinator_email)
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+    let pi = 1;
+
+    if (statusFilter) { q += ` AND da.status = $${pi++}`; params.push(statusFilter); }
+
+    if (!isSuperUser) {
+      q += ` AND da.department = $${pi++}`;
+      params.push(req.auth?.department);
+    } else if (deptFilter) {
+      q += ` AND da.department = $${pi++}`;
+      params.push(deptFilter);
+    }
+
+    q += ` ORDER BY da.created_at DESC`;
+    const asnRes = await db.query(q, params);
+
+    if (asnRes.rows.length === 0) return res.json([]);
+
+    const ids: number[] = asnRes.rows.map((r: any) => r.id);
+    const assigneeRes = await db.query(`
+      SELECT id, assignment_id, faculty_email, faculty_name, submission_status, submitted_at, points_awarded
+      FROM academic_duty_assignees
+      WHERE assignment_id = ANY($1)
+      ORDER BY faculty_name
+    `, [ids]);
+
+    const assigneeMap: Record<number, any[]> = {};
+    for (const ae of assigneeRes.rows) {
+      if (!assigneeMap[ae.assignment_id]) assigneeMap[ae.assignment_id] = [];
+      assigneeMap[ae.assignment_id].push(ae);
+    }
+
+    const result = asnRes.rows.map((row: any) => {
+      const assignees = assigneeMap[row.id] || [];
+      return {
+        ...row,
+        assignees,
+        total: assignees.length,
+        submitted: assignees.filter((a: any) => a.submission_status === 'Submitted' || a.submission_status === 'Approved').length,
+        approved: assignees.filter((a: any) => a.submission_status === 'Approved').length,
+      };
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 6. PUT /academic-duties/:id — HOD edits assignment
+app.put('/academic-duties/:id', requireRole('hod', 'admin', 'director', 'principal'), async (req: Request, res: Response) => {
+  try {
+    await ensureAcademicDutyTables();
+    const isSuperUser = req.auth?.isSuperAdmin === true || req.auth?.department === '*';
+    const { title, description, deadline, coordinator_email, co_coordinator_email, status } = req.body;
+
+    // Dept ownership check
+    const existing = await db.query(`SELECT department FROM academic_duty_assignments WHERE id = $1`, [req.params.id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (!isSuperUser && existing.rows[0].department !== req.auth?.department) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    await db.query(`
+      UPDATE academic_duty_assignments
+      SET title                = COALESCE($1, title),
+          description          = COALESCE($2, description),
+          deadline             = COALESCE($3, deadline),
+          coordinator_email    = COALESCE($4, coordinator_email),
+          co_coordinator_email = COALESCE($5, co_coordinator_email),
+          status               = COALESCE($6, status)
+      WHERE id = $7
+    `, [title ?? null, description ?? null, deadline ?? null, coordinator_email ?? null, co_coordinator_email ?? null, status ?? null, req.params.id]);
+
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 7. DELETE /academic-duties/:id — HOD cancels (soft delete)
+app.delete('/academic-duties/:id', requireRole('hod', 'admin', 'director', 'principal'), async (req: Request, res: Response) => {
+  try {
+    await ensureAcademicDutyTables();
+    const isSuperUser = req.auth?.isSuperAdmin === true || req.auth?.department === '*';
+
+    const existing = await db.query(`SELECT department FROM academic_duty_assignments WHERE id = $1`, [req.params.id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (!isSuperUser && existing.rows[0].department !== req.auth?.department) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    await db.query(`UPDATE academic_duty_assignments SET status = 'Cancelled' WHERE id = $1`, [req.params.id]);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 8. POST /academic-duties/:id/submit — Faculty submits work
+app.post('/academic-duties/:id/submit', requireRole('faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
+  try {
+    await ensureAcademicDutyTables();
+    const email = req.auth?.email?.toLowerCase();
+    if (!email) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { submission_text, proof_url, completed_at } = req.body;
+
+    const aeRes = await db.query(`
+      SELECT id, submission_status FROM academic_duty_assignees
+      WHERE assignment_id = $1 AND LOWER(faculty_email) = $2
+    `, [req.params.id, email]);
+
+    if (aeRes.rows.length === 0) return res.status(403).json({ error: 'You are not assigned to this duty' });
+    if (aeRes.rows[0].submission_status === 'Approved') return res.status(400).json({ error: 'Already approved' });
+
+    await db.query(`
+      UPDATE academic_duty_assignees
+      SET submission_text   = $1,
+          proof_url         = $2,
+          completed_at      = $3,
+          submission_status = 'Submitted',
+          submitted_at      = NOW(),
+          resubmit_count    = resubmit_count + 1
+      WHERE id = $4
+    `, [submission_text ?? null, proof_url ?? null, completed_at ?? null, aeRes.rows[0].id]);
+
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// END ACADEMIC DUTIES MANAGEMENT
+// ════════════════════════════════════════════════════════════════════
 
 // 10c. Not Posted Attendance Tracker — supports single date (?date=) or range (?from=&to=)
 app.get('/attendance/not-posted', requireRole('faculty', 'hod', 'coordinator', 'admin'), async (req: Request, res: Response) => {

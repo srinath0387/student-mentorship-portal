@@ -31,6 +31,8 @@ const FacultyWorkloadPage = lazy(() => import('./features/attendance/workload/Fa
 const AttendanceReportsPage = lazy(() => import('./features/attendance/reports/AttendanceReportsPage').then(m => ({ default: m.AttendanceReportsPage })));
 const DocumentsManagementPage = lazy(() => import('./features/documents/DocumentsManagementPage').then(m => ({ default: m.DocumentsManagementPage })));
 const FacultyApiPage = lazy(() => import('./features/faculty/FacultyApiPage').then(m => ({ default: m.FacultyApiPage })));
+const AcademicDutiesPage = lazy(() => import('./features/academic-duties/AcademicDutiesPage'));
+const MyDutiesPage = lazy(() => import('./features/academic-duties/MyDutiesPage'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -314,6 +316,10 @@ export const App: React.FC = () => {
               {/* Faculty API leaderboard — HOD & Admin only */}
               <Route element={<ProtectedRoute allowedRoles={['hod', 'admin', 'director', 'principal', 'management', 'program_chair']} />}>
                 <Route path="/faculty/api" element={<FacultyApiPage />} />
+                <Route path="/academic-duties" element={<AcademicDutiesPage />} />
+              </Route>
+              <Route element={<ProtectedRoute allowedRoles={['faculty', 'hod', 'admin', 'coordinator', 'director', 'principal']} />}>
+                <Route path="/my-duties" element={<MyDutiesPage />} />
               </Route>
 
               {/* Oversight (View-Only) routes */}

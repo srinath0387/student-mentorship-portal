@@ -20,6 +20,8 @@ import {
   ClipboardCheck,
   FolderOpen,
   Star,
+  ClipboardList,
+  CheckSquare,
   LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -108,6 +110,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
         { label: 'Leave & Duties', path: '/faculty/dashboard?tab=leaves', icon: CalendarCheck },
         { label: 'My Faculty Profile', path: '/faculty/dashboard?tab=profile', icon: User },
         { label: 'My API Score', path: '/faculty/dashboard?tab=profile', icon: Star },
+        { label: 'My Duties', path: '/my-duties', icon: CheckSquare },
         { label: 'Mentee Directory', path: '/faculty/dashboard?tab=mentees', icon: Users },
         { label: 'Documents Approval', path: '/documents', icon: FolderOpen },
         { label: 'Dept CGPA Analytics', path: '/faculty/dashboard?tab=analytics', icon: FileBarChart },
@@ -125,6 +128,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
         { label: 'Attendance Mgmt', path: '/admin/dashboard?tab=attendance', icon: CalendarCheck },
         { label: 'Faculty Workload', path: '/attendance/workload', icon: BarChart2 },
         { label: 'Faculty API Score', path: '/faculty/api', icon: Star },
+        { label: 'Academic Duties', path: '/academic-duties', icon: ClipboardList },
         { label: 'Attendance Reports', path: '/attendance/reports', icon: FileBarChart },
         { label: 'Documents', path: '/documents', icon: FolderOpen },
         { label: 'Student Directory', path: '/admin/dashboard?tab=students', icon: Users },
@@ -146,6 +150,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
         { label: 'Attendance Tracker', path: '/hod/dashboard?tab=attendance', icon: CalendarCheck },
         { label: 'Faculty Workload', path: '/attendance/workload', icon: BarChart2 },
         { label: 'Faculty API Score', path: '/faculty/api', icon: Star },
+        { label: 'Academic Duties', path: '/academic-duties', icon: ClipboardList },
         { label: 'Attendance Reports', path: '/attendance/reports', icon: FileBarChart },
         { label: 'Documents', path: '/documents', icon: FolderOpen },
         { label: 'Student Directory', path: '/hod/dashboard?tab=students', icon: Users },
