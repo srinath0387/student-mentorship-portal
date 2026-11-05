@@ -237,22 +237,26 @@ export const LandingPage: React.FC = () => {
     setForgotLoading(true);
     setForgotError(null);
     setForgotNotInDirectory(false);
+    const isStudent = selectedRole?.id === 'student' || selectedRole?.id === 'parent';
     try {
       await cognitoForgotPassword(email);
       setForgotStep('otp');
       setForgotSuccess(`OTP sent to ${email}. Check your inbox & spam folder.`);
     } catch (err: any) {
       const msg = err?.message || '';
-      // If user does not exist in Cognito User Pool, auto-provision from DB faculty directory
+      // If user does not exist in Cognito User Pool, auto-provision from DB directory
       if (
         msg.includes('Username/client id combination not found') ||
         msg.includes('UserNotFoundException') ||
         msg.includes('does not exist')
       ) {
         try {
-          const syncRes = await api.provisionCognitoFaculty(email);
+          // Route to student or faculty provision endpoint based on role
+          const syncRes = isStudent
+            ? await api.provisionCognitoStudent(email)
+            : await api.provisionCognitoFaculty(email);
           if (syncRes.success) {
-            // Account now provisioned in Cognito — retry sending OTP
+            // Account now provisioned — retry sending OTP
             await cognitoForgotPassword(email);
             setForgotStep('otp');
             setForgotSuccess(`OTP sent to ${email}. Check your inbox & spam folder.`);
@@ -1028,17 +1032,29 @@ export const LandingPage: React.FC = () => {
                 <div className="flex items-start gap-2">
                   <AlertCircle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
                   <div>
-                    <p className="text-xs font-semibold text-amber-800">Account not found in faculty directory</p>
+                    <p className="text-xs font-semibold text-amber-800">
+                      Account not found in {selectedRole?.id === 'student' || selectedRole?.id === 'parent' ? 'student' : 'faculty'} records
+                    </p>
                     <p className="text-xs text-amber-700 mt-0.5">
-                      <span className="font-medium">{forgotEmail}</span> isn't registered in the faculty records yet — but your profile data is safe and won't be lost.
+                      <span className="font-medium">{forgotEmail}</span> isn't registered in the{' '}
+                      {selectedRole?.id === 'student' || selectedRole?.id === 'parent' ? 'student' : 'faculty'} directory yet — but your data is safe and won't be lost.
                     </p>
                   </div>
                 </div>
                 <div className="text-xs text-amber-700 bg-amber-100 rounded-lg p-3 space-y-1">
                   <p className="font-semibold">What you can do:</p>
                   <ul className="list-disc ml-4 space-y-0.5">
-                    <li>Ask your HOD or Admin to add <span className="font-medium">{forgotEmail}</span> to the faculty directory</li>
-                    <li>If you've already logged in before, tap <span className="font-medium">"Try OTP Anyway"</span> below</li>
+                    {selectedRole?.id === 'student' || selectedRole?.id === 'parent' ? (
+                      <>
+                        <li>Contact your class coordinator or admin to verify your account</li>
+                        <li>If you've logged in before, tap <span className="font-medium">"Try OTP Anyway"</span> below</li>
+                      </>
+                    ) : (
+                      <>
+                        <li>Ask your HOD or Admin to add <span className="font-medium">{forgotEmail}</span> to the faculty directory</li>
+                        <li>If you've already logged in before, tap <span className="font-medium">"Try OTP Anyway"</span> below</li>
+                      </>
+                    )}
                   </ul>
                 </div>
                 <div className="flex gap-2">

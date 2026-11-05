@@ -562,6 +562,13 @@ export const api = {
     });
   },
 
+  provisionCognitoStudent: async (email: string): Promise<{ success: boolean; error?: string }> => {
+    return fetchWithAuth('/auth/provision-student', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  },
+
   // Link email to faculty record (admin)
   patchFacultyEmail: async (facultyId: string, email: string): Promise<any> => {
     return fetchWithAuth(`/faculty/${facultyId}/email`, {

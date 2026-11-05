@@ -1493,6 +1493,64 @@ app.post('/auth/provision-faculty', async (req: Request, res: Response) => {
 });
 
 // ============================================================================
+// POST /auth/provision-student — Provisions a student into Cognito User Pool
+// Enables OTP-based forgot password for students who exist in DB but not Cognito
+// ============================================================================
+app.post('/auth/provision-student', async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, error: 'Email is required' });
+
+    const cleanEmail = String(email).trim().toLowerCase();
+    if (!cleanEmail.endsWith('@rgmcet.edu.in')) {
+      return res.status(400).json({ success: false, error: 'Must be an official @rgmcet.edu.in email' });
+    }
+
+    // Look up student by email
+    let student: any = null;
+    try {
+      const res1 = await db.query(
+        'SELECT roll_number, name, email, year, department FROM students WHERE LOWER(email) = $1 LIMIT 1',
+        [cleanEmail]
+      );
+      if (res1.rows.length > 0) student = res1.rows[0];
+    } catch { /* ignore */ }
+
+    // Fallback: derive roll_number from email prefix (e.g. 24091a3282@rgmcet.edu.in)
+    if (!student) {
+      const rollFromEmail = cleanEmail.split('@')[0].toUpperCase();
+      try {
+        const res2 = await db.query(
+          'SELECT roll_number, name, email, year, department FROM students WHERE UPPER(roll_number) = $1 LIMIT 1',
+          [rollFromEmail]
+        );
+        if (res2.rows.length > 0) student = res2.rows[0];
+      } catch { /* ignore */ }
+    }
+
+    if (!student) {
+      return res.status(404).json({ success: false, error: 'Student record not found in institutional records.' });
+    }
+
+    const tempPass = `RgmStu@${Date.now()}!`;
+    const result = await adminCreateCognitoUser({
+      email: cleanEmail,
+      password: tempPass,
+      rollNo: student.roll_number,
+      name: student.name || cleanEmail.split('@')[0],
+      role: 'student',
+      year: student.year || 'Unknown',
+    });
+
+    console.log(`[Cognito Provision Student] Result for ${cleanEmail}:`, result);
+    return res.json({ success: true, status: result });
+  } catch (err: any) {
+    console.error('[Cognito Provision Student] Error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ============================================================================
 // Auth: Faculty/HOD Registration Key Validation (SEC-01 fix)
 // The secret key is stored server-side in FACULTY_SECRET_KEY env var.
 // Frontend sends the user-entered key here for validation — never exposes it.
