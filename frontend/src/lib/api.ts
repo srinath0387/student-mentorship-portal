@@ -460,6 +460,35 @@ export const api = {
     });
   },
 
+  provisionCognitoStudent: async (email: string): Promise<{ success: boolean; error?: string }> => {
+    return fetchWithAuth('/auth/provision-student', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  // ── Academic Duties ──────────────────────────────────────────────────────────
+  getAcademicDuties: async (params?: { status?: string; department?: string }) => {
+    const q = params
+      ? '?' + new URLSearchParams(Object.entries(params).filter(([, v]) => !!v) as [string, string][]).toString()
+      : '';
+    return fetchWithAuth(`/academic-duties${q}`);
+  },
+  getMyAcademicDuties: async () => fetchWithAuth('/academic-duties/my'),
+  createAcademicDuty: async (body: any) =>
+    fetchWithAuth('/academic-duties', { method: 'POST', body: JSON.stringify(body) }),
+  updateAcademicDuty: async (id: number, body: any) =>
+    fetchWithAuth(`/academic-duties/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  cancelAcademicDuty: async (id: number) =>
+    fetchWithAuth(`/academic-duties/${id}`, { method: 'DELETE' }),
+  submitAcademicDutyWork: async (assignmentId: number, body: any) =>
+    fetchWithAuth(`/academic-duties/${assignmentId}/submit`, { method: 'POST', body: JSON.stringify(body) }),
+  approveAcademicDutyAssignee: async (assigneeId: number, body: { points_override?: number; hod_remarks?: string }) =>
+    fetchWithAuth(`/academic-duties/assignees/${assigneeId}/approve`, { method: 'POST', body: JSON.stringify(body) }),
+  rejectAcademicDutyAssignee: async (assigneeId: number, body: { reject_reason: string; hod_remarks?: string }) =>
+    fetchWithAuth(`/academic-duties/assignees/${assigneeId}/reject`, { method: 'POST', body: JSON.stringify(body) }),
+
+
   // Link email to faculty record (admin)
   patchFacultyEmail: async (facultyId: string, email: string): Promise<any> => {
     return fetchWithAuth(`/faculty/${facultyId}/email`, {
