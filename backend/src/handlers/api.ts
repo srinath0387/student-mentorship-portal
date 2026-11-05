@@ -9413,6 +9413,45 @@ app.put('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coor
 //          + Academic Duties(15) + Industry&Professional(20)
 // ══════════════════════════════════════════════════════════════════
 
+// GET /faculty/api-scores — HOD/Admin list view
+app.get('/faculty/api-scores', requireRole('hod', 'admin', 'director', 'principal', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    const callerRole = req.auth?.role;
+    const callerDept = req.auth?.department;
+    const isSuperUser = req.auth?.isSuperAdmin === true || callerDept === '*';
+    const CSE_ALLIED = ['CSE', 'CSE (AI & ML)', 'CSE (Data Science)', 'CSE (BS)', 'CSE (CS)'];
+    const deptParam = (req.query.department as string) || '';
+
+    let deptCond = '';
+    const params: any[] = [];
+    let pi = 1;
+    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
+      deptCond = `AND f.department = $${pi++}`; params.push(callerDept);
+    } else if (callerRole === 'admin' && !isSuperUser && callerDept && callerDept !== '*') {
+      deptCond = `AND f.department = $${pi++}`; params.push(callerDept);
+    } else if (callerRole === 'program_chair') {
+      deptCond = `AND f.department = ANY($${pi++}::text[])`; params.push(CSE_ALLIED);
+    } else if (deptParam && deptParam !== 'All') {
+      deptCond = `AND f.department = $${pi++}`; params.push(deptParam);
+    }
+
+    const facRes = await db.query(`
+      SELECT f.email, f.name AS faculty_name, f.department,
+             COALESCE(fp.personal->>'designation','Faculty') AS designation,
+             fp.certifications, fp.activities, fp.publications
+      FROM faculty f
+      LEFT JOIN faculty_full_profiles fp ON LOWER(fp.email) = LOWER(f.email)
+      WHERE f.role NOT IN ('admin','hod') ${deptCond}
+      ORDER BY f.department, f.name
+    `, params);
+
+    if (facRes.rows.length === 0) return res.json([]);
+
+    const emails = facRes.rows.map((r: any) => r.email.toLowerCase());
+
+    await db.query(`CREATE TABLE IF NOT EXISTS faculty_api_duties (id SERIAL PRIMARY KEY, faculty_email TEXT NOT NULL, faculty_name TEXT, duty_type TEXT NOT NULL, title TEXT NOT NULL, description TEXT, duty_date DATE NOT NULL, proof_url TEXT, points_awarded NUMERIC(5,2), approved_by TEXT, approved_at TIMESTAMPTZ, reject_reason TEXT, status TEXT NOT NULL DEFAULT 'Pending', created_at TIMESTAMPTZ DEFAULT NOW())`).catch(() => {});
+
+
 // GET /faculty/:email/api-score
 app.get('/faculty/:email/api-score', requireRole('faculty', 'hod', 'admin', 'director', 'principal', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
@@ -9600,44 +9639,6 @@ app.get('/faculty/:email/api-score', requireRole('faculty', 'hod', 'admin', 'dir
 });
 
 
-// GET /faculty/api-scores — HOD/Admin list view
-app.get('/faculty/api-scores', requireRole('hod', 'admin', 'director', 'principal', 'management', 'program_chair'), async (req: Request, res: Response) => {
-  try {
-    const callerRole = req.auth?.role;
-    const callerDept = req.auth?.department;
-    const isSuperUser = req.auth?.isSuperAdmin === true || callerDept === '*';
-    const CSE_ALLIED = ['CSE', 'CSE (AI & ML)', 'CSE (Data Science)', 'CSE (BS)', 'CSE (CS)'];
-    const deptParam = (req.query.department as string) || '';
-
-    let deptCond = '';
-    const params: any[] = [];
-    let pi = 1;
-    if (callerRole === 'hod' && callerDept && callerDept !== '*') {
-      deptCond = `AND f.department = $${pi++}`; params.push(callerDept);
-    } else if (callerRole === 'admin' && !isSuperUser && callerDept && callerDept !== '*') {
-      deptCond = `AND f.department = $${pi++}`; params.push(callerDept);
-    } else if (callerRole === 'program_chair') {
-      deptCond = `AND f.department = ANY($${pi++}::text[])`; params.push(CSE_ALLIED);
-    } else if (deptParam && deptParam !== 'All') {
-      deptCond = `AND f.department = $${pi++}`; params.push(deptParam);
-    }
-
-    const facRes = await db.query(`
-      SELECT f.email, f.name AS faculty_name, f.department,
-             COALESCE(fp.personal->>'designation','Faculty') AS designation,
-             fp.certifications, fp.activities, fp.publications
-      FROM faculty f
-      LEFT JOIN faculty_full_profiles fp ON LOWER(fp.email) = LOWER(f.email)
-      WHERE f.role NOT IN ('admin','hod') ${deptCond}
-      ORDER BY f.department, f.name
-    `, params);
-
-    if (facRes.rows.length === 0) return res.json([]);
-
-    const emails = facRes.rows.map((r: any) => r.email.toLowerCase());
-
-    await db.query(`CREATE TABLE IF NOT EXISTS faculty_api_duties (id SERIAL PRIMARY KEY, faculty_email TEXT NOT NULL, faculty_name TEXT, duty_type TEXT NOT NULL, title TEXT NOT NULL, description TEXT, duty_date DATE NOT NULL, proof_url TEXT, points_awarded NUMERIC(5,2), approved_by TEXT, approved_at TIMESTAMPTZ, reject_reason TEXT, status TEXT NOT NULL DEFAULT 'Pending', created_at TIMESTAMPTZ DEFAULT NOW())`).catch(() => {});
-
     // Batch queries — one round-trip per data type for all faculty
     const dutiesRes = await db.query(`
       SELECT LOWER(faculty_email) AS email, duty_type,
@@ -9740,6 +9741,14 @@ app.get('/faculty/api-scores', requireRole('hod', 'admin', 'director', 'principa
 });
 
 
+// GET /faculty/api-duties/pending — HOD/Admin pending approvals
+app.get('/faculty/api-duties/pending', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const callerRole = req.auth?.role;
+    const callerDept = req.auth?.department;
+    await db.query(`CREATE TABLE IF NOT EXISTS faculty_api_duties (id SERIAL PRIMARY KEY, faculty_email TEXT NOT NULL, faculty_name TEXT, duty_type TEXT NOT NULL, title TEXT NOT NULL, description TEXT, duty_date DATE NOT NULL, proof_url TEXT, points_awarded NUMERIC(5,2), approved_by TEXT, approved_at TIMESTAMPTZ, reject_reason TEXT, status TEXT NOT NULL DEFAULT 'Pending', created_at TIMESTAMPTZ DEFAULT NOW())`).catch(() => {});
+
+
 // POST /faculty/:email/api-duties — Faculty submits a duty
 app.post('/faculty/:email/api-duties', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
   try {
@@ -9817,12 +9826,6 @@ app.patch('/faculty/api-duties/:id/reject', requireRole('hod', 'admin'), async (
   }
 });
 
-// GET /faculty/api-duties/pending — HOD/Admin pending approvals
-app.get('/faculty/api-duties/pending', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
-  try {
-    const callerRole = req.auth?.role;
-    const callerDept = req.auth?.department;
-    await db.query(`CREATE TABLE IF NOT EXISTS faculty_api_duties (id SERIAL PRIMARY KEY, faculty_email TEXT NOT NULL, faculty_name TEXT, duty_type TEXT NOT NULL, title TEXT NOT NULL, description TEXT, duty_date DATE NOT NULL, proof_url TEXT, points_awarded NUMERIC(5,2), approved_by TEXT, approved_at TIMESTAMPTZ, reject_reason TEXT, status TEXT NOT NULL DEFAULT 'Pending', created_at TIMESTAMPTZ DEFAULT NOW())`).catch(() => {});
     let q = `SELECT d.*, f.department FROM faculty_api_duties d LEFT JOIN faculty f ON LOWER(f.email) = LOWER(d.faculty_email) WHERE d.status = 'Pending'`;
     const params: any[] = [];
     if (callerRole === 'hod' && callerDept && callerDept !== '*') { q += ` AND f.department = $1`; params.push(callerDept); }
