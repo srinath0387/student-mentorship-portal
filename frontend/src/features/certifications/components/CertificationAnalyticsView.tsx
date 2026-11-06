@@ -2,15 +2,20 @@ import React, { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Award, Users, Search, Download, ExternalLink, ShieldCheck, CheckCircle2, FileText, ChevronRight, X, Loader2 } from 'lucide-react';
 import { api } from '../../../lib/api';
+import { useAuth } from '../../../context/AuthContext';
 import { CertificationTypeaheadSearch, CertResult } from './CertificationTypeaheadSearch';
 
 export const CertificationAnalyticsView: React.FC = () => {
+  const { user } = useAuth();
   const [selectedCertName, setSelectedCertName] = useState<string | null>(null);
+
+  const isSuper = Boolean(user?.isSuperAdmin) || user?.department === '*' || user?.department === 'All';
+  const effectiveDept = (!isSuper && user?.department) ? user.department : undefined;
 
   // Fetch top certifications summary (e.g. AWS: 400, etc.)
   const { data: rawSummary = [], isLoading: isSummaryLoading, refetch: refetchSummary } = useQuery({
-    queryKey: ['certificationsSummary'],
-    queryFn: () => api.getCertificationsSummary().catch(() => []),
+    queryKey: ['certificationsSummary', effectiveDept],
+    queryFn: () => api.getCertificationsSummary({ department: effectiveDept }).catch(() => []),
     staleTime: 0,
     refetchOnMount: 'always',
   });
@@ -18,8 +23,8 @@ export const CertificationAnalyticsView: React.FC = () => {
 
   // Fetch students for selected certification
   const { data: rawStudents = [], isLoading: isStudentsLoading } = useQuery({
-    queryKey: ['certifiedStudents', selectedCertName],
-    queryFn: () => selectedCertName ? api.getCertifiedStudents(selectedCertName).catch(() => []) : Promise.resolve([]),
+    queryKey: ['certifiedStudents', selectedCertName, effectiveDept],
+    queryFn: () => selectedCertName ? api.getCertifiedStudents(selectedCertName, { department: effectiveDept }).catch(() => []) : Promise.resolve([]),
     enabled: Boolean(selectedCertName),
     staleTime: 0,
   });
@@ -88,7 +93,7 @@ export const CertificationAnalyticsView: React.FC = () => {
 
   const handleExportCSV = () => {
     if (!filteredStudents || filteredStudents.length === 0) return;
-    const headers = ['Roll Number', 'Student Name', 'Department', 'Section', 'Year', 'Certificate', 'Issuer', 'Issue Date', 'Source', 'Status'];
+    const headers = ['Roll Number', 'Student Name', 'Department', 'Section', 'Year', 'Certificate', 'Issuer', 'Issue Date', 'Source', 'Status', 'Certificate Link'];
     const rows = filteredStudents.map((s: any) => [
       s.roll_number,
       s.student_name,
@@ -99,7 +104,8 @@ export const CertificationAnalyticsView: React.FC = () => {
       s.issuer,
       s.issue_date || 'N/A',
       s.source,
-      s.verification_status
+      s.verification_status,
+      s.verification_url || s.proof_document_url || s.badge_image_url || '',
     ]);
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.map(val => `"${String(val || '').replace(/"/g, '""')}"`).join(','))].join('\n');
     const encodedUri = encodeURI(csvContent);
@@ -128,6 +134,7 @@ export const CertificationAnalyticsView: React.FC = () => {
           {/* Typeahead Search Bar */}
           <div className="w-full md:w-80">
             <CertificationTypeaheadSearch 
+              department={effectiveDept}
               onSelectCert={(cert) => setSelectedCertName(cert.display_name)}
               placeholder="Type to search (e.g. AWS, MongoDB)..."
             />

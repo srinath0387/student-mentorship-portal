@@ -1,0 +1,595 @@
+[
+  {
+    "id": "l3_t1_while_loops",
+    "title": "The while Loop: Repeat Until Done",
+    "badge_skill": "Writes while loops with guaranteed stop conditions",
+    "ask_the_logic": {
+      "question": "In a countdown loop (count = 3; while count > 0: count = count - 1), why did the loop finally stop?",
+      "options": [
+        "Because count became 0, which made count > 0 evaluate to False.",
+        "Because Python automatically limits loops to 3 runs.",
+        "Because the computer ran out of memory."
+      ],
+      "correct_index": 0,
+      "explanation": "A while loop re-checks its condition before each iteration. When count reached 0, 0 > 0 became False, terminating the loop."
+    },
+    "cards": [
+      {
+        "step_number": 1,
+        "step_name": "The Problem",
+        "title": "Printing 100 Times Without Copy-Pasting",
+        "text": "You already know if statements test a condition once. But what if a robot needs to take steps until it hits a wall, or a phone needs to ring until answered? Copy-pasting 100 print statements is brittle and impossible when you don't know the exact count in advance.",
+        "code": null,
+        "visual_type": "problem_scenario"
+      },
+      {
+        "step_number": 2,
+        "step_name": "The Idea in One Sentence",
+        "title": "A while Loop is an if Statement That Loops Back",
+        "text": "As long as the condition evaluates to True, Python executes the indented block, jumps back up to re-check the condition, and repeats.",
+        "code": "count = 3\nwhile count > 0:\n    print(count)\n    count = count - 1",
+        "visual_type": "analogy"
+      },
+      {
+        "step_number": 3,
+        "step_name": "The Rule",
+        "title": "Smallest Valid Syntax Labelled",
+        "text": "Every while loop requires three essentials: initialization before the loop, a test condition in the header, and an update inside the body.",
+        "code": "count = 3            # 1. Initialize\nwhile count > 0:     # 2. Test condition (runs while True)\n    print(count)     # 3. Work body\n    count = count - 1# 4. Update (moves toward stopping!)",
+        "visual_type": "syntax_card"
+      },
+      {
+        "step_number": 4,
+        "step_name": "Logic First, Code Second",
+        "title": "Side-by-Side: Countdown Timer",
+        "text": "Plan the loop lifecycle clearly in English before writing Python code.",
+        "logic_plan": [
+          "1. Start count at 3.",
+          "2. Repeat as long as count is greater than 0:",
+          "     a. Display current count.",
+          "     b. Reduce count by 1.",
+          "3. When count reaches 0, print 'Blastoff!'."
+        ],
+        "code": "count = 3\nwhile count > 0:\n    print(count)\n    count = count - 1\nprint(\"Blastoff!\")",
+        "visual_type": "logic_vs_code"
+      },
+      {
+        "step_number": 5,
+        "step_name": "See It Run",
+        "title": "Step-by-Step Visualizer & Trace Table",
+        "text": "Step through each iteration and examine the trace table.",
+        "visualizer": {
+          "lines": [
+            "count = 3",
+            "while count > 0:",
+            "    print(count)",
+            "    count = count - 1",
+            "print(\"Blastoff!\")"
+          ],
+          "steps": [
+            {
+              "line": 0,
+              "memory": {"count": 3},
+              "output": "",
+              "explanation": "Line 1: Initialize count to 3."
+            },
+            {
+              "line": 1,
+              "memory": {"count": 3},
+              "output": "",
+              "explanation": "Line 2: 3 > 0 is True. Enter loop iteration 1."
+            },
+            {
+              "line": 2,
+              "memory": {"count": 3},
+              "output": "3\n",
+              "explanation": "Line 3: Prints 3."
+            },
+            {
+              "line": 3,
+              "memory": {"count": 2},
+              "output": "3\n",
+              "explanation": "Line 4: count decremented to 2. Loop cycles back to line 2!"
+            },
+            {
+              "line": 1,
+              "memory": {"count": 2},
+              "output": "3\n",
+              "explanation": "Line 2: 2 > 0 is True. Enter loop iteration 2."
+            },
+            {
+              "line": 2,
+              "memory": {"count": 2},
+              "output": "3\n2\n",
+              "explanation": "Line 3: Prints 2."
+            },
+            {
+              "line": 3,
+              "memory": {"count": 1},
+              "output": "3\n2\n",
+              "explanation": "Line 4: count decremented to 1. Cycles back to line 2."
+            },
+            {
+              "line": 1,
+              "memory": {"count": 1},
+              "output": "3\n2\n",
+              "explanation": "Line 2: 1 > 0 is True. Enter loop iteration 3."
+            },
+            {
+              "line": 2,
+              "memory": {"count": 1},
+              "output": "3\n2\n1\n",
+              "explanation": "Line 3: Prints 1."
+            },
+            {
+              "line": 3,
+              "memory": {"count": 0},
+              "output": "3\n2\n1\n",
+              "explanation": "Line 4: count becomes 0. Cycles back to line 2."
+            },
+            {
+              "line": 1,
+              "memory": {"count": 0},
+              "output": "3\n2\n1\n",
+              "explanation": "Line 2: 0 > 0 is FALSE! Loop terminates."
+            },
+            {
+              "line": 4,
+              "memory": {"count": 0},
+              "output": "3\n2\n1\nBlastoff!\n",
+              "explanation": "Line 5: Loop exited. Prints 'Blastoff!'."
+            }
+          ],
+          "trace_table": [
+            {"step": 1, "line": "Iteration 1", "condition": "3 > 0 (True)", "result": "count = 2", "output": "3"},
+            {"step": 2, "line": "Iteration 2", "condition": "2 > 0 (True)", "result": "count = 1", "output": "2"},
+            {"step": 3, "line": "Iteration 3", "condition": "1 > 0 (True)", "result": "count = 0", "output": "1"},
+            {"step": 4, "line": "Exit check", "condition": "0 > 0 (False)", "result": "Loop ends", "output": "Blastoff!"}
+          ]
+        },
+        "visual_type": "step_visualizer"
+      },
+      {
+        "step_number": 6,
+        "step_name": "A Diagram",
+        "title": "Loop Cycle Flowchart",
+        "text": "Notice the feedback loop arrow pointing back to condition test.",
+        "diagram": {
+          "type": "flowchart",
+          "steps": [
+            "Initialize count = 3",
+            "Condition Check: count > 0?",
+            "True: Print & count = count - 1 -> Loop Back",
+            "False: Exit -> Print 'Blastoff!'"
+          ]
+        },
+        "visual_type": "diagram"
+      },
+      {
+        "step_number": 7,
+        "step_name": "What If...?",
+        "title": "Predict First, Then Try",
+        "text": "What happens if count starts at -1? Predict: -1 > 0 is False immediately on step 1! The body never runs even once, and Python immediately jumps to 'Blastoff!'.",
+        "code": "count = -1\nwhile count > 0:\n    print(count)\n    count -= 1\nprint(\"Blastoff!\")",
+        "visual_type": "what_if"
+      },
+      {
+        "step_number": 8,
+        "step_name": "Common Mistake",
+        "title": "The Infinite Loop (Forgetting to Update)",
+        "text": "Mistake: Forgetting count = count - 1 inside the body. If count remains 3 forever, 3 > 0 is always True, and the computer hangs printing 3 in an endless loop! Always ensure body moves toward stopping.",
+        "code": "# WRONG:\n# count = 3\n# while count > 0:\n#     print(count)  # Hangs forever!\n\n# FIXED: Always decrement\ncount = 3\nwhile count > 0:\n    print(count)\n    count -= 1",
+        "visual_type": "common_mistake"
+      },
+      {
+        "step_number": 9,
+        "step_name": "Check Yourself",
+        "title": "Test Your Understanding",
+        "text": "Test your loop trace reasoning.",
+        "questions": [
+          {
+            "q": "How many times does this loop run? x = 1; while x <= 4: x += 1",
+            "options": ["3", "4", "5", "Infinite"],
+            "ans": 1,
+            "why": "Runs for x = 1, 2, 3, 4 (4 iterations). When x becomes 5, 5 <= 4 is False and it stops."
+          },
+          {
+            "q": "What is the final value of x after the loop above terminates?",
+            "options": ["4", "5", "6", "1"],
+            "ans": 1,
+            "why": "The loop terminates when x reaches 5, so x remains 5 in memory."
+          }
+        ],
+        "visual_type": "check_yourself"
+      },
+      {
+        "step_number": 10,
+        "step_name": "Skill Recap",
+        "title": "Skill Earned!",
+        "text": "You can now write safe while loops with clean initialization, test condition, and guaranteed termination.",
+        "badge_link": "Writes while loops with guaranteed stop conditions",
+        "visual_type": "recap"
+      }
+    ]
+  },
+  {
+    "id": "l3_t2_for_loops_range",
+    "title": "The for Loop & range(): Definite Loops",
+    "badge_skill": "Uses range(start, stop, step) effectively",
+    "ask_the_logic": {
+      "question": "Why does range(1, 5) produce 1, 2, 3, 4 instead of including 5?",
+      "options": [
+        "In Python, range(start, stop) stops BEFORE the stop number (exclusive endpoint), matching zero-indexed sizing.",
+        "Because Python makes a math rounding error.",
+        "Because 5 is a prime number."
+      ],
+      "correct_index": 0,
+      "explanation": "The stop value in range() is exclusive. range(1, 5) generates values while i < 5, which are 1, 2, 3, 4 (exactly 5 - 1 = 4 items)."
+    },
+    "cards": [
+      {
+        "step_number": 1,
+        "step_name": "The Problem",
+        "title": "Iterating a Known Number of Times",
+        "text": "You already know while loops can repeat code. But writing 3 lines (initialize, test, update) just to run 5 times is tedious and prone to infinite loop bugs. When you know in advance how many times you want to iterate, a for loop is far cleaner.",
+        "code": null,
+        "visual_type": "problem_scenario"
+      },
+      {
+        "step_number": 2,
+        "step_name": "The Idea in One Sentence",
+        "title": "A for Loop Visits Every Item in a Sequence",
+        "text": "A for loop automatically takes the next value from a sequence on every turn, assigns it to a loop variable, and stops automatically when the sequence ends.",
+        "code": "for lap in range(1, 4):\n    print(f\"Completed lap {lap}\")",
+        "visual_type": "analogy"
+      },
+      {
+        "step_number": 3,
+        "step_name": "The Rule",
+        "title": "range(start, stop, step) Explained",
+        "text": "range(stop) produces 0 up to stop-1. range(start, stop) starts at start. range(start, stop, step) steps by step.",
+        "code": "range(3)       -> 0, 1, 2\nrange(1, 5)    -> 1, 2, 3, 4\nrange(0, 10, 2)-> 0, 2, 4, 6, 8\nrange(5, 0, -1)-> 5, 4, 3, 2, 1 (countdown!)",
+        "visual_type": "syntax_card"
+      },
+      {
+        "step_number": 4,
+        "step_name": "Logic First, Code Second",
+        "title": "Side-by-Side: Printing Even Numbers",
+        "text": "Step by step logic mapped to for-in-range.",
+        "logic_plan": [
+          "1. For each number from 2 up to 8 stepping by 2:",
+          "2. Print the even number.",
+          "3. Conclude after range finishes."
+        ],
+        "code": "for num in range(2, 9, 2):\n    print(num)\nprint(\"Done!\")",
+        "visual_type": "logic_vs_code"
+      },
+      {
+        "step_number": 5,
+        "step_name": "See It Run",
+        "title": "Step-by-Step Visualizer & Trace Table",
+        "text": "Watch the loop variable advance automatically on each turn.",
+        "visualizer": {
+          "lines": [
+            "for num in range(2, 9, 2):",
+            "    print(num)",
+            "print(\"Done!\")"
+          ],
+          "steps": [
+            {
+              "line": 0,
+              "memory": {"num": 2},
+              "output": "",
+              "explanation": "Iteration 1: num is set to start value 2."
+            },
+            {
+              "line": 1,
+              "memory": {"num": 2},
+              "output": "2\n",
+              "explanation": "Prints 2."
+            },
+            {
+              "line": 0,
+              "memory": {"num": 4},
+              "output": "2\n",
+              "explanation": "Iteration 2: num stepped by +2 to 4."
+            },
+            {
+              "line": 1,
+              "memory": {"num": 4},
+              "output": "2\n4\n",
+              "explanation": "Prints 4."
+            },
+            {
+              "line": 0,
+              "memory": {"num": 6},
+              "output": "2\n4\n",
+              "explanation": "Iteration 3: num stepped to 6."
+            },
+            {
+              "line": 1,
+              "memory": {"num": 6},
+              "output": "2\n4\n6\n",
+              "explanation": "Prints 6."
+            },
+            {
+              "line": 0,
+              "memory": {"num": 8},
+              "output": "2\n4\n6\n",
+              "explanation": "Iteration 4: num stepped to 8."
+            },
+            {
+              "line": 1,
+              "memory": {"num": 8},
+              "output": "2\n4\n6\n8\n",
+              "explanation": "Prints 8."
+            },
+            {
+              "line": 2,
+              "memory": {"num": 8},
+              "output": "2\n4\n6\n8\nDone!\n",
+              "explanation": "Next would be 10 (>= 9 stop limit). Loop exits cleanly!"
+            }
+          ],
+          "trace_table": [
+            {"step": 1, "line": "num = 2", "condition": "2 < 9", "result": "Continue", "output": "2"},
+            {"step": 2, "line": "num = 4", "condition": "4 < 9", "result": "Continue", "output": "4"},
+            {"step": 3, "line": "num = 6", "condition": "6 < 9", "result": "Continue", "output": "6"},
+            {"step": 4, "line": "num = 8", "condition": "8 < 9", "result": "Continue", "output": "8"},
+            {"step": 5, "line": "num = 10", "condition": "10 >= 9", "result": "Terminated", "output": "Done!"}
+          ]
+        },
+        "visual_type": "step_visualizer"
+      },
+      {
+        "step_number": 6,
+        "step_name": "A Diagram",
+        "title": "Sequence Traversal Diagram",
+        "text": "The iterator pointer steps along [2, 4, 6, 8] one by one.",
+        "diagram": {
+          "type": "flowchart",
+          "steps": [
+            "Get next item from range(2, 9, 2)",
+            "Has item? (num = item) -> Run body",
+            "No more items? -> Exit loop"
+          ]
+        },
+        "visual_type": "diagram"
+      },
+      {
+        "step_number": 7,
+        "step_name": "What If...?",
+        "title": "Predict First, Then Try",
+        "text": "What does range(5, 5) produce? Predict: The start is 5 and stop is 5. Since start >= stop, the sequence is empty! The loop body runs zero times.",
+        "code": "for i in range(5, 5):\n    print(i)\nprint(\"Empty!\")",
+        "visual_type": "what_if"
+      },
+      {
+        "step_number": 8,
+        "step_name": "Common Mistake",
+        "title": "Expecting range(1, 10) to Include 10",
+        "text": "Mistake: Writing range(1, 10) when you need numbers 1 through 10. Remember that stop is EXCLUSIVE. If you need 10 included, write range(1, 11).",
+        "code": "# WRONG (stops at 9):\n# for i in range(1, 10):\n\n# FIXED (includes 10):\nfor i in range(1, 11):\n    print(i, end=' ')\n# 1 2 3 4 5 6 7 8 9 10",
+        "visual_type": "common_mistake"
+      },
+      {
+        "step_number": 9,
+        "step_name": "Check Yourself",
+        "title": "Test Your Understanding",
+        "text": "Quick checks on for loops and range behavior.",
+        "questions": [
+          {
+            "q": "What sequence is produced by list(range(3, 8, 2))?",
+            "options": ["[3, 5, 7]", "[3, 5, 7, 9]", "[3, 4, 5, 6, 7]", "[2, 4, 6, 8]"],
+            "ans": 0,
+            "why": "Starts at 3, steps by +2 -> 5, then 7. Next is 9 which is >= 8, so it stops."
+          },
+          {
+            "q": "What is the default start value of range(N) if only one argument is provided?",
+            "options": ["1", "0", "-1", "None"],
+            "ans": 1,
+            "why": "range(N) defaults to starting at index 0."
+          }
+        ],
+        "visual_type": "check_yourself"
+      },
+      {
+        "step_number": 10,
+        "step_name": "Skill Recap",
+        "title": "Skill Earned!",
+        "text": "You can now traverse sequences and configure start, stop, and step arguments with range().",
+        "badge_link": "Uses range(start, stop, step) effectively",
+        "visual_type": "recap"
+      }
+    ]
+  },
+  {
+    "id": "l3_t3_break_continue",
+    "title": "Loop Controls: break & continue",
+    "badge_skill": "Controls loop termination with break",
+    "ask_the_logic": {
+      "question": "What is the exact difference between 'break' and 'continue'?",
+      "options": [
+        "'break' exits and terminates the entire loop immediately; 'continue' only skips the rest of the CURRENT iteration and jumps to the next turn.",
+        "'break' pauses for 1 second; 'continue' speeds up.",
+        "They are identical and can be used interchangeably."
+      ],
+      "correct_index": 0,
+      "explanation": "'break' stops the entire loop dead in its tracks. 'continue' aborts only the current pass and advances immediately to the next iteration."
+    },
+    "cards": [
+      {
+        "step_number": 1,
+        "step_name": "The Problem",
+        "title": "Finding a Needle in a Haystack",
+        "text": "You already know how for loops visit every item. But what if you are searching for a user ID among 100,000 records? Once you find the record at item 5, continuing to check the other 99,995 records wastes CPU time! We need an emergency exit.",
+        "code": null,
+        "visual_type": "problem_scenario"
+      },
+      {
+        "step_number": 2,
+        "step_name": "The Idea in One Sentence",
+        "title": "break is an Emergency Exit, continue is a Fast-Forward",
+        "text": "Use break to shatter out of a loop completely when your goal is achieved. Use continue to discard the rest of the current turn and skip to the next iteration.",
+        "code": "for n in range(1, 10):\n    if n == 5:\n        break  # Exit entirely!\n    print(n)",
+        "visual_type": "analogy"
+      },
+      {
+        "step_number": 3,
+        "step_name": "The Rule",
+        "title": "Rules for break and continue",
+        "text": "Both break and continue only affect the innermost enclosing loop. Code directly below continue in the same iteration is ignored.",
+        "code": "break    -> Exits innermost loop immediately\ncontinue -> Skips remaining lines in current iteration",
+        "visual_type": "syntax_card"
+      },
+      {
+        "step_number": 4,
+        "step_name": "Logic First, Code Second",
+        "title": "Side-by-Side: Search and Early Exit",
+        "text": "Search for number 3, print it, and stop searching.",
+        "logic_plan": [
+          "1. Loop through numbers 1 to 5.",
+          "2. If number is 3, print 'Found 3!' and break.",
+          "3. Print each checked number.",
+          "4. Announce 'Search finished'."
+        ],
+        "code": "for n in range(1, 6):\n    if n == 3:\n        print(\"Found 3!\")\n        break\n    print(f\"Checking {n}\")\nprint(\"Search finished\")",
+        "visual_type": "logic_vs_code"
+      },
+      {
+        "step_number": 5,
+        "step_name": "See It Run",
+        "title": "Step-by-Step Visualizer & Trace Table",
+        "text": "Watch the break statement terminate the loop early.",
+        "visualizer": {
+          "lines": [
+            "for n in range(1, 6):",
+            "    if n == 3:",
+            "        print(\"Found 3!\")",
+            "        break",
+            "    print(f\"Checking {n}\")",
+            "print(\"Search finished\")"
+          ],
+          "steps": [
+            {
+              "line": 0,
+              "memory": {"n": 1},
+              "output": "",
+              "explanation": "n = 1. 1 == 3 is False."
+            },
+            {
+              "line": 4,
+              "memory": {"n": 1},
+              "output": "Checking 1\n",
+              "explanation": "Prints 'Checking 1'."
+            },
+            {
+              "line": 0,
+              "memory": {"n": 2},
+              "output": "Checking 1\n",
+              "explanation": "n = 2. 2 == 3 is False."
+            },
+            {
+              "line": 4,
+              "memory": {"n": 2},
+              "output": "Checking 1\nChecking 2\n",
+              "explanation": "Prints 'Checking 2'."
+            },
+            {
+              "line": 0,
+              "memory": {"n": 3},
+              "output": "Checking 1\nChecking 2\n",
+              "explanation": "n = 3. 3 == 3 is TRUE!"
+            },
+            {
+              "line": 2,
+              "memory": {"n": 3},
+              "output": "Checking 1\nChecking 2\nFound 3!\n",
+              "explanation": "Prints 'Found 3!'."
+            },
+            {
+              "line": 3,
+              "memory": {"n": 3},
+              "output": "Checking 1\nChecking 2\nFound 3!\n",
+              "explanation": "BREAK executes! Loop terminates immediately without checking 4 or 5."
+            },
+            {
+              "line": 5,
+              "memory": {"n": 3},
+              "output": "Checking 1\nChecking 2\nFound 3!\nSearch finished\n",
+              "explanation": "Prints 'Search finished'."
+            }
+          ],
+          "trace_table": [
+            {"step": 1, "line": "n = 1", "condition": "1 == 3 (False)", "result": "Normal iteration", "output": "Checking 1"},
+            {"step": 2, "line": "n = 2", "condition": "2 == 3 (False)", "result": "Normal iteration", "output": "Checking 2"},
+            {"step": 3, "line": "n = 3", "condition": "3 == 3 (True)", "result": "break triggered!", "output": "Found 3!"},
+            {"step": 4, "line": "Exit", "condition": "-", "result": "Loop aborted", "output": "Search finished"}
+          ]
+        },
+        "visual_type": "step_visualizer"
+      },
+      {
+        "step_number": 6,
+        "step_name": "A Diagram",
+        "title": "break vs continue Flowchart",
+        "text": "Shows break exiting to end of loop, and continue looping back to start.",
+        "diagram": {
+          "type": "flowchart",
+          "steps": [
+            "Loop condition check",
+            "Hit 'break' -> Jump straight OUT of loop",
+            "Hit 'continue' -> Jump back to next item",
+            "Normal completion"
+          ]
+        },
+        "visual_type": "diagram"
+      },
+      {
+        "step_number": 7,
+        "step_name": "What If...?",
+        "title": "Predict First, Then Try",
+        "text": "What if we replace 'break' with 'continue'? Predict: When n is 3, 'Found 3!' is printed, then continue skips 'Checking 3' and jumps to n = 4, so iterations 4 and 5 STILL run!",
+        "code": "for n in range(1, 5):\n    if n == 3:\n        continue\n    print(n) # Prints 1, 2, 4 (skips 3!)",
+        "visual_type": "what_if"
+      },
+      {
+        "step_number": 8,
+        "step_name": "Common Mistake",
+        "title": "Using continue in while Loop Before Updating Counter",
+        "text": "Mistake: Writing if x == 2: continue in a while loop BEFORE x += 1. Because the update is skipped, x stays 2 forever, freezing in an infinite loop! Increment before continue.",
+        "code": "# WRONG:\n# while x < 5:\n#    if x == 2: continue # x stays 2 forever!\n#    x += 1\n\n# FIXED: Increment before continue in while loops",
+        "visual_type": "common_mistake"
+      },
+      {
+        "step_number": 9,
+        "step_name": "Check Yourself",
+        "title": "Test Your Understanding",
+        "text": "Verify your control flow mastery.",
+        "questions": [
+          {
+            "q": "What is printed by: for i in range(5): if i == 2: break; print(i, end=' ')?",
+            "options": ["0 1", "0 1 2", "0 1 3 4", "2"],
+            "ans": 0,
+            "why": "i=0 prints '0 ', i=1 prints '1 '. At i=2, break immediately stops the loop before printing."
+          },
+          {
+            "q": "What is printed if the code uses continue instead of break?",
+            "options": ["0 1 3 4 ", "0 1 2 3 4 ", "0 1 ", "3 4 "],
+            "ans": 0,
+            "why": "continue skips only i=2, so 0, 1, 3, and 4 are printed."
+          }
+        ],
+        "visual_type": "check_yourself"
+      },
+      {
+        "step_number": 10,
+        "step_name": "Skill Recap",
+        "title": "Skill Earned!",
+        "text": "You can now control loop execution dynamically using break for early exits and continue to filter iterations.",
+        "badge_link": "Controls loop termination with break",
+        "visual_type": "recap"
+      }
+    ]
+  }
+]

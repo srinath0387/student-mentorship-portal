@@ -8,6 +8,7 @@ import {
   Achievement,
   PlacementProfile,
   ScoreBreakdown,
+  LeaderboardEntry,
   BroadcastNotification,
   CreateBroadcastPayload,
   UnregisteredStudent,
@@ -111,37 +112,38 @@ export const api = {
     const cleanParams: Record<string, string> = {};
     if (params) {
       Object.entries(params).forEach(([key, val]) => {
-        if (val !== undefined && val !== null && val !== '') {
+        if (val !== undefined && val !== null && val !== '' && val !== 'All' && val !== '*') {
           cleanParams[key] = val;
         }
       });
     }
 
-    const pageSize = 1000;
+    // Safe page size — 200 rows per request to avoid Lambda 6MB response limit.
+    // At limit=1000, a full institute load (1500+ students with coding profiles) exceeds 6MB → 500 error → UI shows 0.
+    const pageSize = 200;
 
-    // Global query (no dept/search/section/batch filter) — fetch all pages in parallel
+    // Global query (no dept/search/section/batch filter) — paginate sequentially with safe page size
     const isGlobalQuery = (!cleanParams.department || cleanParams.department === 'All') && !cleanParams.search && !cleanParams.section && !cleanParams.batch;
     if (isGlobalQuery) {
       try {
-        const firstPage: StudentProfile[] = await fetchWithAuth(`/students?limit=${pageSize}&offset=0`);
-        if (Array.isArray(firstPage) && firstPage.length === pageSize) {
-          const subsequentPages = await Promise.all([
-            fetchWithAuth(`/students?limit=${pageSize}&offset=1000`).catch(() => []),
-            fetchWithAuth(`/students?limit=${pageSize}&offset=2000`).catch(() => []),
-            fetchWithAuth(`/students?limit=${pageSize}&offset=3000`).catch(() => []),
-            fetchWithAuth(`/students?limit=${pageSize}&offset=4000`).catch(() => []),
-          ]);
-          return [...firstPage, ...subsequentPages.flat()];
+        const allResults: StudentProfile[] = [];
+        let offset = 0;
+        while (true) {
+          const page: StudentProfile[] = await fetchWithAuth(`/students?limit=${pageSize}&offset=${offset}`).catch(() => []);
+          if (!Array.isArray(page) || page.length === 0) break;
+          allResults.push(...page);
+          if (page.length < pageSize) break;
+          offset += pageSize;
+          if (offset > 10000) break; // safety cap
         }
-        return Array.isArray(firstPage) ? firstPage : [];
+        return allResults;
       } catch (err) {
         console.warn('[getAllStudents] Global chunked query notice:', err);
         return [];
       }
     }
 
-    // Dept-scoped or filtered query — use deptPageSize=200 to avoid 6MB Lambda limit.
-    // EEE has 347 students; at limit=1000 the full payload exceeds 6MB — 500 error — UI shows 0.
+    // Dept-scoped or filtered query — same safe page size
     const deptPageSize = 200;
     const baseQuery = new URLSearchParams(cleanParams).toString();
     try {
@@ -204,6 +206,22 @@ export const api = {
   // Student Profile
   getStudentProfile: async (id: string): Promise<StudentProfile> => {
     return fetchWithAuth(`/students/${id}`);
+  },
+
+  // Unified full profile — returns student + all 8 sub-resources in one API call.
+  // Replaces 9 separate calls (getStudentProfile + 8 sub-resource fetches) on the profile page.
+  // Falls back gracefully: if full-profile endpoint fails, callers can fall back to individual endpoints.
+  getStudentFullProfile: async (id: string): Promise<{
+    student: StudentProfile;
+    academics: AcademicRecord[];
+    codingProfiles: CodingProfile[];
+    techSkills: TechSkill[];
+    certifications: Certification[];
+    softSkills: SoftSkill[];
+    achievements: Achievement[];
+    placement: PlacementProfile | null;
+  }> => {
+    return fetchWithAuth(`/students/${id}/full-profile`);
   },
 
   updateStudentProfile: async (id: string, data: Partial<StudentProfile>): Promise<StudentProfile> => {
@@ -320,9 +338,23 @@ export const api = {
     });
   },
 
-  // Employability Score
+  // Employability Score (1000-XP RPG)
   getEmployabilityScore: async (id: string): Promise<ScoreBreakdown> => {
     return fetchWithAuth(`/students/${id}/employability-score`);
+  },
+
+  // Leaderboards
+  getFacultyLeaderboard: async (): Promise<LeaderboardEntry[]> => {
+    return fetchWithAuth(`/leaderboard/faculty`);
+  },
+  getHodLeaderboard: async (filters?: { department?: string; year?: string; section?: string; limit?: number }): Promise<LeaderboardEntry[]> => {
+    const params = new URLSearchParams();
+    if (filters?.department) params.set('department', filters.department);
+    if (filters?.year) params.set('year', filters.year);
+    if (filters?.section) params.set('section', filters.section);
+    if (filters?.limit) params.set('limit', String(filters.limit));
+    const qs = params.toString();
+    return fetchWithAuth(`/leaderboard/hod${qs ? '?' + qs : ''}`);
   },
 
   // Upload Presigned URL
@@ -351,6 +383,74 @@ export const api = {
   deleteStudentDocument: async (rollNo: string, docId: number) => {
     return fetchWithAuth(`/students/${rollNo}/documents/${docId}`, { method: 'DELETE' });
   },
+  // ── Feature 1: At-Risk Students ──────────────────────────────────────────
+  getAtRiskStudents: async (department?: string) => {
+    const q = department ? `?department=${encodeURIComponent(department)}` : ``;
+    return fetchWithAuth(`/hod/at-risk-students${q}`);
+  },
+
+  // ── Feature 4: Mentor Meeting Log ─────────────────────────────────────────
+  getMentorMeetings: async (params: { student_id?: string; faculty_email?: string }) => {
+    const q = new URLSearchParams();
+    if (params.student_id) q.set('student_id', params.student_id);
+    if (params.faculty_email) q.set('faculty_email', params.faculty_email);
+    return fetchWithAuth(`/mentor-meetings?${q.toString()}`);
+  },
+  createMentorMeeting: async (data: {
+    roll_number: string; student_name?: string; meeting_date: string; topics: string;
+    action_items?: string; next_meeting?: string; tag?: string;
+  }) => {
+    return fetchWithAuth('/mentor-meetings', { method: 'POST', body: JSON.stringify(data) });
+  },
+  deleteMentorMeeting: async (id: number) => {
+    return fetchWithAuth(`/mentor-meetings/${id}`, { method: 'DELETE' });
+  },
+  getDeptMeetingLogs: async (department?: string): Promise<any[]> => {
+    const params = department ? `?department=${encodeURIComponent(department)}` : '';
+    return fetchWithAuth(`/mentor-meetings/department${params}`);
+  },
+  getMentoringCompliance: async (department?: string) => {
+    const q = department ? `?department=${encodeURIComponent(department)}` : ``;
+    return fetchWithAuth(`/hod/mentoring-compliance${q}`);
+  },
+
+  // ── Feature 5: Broadcast Notifications ────────────────────────────────────
+  broadcastNotice: async (data: {
+    title: string; message: string; target_department?: string; target_year?: string;
+    target_roles?: string[]; priority?: string; expires_at?: string;
+  }) => {
+    return fetchWithAuth('/notices/broadcast', { method: 'POST', body: JSON.stringify(data) });
+  },
+  getBroadcastNotices: async (department?: string) => {
+    const q = department ? `?department=${encodeURIComponent(department)}` : ``;
+    return fetchWithAuth(`/notices/broadcast${q}`);
+  },
+
+  // ── Feature 6: Student Placement Tracker ──────────────────────────────────
+  getStudentPlacements: async (params?: { roll_number?: string; department?: string; verified?: boolean }) => {
+    const q = new URLSearchParams();
+    if (params?.roll_number) q.set('roll_number', params.roll_number);
+    if (params?.department) q.set('department', params.department);
+    if (params?.verified) q.set('verified', 'true');
+    return fetchWithAuth(`/student-placements?${q.toString()}`);
+  },
+  createStudentPlacement: async (data: {
+    company_name: string; role_title: string; package_lpa?: number; offer_date?: string;
+    placement_type?: string; roll_number?: string;
+  }) => {
+    return fetchWithAuth('/student-placements', { method: 'POST', body: JSON.stringify(data) });
+  },
+  verifyPlacement: async (id: number) => {
+    return fetchWithAuth(`/student-placements/${id}/verify`, { method: 'PATCH', body: JSON.stringify({}) });
+  },
+  deleteStudentPlacement: async (id: number) => {
+    return fetchWithAuth(`/student-placements/${id}`, { method: 'DELETE' });
+  },
+  getHodPlacementSummary: async (department?: string) => {
+    const q = department ? `?department=${encodeURIComponent(department)}` : ``;
+    return fetchWithAuth(`/hod/placement-summary${q}`);
+  },
+
   getUploadUrl: async (id: string, fileName: string, uploadType: string) => {
     return fetchWithAuth(`/students/${id}/upload-url?fileName=${encodeURIComponent(fileName)}&uploadType=${uploadType}`);
   },
@@ -426,7 +526,9 @@ export const api = {
 
   // Get all faculty with mentee counts (admin/HOD)
   getAllFaculty: async (department?: string): Promise<any[]> => {
-    return fetchWithAuth(`/faculty${department && department !== 'All' ? `?department=${encodeURIComponent(department)}` : ''}`);
+    // BUG-01 fix: pass department=All explicitly to bypass per-dept scoping on backend
+    const param = department ? `?department=${encodeURIComponent(department)}` : '?department=All';
+    return fetchWithAuth(`/faculty${param}`);
   },
 
   // Verify student password set by admin if Cognito rejects credentials
@@ -838,6 +940,21 @@ export const api = {
       body: JSON.stringify(data),
     });
   },
+
+  // Faculty Workload
+  getWorkload: async (params?: { department?: string; semester?: string; section?: string; search?: string; status?: string }) => {
+    const q = params ? '?' + new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([,v]) => v && v !== 'All'))).toString() : '';
+    return fetchWithAuth(`/attendance/workload${q}`);
+  },
+  getWorkloadSettings: async () => fetchWithAuth('/attendance/workload/settings'),
+  saveWorkloadSettings: async (designation: string, min_hours_week: number, max_hours_week: number) =>
+    fetchWithAuth('/attendance/workload/settings', { method: 'POST', body: JSON.stringify({ designation, min_hours_week, max_hours_week }) }),
+
+  // Timetable Clash Check
+  checkTimetableClash: async (payload: {
+    semester_label: string; department: string; section: string; day_of_week: string;
+    period_start: number; num_periods?: number; faculty_email?: string; room_no?: string; exclude_id?: string;
+  }) => fetchWithAuth('/attendance/timetable/check-clash', { method: 'POST', body: JSON.stringify(payload) }),
 
   getAttendanceSessions: async (allotmentId?: string, dateFrom?: string, dateTo?: string) => {
     const params = new URLSearchParams();
@@ -1538,6 +1655,99 @@ export const api = {
   ): Promise<{ total: number; department: string; students: UnregisteredStudent[] }> => {
     const q = department && department !== 'All' ? `?department=${encodeURIComponent(department)}` : '';
     return fetchWithAuth(`/admin/unregistered-students${q}`);
+  },
+
+  async getNotPostedRange(params: { from: string; to: string; department?: string; semester?: string; section?: string }) {
+    const p = new URLSearchParams();
+    p.set('from', params.from);
+    p.set('to', params.to);
+    if (params.department) p.set('department', params.department);
+    if (params.semester) p.set('semester', params.semester);
+    if (params.section) p.set('section', params.section);
+    return fetchWithAuth(`/attendance/not-posted?${p.toString()}`);
+  },
+
+  async submitNoClassRequest(data: { date: string; semester_label: string; department: string; section: string; subject_name: string; period_start: number; reason: string }) {
+    return fetchWithAuth('/attendance/no-class-request', { method: 'POST', body: JSON.stringify(data) });
+  },
+
+  async getNoClassRequests(status?: string) {
+    const q = status ? `?status=${status}` : '';
+    return fetchWithAuth(`/attendance/no-class-requests${q}`);
+  },
+
+  async approveNoClassRequest(id: number) {
+    return fetchWithAuth(`/attendance/no-class-requests/${id}/approve`, { method: 'PATCH' });
+  },
+
+  async rejectNoClassRequest(id: number, reject_reason: string) {
+    return fetchWithAuth(`/attendance/no-class-requests/${id}/reject`, { method: 'PATCH', body: JSON.stringify({ reject_reason }) });
+  },
+
+  async sendAttendanceReminder(data: { faculty_email: string; date: string; period_start: number; subject_name: string; section: string; semester_label: string }) {
+    return fetchWithAuth('/attendance/send-reminder', { method: 'POST', body: JSON.stringify(data) });
+  },
+
+  async getMonthlyAttendanceReport(params: { month: string; department?: string; semester?: string }) {
+    const p = new URLSearchParams();
+    p.set('month', params.month);
+    if (params.department) p.set('department', params.department);
+    if (params.semester) p.set('semester', params.semester);
+    return fetchWithAuth(`/attendance/monthly-report?${p.toString()}`);
+  },
+
+  // ── Faculty API Score ──────────────────────────────────────────────────────
+  async getFacultyApiScore(email: string) {
+    return fetchWithAuth(`/faculty/${encodeURIComponent(email)}/api-score`);
+  },
+
+  async getFacultyApiScores(params?: { department?: string }) {
+    const q = params?.department ? `?department=${encodeURIComponent(params.department)}` : '';
+    return fetchWithAuth(`/faculty/api-scores${q}`);
+  },
+
+  async submitFacultyDuty(email: string, data: {
+    duty_type: string;
+    title: string;
+    description?: string;
+    duty_date: string;
+    proof_url?: string;
+  }) {
+    return fetchWithAuth(`/faculty/${encodeURIComponent(email)}/api-duties`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async getFacultyDuties(email: string) {
+    return fetchWithAuth(`/faculty/${encodeURIComponent(email)}/api-duties`);
+  },
+
+  async approveFacultyDuty(id: number, points_awarded?: number) {
+    return fetchWithAuth(`/faculty/api-duties/${id}/approve`, {
+      method: 'PATCH',
+      body: JSON.stringify({ points_awarded }),
+    });
+  },
+
+  async rejectFacultyDuty(id: number, reject_reason: string) {
+    return fetchWithAuth(`/faculty/api-duties/${id}/reject`, {
+      method: 'PATCH',
+      body: JSON.stringify({ reject_reason }),
+    });
+  },
+
+  async getPendingFacultyDuties() {
+    return fetchWithAuth('/faculty/api-duties/pending');
+  },
+
+  // ── Bulk Document ZIP Download ─────────────────────────────────────────────
+  async getDocumentZipUrls(params: { academic_year?: string; department?: string; doc_type?: string }) {
+    const p = new URLSearchParams();
+    if (params.academic_year) p.set('academic_year', params.academic_year);
+    if (params.department) p.set('department', params.department);
+    if (params.doc_type) p.set('doc_type', params.doc_type);
+    return fetchWithAuth(`/documents/download-zip-urls?${p.toString()}`);
   },
 };
 

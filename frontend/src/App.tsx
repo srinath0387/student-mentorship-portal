@@ -27,6 +27,12 @@ const FacultyManagementPage = lazy(() => import('./features/admin/FacultyManagem
 const MyMentorPage = lazy(() => import('./features/mentor/MyMentorPage'));
 const AttendancePage = lazy(() => import('./features/attendance/AttendancePage').then(m => ({ default: m.AttendancePage })));
 const OversightDashboardPage = lazy(() => import('./features/oversight/OversightDashboardPage'));
+const FacultyWorkloadPage = lazy(() => import('./features/attendance/workload/FacultyWorkloadPage').then(m => ({ default: m.FacultyWorkloadPage })));
+const AttendanceReportsPage = lazy(() => import('./features/attendance/reports/AttendanceReportsPage').then(m => ({ default: m.AttendanceReportsPage })));
+const DocumentsManagementPage = lazy(() => import('./features/documents/DocumentsManagementPage').then(m => ({ default: m.DocumentsManagementPage })));
+const FacultyApiPage = lazy(() => import('./features/faculty/FacultyApiPage').then(m => ({ default: m.FacultyApiPage })));
+const AcademicDutiesPage = lazy(() => import('./features/academic-duties/AcademicDutiesPage'));
+const MyDutiesPage = lazy(() => import('./features/academic-duties/MyDutiesPage'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -303,6 +309,18 @@ export const App: React.FC = () => {
               <Route path="/mentor" element={<MyMentorPage />} />
               <Route path="/coding-analytics" element={<CodingAnalyticsPage />} />
               <Route path="/attendance" element={<AttendancePage />} />
+              <Route path="/attendance/workload" element={<FacultyWorkloadPage />} />
+              <Route path="/attendance/reports" element={<AttendanceReportsPage />} />
+              <Route path="/documents" element={<DocumentsManagementPage />} />
+
+              {/* Faculty API leaderboard — HOD & Admin only */}
+              <Route element={<ProtectedRoute allowedRoles={['hod', 'admin', 'director', 'principal', 'management', 'program_chair']} />}>
+                <Route path="/faculty/api" element={<FacultyApiPage />} />
+                <Route path="/academic-duties" element={<AcademicDutiesPage />} />
+              </Route>
+              <Route element={<ProtectedRoute allowedRoles={['faculty', 'hod', 'admin', 'coordinator', 'director', 'principal']} />}>
+                <Route path="/my-duties" element={<MyDutiesPage />} />
+              </Route>
 
               {/* Oversight (View-Only) routes */}
               <Route element={<ProtectedRoute allowedRoles={['director', 'principal', 'management', 'program_chair', 'admin']} />}>

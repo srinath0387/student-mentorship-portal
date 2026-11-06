@@ -1,9 +1,11 @@
 import React, { useState, useMemo } from 'react';
+
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as XLSX from 'xlsx';
 import { BookOpen, Users, Clock, Trash2, Plus, Upload, Search, Edit2, Check, X, RotateCcw } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { VALID_DEPARTMENT_NAMES } from '../../../lib/validation/auth';
+import { useAuth } from '../../../context/AuthContext';
 
 const DEPARTMENTS = VALID_DEPARTMENT_NAMES;
 const SEMESTERS = ['1-1','1-2','2-1','2-2','3-1','3-2','4-1','4-2'];
@@ -29,11 +31,17 @@ const StatusMsg:React.FC<{msg:{type:string;message:string}|null}> = ({msg}) => {
 export const AttendanceSetupPage: React.FC = () => {
   const [tab, setTab] = useState<TabId>('subjects');
   const qc = useQueryClient();
+  const { user } = useAuth();
+  // isSuperAdmin = truly global admin (department='*'); dept admins (admin-EEE) are scoped like HOD
+  const isSuperAdmin = user?.isSuperAdmin === true || user?.department === '*';
+  const isAdmin = isSuperAdmin; // kept as alias for JSX conditionals below
+  const userDept = (isSuperAdmin ? '' : user?.department) || 'CSE';
 
   // ── TAB 1: SUBJECT MASTER ──────────────────────────────────────────────────
   const [subSearch, setSubSearch] = useState('');
   const [subSemFilter, setSubSemFilter] = useState('');
   const [subDeptFilter, setSubDeptFilter] = useState('');
+  // Lock non-admin to their own dept (populated via useEffect below)
   const [subForm, setSubForm] = useState({ semester_label:'', department:'CSE', subject_code:'', subject_name:'', short_name:'', subject_type:'Theory' as 'Theory'|'Lab', regulation:'R22' });
   const [subStatus, setSubStatus] = useState<{type:string;message:string}|null>(null);
   const [editingSubId, setEditingSubId] = useState<string|null>(null);
@@ -44,7 +52,7 @@ export const AttendanceSetupPage: React.FC = () => {
   const { data: rawMasterSubjects = [], refetch: refetchMaster, isLoading: isMasterLoading, error: masterError } = useQuery({
     queryKey: ['masterSubjects', masterFetchTs],
     queryFn: async () => {
-      const result = await api.getMasterSubjects();
+      const result = await api.getMasterSubjects(undefined, isSuperAdmin ? undefined : userDept);
       if (Array.isArray(result) && result.length > 0) {
         setLocalSubjects(result);
       }
@@ -101,7 +109,7 @@ export const AttendanceSetupPage: React.FC = () => {
 
   // ── TAB 2: FACULTY ALLOTMENT ───────────────────────────────────────────────
   const [allotSem, setAllotSem] = useState('');
-  const [allotDept, setAllotDept] = useState('CSE');
+  const [allotDept, setAllotDept] = useState('CSE'); // synced to userDept for non-admin via useEffect
   const [allotSection, setAllotSection] = useState('A');
   const [allotSubjectId, setAllotSubjectId] = useState('');
   const [allotFaculty, setAllotFaculty] = useState('');
@@ -128,19 +136,29 @@ export const AttendanceSetupPage: React.FC = () => {
 
   const handleDeleteAllotment = async (id:string) => {
     if(!window.confirm('Remove this allotment?')) return;
-    await api.deleteAllotment(id);
-    qc.invalidateQueries({queryKey:['attendanceAllotments']});
+    try {
+      await api.deleteAllotment(id);
+      qc.invalidateQueries({queryKey:['attendanceAllotments']});
+      setAllotStatus({type:'success',message:'Allotment removed.'});
+    } catch(err:any) { setAllotStatus({type:'error',message:err.message||'Failed to delete allotment.'}); }
   };
 
   const handleBulkAllotUpload = (e:React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if(!file) return;
     const reader = new FileReader();
     reader.onload = async (evt) => {
-      const wb = XLSX.read(evt.target?.result,{type:'binary'});
-      const rows:any[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-      await api.uploadAllotments(allotSem, rows.map(r=>({ subject_name:r['Subject Name']||r['subject_name']||'', subject_type:(r['Subject Type']||'Theory').toLowerCase().includes('lab')?'Lab':'Theory', faculty_email:r['Faculty Email']||r['faculty_email']||'', faculty_name:r['Faculty Name']||r['faculty_name']||'', section:r['Section']||allotSection, department:allotDept })));
-      qc.invalidateQueries({queryKey:['attendanceAllotments']});
-      setAllotStatus({type:'success',message:`${rows.length} allotments imported.`});
+      try {
+        const wb = XLSX.read(evt.target?.result,{type:'binary'});
+        const rows:any[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+        if(rows.length===0){setAllotStatus({type:'error',message:'No rows found in the uploaded file.'});return;}
+        const result = await api.uploadAllotments(allotSem, rows.map(r=>({ subject_name:r['Subject Name']||r['subject_name']||'', subject_type:(r['Subject Type']||'Theory').toLowerCase().includes('lab')?'Lab':'Theory', faculty_email:r['Faculty Email']||r['faculty_email']||'', faculty_name:r['Faculty Name']||r['faculty_name']||'', section:r['Section']||allotSection, department:allotDept })));
+        qc.invalidateQueries({queryKey:['attendanceAllotments']});
+        // BUG-14 fix: show real imported/error counts from backend response
+        const imported = result?.importedCount ?? result?.addedCount ?? rows.length;
+        const errCount = result?.errorsCount ?? 0;
+        setAllotStatus({type:errCount>0?'error':'success',message:`${imported} allotments imported${errCount>0?`, ${errCount} failed — check console for details`:'.'}` });
+        if(errCount>0 && result?.errors) console.warn('[Allotment Upload Errors]', result.errors);
+      } catch(err:any){setAllotStatus({type:'error',message:err.message||'Bulk upload failed.'});}
     };
     reader.readAsBinaryString(file);
   };
@@ -170,18 +188,35 @@ export const AttendanceSetupPage: React.FC = () => {
     const file = e.target.files?.[0]; if(!file||!rosterAllotId) return;
     const reader = new FileReader();
     reader.onload = async (evt) => {
-      const wb = XLSX.read(evt.target?.result,{type:'binary'});
-      const rows:any[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-      await api.uploadRoster(rosterAllotId, rows.map(r=>({ roll_number:String(r['Roll Number']||r['roll_number']||r['Roll No']||'').trim().toUpperCase(), student_name:r['Student Name']||r['student_name']||'', joining_date:r['Joining Date']||undefined })));
-      qc.invalidateQueries({queryKey:['attendanceRoster']});
-      setRosterStatus({type:'success',message:`${rows.length} students enrolled.`});
+      try {
+        const wb = XLSX.read(evt.target?.result,{type:'binary'});
+        const rows:any[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+        if(rows.length===0){setRosterStatus({type:'error',message:'No rows found in the uploaded file.'});return;}
+        const result = await api.uploadRoster(rosterAllotId, rows.map(r=>({ roll_number:String(r['Roll Number']||r['roll_number']||r['Roll No']||'').trim().toUpperCase(), student_name:r['Student Name']||r['student_name']||'', joining_date:r['Joining Date']||undefined })));
+        qc.invalidateQueries({queryKey:['attendanceRoster']});
+        // BUG-14 fix: show real added/error counts from backend response
+        const added = result?.addedCount ?? rows.length;
+        const errCount = result?.errorsCount ?? 0;
+        setRosterStatus({type:errCount>0?'error':'success',message:`${added} students enrolled${errCount>0?`, ${errCount} failed — check console for details`:'.'}` });
+        if(errCount>0 && result?.errors) console.warn('[Roster Upload Errors]', result.errors);
+      } catch(err:any){setRosterStatus({type:'error',message:err.message||'Bulk roster upload failed.'});}
     };
     reader.readAsBinaryString(file);
   };
 
   // ── TAB 4: TIMETABLE ──────────────────────────────────────────────────────
   const [ttSem, setTtSem] = useState('');
-  const [ttDept, setTtDept] = useState('CSE');
+  const [ttDept, setTtDept] = useState('CSE'); // synced to userDept for non-admin via useEffect
+
+  // ── Dept scoping: only super-admin (dept='*') sees all departments ─────────
+  React.useEffect(() => {
+    if (!isSuperAdmin && userDept) {
+      setSubDeptFilter(userDept);
+      setAllotDept(userDept);
+      setTtDept(userDept);
+    }
+  }, [isSuperAdmin, userDept]);
+
   const [ttSection, setTtSection] = useState('A');
   const [ttDay, setTtDay] = useState('Monday');
   const [ttPeriod, setTtPeriod] = useState(1);
@@ -190,6 +225,13 @@ export const AttendanceSetupPage: React.FC = () => {
   const [ttNumPeriods, setTtNumPeriods] = useState(1);
   const [ttRoom, setTtRoom] = useState('');
   const [ttStatus, setTtStatus] = useState<{type:string;message:string}|null>(null);
+  const [clashResult, setClashResult] = useState<any>(null);
+  const [clashLoading, setClashLoading] = useState(false);
+  const [overrideReason, setOverrideReason] = useState('');
+
+  // BUG-11 fix: use a separate allotments query keyed on ttSem/ttDept (independent of Tab 2 state)
+  const {data:rawTtAllotments=[]} = useQuery({ queryKey:['ttAllotments',ttSem,ttDept], queryFn:()=>api.getAllotments(ttSem||undefined,ttDept||undefined).catch(()=>[]) });
+  const ttAllotments = Array.isArray(rawTtAllotments)?rawTtAllotments:[];
 
   const {data:rawTT=[]} = useQuery({ queryKey:['attendanceTimetable',ttSem,ttDept,ttSection], queryFn:()=>api.getTimetable({semester:ttSem||undefined,department:ttDept||undefined,section:ttSection||undefined}).catch(()=>[]) });
   const timetable = Array.isArray(rawTT)?rawTT:[];
@@ -197,7 +239,19 @@ export const AttendanceSetupPage: React.FC = () => {
   const ttGrid = useMemo(()=>{
     const grid:Record<string,Record<number,any>> = {};
     DAYS.forEach(d=>{ grid[d]={}; PERIODS.forEach(p=>{ grid[d][p]=null; }); });
-    timetable.filter((t:any)=>(!ttSem||t.semester_label===ttSem)&&(!ttSection||t.section===ttSection)).forEach((t:any)=>{ if(grid[t.day_of_week]) grid[t.day_of_week][t.period_start]=t; });
+    timetable
+      .filter((t:any)=>(!ttSem||t.semester_label===ttSem)&&(!ttSection||t.section===ttSection))
+      .forEach((t:any)=>{
+        if(!grid[t.day_of_week]) return;
+        const span = Math.max(1, parseInt(t.num_periods||1));
+        // Store slot at period_start with its span
+        grid[t.day_of_week][t.period_start] = { ...t, _span: span };
+        // Mark subsequent spanned cells so renderer skips them
+        for(let s=1; s<span; s++){
+          const p = t.period_start + s;
+          if(p<=7) grid[t.day_of_week][p] = { _spanned: true };
+        }
+      });
     return grid;
   },[timetable,ttSem,ttSection]);
 
@@ -211,6 +265,35 @@ export const AttendanceSetupPage: React.FC = () => {
       setTtSubject(''); setTtFacEmail(''); setTtRoom('');
     } catch(err:any) { setTtStatus({type:'error',message:err.message||'Failed.'}); }
   };
+
+  // Auto clash-check when faculty/day/period/room changes
+  React.useEffect(() => {
+    if (!ttSem || !ttDept || !ttSection || !ttDay || !ttPeriod || !ttFacEmail) {
+      setClashResult(null);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setClashLoading(true);
+      try {
+        const result = await (api as any).checkTimetableClash({
+          semester_label: ttSem,
+          department: ttDept,
+          section: ttSection,
+          day_of_week: ttDay,
+          period_start: Number(ttPeriod),
+          num_periods: Number(ttNumPeriods) || 1,
+          faculty_email: ttFacEmail,
+          room_no: ttRoom || undefined,
+        });
+        setClashResult(result);
+      } catch {
+        setClashResult(null);
+      } finally {
+        setClashLoading(false);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [ttSem, ttDept, ttSection, ttDay, ttPeriod, ttNumPeriods, ttFacEmail, ttRoom]);
 
   const TABS: {id:TabId;label:string;icon:React.ReactNode}[] = [
     {id:'subjects',label:'📚 Subject Master',icon:<BookOpen className="w-3.5 h-3.5"/>},
@@ -240,10 +323,13 @@ export const AttendanceSetupPage: React.FC = () => {
               <select value={subForm.semester_label} onChange={e=>setSubForm(f=>({...f,semester_label:e.target.value}))} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold" required>
                 <option value="">Class *</option>{SEMESTERS.map(s=><option key={s}>{s}</option>)}
               </select>
+              {isAdmin ? (
               <select value={subForm.department} onChange={e=>setSubForm(f=>({...f,department:e.target.value}))} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold" required>
-                <option value="">Department *</option>
                 {DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
               </select>
+            ) : (
+              <span className="px-3 py-1.5 text-xs font-bold rounded-xl bg-brand-primary/10 text-brand-primary border border-brand-primary/20">{userDept}</span>
+            )}
               <input value={subForm.subject_code} onChange={e=>setSubForm(f=>({...f,subject_code:e.target.value}))} placeholder="Subject Code *" className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none" required/>
               <input value={subForm.subject_name} onChange={e=>setSubForm(f=>({...f,subject_name:e.target.value}))} placeholder="Subject Title *" className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none" required/>
               <input value={subForm.short_name} onChange={e=>setSubForm(f=>({...f,short_name:e.target.value}))} placeholder="Short Name" className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none"/>
@@ -266,9 +352,13 @@ export const AttendanceSetupPage: React.FC = () => {
               <select value={subSemFilter} onChange={e=>setSubSemFilter(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
                 <option value="">All Classes</option>{SEMESTERS.map(s=><option key={s}>{s}</option>)}
               </select>
-              <select value={subDeptFilter} onChange={e=>setSubDeptFilter(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
-                <option value="">All Departments</option>{DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
-              </select>
+              {isAdmin ? (
+                <select value={subDeptFilter} onChange={e=>setSubDeptFilter(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
+                  <option value="">All Departments</option>{DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
+                </select>
+              ) : (
+                <span className="px-3 py-1.5 text-xs font-bold rounded-xl bg-brand-primary/10 text-brand-primary border border-brand-primary/20">{userDept}</span>
+              )}
               <div className="ml-auto flex items-center gap-3 text-xs">
                 <button type="button" onClick={()=>{setMasterFetchTs(Date.now());refetchMaster();}} className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-borderLine hover:bg-surface-2 text-textSecondary font-bold text-[11px]" title="Refresh Catalog">
                   <RotateCcw className={`w-3 h-3 ${isMasterLoading?'animate-spin text-brand-primary':''}`}/> Refresh
@@ -317,9 +407,13 @@ export const AttendanceSetupPage: React.FC = () => {
               <select value={allotSem} onChange={e=>setAllotSem(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
                 <option value="">All Classes</option>{SEMESTERS.map(s=><option key={s}>{s}</option>)}
               </select>
-              <select value={allotDept} onChange={e=>setAllotDept(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
-                {DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
-              </select>
+{isAdmin ? (
+                <select value={allotDept} onChange={e=>setAllotDept(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
+                  <option value="">All Departments</option>{DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
+                </select>
+              ) : (
+                <span className="px-3 py-1.5 text-xs font-bold rounded-xl bg-brand-primary/10 text-brand-primary border border-brand-primary/20">{userDept}</span>
+              )}
               <select value={allotSection} onChange={e=>setAllotSection(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none">
                 {SECTIONS.map(s=><option key={s}>{s}</option>)}
               </select>
@@ -329,7 +423,8 @@ export const AttendanceSetupPage: React.FC = () => {
               </select>
               <select value={allotFaculty} onChange={e=>setAllotFaculty(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none" required>
                 <option value="">Select Faculty *</option>
-                {facultyList.map((f:any)=><option key={f.email} value={f.email}>{f.name||f.email}</option>)}
+                {/* BUG-01 fix: show all departments' faculty with dept label */}
+                {facultyList.map((f:any)=><option key={f.email} value={f.email}>{f.name||f.email} {f.department ? `(${f.department})` : ''}</option>)}
               </select>
               <button type="submit" className="px-4 py-2 bg-brand-primary text-white font-bold text-xs rounded-xl hover:opacity-90">Allot</button>
             </div>
@@ -389,10 +484,27 @@ export const AttendanceSetupPage: React.FC = () => {
                   <input type="date" value={joiningDate} onChange={e=>setJoiningDate(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none"/>
                   <button type="submit" className="flex items-center justify-center gap-1.5 px-4 py-2 bg-brand-primary text-white font-bold text-xs rounded-xl hover:opacity-90"><Plus className="w-3.5 h-3.5"/>Add Student</button>
                 </form>
-                <label className="flex items-center gap-2 px-3 py-2 border border-dashed border-borderLine rounded-xl cursor-pointer hover:bg-surface-2 text-xs font-bold text-textSecondary w-fit">
-                  <Upload className="w-3.5 h-3.5"/>Bulk Upload Excel
-                  <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleBulkRosterUpload}/>
-                </label>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <label className="flex items-center gap-2 px-3 py-2 border border-dashed border-borderLine rounded-xl cursor-pointer hover:bg-surface-2 text-xs font-bold text-textSecondary w-fit">
+                    <Upload className="w-3.5 h-3.5"/>Bulk Upload Excel
+                    <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleBulkRosterUpload}/>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={()=>{
+                      const ws = XLSX.utils.json_to_sheet([
+                        {'Roll Number':'22BD1A0501','Student Name':'Student One','Joining Date':''},
+                        {'Roll Number':'22BD1A0502','Student Name':'Student Two','Joining Date':''},
+                      ]);
+                      const wb = XLSX.utils.book_new();
+                      XLSX.utils.book_append_sheet(wb, ws, 'Roster');
+                      XLSX.writeFile(wb, 'student_roster_template.xlsx');
+                    }}
+                    className="flex items-center gap-2 px-3 py-2 border border-emerald-400 text-emerald-700 dark:text-emerald-400 rounded-xl hover:bg-emerald-50 dark:hover:bg-emerald-950/30 text-xs font-bold w-fit"
+                  >
+                    ⬇ Download Template
+                  </button>
+                </div>
                 <StatusMsg msg={rosterStatus}/>
                 <div className="overflow-x-auto border border-borderLine rounded-xl">
                   <table className="w-full text-xs text-left">
@@ -427,9 +539,13 @@ export const AttendanceSetupPage: React.FC = () => {
               <select value={ttSem} onChange={e=>setTtSem(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
                 <option value="">Class *</option>{SEMESTERS.map(s=><option key={s} value={s}>{s}</option>)}
               </select>
-              <select value={ttDept} onChange={e=>setTtDept(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
-                {DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
-              </select>
+              {isAdmin ? (
+                <select value={ttDept} onChange={e=>setTtDept(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
+                  <option value="">All Departments</option>{DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
+                </select>
+              ) : (
+                <span className="px-3 py-1.5 text-xs font-bold rounded-xl bg-brand-primary/10 text-brand-primary border border-brand-primary/20">{userDept}</span>
+              )}
               <select value={ttSection} onChange={e=>setTtSection(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
                 {SECTIONS.map(s=><option key={s} value={s}>Section {s}</option>)}
               </select>
@@ -472,7 +588,7 @@ export const AttendanceSetupPage: React.FC = () => {
                   {ttSubject ? 'Select Faculty *' : '— Pick subject first —'}
                 </option>
                 {ttSubject
-                  ? allotments
+                  ? ttAllotments
                       .filter((a: any) =>
                         a.subject_name?.toLowerCase().trim() === ttSubject.toLowerCase().trim() &&
                         a.faculty_email
@@ -494,9 +610,66 @@ export const AttendanceSetupPage: React.FC = () => {
                 }
               </select>
 
-              <button type="submit" className="col-span-2 md:col-span-4 lg:col-span-8 px-4 py-2.5 bg-brand-primary text-white font-bold text-xs rounded-xl hover:opacity-90 transition-opacity">Save Timetable Slot</button>
+              <input
+                value={ttRoom}
+                onChange={e => setTtRoom(e.target.value)}
+                placeholder="Room / Lab (optional)"
+                className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold"
+              />
+
+              <button type="submit" disabled={clashLoading || (clashResult?.clashes?.some((c: any) => c.severity === 'hard') && !overrideReason)} className="col-span-2 md:col-span-4 lg:col-span-8 px-4 py-2.5 bg-brand-primary text-white font-bold text-xs rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50">Save Timetable Slot</button>
             </div>
             <StatusMsg msg={ttStatus}/>
+
+              {/* Clash Detection Panel */}
+              {clashLoading && (
+                <div className="mt-3 p-3 rounded-xl border border-borderLine bg-surface text-xs text-muted flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                  Checking for clashes…
+                </div>
+              )}
+              {!clashLoading && clashResult && (
+                <div className={`mt-3 p-3 rounded-xl border text-xs ${
+                  clashResult.clashes?.some((c: any) => c.severity === 'hard')
+                    ? 'border-red-300 bg-red-50 dark:bg-red-950/20'
+                    : clashResult.clashes?.length > 0
+                    ? 'border-amber-300 bg-amber-50 dark:bg-amber-950/20'
+                    : 'border-green-300 bg-green-50 dark:bg-green-950/20'
+                }`}>
+                  {clashResult.clashes?.length === 0 ? (
+                    <p className="text-green-700 dark:text-green-400 font-semibold">✓ No clashes — slot is free</p>
+                  ) : (
+                    <>
+                      <p className="font-bold text-red-700 dark:text-red-400 mb-1">Clash Detected</p>
+                      <ul className="space-y-1 mb-2">
+                        {clashResult.clashes.map((c: any, i: number) => (
+                          <li key={i} className={`flex gap-2 ${c.severity === 'hard' ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                            <span>{c.severity === 'hard' ? '🔴' : '🟡'}</span>
+                            <span><strong>{c.type}:</strong> {c.message}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      {clashResult.clashes?.some((c: any) => c.severity === 'hard') && (
+                        <div className="mt-2">
+                          <p className="text-xs text-muted mb-1">Override reason (required to save despite warning):</p>
+                          <input
+                            value={overrideReason}
+                            onChange={e => setOverrideReason(e.target.value)}
+                            placeholder="Reason for override…"
+                            className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold"
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
+                  {clashResult.free_periods?.length > 0 && (
+                    <p className="mt-2 text-xs text-muted">Free periods for this faculty today: {clashResult.free_periods.join(', ')}</p>
+                  )}
+                  {clashResult.free_faculty?.length > 0 && (
+                    <p className="mt-1 text-xs text-muted">Free faculty for this slot: {clashResult.free_faculty.slice(0, 3).join(', ')}</p>
+                  )}
+                </div>
+              )}
           </form>
 
           {/* Timetable Grid */}
@@ -531,12 +704,16 @@ export const AttendanceSetupPage: React.FC = () => {
                       <td className="px-4 py-2.5 font-bold bg-surface-2 border-r border-borderLine">{day}</td>
                       {PERIODS.map(period=>{
                         const slot = ttGrid[day]?.[period];
+                        // Skip cells that are covered by a multi-period colSpan
+                        if(slot?._spanned) return null;
+                        const span = slot?._span || 1;
                         return (
-                          <td key={period} className="px-2 py-2 border-r border-borderLine align-top">
-                            {slot ? (
-                              <div className="bg-brand-soft border border-brand-primary/20 rounded-xl p-2 space-y-1 relative group">
+                          <td key={period} colSpan={span} className="px-2 py-2 border-r border-borderLine align-top">
+                            {slot && !slot._spanned ? (
+                              <div className="bg-brand-soft border border-brand-primary/20 rounded-xl p-2 space-y-1 relative group h-full">
                                 <div className="text-[10px] font-black text-brand-primary truncate">{slot.subject_name}</div>
                                 <div className="text-[9px] text-textSecondary truncate">{slot.faculty_email}</div>
+                                {span > 1 && <div className="text-[9px] font-bold text-purple-600">Lab ({span} Hrs)</div>}
                                 <button onClick={async()=>{if(!window.confirm('Delete slot?'))return;await api.deleteTimetableEntry(slot.id);qc.invalidateQueries({queryKey:['attendanceTimetable']});}} className="absolute top-1 right-1 text-rose-400 hover:text-rose-600 opacity-0 group-hover:opacity-100 transition-opacity">
                                   <X className="w-3 h-3"/>
                                 </button>

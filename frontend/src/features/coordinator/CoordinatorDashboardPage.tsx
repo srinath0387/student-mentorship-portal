@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '../../context/AuthContext';
 import {
   Users,
   Upload,
@@ -42,10 +44,29 @@ import { FirstYearOnboardingTab } from './FirstYearOnboardingTab';
 
 export const CoordinatorDashboardPage: React.FC = () => {
   const queryClient = useQueryClient();
+  const { user } = useAuth();  // must be before any useState that uses user?.department
 
   const [activeTab, setActiveTab] = useState<
     'onboarding' | 'freshers' | 'subjects' | 'attendance' | 'manage-attendance' | 'leaves' | 'calendar' | 'incharge' | 'promotion'
   >('onboarding');
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Sync dept states from user?.department once auth resolves
+  useEffect(() => {
+    if (user?.department) {
+      setSubjDept(user.department);
+      setInchargeDept(user.department);
+      setPromoDept(user.department);
+    }
+  }, [user?.department]);
+
+  // Sync tab from URL on mount and navigation
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const tab = params.get('tab');
+    if (tab) setActiveTab(tab as any);
+  }, [location.search]);
 
   // Inspection Modal State for 360 Fresher Profile
   const [inspectStudentRoll, setInspectStudentRoll] = useState<string | null>(null);
@@ -452,7 +473,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
       {/* ── Main Tab Navigation ── */}
       <div className="flex flex-wrap bg-surface-2 p-1 rounded-2xl border border-borderLine max-w-5xl gap-1">
         <button
-          onClick={() => setActiveTab('onboarding')}
+          onClick={() => navigate('/coordinator/dashboard?tab=onboarding')}
           className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'onboarding'
               ? 'bg-pink-600 text-white shadow-md'
@@ -464,7 +485,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('freshers')}
+          onClick={() => navigate('/coordinator/dashboard?tab=freshers')}
           className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'freshers'
               ? 'bg-pink-600 text-white shadow-md'
@@ -476,7 +497,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('subjects')}
+          onClick={() => navigate('/coordinator/dashboard?tab=subjects')}
           className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'subjects'
               ? 'bg-pink-600 text-white shadow-md'
@@ -488,7 +509,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('attendance')}
+          onClick={() => navigate('/coordinator/dashboard?tab=attendance')}
           className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'attendance'
               ? 'bg-pink-600 text-white shadow-md'
@@ -500,7 +521,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('manage-attendance')}
+          onClick={() => navigate('/coordinator/dashboard?tab=manage-attendance')}
           className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'manage-attendance'
               ? 'bg-pink-600 text-white shadow-md'
@@ -512,7 +533,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('leaves')}
+          onClick={() => navigate('/coordinator/dashboard?tab=leaves')}
           className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'leaves'
               ? 'bg-pink-600 text-white shadow-md'
@@ -524,7 +545,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('calendar')}
+          onClick={() => navigate('/coordinator/dashboard?tab=calendar')}
           className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'calendar'
               ? 'bg-pink-600 text-white shadow-md'
@@ -536,7 +557,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('incharge')}
+          onClick={() => navigate('/coordinator/dashboard?tab=incharge')}
           className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'incharge'
               ? 'bg-pink-600 text-white shadow-md'
@@ -548,7 +569,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('promotion')}
+          onClick={() => navigate('/coordinator/dashboard?tab=promotion')}
           className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
             activeTab === 'promotion'
               ? 'bg-pink-600 text-white shadow-md'
@@ -879,16 +900,12 @@ export const CoordinatorDashboardPage: React.FC = () => {
                 </button>
               </div>
 
-              {/* Department Dropdown */}
-              <select
-                value={subjDept}
-                onChange={(e) => setSubjDept(e.target.value)}
-                className="px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-background text-textPrimary focus:outline-none focus:ring-2 focus:ring-pink-500 font-semibold"
+              {/* Department — locked to coordinator's own dept */}
+              <span
+                className="px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary font-semibold"
               >
-                {VALID_DEPARTMENT_NAMES.map((d) => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
-              </select>
+                🏫 {subjDept}
+              </span>
 
               {/* Section Dropdown */}
               <select
@@ -1108,16 +1125,10 @@ export const CoordinatorDashboardPage: React.FC = () => {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-textPrimary mb-1">Select Department *</label>
-              <select
-                value={promoDept}
-                onChange={(e) => setPromoDept(e.target.value)}
-                className="w-full px-3.5 py-2 text-xs rounded-xl border border-borderLine bg-background text-textPrimary focus:outline-none focus:ring-2 focus:ring-pink-500 font-semibold"
-              >
-                {VALID_DEPARTMENT_NAMES.map((d) => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
-              </select>
+              <label className="block text-xs font-semibold text-textPrimary mb-1">Department</label>
+              <span className="block w-full px-3.5 py-2 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary font-semibold">
+                🏫 {promoDept}
+              </span>
             </div>
 
             <div>
@@ -1301,16 +1312,10 @@ export const CoordinatorDashboardPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-textPrimary mb-1">Host Department *</label>
-                <select
-                  value={inchargeDept}
-                  onChange={(e) => setInchargeDept(e.target.value)}
-                  className="w-full px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-background text-textPrimary font-semibold"
-                >
-                  {VALID_DEPARTMENT_NAMES.map((d) => (
-                    <option key={d} value={d}>{d}</option>
-                  ))}
-                </select>
+                <label className="block text-xs font-semibold text-textPrimary mb-1">Host Department</label>
+                <span className="block w-full px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-surface-2 text-textPrimary font-semibold">
+                  🏫 {inchargeDept}
+                </span>
               </div>
 
               <div>

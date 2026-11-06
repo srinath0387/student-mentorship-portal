@@ -19,6 +19,9 @@ import {
   Calendar,
   ClipboardCheck,
   FolderOpen,
+  Star,
+  ClipboardList,
+  CheckSquare,
   LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -53,10 +56,23 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
 
   const isItemActive = (itemPath: string) => {
     const cur = location.pathname + location.search;
+    // Exact match for items with query params (tab-specific links)
     if (itemPath.includes('?')) return cur === itemPath;
+    // Default dashboard routes — active only when no tab or on default tab
     if (itemPath === '/admin/dashboard') {
       return location.pathname === '/admin/dashboard' &&
         (!location.search || location.search === '?tab=students');
+    }
+    if (itemPath === '/hod/dashboard') {
+      return location.pathname === '/hod/dashboard' &&
+        (!location.search || location.search === '?tab=overview');
+    }
+    if (itemPath === '/coordinator/dashboard') {
+      return location.pathname === '/coordinator/dashboard' &&
+        (!location.search || location.search === '?tab=onboarding');
+    }
+    if (itemPath === '/faculty/dashboard') {
+      return location.pathname === '/faculty/dashboard' && !location.search;
     }
     return location.pathname === itemPath;
   };
@@ -93,7 +109,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
         { label: 'Attendance Records', path: '/faculty/dashboard?tab=attendance', icon: CalendarCheck },
         { label: 'Leave & Duties', path: '/faculty/dashboard?tab=leaves', icon: CalendarCheck },
         { label: 'My Faculty Profile', path: '/faculty/dashboard?tab=profile', icon: User },
+        { label: 'My API Score', path: '/faculty/dashboard?tab=profile', icon: Star },
+        { label: 'My Duties', path: '/my-duties', icon: CheckSquare },
         { label: 'Mentee Directory', path: '/faculty/dashboard?tab=mentees', icon: Users },
+        { label: 'Documents Approval', path: '/documents', icon: FolderOpen },
         { label: 'Dept CGPA Analytics', path: '/faculty/dashboard?tab=analytics', icon: FileBarChart },
       ],
     },
@@ -107,6 +126,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
         { label: 'Leave & OD Approvals', path: '/admin/dashboard?tab=leaves', icon: ShieldCheck },
         { label: 'Holiday Calendar', path: '/admin/dashboard?tab=holidays', icon: Calendar },
         { label: 'Attendance Mgmt', path: '/admin/dashboard?tab=attendance', icon: CalendarCheck },
+        { label: 'Faculty Workload', path: '/attendance/workload', icon: BarChart2 },
+        { label: 'Faculty API Score', path: '/faculty/api', icon: Star },
+        { label: 'Academic Duties', path: '/academic-duties', icon: ClipboardList },
+        { label: 'Attendance Reports', path: '/attendance/reports', icon: FileBarChart },
+        { label: 'Documents', path: '/documents', icon: FolderOpen },
         { label: 'Student Directory', path: '/admin/dashboard?tab=students', icon: Users },
         { label: 'CGPA & Top Performers', path: '/admin/dashboard?tab=performance', icon: Award },
         { label: 'Faculty & Mentors', path: '/admin/dashboard?tab=faculty', icon: ShieldCheck },
@@ -124,6 +148,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
         { label: 'Department Overview', path: '/hod/dashboard?tab=overview', icon: Building2 },
         { label: 'Leave & OD Approvals', path: '/hod/dashboard?tab=leaves', icon: ShieldCheck },
         { label: 'Attendance Tracker', path: '/hod/dashboard?tab=attendance', icon: CalendarCheck },
+        { label: 'Faculty Workload', path: '/attendance/workload', icon: BarChart2 },
+        { label: 'Faculty API Score', path: '/faculty/api', icon: Star },
+        { label: 'Academic Duties', path: '/academic-duties', icon: ClipboardList },
+        { label: 'Attendance Reports', path: '/attendance/reports', icon: FileBarChart },
+        { label: 'Documents', path: '/documents', icon: FolderOpen },
         { label: 'Student Directory', path: '/hod/dashboard?tab=students', icon: Users },
         { label: 'CGPA & Rankings', path: '/hod/dashboard?tab=rankings', icon: Award },
         { label: 'Faculty Directory & 360°', path: '/admin/faculty', icon: ShieldCheck },
@@ -137,10 +166,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
     {
       title: '1ST YEAR COORDINATOR',
       items: [
-        { label: 'Coordinator Hub', path: '/coordinator/dashboard', icon: LayoutDashboard },
-        { label: 'Fresher Directory', path: '/coordinator/dashboard', icon: Users },
-        { label: 'Class Incharges', path: '/coordinator/dashboard', icon: Award },
+        { label: 'Coordinator Hub', path: '/coordinator/dashboard?tab=onboarding', icon: LayoutDashboard },
+        { label: 'Fresher Directory', path: '/coordinator/dashboard?tab=freshers', icon: Users },
+        { label: 'Class Incharges', path: '/coordinator/dashboard?tab=incharge', icon: Award },
         { label: 'Attendance Mgmt', path: '/coordinator/dashboard?tab=attendance', icon: CalendarCheck },
+        { label: 'Leave Approvals', path: '/coordinator/dashboard?tab=leaves', icon: ShieldCheck },
         { label: 'Faculty Directory', path: '/admin/faculty', icon: ShieldCheck },
       ],
     },
@@ -168,6 +198,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
         { label: 'Executive Dashboard', path: '/oversight/dashboard', icon: LayoutDashboard },
         { label: 'Academic & CGPA', path: '/admin/dashboard?tab=performance', icon: Award },
         { label: 'Attendance Analytics', path: '/admin/dashboard?tab=attendance', icon: CalendarCheck },
+        { label: 'Faculty Workload', path: '/attendance/workload', icon: BarChart2 },
+        { label: 'Attendance Reports', path: '/attendance/reports', icon: FileBarChart },
+        { label: 'Documents', path: '/documents', icon: FolderOpen },
         { label: 'Student Directory', path: '/admin/dashboard?tab=students', icon: Users },
         { label: 'Faculty & Mentors', path: '/admin/dashboard?tab=faculty', icon: ShieldCheck },
         { label: 'Coding Leaderboard', path: '/coding-analytics', icon: BarChart2 },
@@ -259,19 +292,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
                     onClick={onClose}
                     title={item.label}
                     className={[
-                      'relative flex items-center mb-0.5 rounded-xl text-sm font-medium transition-all duration-150 gap-3',
+                      'relative flex items-center mb-0.5 rounded-xl text-sm font-medium transition-all duration-200 gap-3',
                       collapsed ? 'lg:justify-center lg:px-0 lg:py-3 px-3 py-2.5' : 'px-3 py-2.5',
                       active && !item.soon
-                        ? 'bg-brand-soft text-brand-primary font-semibold'
+                        ? 'bg-brand-soft text-brand-primary font-semibold shadow-sm ring-1 ring-brand-primary/10'
                         : 'text-textSecondary hover:bg-surface-2 hover:text-textPrimary',
                     ].join(' ')}
                   >
-                    {/* Active left bar */}
+                    {/* Active left bar — animated */}
                     {active && !item.soon && (
-                      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 rounded-r-full bg-brand-primary" />
+                      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-6 rounded-r-full bg-brand-primary shadow-[0_0_6px_0px_var(--color-brand-primary,#6366f1)]" />
                     )}
 
-                    <Icon className={`shrink-0 ${active && !item.soon ? 'w-[18px] h-[18px]' : 'w-[17px] h-[17px]'}`} />
+                    <Icon className={`shrink-0 transition-transform duration-200 ${active && !item.soon ? 'w-[18px] h-[18px] scale-110' : 'w-[17px] h-[17px]'}`} />
 
                     <span
                       className={[

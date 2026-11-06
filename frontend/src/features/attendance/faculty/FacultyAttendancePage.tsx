@@ -204,26 +204,34 @@ export const FacultyAttendancePage: React.FC = () => {
   }, [matchedSlot]);
 
   // Not posted
-  const {data:rawNotPosted=[]} = useQuery({ queryKey:['notPosted',user?.email], queryFn:()=>api.getNotPostedAttendance({faculty_email:user?.email}).catch(()=>[]) });
-  const notPosted = Array.isArray(rawNotPosted)?rawNotPosted:[];
+  const {data:rawNotPosted={}} = useQuery({ queryKey:['notPosted',user?.email], queryFn:()=>api.getNotPostedAttendance({faculty_email:user?.email}).catch(()=>({})) });
+  // BUG-03 fix: backend returns { pendingSlots: [...] }, not a plain array
+  const notPosted: any[] = Array.isArray((rawNotPosted as any)?.pendingSlots) ? (rawNotPosted as any).pendingSlots : [];
 
   useEffect(()=>{
     if(!isLoaded) return;
     if(roster.length===0) return;
     if(isPosted&&sessionDetails?.records?.length>0){
+      // Bug fix: normalise roll numbers to UPPER for case-insensitive map lookup
       const map = new Map<string,boolean>();
-      sessionDetails.records.forEach((r:any)=>map.set(r.roll_number,r.is_present));
-      setRecords(roster.map(s=>({
-        roll_number: s.roll_number,
-        student_name: s.student_name,
-        is_on_od: Boolean((s as any).is_on_od),
-        od_type: (s as any).od_type || '',
-        od_reason: (s as any).od_reason || '',
-        h1: (s as any).is_on_od ? true : (map.get(s.roll_number)??true),
-        h2: (s as any).is_on_od ? true : (map.get(s.roll_number)??true),
-        h3: (s as any).is_on_od ? true : (map.get(s.roll_number)??true)
-      })));
-    } else {
+      sessionDetails.records.forEach((r:any)=>map.set((r.roll_number||'').toUpperCase().trim(), Boolean(r.is_present)));
+      setRecords(roster.map(s=>{
+        const roll = (s.roll_number||'').toUpperCase().trim();
+        // Bug fix: use false as explicit default (not true) when key found; only default true when NOT in map at all
+        const saved = map.has(roll) ? map.get(roll)! : true;
+        return {
+          roll_number: s.roll_number,
+          student_name: s.student_name,
+          is_on_od: Boolean((s as any).is_on_od),
+          od_type: (s as any).od_type || '',
+          od_reason: (s as any).od_reason || '',
+          h1: (s as any).is_on_od ? true : saved,
+          h2: (s as any).is_on_od ? true : saved,
+          h3: (s as any).is_on_od ? true : saved
+        };
+      }));
+    } else if(!isPosted) {
+      // Only reset to all-present when session does NOT exist yet (fresh mark)
       setRecords(roster.map(s=>({
         roll_number: s.roll_number,
         student_name: s.student_name,
@@ -235,6 +243,7 @@ export const FacultyAttendancePage: React.FC = () => {
         h3: true
       })));
     }
+    // Note: if isPosted but sessionDetails not loaded yet, don't reset — wait for it
   },[roster,isPosted,sessionDetails,isLoaded]);
 
   const totalActiveHours = (hour1?1:0) + (hour2?1:0) + (hour3?1:0) || 1;
@@ -252,13 +261,15 @@ export const FacultyAttendancePage: React.FC = () => {
         period_start: matchedSlot?.period_start || 1,
         records: records.map(r => ({
           roll_number: r.roll_number,
-          is_present: r.is_on_od ? true : (hour1 ? (hour2 ? (hour3 ? (r.h1 && r.h2 && r.h3) : (r.h1 && r.h2)) : r.h1) : r.h1)
+          // BUG-08 fix: use OR logic — attending any period counts as present (not AND which penalises partial attendance)
+          is_present: r.is_on_od ? true : (hour1 ? (hour2 ? (hour3 ? (r.h1 || r.h2 || r.h3) : (r.h1 || r.h2)) : r.h1) : r.h1)
         }))
       };
       return isPosted&&existingSession?.id ? api.updateAttendanceSession(existingSession.id,payload.records) : api.saveAttendanceSession(payload);
     },
     onSuccess:()=>{
       qc.invalidateQueries({queryKey:['sessions']});
+      qc.invalidateQueries({queryKey:['sessionDetails']});
       qc.invalidateQueries({queryKey:['notPosted']});
       qc.invalidateQueries({queryKey:['dailyPeriodGrid']});
       qc.invalidateQueries({queryKey:['attendanceAllotments']});
@@ -440,18 +451,21 @@ export const FacultyAttendancePage: React.FC = () => {
                       <button onClick={()=>{
                         if (slot.semester_label) setSem(slot.semester_label as any);
                         if (slot.section) setSection(slot.section);
-                        let m = mySubjects.find(s => 
-                          s.subject_name?.toLowerCase().trim() === slot.subject_name?.toLowerCase().trim() && 
+                        let m = mySubjects.find(s =>
+                          s.subject_name?.toLowerCase().trim() === slot.subject_name?.toLowerCase().trim() &&
                           (!slot.section || s.section === slot.section)
                         );
                         if (!m) {
-                          m = mySubjects.find(s => 
-                            s.subject_name?.toLowerCase().includes(slot.subject_name?.toLowerCase()) || 
+                          m = mySubjects.find(s =>
+                            s.subject_name?.toLowerCase().includes(slot.subject_name?.toLowerCase()) ||
                             slot.subject_name?.toLowerCase().includes(s.subject_name?.toLowerCase())
                           );
                         }
-                        if (!m && mySubjects.length > 0) {
-                          m = mySubjects.find(s => s.section === slot.section) || mySubjects[0];
+                        // BUG-12 fix: do NOT silently fall back to wrong subject — warn instead
+                        if (!m) {
+                          alert(`No matching subject found for "${slot.subject_name}". Please select your subject manually in the Mark Attendance tab.`);
+                          setNav('mark');
+                          return;
                         }
                         if (m) setSubjectId(m.id);
                         setIsLoaded(true);
@@ -583,7 +597,7 @@ export const FacultyAttendancePage: React.FC = () => {
                           🔵 {odCount} Student{odCount>1?'s':''} on Approved On-Duty (OD)
                         </div>
                       )}
-                      {isPosted&&<div className="text-[11px] font-bold text-amber-700 bg-amber-100 dark:bg-amber-950/40 px-3 py-1 rounded-lg border border-amber-300">Already Posted — You can edit attendance</div>}
+                      {isPosted&&<div className="text-[11px] font-bold text-amber-700 bg-amber-100 dark:bg-amber-950/40 px-3 py-1 rounded-lg border border-amber-300">✏️ Edit Mode — Attendance already posted. Changes will overwrite.</div>}
                     </div>
 
                     <div className="flex gap-2 pt-1">
@@ -660,12 +674,12 @@ export const FacultyAttendancePage: React.FC = () => {
                     </div>
                     <div className="p-4 bg-surface-2 border-t border-borderLine flex items-center justify-between flex-wrap gap-2">
                       <span className="text-xs font-bold text-textSecondary">Total: {records.length} | Present: {presentCount} {odCount>0&&`(${odCount} on OD)`} | Absentees: {absentList.length}</span>
-                      <button 
-                        onClick={()=>setShowAbsentModal(true)} 
+                      <button
+                        onClick={()=>setShowAbsentModal(true)}
                         disabled={isNonWorkingDay && !allowOverrideExtraClass}
-                        className="px-5 py-2.5 bg-[#007bff] hover:bg-blue-600 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-sm"
+                        className={`px-5 py-2.5 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-sm ${isPosted ? 'bg-amber-600 hover:bg-amber-500' : 'bg-[#007bff] hover:bg-blue-600'}`}
                       >
-                        Review & Submit Attendance ({totalActiveHours} Hr{totalActiveHours>1?'s':''})
+                        {isPosted ? `✏️ Review & Update Attendance (${totalActiveHours} Hr${totalActiveHours>1?'s':''})` : `Review & Submit Attendance (${totalActiveHours} Hr${totalActiveHours>1?'s':''})`}
                       </button>
                     </div>
                   </div>
@@ -1036,8 +1050,8 @@ export const FacultyAttendancePage: React.FC = () => {
             </div>
             <div className="flex gap-3 justify-end pt-1">
               <button onClick={()=>setShowAbsentModal(false)} className="px-4 py-2 text-xs font-bold text-textSecondary hover:bg-surface-2 rounded-xl border border-borderLine">Go Back</button>
-              <button onClick={()=>saveMutation.mutate()} disabled={saveMutation.isPending} className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-md disabled:opacity-60">
-                {saveMutation.isPending?'Saving...':'Confirm & Save Attendance'}
+              <button onClick={()=>saveMutation.mutate()} disabled={saveMutation.isPending} className={`px-5 py-2.5 font-bold text-xs rounded-xl shadow-md disabled:opacity-60 text-white ${isPosted ? 'bg-amber-600 hover:bg-amber-500' : 'bg-emerald-600 hover:bg-emerald-500'}`}>
+                {saveMutation.isPending ? 'Saving...' : isPosted ? '✏️ Update Attendance' : 'Confirm & Save Attendance'}
               </button>
             </div>
           </div>

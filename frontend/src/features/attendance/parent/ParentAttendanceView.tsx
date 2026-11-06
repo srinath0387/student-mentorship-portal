@@ -1,12 +1,22 @@
 import React from 'react';
 import { useAuth } from '../../../context/AuthContext';
+import { useQuery } from '@tanstack/react-query';
 import { StudentAttendanceView } from '../student/StudentAttendanceView';
+import { MeetingLogsView } from '../../../components/MeetingLogsView';
+import { api } from '../../../lib/api';
 import { Bell } from 'lucide-react';
 
 export const ParentAttendanceView: React.FC = () => {
   const { user } = useAuth();
   // Parent's ward roll number is stored in their profile
   const wardRollNumber = (user as any)?.wardRollNumber || (user as any)?.rollNumber || '';
+
+  const { data: meetingLogs = [], isLoading: meetingsLoading } = useQuery<any[]>({
+    queryKey: ['parentWardMeetings', wardRollNumber],
+    queryFn: () => api.getMentorMeetings({ student_id: wardRollNumber }),
+    enabled: Boolean(wardRollNumber),
+    staleTime: 0,
+  });
 
   return (
     <div className="space-y-4">
@@ -21,6 +31,20 @@ export const ParentAttendanceView: React.FC = () => {
 
       {/* Reuse Student View for ward */}
       <StudentAttendanceView rollNumber={wardRollNumber} />
+
+      {/* Mentor Meeting Logs for parent */}
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 space-y-3">
+        <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">
+          📋 Mentor Meeting Logs
+          <span className="text-xs font-normal text-slate-400">(your ward's mentoring sessions)</span>
+        </h3>
+        <MeetingLogsView
+          logs={meetingLogs}
+          isLoading={meetingsLoading}
+          showStudent={false}
+          emptyMessage="No mentor meetings have been recorded for your ward yet."
+        />
+      </div>
     </div>
   );
 };

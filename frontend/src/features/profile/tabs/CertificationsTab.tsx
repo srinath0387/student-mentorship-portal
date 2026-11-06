@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Award, CheckCircle2, Sparkles, ExternalLink, Edit2, Trash2 } from 'lucide-react';
+import { Plus, Award, CheckCircle2, Sparkles, ExternalLink, Edit2, Trash2, Trophy, Dumbbell } from 'lucide-react';
 import { Certification } from '../../../types';
 import { api } from '../../../lib/api';
 import { useAuth } from '../../../context/AuthContext';
@@ -8,6 +8,8 @@ import { PillButton } from '../../../components/common/PillButton';
 interface CertificationsTabProps {
   certifications: Certification[];
   readOnly?: boolean;
+  isAdminView?: boolean;
+  studentRollNo?: string; // the student's roll number (used when admin views someone else's profile)
   onRefresh: () => void;
 }
 
@@ -27,7 +29,18 @@ const PROVIDERS = [
   'Other',
 ];
 
-export const CertificationsTab: React.FC<CertificationsTabProps> = ({ certifications, readOnly = false, onRefresh }) => {
+const PROVIDER_GROUPS = [
+  {
+    label: '🎓 Online Learning & Tech',
+    options: ['AWS', 'Google', 'Microsoft / Azure', 'Oracle', 'Cisco', 'RedHat', 'NVIDIA', 'UiPath', 'NPTEL', 'Coursera', 'Udemy', 'GeeksforGeeks', 'Medium', 'Other'],
+  },
+  {
+    label: '🏅 Co-Curricular & Sports',
+    options: ['Co-Curricular Activity', 'Extra Curricular Activity (EAA)', 'Games & Sports'],
+  },
+];
+
+export const CertificationsTab: React.FC<CertificationsTabProps> = ({ certifications, readOnly = false, isAdminView = false, studentRollNo, onRefresh }) => {
   const [showModal, setShowModal] = useState(false);
   const [provider, setProvider] = useState('AWS');
   const [title, setTitle] = useState('');
@@ -36,7 +49,8 @@ export const CertificationsTab: React.FC<CertificationsTabProps> = ({ certificat
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [editingCert, setEditingCert] = useState<Certification | null>(null);
   const { user } = useAuth();
-  const activeRollNo = user?.rollNumber || '';
+  // Use the provided studentRollNo (when admin views someone else's profile) or fall back to the logged-in user's roll number
+  const activeRollNo = studentRollNo || user?.rollNumber || '';
 
   const completedCerts = certifications.filter((c) => !c.suggested);
   const suggestedCerts = certifications.filter((c) => c.suggested);
@@ -179,7 +193,9 @@ export const CertificationsTab: React.FC<CertificationsTabProps> = ({ certificat
   };
 
   const handleDeleteCert = async (cert: Certification) => {
-    if (readOnly || !cert.id) return;
+    // readOnly students can't delete; admin can delete even in readOnly view
+    if (readOnly && !isAdminView) return;
+    if (!cert.id) return;
     if (!window.confirm(`Delete "${cert.title}"? This cannot be undone.`)) return;
     try {
       await api.deleteCertification(activeRollNo, cert.id);
@@ -194,8 +210,8 @@ export const CertificationsTab: React.FC<CertificationsTabProps> = ({ certificat
       {/* Header */}
       <div className="bg-surface border border-borderLine rounded-xl p-6 shadow-sm flex items-center justify-between">
         <div>
-          <h3 className="text-base font-bold text-textPrimary">Industry Certifications</h3>
-          <p className="text-xs text-textSecondary">Upload verified technical certifications & cloud credentials</p>
+          <h3 className="text-base font-bold text-textPrimary">Certifications & Activities</h3>
+          <p className="text-xs text-textSecondary">Technical certifications, co-curricular activities & sports achievements</p>
         </div>
         {!readOnly && (
           <PillButton variant="primary" size="sm" onClick={openAddModal} icon={<Plus className="w-3.5 h-3.5" />}>
@@ -208,13 +224,25 @@ export const CertificationsTab: React.FC<CertificationsTabProps> = ({ certificat
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {completedCerts.map((cert) => (
           <div key={cert.id || cert.title} className="bg-surface border border-borderLine rounded-xl p-5 shadow-sm flex items-start gap-4">
-            <div className="p-3 rounded-xl bg-brand-soft text-brand-primary shrink-0">
-              <Award className="w-6 h-6" />
+            <div className={`p-3 rounded-xl shrink-0 ${
+              cert.provider === 'Games & Sports' ? 'bg-green-50 text-green-600' :
+              cert.provider === 'Co-Curricular Activity' ? 'bg-purple-50 text-purple-600' :
+              cert.provider === 'Extra Curricular Activity (EAA)' ? 'bg-orange-50 text-orange-600' :
+              'bg-brand-soft text-brand-primary'
+            }`}>
+              {cert.provider === 'Games & Sports' ? <Dumbbell className="w-6 h-6" /> :
+               cert.provider === 'Co-Curricular Activity' || cert.provider === 'Extra Curricular Activity (EAA)' ? <Trophy className="w-6 h-6" /> :
+               <Award className="w-6 h-6" />}
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-brand-primary text-white">
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                    cert.provider === 'Games & Sports' ? 'bg-green-600 text-white' :
+                    cert.provider === 'Co-Curricular Activity' ? 'bg-purple-600 text-white' :
+                    cert.provider === 'Extra Curricular Activity (EAA)' ? 'bg-orange-600 text-white' :
+                    'bg-brand-primary text-white'
+                  }`}>
                     {cert.provider}
                   </span>
                   <span className="text-xs text-textSecondary">{formatDate(cert.date_completed)}</span>
@@ -236,6 +264,16 @@ export const CertificationsTab: React.FC<CertificationsTabProps> = ({ certificat
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
+                )}
+                {/* Admin-only delete shown even in readOnly view */}
+                {readOnly && isAdminView && (
+                  <button
+                    onClick={() => handleDeleteCert(cert)}
+                    className="p-1.5 rounded-lg text-textSecondary hover:text-red-500 hover:bg-red-50 transition-all"
+                    title="Delete certification (Admin)"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 )}
               </div>
               <h4 className="text-sm font-bold text-textPrimary mt-1.5">{cert.title}</h4>
@@ -305,14 +343,18 @@ export const CertificationsTab: React.FC<CertificationsTabProps> = ({ certificat
             </h3>
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-textPrimary mb-1">Provider</label>
+                <label className="block text-xs font-semibold text-textPrimary mb-1">Category / Provider</label>
                 <select
                   value={provider}
                   onChange={(e) => setProvider(e.target.value)}
                   className="w-full px-3 py-2 text-sm rounded-lg border border-borderLine bg-background"
                 >
-                  {PROVIDERS.map((p) => (
-                    <option key={p} value={p}>{p}</option>
+                  {PROVIDER_GROUPS.map((group) => (
+                    <optgroup key={group.label} label={group.label}>
+                      {group.options.map((p) => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
               </div>

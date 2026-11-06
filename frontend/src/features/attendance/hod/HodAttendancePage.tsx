@@ -35,11 +35,12 @@ export const HodAttendancePage: React.FC = () => {
   });
 
   // Daily Period Grid
-  const { data: rawDailyGrid = [] } = useQuery({
+  const { data: rawDailyGrid = {} } = useQuery({
     queryKey: ['dailyPeriodGrid', selectedDate, filterSem, user?.department],
-    queryFn: () => api.getDailyPeriodGrid({ date: selectedDate, semester: filterSem || undefined, department: user?.department || undefined }).catch(() => [])
+    queryFn: () => api.getDailyPeriodGrid({ date: selectedDate, semester: filterSem || undefined, department: user?.department || undefined }).catch(() => ({}))
   });
-  const dailyGrid = Array.isArray(rawDailyGrid) ? rawDailyGrid : [];
+  // BUG-04 fix: backend returns { grid: [...], date, isWorkingDay, ... } — not a plain array
+  const dailyGrid: any[] = Array.isArray((rawDailyGrid as any)?.grid) ? (rawDailyGrid as any).grid : [];
 
   const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
     { id: 'summary', label: '📊 Department Overview', icon: <BarChart2 className="w-3.5 h-3.5" /> },
@@ -60,10 +61,10 @@ export const HodAttendancePage: React.FC = () => {
   const totalSessionsTaken = allotments.reduce((acc: number, a: any) => acc + parseInt(a.sessions_count || '0'), 0);
   const totalStudentsEnrolled = allotments.reduce((acc: number, a: any) => acc + parseInt(a.roster_count || '0'), 0);
 
-  // Defaulters (< 75%)
+  // Defaulters (< 75%) — BUG-06 fix: null < 75 is true in JS, must guard explicitly
   const defaultersList = useMemo(() => {
     if (!subjectSummary?.students) return [];
-    return subjectSummary.students.filter((s: any) => s.percentage < 75);
+    return subjectSummary.students.filter((s: any) => s.percentage !== null && s.percentage !== undefined && s.percentage < 75);
   }, [subjectSummary]);
 
   const handleExportCSV = (data: any[], filename: string) => {
@@ -295,12 +296,19 @@ export const HodAttendancePage: React.FC = () => {
                       <tr key={sec} className="hover:bg-surface-2">
                         <td className="px-4 py-3 font-black text-textPrimary">{user?.department} - Sec {sec}</td>
                         {[1, 2, 3, 4, 5, 6, 7].map(p => {
-                          const slot = dailyGrid.find((g: any) => g.section === sec && g.period_start === p);
+                          // BUG-04 fix: backend returns { section, periods:[{period, has_class, subject_name, status}] }
+                          const secRow = dailyGrid.find((g: any) => String(g.section) === String(sec));
+                          const periodData = secRow?.periods?.find((pd: any) => pd.period === p);
+                          const hasClass = periodData?.has_class;
+                          const isPosted = periodData?.status === 'Posted';
                           return (
                             <td key={p} className="px-3 py-3 text-center">
-                              {slot ? (
-                                <span className="px-2 py-1 bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-bold rounded-lg text-[10px] block truncate" title={slot.subject_name}>
-                                  ✓ {slot.subject_name}
+                              {hasClass ? (
+                                <span
+                                  className={`px-2 py-1 font-bold rounded-lg text-[10px] block truncate ${isPosted ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300' : 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300'}`}
+                                  title={`${periodData?.subject_name} — ${isPosted ? 'Posted' : 'Pending'}`}
+                                >
+                                  {isPosted ? '✓' : '⏳'} {periodData?.subject_name}
                                 </span>
                               ) : (
                                 <span className="text-textMuted text-[10px] opacity-40">—</span>

@@ -12,11 +12,13 @@ export interface CertResult {
 interface Props {
   onSelectCert?: (cert: CertResult) => void;
   placeholder?: string;
+  department?: string;
 }
 
 export const CertificationTypeaheadSearch: React.FC<Props> = ({ 
   onSelectCert, 
-  placeholder = "Search certifications (e.g. AWS, MongoDB, Azure)..." 
+  placeholder = "Search certifications (e.g. AWS, MongoDB, Azure)...",
+  department,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [results, setResults] = useState<CertResult[]>([]);
@@ -35,7 +37,7 @@ export const CertificationTypeaheadSearch: React.FC<Props> = ({
     setIsLoading(true);
     const handler = setTimeout(async () => {
       try {
-        const data = await api.searchCertifications(searchTerm.trim());
+        const data = await api.searchCertifications(searchTerm.trim(), department ? { department } : undefined);
         setResults(Array.isArray(data) ? data : []);
         setIsOpen(true);
       } catch (err) {
@@ -47,7 +49,7 @@ export const CertificationTypeaheadSearch: React.FC<Props> = ({
     }, 300);
 
     return () => clearTimeout(handler);
-  }, [searchTerm]);
+  }, [searchTerm, department]);
 
   // Click outside listener
   useEffect(() => {

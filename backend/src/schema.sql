@@ -268,6 +268,29 @@ CREATE TABLE IF NOT EXISTS timetable_entries (
     UNIQUE(semester_label, department, section, day_of_week, period_start)
 );
 
+-- No-Class Request: faculty requests admin to remove a specific date slot from not-posted count
+CREATE TABLE IF NOT EXISTS attendance_no_class_requests (
+  id              SERIAL PRIMARY KEY,
+  faculty_email   TEXT NOT NULL,
+  faculty_name    TEXT,
+  date            DATE NOT NULL,
+  semester_label  TEXT NOT NULL,
+  department      TEXT NOT NULL,
+  section         TEXT NOT NULL,
+  subject_name    TEXT NOT NULL,
+  period_start    INT NOT NULL,
+  reason          TEXT,
+  status          TEXT NOT NULL DEFAULT 'Pending',
+  reviewed_by     TEXT,
+  reviewed_at     TIMESTAMPTZ,
+  reject_reason   TEXT,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(faculty_email, date, semester_label, section, subject_name, period_start)
+);
+CREATE INDEX IF NOT EXISTS idx_no_class_req_email ON attendance_no_class_requests(faculty_email);
+CREATE INDEX IF NOT EXISTS idx_no_class_req_date ON attendance_no_class_requests(date);
+CREATE INDEX IF NOT EXISTS idx_no_class_req_status ON attendance_no_class_requests(status);
+
 -- 18. Timetable Official Documents (Uploaded PDF Timetable per Section & Semester)
 CREATE TABLE IF NOT EXISTS timetable_documents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -289,7 +312,26 @@ CREATE INDEX IF NOT EXISTS idx_rosters_allotment ON subject_rosters(allotment_id
 CREATE INDEX IF NOT EXISTS idx_rosters_roll ON subject_rosters(roll_number);
 CREATE INDEX IF NOT EXISTS idx_sessions_allotment ON attendance_sessions(allotment_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_date ON attendance_sessions(session_date);
--- 19. Class Incharges (1st Year Only: 1-1 and 1-2)
+
+-- 19. Workload Settings (configurable thresholds per designation)
+CREATE TABLE IF NOT EXISTS workload_settings (
+  id SERIAL PRIMARY KEY,
+  designation TEXT NOT NULL DEFAULT 'default',
+  min_hours_week INT NOT NULL DEFAULT 12,
+  max_hours_week INT NOT NULL DEFAULT 20,
+  updated_by TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(designation)
+);
+-- Seed defaults
+INSERT INTO workload_settings (designation, min_hours_week, max_hours_week) VALUES
+  ('default', 12, 20),
+  ('Professor', 12, 18),
+  ('Associate Professor', 12, 20),
+  ('Assistant Professor', 14, 22)
+ON CONFLICT (designation) DO NOTHING;
+
+-- 20. Class Incharges (1st Year Only: 1-1 and 1-2)
 CREATE TABLE IF NOT EXISTS class_incharges (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     semester_label VARCHAR(5) NOT NULL CHECK (semester_label IN ('1-1', '1-2')),
@@ -390,5 +432,66 @@ CREATE INDEX IF NOT EXISTS idx_student_docs_roll ON student_documents(roll_numbe
 CREATE INDEX IF NOT EXISTS idx_student_docs_type ON student_documents(doc_type);
 CREATE INDEX IF NOT EXISTS idx_student_docs_status ON student_documents(verification_status);
 
+
+-- ── Feature: Mentor Meeting Logs ────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS mentor_meetings (
+  id            SERIAL PRIMARY KEY,
+  faculty_id    TEXT        NOT NULL,
+  faculty_email TEXT        NOT NULL,
+  roll_number   TEXT        NOT NULL,
+  student_name  TEXT,
+  meeting_date  DATE        NOT NULL DEFAULT CURRENT_DATE,
+  topics        TEXT        NOT NULL,
+  action_items  TEXT,
+  next_meeting  DATE,
+  tag           TEXT        NOT NULL DEFAULT 'Academic' CHECK (tag IN ('Academic','Personal','Placement','Attendance','Other')),
+  created_at    TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_mentor_meetings_roll    ON mentor_meetings(roll_number);
+CREATE INDEX IF NOT EXISTS idx_mentor_meetings_faculty ON mentor_meetings(faculty_email);
+CREATE INDEX IF NOT EXISTS idx_mentor_meetings_date    ON mentor_meetings(meeting_date);
+
+-- ── Feature: Placement Tracker ───────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS student_placements (
+  id             SERIAL PRIMARY KEY,
+  roll_number    TEXT        NOT NULL,
+  student_name   TEXT,
+  department     TEXT,
+  batch          TEXT,
+  company_name   TEXT        NOT NULL,
+  role_title     TEXT,
+  package_lpa    NUMERIC(6,2),
+  offer_date     DATE,
+  placement_type TEXT        NOT NULL DEFAULT 'Campus' CHECK (placement_type IN ('Campus','Off-Campus','Internship','Higher Studies','Entrepreneurship')),
+  verified       BOOLEAN     NOT NULL DEFAULT FALSE,
+  verified_by    TEXT,
+  created_at     TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  updated_at     TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_placements_roll ON student_placements(roll_number);
+CREATE INDEX IF NOT EXISTS idx_placements_dept ON student_placements(department);
+CREATE INDEX IF NOT EXISTS idx_placements_batch ON student_placements(batch);
+
 -- End of schema.sql
+
+-- Faculty Academic Performance Index (API) Duties Log
+CREATE TABLE IF NOT EXISTS faculty_api_duties (
+  id              SERIAL PRIMARY KEY,
+  faculty_email   TEXT NOT NULL,
+  faculty_name    TEXT,
+  duty_type       TEXT NOT NULL,
+  title           TEXT NOT NULL,
+  description     TEXT,
+  duty_date       DATE NOT NULL,
+  proof_url       TEXT,
+  points_awarded  NUMERIC(5,2),
+  approved_by     TEXT,
+  approved_at     TIMESTAMPTZ,
+  reject_reason   TEXT,
+  status          TEXT NOT NULL DEFAULT 'Pending',
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_api_duties_email  ON faculty_api_duties(faculty_email);
+CREATE INDEX IF NOT EXISTS idx_api_duties_status ON faculty_api_duties(status);
+CREATE INDEX IF NOT EXISTS idx_api_duties_type   ON faculty_api_duties(duty_type);
 

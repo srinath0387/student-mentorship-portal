@@ -1,0 +1,462 @@
+[
+  {
+    "id": "l1_t1_variables",
+    "title": "Variables: Labelled Boxes for Memory",
+    "badge_skill": "Declares and names meaningful variables",
+    "ask_the_logic": {
+      "question": "If you write score = 10 and then score = score + 5, why doesn't Python complain that score equals two different numbers?",
+      "options": [
+        "Because '=' is not algebra; it means 'calculate the right side, then store the result into the box on the left'.",
+        "Because Python creates two different variables with the same name.",
+        "Because Python ignores the second assignment."
+      ],
+      "correct_index": 0,
+      "explanation": "In Python, '=' is an assignment operator, not an equation. The computer first evaluates the right side (10 + 5 = 15) and replaces the old value in the box named 'score'."
+    },
+    "cards": [
+      {
+        "step_number": 1,
+        "step_name": "The Problem",
+        "title": "Remembering Game Scores Without Pen & Paper",
+        "text": "Imagine running a video game where a player earns points. Without a way to store that number in the computer's memory, the score vanishes the millisecond after a point is scored. We need a way to label a chunk of memory so we can read it, update it, and reuse it whenever we want.",
+        "code": null,
+        "visual_type": "problem_scenario"
+      },
+      {
+        "step_number": 2,
+        "step_name": "The Idea in One Sentence",
+        "title": "A Variable is a Labelled Box in Memory",
+        "text": "Think of a variable as a storage box with a sticker on the front. You put a value inside the box, and whenever you write the box's name in your code, Python looks inside and grabs the current value.",
+        "code": "# Box sticker: score\n# Box content: 10\nscore = 10",
+        "visual_type": "analogy"
+      },
+      {
+        "step_number": 3,
+        "step_name": "The Rule",
+        "title": "Smallest Valid Syntax Labelled",
+        "text": "Assignment always runs from right to left. Variable names must start with a letter or underscore and cannot contain spaces.",
+        "code": "score = 10\n# [variable_name] = [expression/value]\n# Left: The box name (must be a valid identifier)\n# Middle: Single '=' (assignment operator)\n# Right: The value or calculation to place inside",
+        "visual_type": "syntax_card"
+      },
+      {
+        "step_number": 4,
+        "step_name": "Logic First, Code Second",
+        "title": "Side-by-Side: Plain English vs Python",
+        "text": "Always clarify what you want the computer to do in plain English before writing syntax.",
+        "logic_plan": [
+          "1. Reserve a box named score and store 10 inside.",
+          "2. Calculate current score + 5 (15) and update the box.",
+          "3. Display the final number stored in the box."
+        ],
+        "code": "score = 10\nscore = score + 5\nprint(score)",
+        "visual_type": "logic_vs_code"
+      },
+      {
+        "step_number": 5,
+        "step_name": "See It Run",
+        "title": "Step-by-Step Memory Visualizer",
+        "text": "Step through execution to see how memory changes line by line.",
+        "visualizer": {
+          "lines": [
+            "score = 10",
+            "score = score + 5",
+            "print(score)"
+          ],
+          "steps": [
+            {
+              "line": 0,
+              "memory": {"score": 10},
+              "output": "",
+              "explanation": "Line 1: Python creates variable 'score' and stores 10."
+            },
+            {
+              "line": 1,
+              "memory": {"score": 15},
+              "output": "",
+              "explanation": "Line 2: Evaluates 10 + 5 = 15, then overwrites 'score' with 15."
+            },
+            {
+              "line": 2,
+              "memory": {"score": 15},
+              "output": "15\n",
+              "explanation": "Line 3: Prints the current value of 'score' (15) to screen."
+            }
+          ]
+        },
+        "visual_type": "step_visualizer"
+      },
+      {
+        "step_number": 6,
+        "step_name": "A Diagram",
+        "title": "Memory Box Diagram",
+        "text": "Notice how the box keeps its label while the contents get replaced cleanly.",
+        "diagram": {
+          "type": "memory_box",
+          "boxes": [
+            {"label": "score (Initial)", "val": "10", "status": "overwritten"},
+            {"label": "score (Updated)", "val": "15", "status": "active"}
+          ]
+        },
+        "visual_type": "diagram"
+      },
+      {
+        "step_number": 7,
+        "step_name": "What If...?",
+        "title": "Predict First, Then Try",
+        "text": "What happens if you write 10 = score instead of score = 10? Try predicting before checking: Python throws SyntaxError because you cannot store a variable into a raw number! The left side must always be a variable name.",
+        "code": "# Incorrect:\n# 10 = score  -> SyntaxError: cannot assign to literal\n\n# Correct:\nscore = 10\nprint(score)",
+        "visual_type": "what_if"
+      },
+      {
+        "step_number": 8,
+        "step_name": "Common Mistake",
+        "title": "Confusing Assignment (=) with Math Equality",
+        "text": "Mistake: Writing score + 5 without assigning it back. In Python, doing score + 5 calculates 15, but if you don't store it back with score = score + 5, the result is immediately thrown away!",
+        "code": "# WRONG:\nscore = 10\nscore + 5    # Calculated but lost!\nprint(score) # Still prints 10\n\n# FIXED:\nscore = 10\nscore = score + 5\nprint(score) # Prints 15",
+        "visual_type": "common_mistake"
+      },
+      {
+        "step_number": 9,
+        "step_name": "Check Yourself",
+        "title": "Test Your Understanding",
+        "text": "Answer these quick conceptual checks to verify your mental model.",
+        "questions": [
+          {
+            "q": "What is printed by: x = 5; x = x * 2; print(x)?",
+            "options": ["5", "10", "x * 2", "Error"],
+            "ans": 1,
+            "why": "First x is 5. Next, 5 * 2 = 10, which replaces 5 inside x. Then print(x) outputs 10."
+          },
+          {
+            "q": "Which of these is a valid Python variable name?",
+            "options": ["2player", "player_score", "player score", "score@game"],
+            "ans": 1,
+            "why": "Variable names cannot start with numbers, cannot contain spaces, and cannot contain special characters like '@'. Underscores are valid."
+          }
+        ],
+        "visual_type": "check_yourself"
+      },
+      {
+        "step_number": 10,
+        "step_name": "Skill Recap",
+        "title": "Skill Earned!",
+        "text": "You can now declare, name, and update variables to store changing data in computer memory.",
+        "badge_link": "Declares and names meaningful variables",
+        "visual_type": "recap"
+      }
+    ]
+  },
+  {
+    "id": "l1_t2_datatypes",
+    "title": "Data Types: Numbers, Text & Truths",
+    "badge_skill": "Identifies int, float, str, and bool data types",
+    "ask_the_logic": {
+      "question": "Why does \"5\" + \"5\" give \"55\" instead of 10 in Python?",
+      "options": [
+        "Because quotes tell Python it's text (string), and adding text glues them together (concatenation).",
+        "Because Python doesn't know basic math.",
+        "Because '+' only works for text, not numbers."
+      ],
+      "correct_index": 0,
+      "explanation": "Quotes define a string (text). The '+' operator adds numbers together, but for strings, it joins them end-to-end."
+    },
+    "cards": [
+      {
+        "step_number": 1,
+        "step_name": "The Problem",
+        "title": "Mixing Text and Numbers Causes Chaos",
+        "text": "You already know variables store values. But if you have student roll numbers like '2026B101' and marks like 95.5, the computer must know what operations make sense. You can divide marks by 2, but dividing a name by 2 makes no sense!",
+        "code": null,
+        "visual_type": "problem_scenario"
+      },
+      {
+        "step_number": 2,
+        "step_name": "The Idea in One Sentence",
+        "title": "A Data Type is the Nature of the Value",
+        "text": "Every value has a type that tells Python what it represents and what you are allowed to do with it.",
+        "code": "age = 19           # Whole number (int)\ngpa = 8.75         # Decimal number (float)\nname = \"Priya\"     # Text string (str)\npassed = True      # Boolean flag (bool)",
+        "visual_type": "analogy"
+      },
+      {
+        "step_number": 3,
+        "step_name": "The Rule",
+        "title": "Four Fundamental Python Types",
+        "text": "Python figures out the type automatically from how you write the value. Check any type using type(variable).",
+        "code": "int   -> Whole numbers (42, -7, 0)\nfloat -> Numbers with decimal points (3.14, -0.5)\nstr   -> Text enclosed in quotes (\"Hello\", 'Python')\nbool  -> Exactly True or False (capitalized!)",
+        "visual_type": "syntax_card"
+      },
+      {
+        "step_number": 4,
+        "step_name": "Logic First, Code Second",
+        "title": "Side-by-Side: Tracking Types",
+        "text": "Inspect the types of different values cleanly.",
+        "logic_plan": [
+          "1. Store student name as text (str).",
+          "2. Store student credits as integer (int).",
+          "3. Verify and print the data type of each."
+        ],
+        "code": "student = \"Kiran\"\ncredits = 24\nprint(type(student))\nprint(type(credits))",
+        "visual_type": "logic_vs_code"
+      },
+      {
+        "step_number": 5,
+        "step_name": "See It Run",
+        "title": "Step-by-Step Type Visualizer",
+        "text": "See how Python tags each variable with both its type and its value.",
+        "visualizer": {
+          "lines": [
+            "student = \"Kiran\"",
+            "credits = 24",
+            "print(type(student))",
+            "print(type(credits))"
+          ],
+          "steps": [
+            {
+              "line": 0,
+              "memory": {"student": "\"Kiran\" (str)"},
+              "output": "",
+              "explanation": "Creates 'student' referencing a string object."
+            },
+            {
+              "line": 1,
+              "memory": {"student": "\"Kiran\" (str)", "credits": "24 (int)"},
+              "output": "",
+              "explanation": "Creates 'credits' referencing an integer object."
+            },
+            {
+              "line": 2,
+              "memory": {"student": "\"Kiran\" (str)", "credits": "24 (int)"},
+              "output": "<class 'str'>\n",
+              "explanation": "Prints type of student: str"
+            },
+            {
+              "line": 3,
+              "memory": {"student": "\"Kiran\" (str)", "credits": "24 (int)"},
+              "output": "<class 'str'>\n<class 'int'>\n",
+              "explanation": "Prints type of credits: int"
+            }
+          ]
+        },
+        "visual_type": "step_visualizer"
+      },
+      {
+        "step_number": 6,
+        "step_name": "A Diagram",
+        "title": "Memory Type Tags",
+        "text": "In Python, values hold the type tag, and variable names point to them.",
+        "diagram": {
+          "type": "memory_box",
+          "boxes": [
+            {"label": "name", "val": "\"Kiran\"", "status": "str"},
+            {"label": "credits", "val": "24", "status": "int"},
+            {"label": "gpa", "val": "8.5", "status": "float"},
+            {"label": "is_enrolled", "val": "True", "status": "bool"}
+          ]
+        },
+        "visual_type": "diagram"
+      },
+      {
+        "step_number": 7,
+        "step_name": "What If...?",
+        "title": "Predict First, Then Try",
+        "text": "What happens if you type true with a lowercase 't'? Try predicting: Python gives NameError: name 'true' is not defined! Python booleans must always start with capital T (True) and capital F (False).",
+        "code": "# Incorrect: ok = true   (NameError!)\n# Correct:\nok = True\nprint(ok)",
+        "visual_type": "what_if"
+      },
+      {
+        "step_number": 8,
+        "step_name": "Common Mistake",
+        "title": "Forgetting Quotes Around Strings",
+        "text": "Mistake: Writing city = Hyderabad without quotes. Python assumes Hyderabad is a variable name and crashes because no variable called Hyderabad exists yet!",
+        "code": "# WRONG:\n# city = Hyderabad  # NameError: name 'Hyderabad' is not defined\n\n# FIXED:\ncity = \"Hyderabad\"\nprint(city)  # Prints: Hyderabad",
+        "visual_type": "common_mistake"
+      },
+      {
+        "step_number": 9,
+        "step_name": "Check Yourself",
+        "title": "Test Your Understanding",
+        "text": "Quick checks to sharpen your type instincts.",
+        "questions": [
+          {
+            "q": "What is the data type of the value 42.0?",
+            "options": ["int", "float", "str", "number"],
+            "ans": 1,
+            "why": "Even though .0 has zero fractional value, having a decimal point makes it a float."
+          },
+          {
+            "q": "What is the data type of \"True\" (with quotes)?",
+            "options": ["bool", "str", "int", "None"],
+            "ans": 1,
+            "why": "Any characters enclosed inside quotation marks are strings (str), even if the text spells True or 123."
+          }
+        ],
+        "visual_type": "check_yourself"
+      },
+      {
+        "step_number": 10,
+        "step_name": "Skill Recap",
+        "title": "Skill Earned!",
+        "text": "You can now identify and use Python's 4 core data types: int, float, str, and bool.",
+        "badge_link": "Identifies int, float, str, and bool data types",
+        "visual_type": "recap"
+      }
+    ]
+  },
+  {
+    "id": "l1_t3_operators_io",
+    "title": "Operators & Input/Output",
+    "badge_skill": "Reads user input and prints clean formatted output",
+    "ask_the_logic": {
+      "question": "input() always returns text (a string). If a user types 25, why must you do int(input()) before doing math?",
+      "options": [
+        "Because adding 5 to \"25\" causes a TypeError: you cannot add a number to a string.",
+        "Because input() deletes numbers if not converted.",
+        "Because int() makes the code run faster."
+      ],
+      "correct_index": 0,
+      "explanation": "input() captures characters from the keyboard as str. '25' + 5 causes TypeError: can only concatenate str to str, not int."
+    },
+    "cards": [
+      {
+        "step_number": 1,
+        "step_name": "The Problem",
+        "title": "Programs Need User Interaction",
+        "text": "Hardcoding numbers into your script means the program can only do one calculation forever. To build a calculator or billing app, the program must ask the user for inputs, compute the total, and print a clear answer.",
+        "code": null,
+        "visual_type": "problem_scenario"
+      },
+      {
+        "step_number": 2,
+        "step_name": "The Idea in One Sentence",
+        "title": "Input Takes In, Operators Process, Print Sends Out",
+        "text": "A computer program is an input-process-output factory: input() reads from the keyboard, arithmetic operators (+, -, *, /, //, %) calculate, and print() shows results.",
+        "code": "# 1. Read input as text\n# 2. Convert to number\n# 3. Calculate and display",
+        "visual_type": "analogy"
+      },
+      {
+        "step_number": 3,
+        "step_name": "The Rule",
+        "title": "Essential Operators and Functions",
+        "text": "Know the division trio: / gives float (7 / 2 = 3.5), // gives integer quotient (7 // 2 = 3), and % gives the remainder (7 % 2 = 1).",
+        "code": "user_text = input(\"Prompt: \")  # Always returns str\nnum = int(user_text)           # Converts str to int\ntotal = num * 2                # Arithmetic\nprint(f\"Result is {total}\")    # f-string formatting",
+        "visual_type": "syntax_card"
+      },
+      {
+        "step_number": 4,
+        "step_name": "Logic First, Code Second",
+        "title": "Side-by-Side: Price Calculator",
+        "text": "Notice how each step translates directly into one line.",
+        "logic_plan": [
+          "1. Read price per item as integer (e.g., 50).",
+          "2. Read quantity of items (e.g., 3).",
+          "3. Multiply price by quantity.",
+          "4. Print formatted total bill."
+        ],
+        "code": "price = 50\nqty = 3\ntotal = price * qty\nprint(f\"Total bill: Rs {total}\")",
+        "visual_type": "logic_vs_code"
+      },
+      {
+        "step_number": 5,
+        "step_name": "See It Run",
+        "title": "Step-by-Step Operator Visualizer",
+        "text": "Watch the calculation happen and the formatted output display.",
+        "visualizer": {
+          "lines": [
+            "price = 50",
+            "qty = 3",
+            "total = price * qty",
+            "print(f\"Total bill: Rs {total}\")"
+          ],
+          "steps": [
+            {
+              "line": 0,
+              "memory": {"price": 50},
+              "output": "",
+              "explanation": "Store 50 in 'price'."
+            },
+            {
+              "line": 1,
+              "memory": {"price": 50, "qty": 3},
+              "output": "",
+              "explanation": "Store 3 in 'qty'."
+            },
+            {
+              "line": 2,
+              "memory": {"price": 50, "qty": 3, "total": 150},
+              "output": "",
+              "explanation": "50 * 3 evaluates to 150, stored in 'total'."
+            },
+            {
+              "line": 3,
+              "memory": {"price": 50, "qty": 3, "total": 150},
+              "output": "Total bill: Rs 150\n",
+              "explanation": "The f-string substitutes {total} with 150 and prints."
+            }
+          ]
+        },
+        "visual_type": "step_visualizer"
+      },
+      {
+        "step_number": 6,
+        "step_name": "A Diagram",
+        "title": "Input -> Process -> Output Flow",
+        "text": "Every program follows this standard three-step pipeline.",
+        "diagram": {
+          "type": "flowchart",
+          "steps": [
+            "Keyboard: input()",
+            "Convert: int() / float()",
+            "Compute: +, -, *, /, %",
+            "Screen: print()"
+          ]
+        },
+        "visual_type": "diagram"
+      },
+      {
+        "step_number": 7,
+        "step_name": "What If...?",
+        "title": "Predict First, Then Try",
+        "text": "What does 17 % 5 evaluate to? Predict before running: % is the remainder operator (modulus). 17 divided by 5 is 3 with remainder 2! So 17 % 5 is 2.",
+        "code": "rem = 17 % 5\nprint(rem)  # Prints: 2",
+        "visual_type": "what_if"
+      },
+      {
+        "step_number": 8,
+        "step_name": "Common Mistake",
+        "title": "Adding Input Directly Without int()",
+        "text": "Mistake: writing a = input(); b = input(); print(a + b). If user enters 10 and 20, Python outputs '1020' instead of 30 because input is text!",
+        "code": "# WRONG:\n# a = \"10\"\n# b = \"20\"\n# print(a + b) # \"1020\"\n\n# FIXED:\na = int(\"10\")\nb = int(\"20\")\nprint(a + b) # 30",
+        "visual_type": "common_mistake"
+      },
+      {
+        "step_number": 9,
+        "step_name": "Check Yourself",
+        "title": "Test Your Understanding",
+        "text": "Answer these quick questions on operators.",
+        "questions": [
+          {
+            "q": "What is the result of 14 // 4 in Python?",
+            "options": ["3.5", "3", "2", "3.0"],
+            "ans": 1,
+            "why": "// is floor division. It drops the decimal part and returns the whole integer 3."
+          },
+          {
+            "q": "What does print(f\"{5 + 3}\") print?",
+            "options": ["5 + 3", "8", "{8}", "Error"],
+            "ans": 1,
+            "why": "Inside an f-string f\"...\", expressions inside curly braces {} are evaluated. 5 + 3 becomes 8."
+          }
+        ],
+        "visual_type": "check_yourself"
+      },
+      {
+        "step_number": 10,
+        "step_name": "Skill Recap",
+        "title": "Skill Earned!",
+        "text": "You can now read inputs, convert types safely, perform arithmetic, and format clean outputs.",
+        "badge_link": "Reads user input and prints clean formatted output",
+        "visual_type": "recap"
+      }
+    ]
+  }
+]

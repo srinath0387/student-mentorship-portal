@@ -31,6 +31,7 @@ import {
 import { formatExternalUrl } from '../../../lib/urlUtils';
 import { SubjectsHandledSection } from './SubjectsHandledSection';
 import { VALID_DEPARTMENT_NAMES } from '../../../lib/validation/auth';
+import { FacultyApiScoreCard } from '../FacultyApiScoreCard';
 
 interface Props {
   faculty: {
@@ -224,6 +225,9 @@ export const FacultyProfileInspectionModal: React.FC<Props> = ({ faculty, onClos
           </div>
         ) : (
           <div className="space-y-6">
+            {/* ── API Score Card ── */}
+            <FacultyApiScoreCard facultyEmail={email} readOnly={true} />
+
             {/* ── 1. Personal & Contact Details ── */}
             <div className="bg-surface-2 border border-borderLine rounded-xl p-4 space-y-3">
               <h3 className="text-xs font-bold text-textPrimary uppercase tracking-wider flex items-center gap-1.5">
