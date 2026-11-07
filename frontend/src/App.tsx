@@ -159,7 +159,7 @@ const MainLayout: React.FC = () => {
   };
 
   // Student profile check for photo
-  const { data: studentProfile } = useQuery({
+  const { data: studentProfile, isFetched: studentPhotoFetched } = useQuery({
     queryKey: ['studentProfileForPhoto', user?.rollNumber],
     queryFn: () => (user?.rollNumber ? api.getStudentProfile(user.rollNumber) : Promise.resolve(null)),
     enabled: Boolean(isAuthenticated && role === 'student' && user?.rollNumber),
@@ -167,20 +167,20 @@ const MainLayout: React.FC = () => {
   });
 
   // Faculty profile check for photo
-  const isFacultyRole = ['faculty', 'coordinator', 'mentor'].includes(role || '');
-  const { data: facultyProfile } = useQuery({
+  const isFacultyRole = ['faculty', 'coordinator', 'mentor', 'hod'].includes(role || '');
+  const { data: facultyProfile, isFetched: facultyPhotoFetched } = useQuery({
     queryKey: ['facultyProfileForPhoto', user?.email],
     queryFn: () => (user?.email ? api.getFacultyFullProfile(user.email) : Promise.resolve(null)),
     enabled: Boolean(isAuthenticated && isFacultyRole && user?.email),
     staleTime: 60 * 1000,
   });
 
-  // Check if profile photo is missing
+  // Check if profile photo is missing — only AFTER the query has actually fetched fresh data
   const hasStudentPhoto = Boolean(studentProfile?.photo_url && studentProfile.photo_url.trim().length > 0);
   const hasFacultyPhoto = Boolean(facultyProfile?.personal?.photo_url && facultyProfile.personal.photo_url.trim().length > 0);
 
-  const shouldPromptStudent = Boolean(role === 'student' && studentProfile && !hasStudentPhoto);
-  const shouldPromptFaculty = Boolean(isFacultyRole && facultyProfile && !hasFacultyPhoto);
+  const shouldPromptStudent = Boolean(role === 'student' && studentPhotoFetched && studentProfile && !hasStudentPhoto);
+  const shouldPromptFaculty = Boolean(isFacultyRole && facultyPhotoFetched && facultyProfile && !hasFacultyPhoto);
   const isPhotoRequired = (shouldPromptStudent || shouldPromptFaculty) && !photoModalDismissed;
 
   // Check if student is missing Parent Phone OR Faculty Mentor

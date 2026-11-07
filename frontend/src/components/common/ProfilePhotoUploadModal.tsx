@@ -127,6 +127,7 @@ export const ProfilePhotoUploadModal: React.FC<ProfilePhotoUploadModalProps> = (
           photo_url: previewUrl,
         } as any);
         queryClient.invalidateQueries({ queryKey: ['studentProfile', userId] });
+        queryClient.invalidateQueries({ queryKey: ['studentProfileForPhoto', userId] });
         queryClient.invalidateQueries({ queryKey: ['myStudentProfile'] });
         queryClient.invalidateQueries({ queryKey: ['student'] });
       } else {
@@ -149,6 +150,7 @@ export const ProfilePhotoUploadModal: React.FC<ProfilePhotoUploadModalProps> = (
 
         await api.updateFacultyFullProfile(email, updatedProfile);
         queryClient.invalidateQueries({ queryKey: ['facultyFullProfile', email] });
+        queryClient.invalidateQueries({ queryKey: ['facultyProfileForPhoto', email] });
         queryClient.invalidateQueries({ queryKey: ['myFacultyFullProfile'] });
         queryClient.invalidateQueries({ queryKey: ['faculty'] });
       }
