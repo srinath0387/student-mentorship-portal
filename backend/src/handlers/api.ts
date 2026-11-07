@@ -2069,6 +2069,18 @@ app.get('/students', requireAuth, async (req: Request, res: Response) => {
       paginationClause = `LIMIT 1000 OFFSET ${pageOffset}`;
     }
 
+    const countOnly = req.query.count_only === 'true';
+    const includeCount = req.query.include_count === 'true';
+
+    // ── Fast path: count_only=true → lightweight COUNT(*), no JOINs ──
+    if (countOnly) {
+      const countResult = await db.query(
+        `SELECT COUNT(DISTINCT s.roll_number) AS total FROM students s ${whereClause}`,
+        params
+      );
+      return res.json({ total: parseInt(countResult.rows[0]?.total || '0', 10) });
+    }
+
     // Check in-memory cache for non-search queries.
     // Search queries are always served live (unique per request).
     const cacheKey = search
@@ -2087,9 +2099,21 @@ app.get('/students', requireAuth, async (req: Request, res: Response) => {
       const cached = getCachedStudents(cacheKey);
       if (cached) {
         res.setHeader('X-Cache', 'HIT');
+        if (includeCount) {
+          const countResult = await db.query(
+            `SELECT COUNT(DISTINCT s.roll_number) AS total FROM students s ${whereClause}`,
+            params
+          );
+          return res.json({ students: cached, total: parseInt(countResult.rows[0]?.total || '0', 10) });
+        }
         return res.json(cached);
       }
     }
+
+    // ── include_count: run COUNT in parallel with the data query ──
+    const countPromise = includeCount
+      ? db.query(`SELECT COUNT(DISTINCT s.roll_number) AS total FROM students s ${whereClause}`, params)
+      : null;
 
     const result = await db.query(`
       SELECT
@@ -2144,6 +2168,12 @@ app.get('/students', requireAuth, async (req: Request, res: Response) => {
       setCachedStudents(cacheKey, result.rows);
       res.setHeader('X-Cache', 'MISS');
     }
+
+    if (includeCount && countPromise) {
+      const countResult = await countPromise;
+      return res.json({ students: result.rows, total: parseInt(countResult.rows[0]?.total || '0', 10) });
+    }
+
     res.json(result.rows);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -2786,9 +2816,16 @@ app.put('/students/:id', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), as
       ).catch(() => {});
     }
 
-    const photo_url = body.photo_url !== undefined ? body.photo_url : (existing.photo_url || null);
-    const resume_url = body.resume_url !== undefined ? body.resume_url : (existing.resume_url || null);
-    const linkedin_url = body.linkedin_url !== undefined ? body.linkedin_url : (existing.linkedin_url || null);
+    // Crucial: preserve existing photo_url if the incoming payload is empty/null/undefined
+    const photo_url = (body.photo_url && String(body.photo_url).trim().length > 0)
+      ? body.photo_url
+      : (existing.photo_url || null);
+    const resume_url = (body.resume_url && String(body.resume_url).trim().length > 0)
+      ? body.resume_url
+      : (existing.resume_url || null);
+    const linkedin_url = (body.linkedin_url && String(body.linkedin_url).trim().length > 0)
+      ? body.linkedin_url
+      : (existing.linkedin_url || null);
 
     // SECURITY: Students cannot self-modify CGPA. CGPA is computed from verified academics or updated by Admin/HOD.
     const cgpa = (isPrivileged && body.cgpa !== undefined && body.cgpa !== null && body.cgpa !== '')
@@ -5271,6 +5308,20 @@ app.put('/faculty/full-profile/:email', async (req: Request, res: Response) => {
       data.personal.designation_locked = true;
     }
 
+    // Preserve existing photo_url if the incoming update didn't supply a new photo
+    const existingProfRes = await db.query(
+      'SELECT personal FROM faculty_full_profiles WHERE LOWER(email) = $1 LIMIT 1',
+      [email]
+    );
+    const existingPersonal = existingProfRes.rows[0]?.personal || {};
+    const mergedPersonal = {
+      ...existingPersonal,
+      ...(data.personal || {}),
+      photo_url: (data.personal?.photo_url && String(data.personal.photo_url).trim().length > 0)
+        ? data.personal.photo_url
+        : (existingPersonal.photo_url || null),
+    };
+
     await db.query(
       `INSERT INTO faculty_full_profiles (email, faculty_id, personal, education, certifications, activities, publications, domains, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
@@ -5285,7 +5336,7 @@ app.put('/faculty/full-profile/:email', async (req: Request, res: Response) => {
       [
         email,
         facultyId,
-        JSON.stringify(data.personal || {}),
+        JSON.stringify(mergedPersonal),
         JSON.stringify(data.education || {}),
         JSON.stringify(data.certifications || []),
         JSON.stringify(data.activities || []),

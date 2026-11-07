@@ -122,11 +122,14 @@ export const ProfilePhotoUploadModal: React.FC<ProfilePhotoUploadModalProps> = (
 
     try {
       if (role === 'student') {
+        const roll = userId.toUpperCase().trim();
         // Save to student record
-        await api.updateStudentProfile(userId, {
+        await api.updateStudentProfile(roll, {
           photo_url: previewUrl,
         } as any);
+        queryClient.invalidateQueries({ queryKey: ['studentProfile', roll] });
         queryClient.invalidateQueries({ queryKey: ['studentProfile', userId] });
+        queryClient.invalidateQueries({ queryKey: ['studentProfileForPhoto', roll] });
         queryClient.invalidateQueries({ queryKey: ['studentProfileForPhoto', userId] });
         queryClient.invalidateQueries({ queryKey: ['myStudentProfile'] });
         queryClient.invalidateQueries({ queryKey: ['student'] });
@@ -151,6 +154,7 @@ export const ProfilePhotoUploadModal: React.FC<ProfilePhotoUploadModalProps> = (
         await api.updateFacultyFullProfile(email, updatedProfile);
         queryClient.invalidateQueries({ queryKey: ['facultyFullProfile', email] });
         queryClient.invalidateQueries({ queryKey: ['facultyProfileForPhoto', email] });
+        queryClient.invalidateQueries({ queryKey: ['facultyProfileForPhoto', userId] });
         queryClient.invalidateQueries({ queryKey: ['myFacultyFullProfile'] });
         queryClient.invalidateQueries({ queryKey: ['faculty'] });
       }

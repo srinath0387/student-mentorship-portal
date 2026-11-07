@@ -170,6 +170,45 @@ export const api = {
     }
   },
 
+  // Server-side paginated fetch: returns only 1 page (100 students) + total count
+  getStudentsPage: async (params?: {
+    department?: string; batch?: string; section?: string; search?: string; year?: string;
+    page?: number; pageSize?: number;
+  }): Promise<{ students: StudentProfile[]; total: number }> => {
+    const page = params?.page ?? 1;
+    const pageSize = params?.pageSize ?? 100;
+    const offset = (page - 1) * pageSize;
+
+    const cleanParams: Record<string, string> = {};
+    if (params) {
+      Object.entries(params).forEach(([key, val]) => {
+        if (['page', 'pageSize'].includes(key)) return; // don't send these to backend
+        if (val !== undefined && val !== null && val !== '' && val !== 'All' && val !== '*') {
+          cleanParams[key] = String(val);
+        }
+      });
+    }
+
+    const qp = new URLSearchParams(cleanParams);
+    qp.set('limit', String(pageSize));
+    qp.set('offset', String(offset));
+    qp.set('include_count', 'true');
+
+    try {
+      const res = await fetchWithAuth(`/students?${qp.toString()}`);
+      // Backend returns { students: [...], total: N } when include_count=true
+      if (res && typeof res === 'object' && 'students' in res) {
+        return { students: Array.isArray(res.students) ? res.students : [], total: res.total ?? 0 };
+      }
+      // Fallback: old backend that returns plain array
+      const arr = Array.isArray(res) ? res : [];
+      return { students: arr, total: arr.length };
+    } catch (err) {
+      console.warn('[getStudentsPage] error:', err);
+      return { students: [], total: 0 };
+    }
+  },
+
     createStudent: async (data: Partial<StudentProfile>): Promise<{ message: string; student: StudentProfile }> => {
     return fetchWithAuth(`/students`, {
       method: 'POST',

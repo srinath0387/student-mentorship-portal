@@ -276,6 +276,7 @@ export const FacultyProfileTab: React.FC = () => {
         prior_experience_months: priorMonths,
         designation: designation as FacultyDesignation,
         designation_locked: designationLocked,
+        photo_url: profileData?.personal?.photo_url,
       },
       education: {
         highest_qualification: highestQual,

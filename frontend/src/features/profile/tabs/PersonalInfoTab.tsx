@@ -194,6 +194,7 @@ export const PersonalInfoTab: React.FC<PersonalInfoTabProps> = ({ student, acade
         batch: data.batch && data.batch !== '' ? data.batch : (student?.batch || '2023-2027'),
         section: data.section && data.section !== '' ? data.section : (student?.section || ''),
         hostel_day_scholar: data.hostel_day_scholar && data.hostel_day_scholar !== '' ? data.hostel_day_scholar : (student?.hostel_day_scholar || 'Day Scholar'),
+        photo_url: student?.photo_url || undefined,
       };
       await api.updateStudentProfile(data.roll_number || activeRoll, payload);
 

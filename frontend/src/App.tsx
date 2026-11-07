@@ -159,25 +159,30 @@ const MainLayout: React.FC = () => {
   };
 
   // Student profile check for photo
+  const studentRoll = user?.rollNumber ? user.rollNumber.toUpperCase().trim() : '';
   const { data: studentProfile, isFetched: studentPhotoFetched } = useQuery({
-    queryKey: ['studentProfileForPhoto', user?.rollNumber],
-    queryFn: () => (user?.rollNumber ? api.getStudentProfile(user.rollNumber) : Promise.resolve(null)),
-    enabled: Boolean(isAuthenticated && role === 'student' && user?.rollNumber),
+    queryKey: ['studentProfileForPhoto', studentRoll],
+    queryFn: () => (studentRoll ? api.getStudentProfile(studentRoll) : Promise.resolve(null)),
+    enabled: Boolean(isAuthenticated && role === 'student' && studentRoll),
     staleTime: 60 * 1000,
   });
 
   // Faculty profile check for photo
+  const facultyEmail = user?.email ? user.email.toLowerCase().trim() : '';
   const isFacultyRole = ['faculty', 'coordinator', 'mentor', 'hod'].includes(role || '');
   const { data: facultyProfile, isFetched: facultyPhotoFetched } = useQuery({
-    queryKey: ['facultyProfileForPhoto', user?.email],
-    queryFn: () => (user?.email ? api.getFacultyFullProfile(user.email) : Promise.resolve(null)),
-    enabled: Boolean(isAuthenticated && isFacultyRole && user?.email),
+    queryKey: ['facultyProfileForPhoto', facultyEmail],
+    queryFn: () => (facultyEmail ? api.getFacultyFullProfile(facultyEmail) : Promise.resolve(null)),
+    enabled: Boolean(isAuthenticated && isFacultyRole && facultyEmail),
     staleTime: 60 * 1000,
   });
 
   // Check if profile photo is missing — only AFTER the query has actually fetched fresh data
   const hasStudentPhoto = Boolean(studentProfile?.photo_url && studentProfile.photo_url.trim().length > 0);
-  const hasFacultyPhoto = Boolean(facultyProfile?.personal?.photo_url && facultyProfile.personal.photo_url.trim().length > 0);
+  const hasFacultyPhoto = Boolean(
+    (facultyProfile?.personal?.photo_url && facultyProfile.personal.photo_url.trim().length > 0) ||
+    (facultyProfile?.photo_url && facultyProfile.photo_url.trim().length > 0)
+  );
 
   const shouldPromptStudent = Boolean(role === 'student' && studentPhotoFetched && studentProfile && !hasStudentPhoto);
   const shouldPromptFaculty = Boolean(isFacultyRole && facultyPhotoFetched && facultyProfile && !hasFacultyPhoto);
