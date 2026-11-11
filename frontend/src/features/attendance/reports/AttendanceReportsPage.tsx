@@ -41,6 +41,8 @@ export const AttendanceReportsPage: React.FC = () => {
   const [reminderStatus, setReminderStatus] = useState<Record<string, string>>({});
   const [noClassModal, setNoClassModal] = useState<{ slot: any; date: string } | null>(null);
   const [noClassReason, setNoClassReason] = useState('');
+  const [rejectModal, setRejectModal] = useState<{ id: number } | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
 
   // Monthly report state
   const [mrMonth, setMrMonth] = useState(thisMonth);
@@ -462,7 +464,7 @@ export const AttendanceReportsPage: React.FC = () => {
                                 className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 hover:bg-green-200 text-xs font-semibold disabled:opacity-50">
                                 <CheckCircle className="h-3 w-3" /> Approve
                               </button>
-                              <button onClick={() => rejectMut.mutate({ id: r.id, reason: 'Rejected by admin' })} disabled={rejectMut.isPending}
+                              <button onClick={() => { setRejectModal({ id: r.id }); setRejectReason(''); }} disabled={rejectMut.isPending}
                                 className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 hover:bg-red-200 text-xs font-semibold disabled:opacity-50">
                                 <XCircle className="h-3 w-3" /> Reject
                               </button>
@@ -521,6 +523,42 @@ export const AttendanceReportsPage: React.FC = () => {
                 disabled={noClassMut.isPending || !noClassReason.trim()}
                 className="px-4 py-2 rounded-xl bg-primary text-white text-xs font-semibold disabled:opacity-50">
                 {noClassMut.isPending ? 'Submitting…' : 'Submit Request'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Reject Reason Modal */}
+      {rejectModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-background rounded-2xl border border-borderLine p-6 max-w-sm w-full space-y-4 shadow-2xl">
+            <div className="flex items-start gap-2">
+              <XCircle className="h-5 w-5 text-red-500 mt-0.5 shrink-0" />
+              <div>
+                <h3 className="font-bold text-sm text-foreground">Reject No-Class Request</h3>
+                <p className="text-xs text-muted mt-0.5">Provide a reason for rejection (optional).</p>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-muted block mb-1">Reason</label>
+              <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)}
+                placeholder="e.g. Attendance records indicate class was held…"
+                rows={3}
+                className="w-full px-3 py-2 text-xs rounded-xl border border-borderLine bg-surface focus:outline-none resize-none" />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setRejectModal(null)}
+                className="px-4 py-2 rounded-xl border border-borderLine text-xs font-semibold text-muted hover:bg-surface">
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  rejectMut.mutate({ id: rejectModal.id, reason: rejectReason.trim() || 'Rejected by admin' });
+                  setRejectModal(null);
+                }}
+                disabled={rejectMut.isPending}
+                className="px-4 py-2 rounded-xl bg-red-500 text-white text-xs font-semibold disabled:opacity-50">
+                {rejectMut.isPending ? 'Rejecting…' : 'Confirm Reject'}
               </button>
             </div>
           </div>

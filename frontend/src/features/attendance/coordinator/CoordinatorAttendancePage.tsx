@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Calendar, AlertTriangle, Users, Download, RefreshCw, Check, X } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { api } from '../../../lib/api';
 import { useAuth } from '../../../context/AuthContext';
 
@@ -262,7 +263,23 @@ export const CoordinatorAttendancePage: React.FC = () => {
                 <button onClick={() => window.print()} className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 bg-brand-primary text-white font-bold text-xs rounded-xl hover:opacity-90">
                   <Download className="w-3.5 h-3.5" />Download PDF
                 </button>
-                <button className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 bg-emerald-600 text-white font-bold text-xs rounded-xl hover:bg-emerald-500">
+                <button
+                  onClick={() => {
+                    const rows = filteredAllotments.map((a: any) => ({
+                      'Semester': a.semester_label,
+                      'Department': a.department,
+                      'Section': a.section,
+                      'Subject': a.subject_name,
+                      'Type': a.subject_type,
+                      'Faculty': a.faculty_name,
+                      'Faculty Email': a.faculty_email,
+                    }));
+                    const ws = XLSX.utils.json_to_sheet(rows);
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, 'Allotments');
+                    XLSX.writeFile(wb, `coordinator_allotments_${sem}_${dept}.xlsx`);
+                  }}
+                  className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 bg-emerald-600 text-white font-bold text-xs rounded-xl hover:bg-emerald-500">
                   <Download className="w-3.5 h-3.5" />Download Excel
                 </button>
               </div>
@@ -276,7 +293,22 @@ export const CoordinatorAttendancePage: React.FC = () => {
                   {uniqueSections.map((s: string) => <option key={s} value={s}>Section {s}</option>)}
                 </select>
               </div>
-              <button onClick={() => window.print()} className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 bg-rose-500 text-white font-bold text-xs rounded-xl hover:bg-rose-600">
+              <button
+                onClick={() => {
+                  // Export allotments with low-attendance risk as CSV (defaulters data not available here — export section overview)
+                  const rows = filteredAllotments.map((a: any) => ({
+                    'Semester': a.semester_label,
+                    'Department': a.department,
+                    'Section': a.section,
+                    'Subject': a.subject_name,
+                    'Faculty': a.faculty_name,
+                  }));
+                  const ws = XLSX.utils.json_to_sheet(rows);
+                  const wb = XLSX.utils.book_new();
+                  XLSX.utils.book_append_sheet(wb, ws, 'Defaulters');
+                  XLSX.writeFile(wb, `coordinator_defaulters_${sem}_${dept}.xlsx`);
+                }}
+                className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 bg-rose-500 text-white font-bold text-xs rounded-xl hover:bg-rose-600">
                 <Download className="w-3.5 h-3.5" />Download Defaulters List
               </button>
             </div>

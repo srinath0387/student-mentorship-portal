@@ -263,6 +263,9 @@ export const AttendanceSetupPage: React.FC = () => {
       qc.invalidateQueries({queryKey:['attendanceTimetable']});
       setTtStatus({type:'success',message:`Slot saved: ${ttDay} P${ttPeriod}.`});
       setTtSubject(''); setTtFacEmail(''); setTtRoom('');
+      // ATT-BUG-11 fix: clear stale clash result after successful save
+      setClashResult(null);
+      setOverrideReason('');
     } catch(err:any) { setTtStatus({type:'error',message:err.message||'Failed.'}); }
   };
 

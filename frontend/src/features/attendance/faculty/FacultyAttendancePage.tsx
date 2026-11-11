@@ -274,6 +274,8 @@ export const FacultyAttendancePage: React.FC = () => {
       qc.invalidateQueries({queryKey:['dailyPeriodGrid']});
       qc.invalidateQueries({queryKey:['attendanceAllotments']});
       qc.invalidateQueries({queryKey:['subjectSummary']});
+      // ATT-BUG-01 fix: also invalidate roster so OD status updates are reflected
+      qc.invalidateQueries({queryKey:['roster', subjectId, date]});
       setShowAbsentModal(false);
       setFeedback({type:'success',text:'Attendance saved successfully!'});
       setTimeout(()=>setFeedback(null),4000);
