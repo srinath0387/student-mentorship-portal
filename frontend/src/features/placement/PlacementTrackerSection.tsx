@@ -110,6 +110,7 @@ export const PlacementTrackerSection: React.FC<Props> = ({
 }) => {
   const qc = useQueryClient();
   const [showForm, setShowForm] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const { data: placements = [], isLoading, refetch, isFetching } = useQuery<StudentPlacement[]>({
     queryKey: ['studentPlacements', department, studentRollNumber],
@@ -146,10 +147,12 @@ export const PlacementTrackerSection: React.FC<Props> = ({
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => api.deleteStudentPlacement(id),
+    onMutate: (id: number) => { setDeletingId(id); },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['studentPlacements'] });
       qc.invalidateQueries({ queryKey: ['hodPlacementSummary'] });
     },
+    onSettled: () => { setDeletingId(null); },
   });
 
   const typeColor: Record<string, string> = {
@@ -216,7 +219,7 @@ export const PlacementTrackerSection: React.FC<Props> = ({
       )}
 
       {/* Top Companies */}
-      {(isHodView || isAdminView) && summary && summary.top_companies.length > 0 && (
+      {(isHodView || isAdminView) && summary && (summary?.top_companies?.length ?? 0) > 0 && (
         <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-4">
           <div className="flex items-center gap-2 mb-3">
             <Building2 size={16} className="text-white/50" />
@@ -317,10 +320,10 @@ export const PlacementTrackerSection: React.FC<Props> = ({
                       {(isHodView || isAdminView || isStudentView) && (
                         <button
                           onClick={() => { if (confirm('Delete this placement record?')) deleteMutation.mutate(p.id); }}
-                          disabled={deleteMutation.isPending}
+                          disabled={deletingId === p.id}
                           className="text-xs p-1 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30"
                         >
-                          <Trash2 size={12} />
+                          {deletingId === p.id ? <RefreshCw size={12} className="animate-spin" /> : <Trash2 size={12} />}
                         </button>
                       )}
                     </div>

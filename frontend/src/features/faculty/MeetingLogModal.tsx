@@ -16,6 +16,7 @@ interface Props {
 export const MeetingLogModal: React.FC<Props> = ({ rollNumber, studentName, onClose, facultyEmail }) => {
   const qc = useQueryClient();
   const [showForm, setShowForm] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [form, setForm] = useState({
     meeting_date: new Date().toISOString().split('T')[0],
     topics: '',
@@ -41,7 +42,9 @@ export const MeetingLogModal: React.FC<Props> = ({ rollNumber, studentName, onCl
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => api.deleteMentorMeeting(id),
+    onMutate: (id: number) => { setDeletingId(id); },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['mentorMeetings', rollNumber] }),
+    onSettled: () => { setDeletingId(null); },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -188,7 +191,8 @@ export const MeetingLogModal: React.FC<Props> = ({ rollNumber, studentName, onCl
                     {m.faculty_email === facultyEmail && (
                       <button
                         onClick={() => { if (confirm('Delete this meeting log?')) deleteMutation.mutate(m.id); }}
-                        className="p-1.5 rounded-lg hover:bg-red-500/20 text-white/30 hover:text-red-400 transition-colors flex-shrink-0"
+                        disabled={deletingId === m.id}
+                        className="p-1.5 rounded-lg hover:bg-red-500/20 text-white/30 hover:text-red-400 transition-colors flex-shrink-0 disabled:opacity-50"
                       >
                         <Trash2 size={14} />
                       </button>

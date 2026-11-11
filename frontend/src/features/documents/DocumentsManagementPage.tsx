@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, Fragment } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   FolderOpen, CheckCircle2, XCircle, Download, Eye, Search,
@@ -305,9 +305,8 @@ export function DocumentsManagementPage() {
               </thead>
               <tbody className="divide-y divide-borderLine">
                 {filtered.map(doc => (
-                  <>
+                  <Fragment key={doc.id}>
                     <tr
-                      key={doc.id}
                       className={`hover:bg-surface-2 transition-colors ${
                         doc.verification_status === 'Pending' ? 'bg-amber-50/30' : ''
                       }`}
@@ -420,7 +419,7 @@ export function DocumentsManagementPage() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 ))}
               </tbody>
             </table>

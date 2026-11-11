@@ -55,6 +55,9 @@ export const FacultyLeaveTab: React.FC = () => {
   const [activeSubTab, setActiveSubTab] = useState<'my-leaves' | 'reassigned-duties'>('my-leaves');
   const [showApplyModal, setShowApplyModal] = useState(false);
   const [viewingLeave, setViewingLeave] = useState<FacultyLeaveRecord | null>(null);
+  const [declineModal, setDeclineModal] = useState<{ adjId: string; subject: string; date: string } | null>(null);
+  const [declineReason, setDeclineReason] = useState('');
+  const [dutyPendingId, setDutyPendingId] = useState<string | null>(null);
 
   // Form State
   const [formLeaveType, setFormLeaveType] = useState<FacultyLeaveType>('Casual Leave');
@@ -177,15 +180,19 @@ export const FacultyLeaveTab: React.FC = () => {
   const dutyResponseMutation = useMutation({
     mutationFn: ({ adjId, status, rejected_reason }: { adjId: string; status: 'Accepted' | 'Rejected'; rejected_reason?: string }) =>
       api.respondToAdjustment(adjId, status, rejected_reason, email),
+    onMutate: ({ adjId }) => { setDutyPendingId(adjId); },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['facultyReassignedDuties', email] });
       queryClient.invalidateQueries({ queryKey: ['facultyLeaveSummary'] });
       queryClient.invalidateQueries({ queryKey: ['hodFacultyLeaves'] });
+      setDeclineModal(null);
+      setDeclineReason('');
       alert(res.message || 'Response recorded successfully.');
     },
     onError: (err: any) => {
       alert(`Failed to record response: ${err.message}`);
     },
+    onSettled: () => { setDutyPendingId(null); },
   });
 
   const reassignMutation = useMutation({
@@ -662,17 +669,8 @@ export const FacultyLeaveTab: React.FC = () => {
                               <div className="flex items-center justify-end gap-1.5">
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    const reason = prompt('Please enter reason for declining this covering duty:');
-                                    if (reason !== null) {
-                                      dutyResponseMutation.mutate({
-                                        adjId: duty.id || '',
-                                        status: 'Rejected',
-                                        rejected_reason: reason,
-                                      });
-                                    }
-                                  }}
-                                  disabled={dutyResponseMutation.isPending}
+                                  onClick={() => setDeclineModal({ adjId: duty.id || '', subject: duty.subject_or_duty, date: duty.date })}
+                                  disabled={dutyPendingId === duty.id}
                                   className="px-2.5 py-1 rounded-lg border border-alert/30 text-alert hover:bg-alert-soft font-bold text-xs transition-all cursor-pointer"
                                 >
                                   Decline
@@ -687,7 +685,7 @@ export const FacultyLeaveTab: React.FC = () => {
                                       });
                                     }
                                   }}
-                                  disabled={dutyResponseMutation.isPending}
+                                  disabled={dutyPendingId === duty.id}
                                   className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all shadow-sm cursor-pointer flex items-center gap-1"
                                 >
                                   <Check className="w-3.5 h-3.5" />
@@ -1078,6 +1076,48 @@ export const FacultyLeaveTab: React.FC = () => {
                 className="px-4 py-1.5 rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white text-xs font-bold shadow-sm disabled:opacity-50 cursor-pointer"
               >
                 {reassignMutation.isPending ? 'Reassigning...' : 'Confirm Reassignment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Decline Duty Reason Modal ── */}
+      {declineModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-surface border border-borderLine rounded-2xl p-6 max-w-sm w-full shadow-2xl space-y-4 animate-in fade-in">
+            <h4 className="text-sm font-bold text-textPrimary">Decline Covering Duty</h4>
+            <p className="text-xs text-textSecondary">
+              Declining <strong>{declineModal.subject}</strong> on {declineModal.date}. Please provide a reason:
+            </p>
+            <textarea
+              rows={3}
+              value={declineReason}
+              onChange={(e) => setDeclineReason(e.target.value)}
+              placeholder="Reason for declining (e.g. already on leave, prior commitment)..."
+              className="w-full px-3 py-2 rounded-xl border border-borderLine bg-surface text-textPrimary text-xs focus:outline-none focus:border-brand-primary"
+            />
+            <div className="flex justify-end gap-2 pt-2 border-t border-borderLine">
+              <button
+                type="button"
+                onClick={() => { setDeclineModal(null); setDeclineReason(''); }}
+                className="px-3.5 py-1.5 rounded-xl border border-borderLine text-textSecondary text-xs font-semibold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={dutyResponseMutation.isPending}
+                onClick={() => {
+                  dutyResponseMutation.mutate({
+                    adjId: declineModal.adjId,
+                    status: 'Rejected',
+                    rejected_reason: declineReason.trim(),
+                  });
+                }}
+                className="px-4 py-1.5 rounded-xl bg-alert hover:bg-alert/90 text-white text-xs font-bold shadow-sm disabled:opacity-50 cursor-pointer"
+              >
+                {dutyResponseMutation.isPending ? 'Declining...' : 'Confirm Decline'}
               </button>
             </div>
           </div>
