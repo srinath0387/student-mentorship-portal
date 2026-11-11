@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   Camera,
@@ -73,6 +73,8 @@ export const ProfilePhotoUploadModal: React.FC<ProfilePhotoUploadModalProps> = (
 }) => {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isMountedRef = useRef(true);
+  useEffect(() => { isMountedRef.current = true; return () => { isMountedRef.current = false; }; }, []);
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -163,6 +165,7 @@ export const ProfilePhotoUploadModal: React.FC<ProfilePhotoUploadModalProps> = (
       if (onSuccess) onSuccess(previewUrl);
 
       setTimeout(() => {
+        if (!isMountedRef.current) return;
         setIsSuccess(false);
         setPreviewUrl(null);
         setSelectedFile(null);
@@ -180,7 +183,8 @@ export const ProfilePhotoUploadModal: React.FC<ProfilePhotoUploadModalProps> = (
     .filter(Boolean)
     .map((n) => n[0])
     .join('')
-    .toUpperCase() || 'U';
+    .toUpperCase()
+    .slice(0, 2) || 'U';
 
   const activeDisplay = previewUrl || currentPhotoUrl;
 

@@ -52,6 +52,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [selectedNotif, setSelectedNotif] = useState<BroadcastNotification | null>(null);
+  const [photoImgError, setPhotoImgError] = useState(false);
 
   const canBroadcast = ['hod', 'faculty', 'coordinator', 'admin', 'principal', 'director', 'management', 'program_chair'].includes(user?.role || '');
 
@@ -119,6 +120,8 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
   const photoUrl = user?.role === 'student'
     ? studentProfile?.photo_url
     : facultyProfile?.personal?.photo_url;
+  // Reset error state whenever photoUrl changes (after a new upload)
+  useEffect(() => { setPhotoImgError(false); }, [photoUrl]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -440,8 +443,8 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
             className="flex items-center gap-2.5 p-1.5 rounded-xl hover:bg-surface-2 transition-all focus:outline-none"
           >
             <div className="w-8 h-8 rounded-full overflow-hidden bg-brand-primary text-white font-bold flex items-center justify-center text-xs shadow-xs ring-2 ring-brand-soft">
-              {photoUrl ? (
-                <img src={photoUrl} alt={displayName} className="w-full h-full object-cover" />
+              {photoUrl && !photoImgError ? (
+                <img src={photoUrl} alt={displayName} className="w-full h-full object-cover" onError={() => setPhotoImgError(true)} />
               ) : (
                 avatarText
               )}
@@ -462,8 +465,8 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
               <div className="p-4 border-b border-borderLine" style={{ background: 'linear-gradient(135deg, var(--color-brand-subtle), var(--color-surface-2))' }}>
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full overflow-hidden bg-brand-primary text-white font-bold flex items-center justify-center text-sm shadow-xs shrink-0 ring-2 ring-brand-soft">
-                    {photoUrl ? (
-                      <img src={photoUrl} alt={displayName} className="w-full h-full object-cover" />
+                    {photoUrl && !photoImgError ? (
+                      <img src={photoUrl} alt={displayName} className="w-full h-full object-cover" onError={() => setPhotoImgError(true)} />
                     ) : (
                       avatarText
                     )}

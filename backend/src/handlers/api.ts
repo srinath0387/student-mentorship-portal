@@ -5223,7 +5223,7 @@ const ensureFacultyProfileTable = async () => {
   `).catch(() => {});
 };
 
-app.get('/faculty/full-profile/:email', async (req: Request, res: Response) => {
+app.get('/faculty/full-profile/:email', requireAuth, async (req: Request, res: Response) => {
   try {
     const email = req.params.email.toLowerCase().trim();
     if (db.isMock) {
@@ -5283,7 +5283,7 @@ app.get('/faculty/full-profile/:email', async (req: Request, res: Response) => {
   }
 });
 
-app.put('/faculty/full-profile/:email', async (req: Request, res: Response) => {
+app.put('/faculty/full-profile/:email', requireAuth, async (req: Request, res: Response) => {
   try {
     const email = req.params.email.toLowerCase().trim();
     const data = req.body;
@@ -5953,19 +5953,21 @@ app.get('/faculty', requireRole('admin', 'hod', 'coordinator', 'faculty', 'direc
     // Count mentees from BOTH mentor_assignments AND students.faculty_mentor_id (union, deduplicated)
     const result = await db.query(`
       SELECT f.*,
+             ffp.personal->>'photo_url' AS photo_url,
              COUNT(DISTINCT combined.roll_number)::int                            AS mentee_count,
              COUNT(DISTINCT CASE WHEN s2.year = '1st Year' THEN combined.roll_number END)::int AS year1_count,
              COUNT(DISTINCT CASE WHEN s2.year = '2nd Year' THEN combined.roll_number END)::int AS year2_count,
              COUNT(DISTINCT CASE WHEN s2.year = '3rd Year' THEN combined.roll_number END)::int AS year3_count,
              COUNT(DISTINCT CASE WHEN s2.year = '4th Year' THEN combined.roll_number END)::int AS year4_count
       FROM faculty f
+      LEFT JOIN faculty_full_profiles ffp ON LOWER(ffp.email) = LOWER(f.email)
       LEFT JOIN (
         SELECT roll_number, faculty_id FROM mentor_assignments
         UNION
         SELECT roll_number, faculty_mentor_id AS faculty_id FROM students WHERE faculty_mentor_id IS NOT NULL
       ) combined ON UPPER(combined.faculty_id) = UPPER(f.faculty_id)
       LEFT JOIN students s2 ON UPPER(s2.roll_number) = UPPER(combined.roll_number)
-      GROUP BY f.faculty_id
+      GROUP BY f.faculty_id, ffp.personal
       ORDER BY f.name
     `);
 

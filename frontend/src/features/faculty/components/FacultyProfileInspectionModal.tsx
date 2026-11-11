@@ -40,6 +40,7 @@ interface Props {
     email: string;
     department?: string;
     role?: string;
+    photo_url?: string;
   } | null;
   onClose: () => void;
 }
@@ -161,8 +162,17 @@ export const FacultyProfileInspectionModal: React.FC<Props> = ({ faculty, onClos
           </div>
 
           <div className="flex items-start gap-4 mt-3">
-            <div className="w-14 h-14 rounded-2xl bg-[#031B33] text-brand-primary border border-brand-primary/30 flex items-center justify-center text-lg font-black shrink-0">
-              {getInitials(faculty.name)}
+            <div className="w-14 h-14 rounded-2xl bg-[#031B33] text-brand-primary border border-brand-primary/30 flex items-center justify-center text-lg font-black shrink-0 overflow-hidden">
+              {(personal.photo_url || faculty.photo_url) ? (
+                <img
+                  src={personal.photo_url || faculty.photo_url}
+                  alt={faculty.name}
+                  className="w-full h-full object-cover"
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                />
+              ) : (
+                getInitials(faculty.name)
+              )}
             </div>
             <div className="flex-1">
               <h2 className="text-xl font-extrabold text-textPrimary">{faculty.name}</h2>

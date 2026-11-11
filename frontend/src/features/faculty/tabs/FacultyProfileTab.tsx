@@ -84,7 +84,7 @@ const DOMAIN_PRESETS = [
 ];
 
 export const FacultyProfileTab: React.FC = () => {
-  const { user, role } = useAuth();
+  const { user, role, updatePhotoUrl } = useAuth();
   const queryClient = useQueryClient();
   const email = user?.email || '';
 
@@ -926,6 +926,7 @@ export const FacultyProfileTab: React.FC = () => {
                     src={profileData.personal.photo_url}
                     alt={profileData?.personal?.name || 'Faculty'}
                     className="w-full h-full object-cover"
+                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
                   />
                 ) : (
                   <User className="w-6 h-6" />
@@ -2338,8 +2339,11 @@ export const FacultyProfileTab: React.FC = () => {
         userId={email}
         userName={profileData?.personal?.name || user?.name || 'Faculty Member'}
         currentPhotoUrl={profileData?.personal?.photo_url}
-        onSuccess={() => {
+        onSuccess={(newPhotoUrl) => {
           queryClient.invalidateQueries({ queryKey: ['facultyFullProfile', email] });
+          queryClient.invalidateQueries({ queryKey: ['facultyProfileForPhoto', email] });
+          queryClient.invalidateQueries({ queryKey: ['faculty'] });
+          if (newPhotoUrl) updatePhotoUrl(newPhotoUrl);
         }}
       />
     </div>

@@ -34,7 +34,7 @@ import { MeetingLogsView } from '../../components/MeetingLogsView';
 export const ProfilePage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, updatePhotoUrl } = useAuth();
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
 
   // ?id=ROLLNO means admin/HOD is viewing a specific student's profile from search.
@@ -185,6 +185,7 @@ export const ProfilePage: React.FC = () => {
                       src={student.photo_url}
                       alt={displayName}
                       className="w-full h-full object-cover"
+                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
                     />
                   ) : (
                     initials
@@ -312,7 +313,7 @@ export const ProfilePage: React.FC = () => {
         userId={activeRollNo}
         userName={displayName}
         currentPhotoUrl={student?.photo_url}
-        onSuccess={() => handleRefreshAll()}
+        onSuccess={(newPhotoUrl) => { handleRefreshAll(); if (newPhotoUrl) updatePhotoUrl(newPhotoUrl); }}
       />
     </div>
   );
