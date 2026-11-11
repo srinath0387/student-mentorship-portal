@@ -349,7 +349,20 @@ export const HodAttendancePage: React.FC = () => {
                 <button onClick={() => window.print()} className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 bg-brand-primary text-white font-bold text-xs rounded-xl hover:opacity-90">
                   <Printer className="w-3.5 h-3.5" />Print / PDF
                 </button>
-                <button onClick={() => handleExportCSV(allotments, `Section_Attendance_${user?.department || 'dept'}`)} className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 bg-emerald-600 text-white font-bold text-xs rounded-xl hover:bg-emerald-500">
+                <button onClick={() => handleExportCSV(
+                  filteredAllotments.map((a: any) => ({
+                    'Semester': a.semester_label,
+                    'Department': a.department,
+                    'Section': a.section,
+                    'Subject': a.subject_name,
+                    'Type': a.subject_type,
+                    'Faculty': a.faculty_name,
+                    'Faculty Email': a.faculty_email,
+                    'Students Enrolled': a.roster_count ?? '',
+                    'Sessions Taken': a.sessions_count ?? '',
+                  })),
+                  `Section_Attendance_${user?.department || 'dept'}`
+                )} className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 bg-emerald-600 text-white font-bold text-xs rounded-xl hover:bg-emerald-500">
                   <FileSpreadsheet className="w-3.5 h-3.5" />Export Excel
                 </button>
               </div>

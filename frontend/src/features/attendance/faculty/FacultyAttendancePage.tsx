@@ -107,15 +107,22 @@ export const FacultyAttendancePage: React.FC = () => {
   });
 
   // Combined timetable: email-matched + subject/section-matched (dedup by id)
+  // ATT-BUG-03 fix: filter rawSubjectTT to only slots where faculty_email matches the logged-in user
+  // (rawSubjectTT fetches by semester+section so it may include other faculty's slots)
   const myTimetable = useMemo(() => {
     const emailMatched = Array.isArray(rawTT) ? rawTT : [];
-    const subjectMatched = Array.isArray(rawSubjectTT) ? rawSubjectTT : [];
+    const subjectMatched = Array.isArray(rawSubjectTT)
+      ? rawSubjectTT.filter((t: any) =>
+          !t.faculty_email ||
+          t.faculty_email.toLowerCase().trim() === (user?.email || '').toLowerCase().trim()
+        )
+      : [];
     const combined = [...emailMatched];
     for (const t of subjectMatched) {
       if (!combined.find((m: any) => m.id === t.id)) combined.push(t);
     }
     return combined;
-  }, [rawTT, rawSubjectTT]);
+  }, [rawTT, rawSubjectTT, user?.email]);
 
   // Academic Holidays
   const { data: rawHolidays = [] } = useQuery({
@@ -203,6 +210,11 @@ export const FacultyAttendancePage: React.FC = () => {
     }
   }, [matchedSlot]);
 
+  // ATT-BUG-04 fix: reset hour toggles whenever subject changes so lab hours don't bleed into theory
+  useEffect(() => {
+    setHour1(true); setHour2(false); setHour3(false);
+  }, [subjectId]);
+
   // Not posted
   const {data:rawNotPosted={}} = useQuery({ queryKey:['notPosted',user?.email], queryFn:()=>api.getNotPostedAttendance({faculty_email:user?.email}).catch(()=>({})) });
   // BUG-03 fix: backend returns { pendingSlots: [...] }, not a plain array
@@ -283,7 +295,9 @@ export const FacultyAttendancePage: React.FC = () => {
     onError:(err:any)=>setFeedback({type:'error',text:err.message||'Failed to save.'})
   });
 
-  const absentList = records.filter(r=>!r.is_on_od && (!r.h1 || (hour2 && !r.h2) || (hour3 && !r.h3)));
+  // ATT-BUG-06 fix: absent = missing h1 for all; for lab (hour2/hour3 active) also check h2/h3
+  // A student is absent if they miss at least one active period
+  const absentList = records.filter(r => !r.is_on_od && (!r.h1 || (hour2 && !r.h2) || (hour3 && !r.h3)));
   const odCount = records.filter(r=>r.is_on_od).length;
   const presentCount = records.length - absentList.length;
 
