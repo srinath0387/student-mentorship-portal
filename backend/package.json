@@ -4,7 +4,7 @@
   "description": "Advitiyans Student 360 & Placement Readiness Platform API",
   "main": "dist/handlers/api.js",
   "scripts": {
-    "build": "tsc && esbuild src/handlers/api.ts --bundle --platform=node --target=node20 --outfile=dist/handlers/api.js --external:pg-native && esbuild src/handlers/cognito-pre-signup.ts --bundle --platform=node --target=node20 --outfile=dist/handlers/cognito-pre-signup.js",
+    "build": "tsc && esbuild src/handlers/api.ts --bundle --platform=node --target=node20 --outfile=dist/handlers/api.js --external:pg-native --external:compression && esbuild src/handlers/cognito-pre-signup.ts --bundle --platform=node --target=node20 --outfile=dist/handlers/cognito-pre-signup.js",
     "test": "jest --passWithNoTests",
     "test:smoke": "jest --testPathPattern=tests/smoke --passWithNoTests",
     "test:unit": "jest --testPathPattern=tests/unit --passWithNoTests",

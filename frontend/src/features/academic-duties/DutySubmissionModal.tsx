@@ -25,10 +25,15 @@ export function DutySubmissionModal({ assignmentId, dutyTitle, dutyType, onClose
     if (!form.completed_at) { setError('Please enter the completion date.'); return; }
     setLoading(true);
     setError('');
+    const sanitizeUrl = (url: string): string | undefined => {
+      const trimmed = url.trim();
+      if (!trimmed) return undefined;
+      return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    };
     try {
       await api.submitAcademicDutyWork(assignmentId, {
         submission_text: form.submission_text.trim(),
-        proof_url: form.proof_url.trim() || undefined,
+        proof_url: sanitizeUrl(form.proof_url),
         completed_at: form.completed_at,
       });
       setSuccess(true);

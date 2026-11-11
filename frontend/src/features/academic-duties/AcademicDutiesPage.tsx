@@ -122,7 +122,13 @@ function ReviewPanel({ assignee, dutyType, isRecurring, onDone }: {
       {/* Submission text */}
       <div>
         <p className="text-xs font-semibold text-gray-600 mb-1">Submission</p>
-        <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{assignee.submission_text}</p>
+        <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
+          {(assignee.submission_text || '').split(/(https?:\/\/[^\s]+)/g).map((part: string, i: number) =>
+            /^https?:\/\//.test(part)
+              ? <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline break-all">{part}</a>
+              : part
+          )}
+        </p>
       </div>
 
       {/* Proof URL — always visible prominently */}
@@ -302,49 +308,56 @@ function DutyCard({ duty, refetch }: { duty: any; refetch: () => void }) {
                   : duty.co_coordinator_email?.toLowerCase() === a.faculty_email?.toLowerCase()
                   ? 'co_coordinator' : 'assigned';
                 const isReviewing = reviewing === a.id;
+                const colSpan = duty.is_recurring ? 6 : 5;
                 return (
-                  <tr key={a.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-5 py-3">
-                      <div className="font-medium text-gray-800">{a.faculty_name}</div>
-                      <div className="text-gray-400">{a.faculty_email}</div>
-                      {isReviewing && (
-                        <ReviewPanel
-                          assignee={a}
-                          dutyType={duty.duty_type}
-                          isRecurring={!!duty.is_recurring}
-                          onDone={() => { setReviewing(null); refetch(); }}
-                        />
-                      )}
-                    </td>
-                    <td className="px-3 py-3">{roleBadge(role)}</td>
-                    <td className="px-3 py-3">{statusBadge(a.submission_status)}</td>
-                    {/* Proof URL — always visible in table row */}
-                    <td className="px-3 py-3">
-                      {a.proof_url ? (
-                        <a href={a.proof_url} target="_blank" rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 hover:underline font-medium">
-                          <ExternalLink className="w-3 h-3" /> View
-                        </a>
-                      ) : (
-                        <span className="text-gray-300">—</span>
-                      )}
-                    </td>
-                    {duty.is_recurring && (
-                      <td className="px-3 py-3 text-gray-600">
-                        <span className="font-semibold">{a.cycles_approved ?? 0}</span>
-                        <span className="text-gray-400"> cycles · </span>
-                        <span className="font-semibold text-indigo-600">{a.total_points_earned ?? 0}pt</span>
+                  <>
+                    <tr key={a.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-5 py-3">
+                        <div className="font-medium text-gray-800">{a.faculty_name}</div>
+                        <div className="text-gray-400">{a.faculty_email}</div>
                       </td>
-                    )}
-                    <td className="px-3 py-3 text-right">
-                      {a.submission_status === 'Submitted' && (
-                        <button onClick={() => setReviewing(isReviewing ? null : a.id)}
-                          className="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 transition-colors">
-                          {isReviewing ? 'Close' : 'Review'}
-                        </button>
+                      <td className="px-3 py-3">{roleBadge(role)}</td>
+                      <td className="px-3 py-3">{statusBadge(a.submission_status)}</td>
+                      {/* Proof URL — always visible in table row */}
+                      <td className="px-3 py-3">
+                        {a.proof_url ? (
+                          <a href={a.proof_url} target="_blank" rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 hover:underline font-medium">
+                            <ExternalLink className="w-3 h-3" /> View
+                          </a>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
+                      {duty.is_recurring && (
+                        <td className="px-3 py-3 text-gray-600">
+                          <span className="font-semibold">{a.cycles_approved ?? 0}</span>
+                          <span className="text-gray-400"> cycles · </span>
+                          <span className="font-semibold text-indigo-600">{a.total_points_earned ?? 0}pt</span>
+                        </td>
                       )}
-                    </td>
-                  </tr>
+                      <td className="px-3 py-3 text-right">
+                        {a.submission_status === 'Submitted' && (
+                          <button onClick={() => setReviewing(isReviewing ? null : a.id)}
+                            className="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 transition-colors">
+                            {isReviewing ? 'Close' : 'Review'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                    {isReviewing && (
+                      <tr key={`review-${a.id}`}>
+                        <td colSpan={colSpan} className="px-5 pb-4 pt-0">
+                          <ReviewPanel
+                            assignee={a}
+                            dutyType={duty.duty_type}
+                            isRecurring={!!duty.is_recurring}
+                            onDone={() => { setReviewing(null); refetch(); }}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 );
               })}
             </tbody>

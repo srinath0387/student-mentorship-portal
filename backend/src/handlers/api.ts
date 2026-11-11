@@ -1,7 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import zlib from 'zlib';
-import compression from 'compression';
 import { globalErrorHandler } from '../lib/errors';
 import { logger } from '../lib/logger';
 import cors from 'cors';
@@ -91,14 +90,23 @@ const app = express();
 
 // Compression middleware — compresses all JSON responses > 1KB (gzip level 6).
 // Reduces 3–6 MB student list payloads to 0.6–1.2 MB automatically.
-app.use(compression({
-  level: 6,
-  threshold: 1024,
-  filter: (req: Request, res: Response) => {
-    if (req.headers['x-no-compression']) return false;
-    return compression.filter(req, res);
-  },
-}));
+let compressionMiddleware: any = (_req: any, _res: any, next: any) => next();
+try {
+  const comp = require('compression');
+  if (comp) {
+    compressionMiddleware = comp({
+      level: 6,
+      threshold: 1024,
+      filter: (req: Request, res: Response) => {
+        if (req.headers['x-no-compression']) return false;
+        return comp.filter ? comp.filter(req, res) : true;
+      },
+    });
+  }
+} catch {
+  // Compression optional
+}
+app.use(compressionMiddleware);
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -9574,6 +9582,106 @@ app.get('/faculty/api-scores', requireRole('hod', 'admin', 'director', 'principa
     const emails = facRes.rows.map((r: any) => r.email.toLowerCase());
 
     await db.query(`CREATE TABLE IF NOT EXISTS faculty_api_duties (id SERIAL PRIMARY KEY, faculty_email TEXT NOT NULL, faculty_name TEXT, duty_type TEXT NOT NULL, title TEXT NOT NULL, description TEXT, duty_date DATE NOT NULL, proof_url TEXT, points_awarded NUMERIC(5,2), approved_by TEXT, approved_at TIMESTAMPTZ, reject_reason TEXT, status TEXT NOT NULL DEFAULT 'Pending', created_at TIMESTAMPTZ DEFAULT NOW())`).catch(() => {});
+    // Batch queries — one round-trip per data type for all faculty
+    const dutiesRes = await db.query(`
+      SELECT LOWER(faculty_email) AS email, duty_type,
+        COALESCE(SUM(points_awarded), 0) AS pts
+      FROM faculty_api_duties
+      WHERE LOWER(faculty_email) = ANY($1) AND status = 'Approved'
+      GROUP BY LOWER(faculty_email), duty_type
+    `, [emails]);
+
+    const workloadRes = await db.query(`
+      SELECT LOWER(faculty_email) AS email, COALESCE(SUM(num_periods),0)::int AS total_periods
+      FROM timetable_entries WHERE LOWER(faculty_email) = ANY($1)
+      GROUP BY LOWER(faculty_email)
+    `, [emails]);
+
+    const meetingsRes = await db.query(`
+      SELECT LOWER(faculty_email) AS email, COUNT(*)::int AS cnt
+      FROM mentor_meetings WHERE LOWER(faculty_email) = ANY($1)
+        AND meeting_date >= NOW() - INTERVAL '180 days'
+      GROUP BY LOWER(faculty_email)
+    `, [emails]);
+
+    const menteesRes = await db.query(`
+      SELECT LOWER(f.email) AS email, COUNT(DISTINCT ma.roll_number)::int AS cnt
+      FROM mentor_assignments ma
+      JOIN faculty f ON UPPER(f.faculty_id) = UPPER(ma.faculty_id)
+      WHERE LOWER(f.email) = ANY($1)
+      GROUP BY LOWER(f.email)
+    `, [emails]);
+
+    const ACADEMIC_TYPES = ['NAAC', 'NBA', 'JNTU', 'Exam Duty', 'Monthly Duty', 'Other Academic'];
+    const INDUSTRY_TYPES = ['Industry Visit', 'Guest Lecture', 'Workshop Conducted', 'Workshop Attended',
+                            'FDP Conducted', 'FDP Attended', 'Professional Activity'];
+
+    const dutiesMap: Record<string, { academic: number; industry: number }> = {};
+    for (const d of dutiesRes.rows) {
+      if (!dutiesMap[d.email]) dutiesMap[d.email] = { academic: 0, industry: 0 };
+      const pts = parseFloat(d.pts) || 0;
+      if (ACADEMIC_TYPES.includes(d.duty_type)) dutiesMap[d.email].academic += pts;
+      else if (INDUSTRY_TYPES.includes(d.duty_type)) dutiesMap[d.email].industry += pts;
+    }
+    const workloadMap: Record<string, number> = {};
+    for (const w of workloadRes.rows) workloadMap[w.email] = w.total_periods;
+    const meetingsMap: Record<string, number> = {};
+    for (const m of meetingsRes.rows) meetingsMap[m.email] = m.cnt;
+    const menteesMap: Record<string, number> = {};
+    for (const m of menteesRes.rows) menteesMap[m.email] = m.cnt;
+
+    const scores = facRes.rows.map((f: any) => {
+      const email = f.email.toLowerCase();
+      const certs: any[] = Array.isArray(f.certifications) ? f.certifications : [];
+      const activities: any[] = Array.isArray(f.activities) ? f.activities : [];
+      const publications: any[] = Array.isArray(f.publications) ? f.publications : [];
+
+      // Pillar 1: Teaching (workload + 10pt base for posting/attendance)
+      const periods = workloadMap[email] || 0;
+      const workloadScore = periods === 0 ? 0 : periods < 12 ? 6 : periods > 20 ? 7 : 10;
+      const teachingScore = workloadScore + 10;
+
+      // Pillar 2: Research
+      const fdps = activities.filter((a: any) =>
+        (a.type || '').toLowerCase().includes('fdp') || (a.category || '').toLowerCase().includes('fdp'));
+      const researchScore = Math.min(fdps.length, 4) + Math.min(publications.length * 2, 4) + Math.min(certs.length, 2);
+
+      // Pillar 3: Mentoring
+      const menteeCount = menteesMap[email] || 0;
+      const sessionCount = meetingsMap[email] || 0;
+      const sessionsScore = menteeCount > 0 ? Math.min(Math.round((sessionCount / menteeCount) * 10), 10) : 0;
+      const mentoringScore = sessionsScore + 3;
+
+      // Pillars 4 & 5: Duties
+      const duties = dutiesMap[email] || { academic: 0, industry: 0 };
+      const academicScore = Math.min(duties.academic, 15);
+      const industryScore = Math.min(duties.industry, 20);
+
+      const totalScore = parseFloat((teachingScore + researchScore + mentoringScore + academicScore + industryScore).toFixed(1));
+      const grade = totalScore >= 90 ? 'Excellent' : totalScore >= 75 ? 'Good' : totalScore >= 60 ? 'Average' : 'Needs Improvement';
+
+      return {
+        email: f.email,
+        name: f.faculty_name,
+        department: f.department,
+        designation: f.designation,
+        total_score: totalScore,
+        grade,
+        pillars: {
+          teaching:        { score: teachingScore,  max: 40 },
+          research:        { score: researchScore,  max: 10 },
+          mentoring:       { score: mentoringScore, max: 15 },
+          academic_duties: { score: academicScore,  max: 15 },
+          industry:        { score: industryScore,  max: 20 },
+        },
+      };
+    });
+
+    res.json(scores);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 
 // GET /faculty/:email/api-score
@@ -9763,106 +9871,6 @@ app.get('/faculty/:email/api-score', requireRole('faculty', 'hod', 'admin', 'dir
 });
 
 
-    // Batch queries — one round-trip per data type for all faculty
-    const dutiesRes = await db.query(`
-      SELECT LOWER(faculty_email) AS email, duty_type,
-        COALESCE(SUM(points_awarded), 0) AS pts
-      FROM faculty_api_duties
-      WHERE LOWER(faculty_email) = ANY($1) AND status = 'Approved'
-      GROUP BY LOWER(faculty_email), duty_type
-    `, [emails]);
-
-    const workloadRes = await db.query(`
-      SELECT LOWER(faculty_email) AS email, COALESCE(SUM(num_periods),0)::int AS total_periods
-      FROM timetable_entries WHERE LOWER(faculty_email) = ANY($1)
-      GROUP BY LOWER(faculty_email)
-    `, [emails]);
-
-    const meetingsRes = await db.query(`
-      SELECT LOWER(faculty_email) AS email, COUNT(*)::int AS cnt
-      FROM mentor_meetings WHERE LOWER(faculty_email) = ANY($1)
-        AND meeting_date >= NOW() - INTERVAL '180 days'
-      GROUP BY LOWER(faculty_email)
-    `, [emails]);
-
-    const menteesRes = await db.query(`
-      SELECT LOWER(f.email) AS email, COUNT(DISTINCT ma.roll_number)::int AS cnt
-      FROM mentor_assignments ma
-      JOIN faculty f ON UPPER(f.faculty_id) = UPPER(ma.faculty_id)
-      WHERE LOWER(f.email) = ANY($1)
-      GROUP BY LOWER(f.email)
-    `, [emails]);
-
-    const ACADEMIC_TYPES = ['NAAC', 'NBA', 'JNTU', 'Exam Duty', 'Monthly Duty', 'Other Academic'];
-    const INDUSTRY_TYPES = ['Industry Visit', 'Guest Lecture', 'Workshop Conducted', 'Workshop Attended',
-                            'FDP Conducted', 'FDP Attended', 'Professional Activity'];
-
-    const dutiesMap: Record<string, { academic: number; industry: number }> = {};
-    for (const d of dutiesRes.rows) {
-      if (!dutiesMap[d.email]) dutiesMap[d.email] = { academic: 0, industry: 0 };
-      const pts = parseFloat(d.pts) || 0;
-      if (ACADEMIC_TYPES.includes(d.duty_type)) dutiesMap[d.email].academic += pts;
-      else if (INDUSTRY_TYPES.includes(d.duty_type)) dutiesMap[d.email].industry += pts;
-    }
-    const workloadMap: Record<string, number> = {};
-    for (const w of workloadRes.rows) workloadMap[w.email] = w.total_periods;
-    const meetingsMap: Record<string, number> = {};
-    for (const m of meetingsRes.rows) meetingsMap[m.email] = m.cnt;
-    const menteesMap: Record<string, number> = {};
-    for (const m of menteesRes.rows) menteesMap[m.email] = m.cnt;
-
-    const scores = facRes.rows.map((f: any) => {
-      const email = f.email.toLowerCase();
-      const certs: any[] = Array.isArray(f.certifications) ? f.certifications : [];
-      const activities: any[] = Array.isArray(f.activities) ? f.activities : [];
-      const publications: any[] = Array.isArray(f.publications) ? f.publications : [];
-
-      // Pillar 1: Teaching (workload + 10pt base for posting/attendance)
-      const periods = workloadMap[email] || 0;
-      const workloadScore = periods === 0 ? 0 : periods < 12 ? 6 : periods > 20 ? 7 : 10;
-      const teachingScore = workloadScore + 10;
-
-      // Pillar 2: Research
-      const fdps = activities.filter((a: any) =>
-        (a.type || '').toLowerCase().includes('fdp') || (a.category || '').toLowerCase().includes('fdp'));
-      const researchScore = Math.min(fdps.length, 4) + Math.min(publications.length * 2, 4) + Math.min(certs.length, 2);
-
-      // Pillar 3: Mentoring
-      const menteeCount = menteesMap[email] || 0;
-      const sessionCount = meetingsMap[email] || 0;
-      const sessionsScore = menteeCount > 0 ? Math.min(Math.round((sessionCount / menteeCount) * 10), 10) : 0;
-      const mentoringScore = sessionsScore + 3;
-
-      // Pillars 4 & 5: Duties
-      const duties = dutiesMap[email] || { academic: 0, industry: 0 };
-      const academicScore = Math.min(duties.academic, 15);
-      const industryScore = Math.min(duties.industry, 20);
-
-      const totalScore = parseFloat((teachingScore + researchScore + mentoringScore + academicScore + industryScore).toFixed(1));
-      const grade = totalScore >= 90 ? 'Excellent' : totalScore >= 75 ? 'Good' : totalScore >= 60 ? 'Average' : 'Needs Improvement';
-
-      return {
-        email: f.email,
-        name: f.faculty_name,
-        department: f.department,
-        designation: f.designation,
-        total_score: totalScore,
-        grade,
-        pillars: {
-          teaching:        { score: teachingScore,  max: 40 },
-          research:        { score: researchScore,  max: 10 },
-          mentoring:       { score: mentoringScore, max: 15 },
-          academic_duties: { score: academicScore,  max: 15 },
-          industry:        { score: industryScore,  max: 20 },
-        },
-      };
-    });
-
-    res.json(scores);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 
 // GET /faculty/api-duties/pending — HOD/Admin pending approvals
@@ -9872,6 +9880,16 @@ app.get('/faculty/api-duties/pending', requireRole('hod', 'admin'), async (req: 
     const callerDept = req.auth?.department;
     await db.query(`CREATE TABLE IF NOT EXISTS faculty_api_duties (id SERIAL PRIMARY KEY, faculty_email TEXT NOT NULL, faculty_name TEXT, duty_type TEXT NOT NULL, title TEXT NOT NULL, description TEXT, duty_date DATE NOT NULL, proof_url TEXT, points_awarded NUMERIC(5,2), approved_by TEXT, approved_at TIMESTAMPTZ, reject_reason TEXT, status TEXT NOT NULL DEFAULT 'Pending', created_at TIMESTAMPTZ DEFAULT NOW())`).catch(() => {});
 
+    let q = `SELECT d.*, f.department FROM faculty_api_duties d LEFT JOIN faculty f ON LOWER(f.email) = LOWER(d.faculty_email) WHERE d.status = 'Pending'`;
+    const params: any[] = [];
+    if (callerRole === 'hod' && callerDept && callerDept !== '*') { q += ` AND f.department = $1`; params.push(callerDept); }
+    q += ` ORDER BY d.created_at DESC`;
+    const result = await db.query(q, params);
+    res.json({ duties: result.rows });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // POST /faculty/:email/api-duties — Faculty submits a duty
 app.post('/faculty/:email/api-duties', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
@@ -9992,6 +10010,18 @@ const ACAD_DDL = `
     submitted_at        TIMESTAMPTZ,
     UNIQUE(assignment_id, faculty_email)
   );
+  CREATE TABLE IF NOT EXISTS academic_duty_cycle_history (
+    id              SERIAL PRIMARY KEY,
+    assignee_id     INT REFERENCES academic_duty_assignees(id) ON DELETE CASCADE,
+    cycle_number    INT NOT NULL,
+    submission_text TEXT,
+    proof_url       TEXT,
+    completed_at    DATE,
+    points_awarded  NUMERIC(5,2),
+    approved_by     TEXT,
+    approved_at     TIMESTAMPTZ DEFAULT NOW(),
+    hod_remarks     TEXT
+  );
 `;
 
 // ALTER TABLE to add new columns if table already exists (safe no-op if already present)
@@ -10072,6 +10102,19 @@ app.post('/academic-duties/assignees/:aId/approve', requireRole('hod', 'admin', 
     const autoPoints = points_override != null ? parseFloat(points_override) : (SUGGESTED[info.duty_type] ?? 2);
 
     if (info.is_recurring) {
+      // Save this cycle to history before resetting
+      const cycleNumRes = await db.query(
+        `SELECT COALESCE(MAX(cycle_number)+1, 1) AS next_cycle FROM academic_duty_cycle_history WHERE assignee_id=$1`,
+        [aId]
+      );
+      const nextCycle = cycleNumRes.rows[0]?.next_cycle || 1;
+      await db.query(`
+        INSERT INTO academic_duty_cycle_history
+          (assignee_id, cycle_number, submission_text, proof_url, completed_at, points_awarded, approved_by, hod_remarks)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `, [aId, nextCycle, info.submission_text, info.proof_url, info.completed_at,
+          autoPoints, approver, hod_remarks || null]).catch(() => {});
+
       // Recurring: accumulate points, increment cycles, then RESET submission to Pending for next cycle
       await db.query(`
         UPDATE academic_duty_assignees
@@ -10120,6 +10163,19 @@ app.post('/academic-duties/assignees/:aId/reject', requireRole('hod', 'admin', '
       WHERE id=$4
     `, [reject_reason || '', hod_remarks || null, req.auth!.email, aId]);
     res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ── GET /academic-duties/assignees/:aId/history — cycle history ─────────────
+app.get('/academic-duties/assignees/:aId/history', requireRole('hod', 'admin', 'director', 'principal', 'faculty'), async (req: Request, res: Response) => {
+  try {
+    await ensureAcadTables();
+    const aId = parseInt(req.params.aId);
+    const rows = await db.query(
+      `SELECT * FROM academic_duty_cycle_history WHERE assignee_id=$1 ORDER BY cycle_number ASC`,
+      [aId]
+    );
+    res.json(rows.rows);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
@@ -10221,7 +10277,7 @@ app.get('/academic-duties', requireRole('hod', 'admin', 'director', 'principal',
           'hod_remarks', ae.hod_remarks, 'reject_reason', ae.reject_reason,
           'resubmit_count', ae.resubmit_count,
           'total_points_earned', ae.total_points_earned, 'cycles_approved', ae.cycles_approved
-        ) ORDER BY ae.faculty_name) AS assignees
+        ) ORDER BY ae.faculty_name) FILTER (WHERE ae.id IS NOT NULL) AS assignees
       FROM academic_duty_assignments da
       LEFT JOIN academic_duty_assignees ae ON ae.assignment_id = da.id
       LEFT JOIN faculty fc  ON LOWER(fc.email)  = LOWER(da.coordinator_email)
@@ -10233,9 +10289,10 @@ app.get('/academic-duties', requireRole('hod', 'admin', 'director', 'principal',
     `, params);
 
     const result = rows.rows.map((r: any) => {
-      const assignees = r.assignees || [];
+      const assignees = (r.assignees || []).filter((a: any) => a.id != null);
       return {
         ...r,
+        assignees,
         total:     assignees.length,
         submitted: assignees.filter((a: any) => ['Submitted','Approved'].includes(a.submission_status)).length,
         approved:  assignees.filter((a: any) => a.submission_status === 'Approved').length,
@@ -10299,369 +10356,6 @@ app.post('/academic-duties/:id/submit', requireRole('faculty', 'hod', 'admin', '
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-
-    let q = `SELECT d.*, f.department FROM faculty_api_duties d LEFT JOIN faculty f ON LOWER(f.email) = LOWER(d.faculty_email) WHERE d.status = 'Pending'`;
-    const params: any[] = [];
-    if (callerRole === 'hod' && callerDept && callerDept !== '*') { q += ` AND f.department = $1`; params.push(callerDept); }
-    q += ` ORDER BY d.created_at DESC`;
-    const result = await db.query(q, params);
-    res.json({ duties: result.rows });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ════════════════════════════════════════════════════════════════════
-// ACADEMIC DUTIES MANAGEMENT — 8 endpoints
-// ════════════════════════════════════════════════════════════════════
-
-const ensureAcademicDutyTables = async () => {
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS academic_duty_assignments (
-      id                    SERIAL PRIMARY KEY,
-      duty_type             TEXT NOT NULL,
-      title                 TEXT NOT NULL,
-      description           TEXT,
-      deadline              DATE,
-      assigned_by           TEXT NOT NULL,
-      department            TEXT NOT NULL,
-      coordinator_email     TEXT,
-      co_coordinator_email  TEXT,
-      status                TEXT NOT NULL DEFAULT 'Active',
-      created_at            TIMESTAMPTZ DEFAULT NOW()
-    )
-  `).catch(() => {});
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS academic_duty_assignees (
-      id                  SERIAL PRIMARY KEY,
-      assignment_id       INT REFERENCES academic_duty_assignments(id) ON DELETE CASCADE,
-      faculty_email       TEXT NOT NULL,
-      faculty_name        TEXT,
-      submission_text     TEXT,
-      proof_url           TEXT,
-      completed_at        DATE,
-      submission_status   TEXT NOT NULL DEFAULT 'Pending',
-      points_awarded      NUMERIC(5,2),
-      approved_by         TEXT,
-      approved_at         TIMESTAMPTZ,
-      reject_reason       TEXT,
-      hod_remarks         TEXT,
-      resubmit_count      INT DEFAULT 0,
-      submitted_at        TIMESTAMPTZ,
-      UNIQUE(assignment_id, faculty_email)
-    )
-  `).catch(() => {});
-};
-
-// 1. GET /academic-duties/my — Faculty sees their own duties (must be before /:id)
-app.get('/academic-duties/my', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
-  try {
-    await ensureAcademicDutyTables();
-    const email = req.auth?.email?.toLowerCase();
-    if (!email) return res.status(401).json({ error: 'Unauthorized' });
-
-    const result = await db.query(`
-      SELECT
-        da.id AS assignment_id,
-        da.duty_type,
-        da.title,
-        da.deadline,
-        da.assigned_by,
-        da.department,
-        da.coordinator_email,
-        da.co_coordinator_email,
-        da.status AS assignment_status,
-        ae.id AS assignee_id,
-        ae.submission_status,
-        ae.submission_text,
-        ae.proof_url,
-        ae.completed_at,
-        ae.hod_remarks,
-        ae.reject_reason,
-        ae.resubmit_count,
-        ae.submitted_at,
-        ae.points_awarded,
-        CASE
-          WHEN LOWER(da.coordinator_email) = $1 THEN 'coordinator'
-          WHEN LOWER(da.co_coordinator_email) = $1 THEN 'co_coordinator'
-          ELSE 'assigned'
-        END AS my_role
-      FROM academic_duty_assignees ae
-      JOIN academic_duty_assignments da ON da.id = ae.assignment_id
-      WHERE LOWER(ae.faculty_email) = $1
-      ORDER BY da.created_at DESC
-    `, [email]);
-
-    res.json(result.rows);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 2. POST /academic-duties/assignees/:aId/approve — HOD approves one assignee
-app.post('/academic-duties/assignees/:aId/approve', requireRole('hod', 'admin', 'director', 'principal'), async (req: Request, res: Response) => {
-  try {
-    await ensureAcademicDutyTables();
-    const { aId } = req.params;
-    const { points_awarded, hod_remarks } = req.body;
-    const approver = req.auth?.email;
-
-    await db.query(`
-      UPDATE academic_duty_assignees
-      SET submission_status = 'Approved',
-          points_awarded     = $1,
-          approved_by        = $2,
-          approved_at        = NOW(),
-          hod_remarks        = $3
-      WHERE id = $4
-    `, [points_awarded ?? null, approver, hod_remarks ?? null, aId]);
-
-    // Mirror to faculty_api_duties for API Score pillar
-    await db.query(`
-      INSERT INTO faculty_api_duties (faculty_email, faculty_name, duty_type, title, duty_date, points_awarded, status, approved_by, approved_at)
-      SELECT ae.faculty_email, ae.faculty_name, da.duty_type, da.title,
-             COALESCE(ae.completed_at, NOW()::date),
-             $1, 'Approved', $2, NOW()
-      FROM academic_duty_assignees ae
-      JOIN academic_duty_assignments da ON da.id = ae.assignment_id
-      WHERE ae.id = $3
-      ON CONFLICT DO NOTHING
-    `, [points_awarded ?? null, approver, aId]).catch(() => {});
-
-    res.json({ success: true });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 3. POST /academic-duties/assignees/:aId/reject — HOD rejects one assignee
-app.post('/academic-duties/assignees/:aId/reject', requireRole('hod', 'admin', 'director', 'principal'), async (req: Request, res: Response) => {
-  try {
-    await ensureAcademicDutyTables();
-    const { aId } = req.params;
-    const { reject_reason, hod_remarks } = req.body;
-    const approver = req.auth?.email;
-
-    await db.query(`
-      UPDATE academic_duty_assignees
-      SET submission_status = 'Rejected',
-          reject_reason      = $1,
-          hod_remarks        = $2,
-          approved_by        = $3,
-          approved_at        = NOW()
-      WHERE id = $4
-    `, [reject_reason ?? '', hod_remarks ?? null, approver, aId]);
-
-    res.json({ success: true });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 4. POST /academic-duties — HOD/Admin creates assignment
-app.post('/academic-duties', requireRole('hod', 'admin', 'director', 'principal'), async (req: Request, res: Response) => {
-  try {
-    await ensureAcademicDutyTables();
-    const isSuperUser = req.auth?.isSuperAdmin === true || req.auth?.department === '*';
-    const { duty_type, title, description, deadline, coordinator_email, co_coordinator_email, faculty_emails, department } = req.body;
-
-    const dept = isSuperUser ? (department || req.auth?.department) : req.auth?.department;
-    if (!dept) return res.status(400).json({ error: 'Department is required' });
-
-    const assignedBy = req.auth?.email;
-
-    // Insert assignment
-    const asnRes = await db.query(`
-      INSERT INTO academic_duty_assignments (duty_type, title, description, deadline, assigned_by, department, coordinator_email, co_coordinator_email, status)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Active')
-      RETURNING id
-    `, [duty_type, title, description ?? null, deadline ?? null, assignedBy, dept, coordinator_email ?? null, co_coordinator_email ?? null]);
-
-    const assignmentId = asnRes.rows[0].id;
-
-    // Build set of emails to assign (include coordinator/co_coordinator if not already in list)
-    const emailSet: Set<string> = new Set((faculty_emails || []).map((e: string) => e.toLowerCase()));
-    if (coordinator_email) emailSet.add(coordinator_email.toLowerCase());
-    if (co_coordinator_email) emailSet.add(co_coordinator_email.toLowerCase());
-
-    // Look up faculty names
-    const emailArr = Array.from(emailSet);
-    const nameRes = await db.query(
-      `SELECT LOWER(email) AS email, name FROM faculty WHERE LOWER(email) = ANY($1)`,
-      [emailArr]
-    );
-    const nameMap: Record<string, string> = {};
-    for (const row of nameRes.rows) nameMap[row.email] = row.name;
-
-    // Bulk insert assignees
-    for (const em of emailArr) {
-      await db.query(`
-        INSERT INTO academic_duty_assignees (assignment_id, faculty_email, faculty_name, submission_status)
-        VALUES ($1, $2, $3, 'Pending')
-        ON CONFLICT (assignment_id, faculty_email) DO NOTHING
-      `, [assignmentId, em, nameMap[em] ?? null]);
-    }
-
-    res.json({ success: true, id: assignmentId });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 5. GET /academic-duties — HOD/Admin list all assignments
-app.get('/academic-duties', requireRole('hod', 'admin', 'director', 'principal', 'program_chair'), async (req: Request, res: Response) => {
-  try {
-    await ensureAcademicDutyTables();
-    const isSuperUser = req.auth?.isSuperAdmin === true || req.auth?.department === '*';
-    const statusFilter = (req.query.status as string) || 'Active';
-    const deptFilter = (req.query.department as string) || '';
-
-    let q = `
-      SELECT
-        da.*,
-        fc.name AS coordinator_name,
-        fcc.name AS co_coordinator_name
-      FROM academic_duty_assignments da
-      LEFT JOIN faculty fc  ON LOWER(fc.email)  = LOWER(da.coordinator_email)
-      LEFT JOIN faculty fcc ON LOWER(fcc.email) = LOWER(da.co_coordinator_email)
-      WHERE 1=1
-    `;
-    const params: any[] = [];
-    let pi = 1;
-
-    if (statusFilter) { q += ` AND da.status = $${pi++}`; params.push(statusFilter); }
-
-    if (!isSuperUser) {
-      q += ` AND da.department = $${pi++}`;
-      params.push(req.auth?.department);
-    } else if (deptFilter) {
-      q += ` AND da.department = $${pi++}`;
-      params.push(deptFilter);
-    }
-
-    q += ` ORDER BY da.created_at DESC`;
-    const asnRes = await db.query(q, params);
-
-    if (asnRes.rows.length === 0) return res.json([]);
-
-    const ids: number[] = asnRes.rows.map((r: any) => r.id);
-    const assigneeRes = await db.query(`
-      SELECT id, assignment_id, faculty_email, faculty_name, submission_status, submitted_at, points_awarded
-      FROM academic_duty_assignees
-      WHERE assignment_id = ANY($1)
-      ORDER BY faculty_name
-    `, [ids]);
-
-    const assigneeMap: Record<number, any[]> = {};
-    for (const ae of assigneeRes.rows) {
-      if (!assigneeMap[ae.assignment_id]) assigneeMap[ae.assignment_id] = [];
-      assigneeMap[ae.assignment_id].push(ae);
-    }
-
-    const result = asnRes.rows.map((row: any) => {
-      const assignees = assigneeMap[row.id] || [];
-      return {
-        ...row,
-        assignees,
-        total: assignees.length,
-        submitted: assignees.filter((a: any) => a.submission_status === 'Submitted' || a.submission_status === 'Approved').length,
-        approved: assignees.filter((a: any) => a.submission_status === 'Approved').length,
-      };
-    });
-
-    res.json(result);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 6. PUT /academic-duties/:id — HOD edits assignment
-app.put('/academic-duties/:id', requireRole('hod', 'admin', 'director', 'principal'), async (req: Request, res: Response) => {
-  try {
-    await ensureAcademicDutyTables();
-    const isSuperUser = req.auth?.isSuperAdmin === true || req.auth?.department === '*';
-    const { title, description, deadline, coordinator_email, co_coordinator_email, status } = req.body;
-
-    // Dept ownership check
-    const existing = await db.query(`SELECT department FROM academic_duty_assignments WHERE id = $1`, [req.params.id]);
-    if (existing.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    if (!isSuperUser && existing.rows[0].department !== req.auth?.department) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
-
-    await db.query(`
-      UPDATE academic_duty_assignments
-      SET title                = COALESCE($1, title),
-          description          = COALESCE($2, description),
-          deadline             = COALESCE($3, deadline),
-          coordinator_email    = COALESCE($4, coordinator_email),
-          co_coordinator_email = COALESCE($5, co_coordinator_email),
-          status               = COALESCE($6, status)
-      WHERE id = $7
-    `, [title ?? null, description ?? null, deadline ?? null, coordinator_email ?? null, co_coordinator_email ?? null, status ?? null, req.params.id]);
-
-    res.json({ success: true });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 7. DELETE /academic-duties/:id — HOD cancels (soft delete)
-app.delete('/academic-duties/:id', requireRole('hod', 'admin', 'director', 'principal'), async (req: Request, res: Response) => {
-  try {
-    await ensureAcademicDutyTables();
-    const isSuperUser = req.auth?.isSuperAdmin === true || req.auth?.department === '*';
-
-    const existing = await db.query(`SELECT department FROM academic_duty_assignments WHERE id = $1`, [req.params.id]);
-    if (existing.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    if (!isSuperUser && existing.rows[0].department !== req.auth?.department) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
-
-    await db.query(`UPDATE academic_duty_assignments SET status = 'Cancelled' WHERE id = $1`, [req.params.id]);
-    res.json({ success: true });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 8. POST /academic-duties/:id/submit — Faculty submits work
-app.post('/academic-duties/:id/submit', requireRole('faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
-  try {
-    await ensureAcademicDutyTables();
-    const email = req.auth?.email?.toLowerCase();
-    if (!email) return res.status(401).json({ error: 'Unauthorized' });
-
-    const { submission_text, proof_url, completed_at } = req.body;
-
-    const aeRes = await db.query(`
-      SELECT id, submission_status FROM academic_duty_assignees
-      WHERE assignment_id = $1 AND LOWER(faculty_email) = $2
-    `, [req.params.id, email]);
-
-    if (aeRes.rows.length === 0) return res.status(403).json({ error: 'You are not assigned to this duty' });
-    if (aeRes.rows[0].submission_status === 'Approved') return res.status(400).json({ error: 'Already approved' });
-
-    await db.query(`
-      UPDATE academic_duty_assignees
-      SET submission_text   = $1,
-          proof_url         = $2,
-          completed_at      = $3,
-          submission_status = 'Submitted',
-          submitted_at      = NOW(),
-          resubmit_count    = resubmit_count + 1
-      WHERE id = $4
-    `, [submission_text ?? null, proof_url ?? null, completed_at ?? null, aeRes.rows[0].id]);
-
-    res.json({ success: true });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ════════════════════════════════════════════════════════════════════
-// END ACADEMIC DUTIES MANAGEMENT
-// ════════════════════════════════════════════════════════════════════
 
 // 10c. Not Posted Attendance Tracker — supports single date (?date=) or range (?from=&to=)
 

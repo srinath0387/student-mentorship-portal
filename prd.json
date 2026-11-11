@@ -1,0 +1,69 @@
+{
+  "project": "RGM ManageBAC Portal",
+  "last_updated": "2026-11-11",
+  "tasks": [
+    {
+      "id": "T001",
+      "title": "Fix proof_url not visible to HOD (relative URL bug)",
+      "description": "Faculty enter Drive links without https:// prefix. The <a href> treats them as relative paths causing 404s. Fix: sanitize proof_url in DutySubmissionModal to prepend https:// if no protocol. Also auto-linkify URLs in submission_text so embedded links are clickable in ReviewPanel.",
+      "files_affected": [
+        "frontend/src/features/academic-duties/DutySubmissionModal.tsx",
+        "frontend/src/features/academic-duties/AcademicDutiesPage.tsx"
+      ],
+      "acceptance_criteria": "Proof links open correctly in HOD view regardless of whether faculty typed https:// or not. URLs embedded in submission text are clickable.",
+      "status": "pending",
+      "priority": "critical",
+      "commit_msg": "fix(academic-duties): sanitize proof_url protocol and auto-linkify submission text for HOD"
+    },
+    {
+      "id": "T002",
+      "title": "Fix broken api.ts route handlers (split handler bug)",
+      "description": "Previous route-reordering script left GET /faculty/api-scores and GET /faculty/api-duties/pending split in half — the second half of each handler is orphaned outside any app.get() callback. Also there is a 350-line duplicate block of Academic Duties v1 endpoints (lines ~10265-10610) that shadows the v2 endpoints. Fix: reconstruct both broken handlers and remove duplicate block.",
+      "files_affected": [
+        "backend/src/handlers/api.ts"
+      ],
+      "acceptance_criteria": "Backend build exits 0. GET /faculty/api-scores returns scores array. GET /faculty/api-duties/pending returns pending duties. No duplicate route registrations.",
+      "status": "pending",
+      "priority": "critical",
+      "commit_msg": "fix(backend): reconstruct split route handlers and remove 350-line duplicate academic duties block"
+    },
+    {
+      "id": "T003",
+      "title": "Fix json_agg null row bug in GET /academic-duties",
+      "description": "When a duty has no assignees, LEFT JOIN returns a null row and json_agg produces [{id:null,...}] instead of []. Fix: add FILTER (WHERE ae.id IS NOT NULL) to json_agg call. Also fix frontend: duty.total shows 1 instead of 0 for empty duties.",
+      "files_affected": [
+        "backend/src/handlers/api.ts",
+        "frontend/src/features/academic-duties/AcademicDutiesPage.tsx"
+      ],
+      "acceptance_criteria": "Duties with no assignees show 0/0 progress. No phantom null rows in assignees array.",
+      "status": "pending",
+      "priority": "high",
+      "commit_msg": "fix(backend): add FILTER WHERE ae.id IS NOT NULL to json_agg to prevent null-row phantom assignees"
+    },
+    {
+      "id": "T004",
+      "title": "Preserve proof_url history before recurring duty reset",
+      "description": "When HOD approves a recurring duty, the approval query NULLs out submission_text and proof_url immediately, destroying all evidence. Fix: before resetting, insert a cycle history record into a new academic_duty_cycle_history table, then reset. HOD ReviewPanel shows past cycle history.",
+      "files_affected": [
+        "backend/src/handlers/api.ts",
+        "frontend/src/features/academic-duties/AcademicDutiesPage.tsx"
+      ],
+      "acceptance_criteria": "After approving a recurring cycle, the submission_text and proof_url from that cycle are stored in cycle history and visible to HOD. Faculty submission resets to Pending for next cycle.",
+      "status": "pending",
+      "priority": "high",
+      "commit_msg": "feat(academic-duties): save cycle history before resetting recurring duty submission"
+    },
+    {
+      "id": "T005",
+      "title": "Move ReviewPanel out of <td> into full-width row",
+      "description": "ReviewPanel is currently rendered inside the first <td> of the faculty table row, breaking table layout. Fix: render it as a separate <tr> that spans all columns below the faculty row using colSpan.",
+      "files_affected": [
+        "frontend/src/features/academic-duties/AcademicDutiesPage.tsx"
+      ],
+      "acceptance_criteria": "ReviewPanel renders in a full-width row below the faculty row. Table layout is not distorted.",
+      "status": "pending",
+      "priority": "medium",
+      "commit_msg": "fix(academic-duties): move ReviewPanel into full-width colspan row below faculty table row"
+    }
+  ]
+}
