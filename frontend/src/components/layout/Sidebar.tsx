@@ -79,7 +79,7 @@ const studentNav: NavGroup[] = [
     title: 'My Profile',
     icon: User,
     items: [
-      { label: 'My 360° Profile', path: '/profile?tab=personal-info', icon: User },
+      { label: 'Personal Info', path: '/profile?tab=personal-info', icon: User },
       { label: 'My Attendance', path: '/profile?tab=attendance', icon: CalendarCheck },
       { label: 'On-Duty Permissions', path: '/profile?tab=permissions', icon: FileCheck },
       { label: 'My Mentor', path: '/mentor', icon: UserCheck },
@@ -92,10 +92,12 @@ const studentNav: NavGroup[] = [
 
 const facultyNav: NavGroup[] = [
   {
-    title: 'Faculty Portal',
+    title: 'Dashboard',
     icon: LayoutDashboard,
     items: [
-      { label: 'Faculty Dashboard', path: '/faculty/dashboard', icon: LayoutDashboard },
+      { label: 'Assigned Mentees', path: '/faculty/dashboard?tab=mentees', icon: Users },
+      { label: 'Placement Eligibility', path: '/faculty/dashboard?tab=placement', icon: Award },
+      { label: 'API Scoreboard', path: '/faculty/dashboard?tab=scoreboard', icon: BarChart2 },
     ],
   },
   {
@@ -104,6 +106,7 @@ const facultyNav: NavGroup[] = [
     items: [
       { label: 'Take Attendance', path: '/attendance', icon: ClipboardCheck },
       { label: 'Attendance Records', path: '/faculty/dashboard?tab=attendance', icon: CalendarCheck },
+      { label: 'CGPA Analytics', path: '/faculty/dashboard?tab=analytics', icon: FileBarChart },
     ],
   },
   {
@@ -115,30 +118,31 @@ const facultyNav: NavGroup[] = [
     ],
   },
   {
-    title: 'Profile & Score',
+    title: 'My Profile',
     icon: Star,
     items: [
       { label: 'My Faculty Profile', path: '/faculty/dashboard?tab=profile', icon: User },
-      { label: 'My API Score', path: '/faculty/dashboard?tab=profile', icon: Star },
     ],
   },
   {
-    title: 'Mentees & Docs',
-    icon: Users,
+    title: 'Documents',
+    icon: FolderOpen,
     items: [
-      { label: 'Mentee Directory', path: '/faculty/dashboard?tab=mentees', icon: Users },
       { label: 'Documents Approval', path: '/documents', icon: FolderOpen },
-      { label: 'Dept CGPA Analytics', path: '/faculty/dashboard?tab=analytics', icon: FileBarChart },
     ],
   },
 ];
 
 const adminNav: NavGroup[] = [
   {
-    title: 'Administration',
-    icon: LayoutDashboard,
+    title: 'Students',
+    icon: Users,
     items: [
-      { label: 'Admin Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
+      { label: 'Student Directory', path: '/admin/dashboard?tab=students', icon: Users },
+      { label: 'CGPA & Top Performers', path: '/admin/dashboard?tab=performance', icon: Award },
+      { label: 'Certifications', path: '/admin/dashboard?tab=certifications', icon: CheckCircle2 },
+      { label: 'Coding Leaderboard', path: '/coding-analytics', icon: BarChart2 },
+      { label: 'Documents', path: '/documents', icon: FolderOpen },
     ],
   },
   {
@@ -156,6 +160,7 @@ const adminNav: NavGroup[] = [
     icon: ShieldCheck,
     items: [
       { label: 'Leave & OD Approvals', path: '/admin/dashboard?tab=leaves', icon: ShieldCheck },
+      { label: 'Leave Credits', path: '/admin/dashboard?tab=leave-credits', icon: FileCheck },
       { label: 'Academic Duties', path: '/academic-duties', icon: ClipboardList },
     ],
   },
@@ -163,30 +168,31 @@ const adminNav: NavGroup[] = [
     title: 'Faculty',
     icon: User,
     items: [
-      { label: 'Faculty API Score', path: '/faculty/api', icon: Star },
       { label: 'Faculty & Mentors', path: '/admin/dashboard?tab=faculty', icon: ShieldCheck },
-      { label: 'Faculty Management', path: '/admin/faculty', icon: ShieldCheck },
+      { label: 'Faculty Management', path: '/admin/faculty', icon: Users },
+      { label: 'Faculty API Score', path: '/faculty/api', icon: Star },
     ],
   },
   {
-    title: 'Students & Academics',
-    icon: Users,
+    title: 'Settings',
+    icon: FileText,
     items: [
-      { label: 'Student Directory', path: '/admin/dashboard?tab=students', icon: Users },
-      { label: 'CGPA & Top Performers', path: '/admin/dashboard?tab=performance', icon: Award },
-      { label: 'Coding Leaderboard', path: '/coding-analytics', icon: BarChart2 },
-      { label: 'Documents', path: '/documents', icon: FolderOpen },
+      { label: 'HOD Credentials', path: '/admin/dashboard?tab=hod-credentials', icon: ShieldCheck },
+      { label: 'Student Passwords', path: '/admin/dashboard?tab=student-passwords', icon: FileCheck },
     ],
   },
 ];
 
 const hodNav: NavGroup[] = [
   {
-    title: 'HOD Portal',
+    title: 'Dashboard',
     icon: LayoutDashboard,
     items: [
-      { label: 'Power BI Dashboard', path: '/hod/dashboard?tab=powerbi', icon: BarChart2 },
-      { label: 'Department Overview', path: '/hod/dashboard?tab=overview', icon: Building2 },
+      { label: 'Power BI Canvas', path: '/hod/dashboard?tab=powerbi', icon: BarChart2 },
+      { label: 'Year-Wise Overview', path: '/hod/dashboard?tab=overview', icon: Building2 },
+      { label: 'Certification Analytics', path: '/hod/dashboard?tab=certifications', icon: CheckCircle2 },
+      { label: 'Academic & Holiday Calendar', path: '/hod/dashboard?tab=holidays', icon: Calendar },
+      { label: 'At-Risk Students', path: '/hod/dashboard?tab=unregistered', icon: FileBarChart },
     ],
   },
   {
@@ -204,6 +210,7 @@ const hodNav: NavGroup[] = [
     items: [
       { label: 'Leave & OD Approvals', path: '/hod/dashboard?tab=leaves', icon: ShieldCheck },
       { label: 'Academic Duties', path: '/academic-duties', icon: ClipboardList },
+      { label: 'Mentoring Compliance', path: '/hod/dashboard?tab=mentoring', icon: UserCheck },
     ],
   },
   {
@@ -221,6 +228,7 @@ const hodNav: NavGroup[] = [
       { label: 'Student Directory', path: '/hod/dashboard?tab=students', icon: Users },
       { label: 'CGPA & Rankings', path: '/hod/dashboard?tab=rankings', icon: Award },
       { label: 'My Mentees', path: '/hod/dashboard?tab=mentees', icon: UserCheck },
+      { label: 'Placement Tracker', path: '/hod/dashboard?tab=placement-tracker', icon: Award },
       { label: 'Coding Leaderboard', path: '/coding-analytics', icon: BarChart2 },
       { label: 'Documents', path: '/documents', icon: FolderOpen },
     ],
@@ -232,9 +240,11 @@ const coordinatorNav: NavGroup[] = [
     title: 'Coordinator Hub',
     icon: LayoutDashboard,
     items: [
-      { label: 'Coordinator Hub', path: '/coordinator/dashboard?tab=onboarding', icon: LayoutDashboard },
+      { label: 'Onboarding', path: '/coordinator/dashboard?tab=onboarding', icon: LayoutDashboard },
       { label: 'Fresher Directory', path: '/coordinator/dashboard?tab=freshers', icon: Users },
+      { label: 'Subject Allocation', path: '/coordinator/dashboard?tab=subjects', icon: FileText },
       { label: 'Class Incharges', path: '/coordinator/dashboard?tab=incharge', icon: Award },
+      { label: 'Year Promotion', path: '/coordinator/dashboard?tab=promotion', icon: CheckCircle2 },
     ],
   },
   {
@@ -242,7 +252,9 @@ const coordinatorNav: NavGroup[] = [
     icon: CalendarCheck,
     items: [
       { label: 'Attendance Mgmt', path: '/coordinator/dashboard?tab=attendance', icon: CalendarCheck },
+      { label: 'Manage Attendance', path: '/coordinator/dashboard?tab=manage-attendance', icon: ClipboardCheck },
       { label: 'Leave Approvals', path: '/coordinator/dashboard?tab=leaves', icon: ShieldCheck },
+      { label: 'Holiday Calendar', path: '/coordinator/dashboard?tab=calendar', icon: Calendar },
     ],
   },
   {
@@ -290,6 +302,7 @@ const oversightNav: NavGroup[] = [
     items: [
       { label: 'Academic & CGPA', path: '/admin/dashboard?tab=performance', icon: Award },
       { label: 'Student Directory', path: '/admin/dashboard?tab=students', icon: Users },
+      { label: 'Certifications', path: '/admin/dashboard?tab=certifications', icon: CheckCircle2 },
       { label: 'Coding Leaderboard', path: '/coding-analytics', icon: BarChart2 },
     ],
   },
