@@ -25,6 +25,8 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
     const p = location.pathname;
     const q = new URLSearchParams(location.search).get('tab') || '';
     const TAB_LABELS: Record<string, string> = {
+      // shared
+      home: 'Home',
       attendance: 'Attendance', leaves: 'Leave & OD', performance: 'CGPA & Rankings',
       students: 'Student Directory', faculty: 'Faculty & Mentors', holidays: 'Holiday Calendar',
       overview: 'Dept Overview', rankings: 'CGPA & Rankings', mentees: 'Mentees',
@@ -32,6 +34,19 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
       permissions: 'On-Duty Permissions', certifications: 'Certificates', documents: 'Documents',
       academics: 'Academics', 'personal-info': 'Personal Info', powerbi: 'Power BI Dashboard',
       freshers: 'Fresher Directory', incharge: 'Class Incharges', onboarding: 'Coordinator Hub',
+      // oversight
+      research: 'Research & Publications', placements: 'Placement Analytics',
+      // admin
+      'leave-credits': 'Leave Credits', 'hod-credentials': 'HOD Credentials',
+      'student-passwords': 'Student Passwords', 'admin-management': 'Admin Management',
+      unregistered: 'At-Risk Students',
+      // hod
+      mentoring: 'Mentoring Compliance', 'placement-tracker': 'Placement Tracker', settings: 'Account Settings',
+      // faculty
+      scoreboard: 'API Scoreboard', placement: 'Placement Eligibility',
+      // coordinator
+      subjects: 'Section Subjects', 'manage-attendance': 'Allotments & Rosters',
+      calendar: 'Holiday Calendar', promotion: 'Year Promotion',
     };
     const tab = TAB_LABELS[q] || '';
     if (p === '/dashboard') return { parent: 'Dashboard', child: '' };

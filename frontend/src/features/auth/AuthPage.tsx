@@ -23,19 +23,21 @@ export const AuthPage: React.FC = () => {
 
   // Determine active role strictly from search query (?role=faculty), route param (/login/:role), path, or window.location
   const getInitialRole = (): UserRole | null => {
+    const ALL_ROLES = ['student', 'parent', 'faculty', 'hod', 'coordinator', 'admin', 'director', 'principal', 'management', 'program_chair'];
+
     // 1. React Router searchParams (?role=...)
     const queryRole = searchParams.get('role')?.toLowerCase().trim();
-    if (queryRole && ['student', 'parent', 'faculty', 'hod', 'coordinator', 'admin'].includes(queryRole)) {
+    if (queryRole && ALL_ROLES.includes(queryRole)) {
       return queryRole as UserRole;
     }
 
     // 2. Route param (/login/:role)
     const paramRole = params.role?.toLowerCase().trim();
-    if (paramRole && ['student', 'parent', 'faculty', 'hod', 'coordinator', 'admin'].includes(paramRole)) {
+    if (paramRole && ALL_ROLES.includes(paramRole)) {
       return paramRole as UserRole;
     }
 
-    // 3. Pathname checks (/faculty-login, /admin-login, /student-login, /hod-login, /parent-login, /coordinator-login)
+    // 3. Pathname checks (/faculty-login, /admin-login, /student-login, /hod-login, /parent-login, /coordinator-login, /director-login, /principal-login, /management-login, /oversight-login, /program-chair-login)
     const path = location.pathname.toLowerCase();
     if (path.includes('faculty-login')) return 'faculty';
     if (path.includes('hod-login')) return 'hod';
@@ -43,19 +45,25 @@ export const AuthPage: React.FC = () => {
     if (path.includes('admin-login')) return 'admin';
     if (path.includes('parent-login')) return 'parent';
     if (path.includes('student-login')) return 'student';
+    // Oversight roles — all map to 'director' as the login form type (LandingPage handles specific sub-role)
+    if (path.includes('director-login')) return 'director';
+    if (path.includes('principal-login')) return 'principal';
+    if (path.includes('management-login')) return 'management';
+    if (path.includes('program-chair-login')) return 'program_chair';
+    if (path.includes('oversight-login')) return 'director'; // generic oversight login
 
     // 4. Fallback from window.location (handles both query strings and hash query strings)
     try {
       const urlObj = new URL(window.location.href);
       const winRole = urlObj.searchParams.get('role')?.toLowerCase().trim();
-      if (winRole && ['student', 'parent', 'faculty', 'hod', 'coordinator', 'admin'].includes(winRole)) {
+      if (winRole && ALL_ROLES.includes(winRole)) {
         return winRole as UserRole;
       }
       if (window.location.hash.includes('?')) {
         const hashQuery = window.location.hash.split('?')[1];
         const hashParams = new URLSearchParams(hashQuery);
         const hashRole = hashParams.get('role')?.toLowerCase().trim();
-        if (hashRole && ['student', 'parent', 'faculty', 'hod', 'coordinator', 'admin'].includes(hashRole)) {
+        if (hashRole && ALL_ROLES.includes(hashRole)) {
           return hashRole as UserRole;
         }
       }
@@ -672,6 +680,24 @@ export const AuthPage: React.FC = () => {
         login(data.email, 'admin', 'ADMIN_MASTER', 'System Administrator', undefined, effectiveDept, authResult.isSuperAdmin);
         registerSession(data.email, 'admin');
         navigate('/admin/dashboard');
+        return;
+      }
+
+      // ── OVERSIGHT ROLES LOGIN (director, principal, management, program_chair) ──
+      if (['director', 'principal', 'management', 'program_chair'].includes(activeTab as string)) {
+        const oversightResult = await api.adminLogin(data.email, data.password, 'All');
+        if (!oversightResult.valid) {
+          throw new Error(oversightResult.error || 'Incorrect credentials. Please check your email and password.');
+        }
+        const assignedRole = oversightResult.role as UserRole;
+        if (!['director', 'principal', 'management', 'program_chair', 'admin'].includes(assignedRole)) {
+          throw new Error('Access denied. This login is for institutional oversight roles only.');
+        }
+        cognitoSignOut();
+        const displayName = assignedRole.charAt(0).toUpperCase() + assignedRole.slice(1).replace('_', ' ');
+        login(data.email, assignedRole, `OVERSIGHT_${assignedRole.toUpperCase()}`, displayName, undefined, oversightResult.department || '*');
+        registerSession(data.email, assignedRole);
+        navigate('/oversight/dashboard');
         return;
       }
 
@@ -1926,6 +1952,47 @@ export const AuthPage: React.FC = () => {
                       Need access? Contact Admin Office
                     </p>
                   </div>
+                </form>
+              ) : (['director', 'principal', 'management', 'program_chair'] as string[]).includes(activeTab as string) ? (
+                /* ── OVERSIGHT ROLE LOGIN (Director / Principal / Management / Program Chair) ── */
+                <form onSubmit={handleAdminLoginSubmit(onLogin)} className="space-y-4">
+                  <div className="p-3 bg-teal-50 border border-teal-200 rounded-xl text-xs text-teal-800 font-semibold flex items-center gap-2">
+                    <span>🏛️</span>
+                    <span>Institutional Oversight — {activeTab === 'program_chair' ? 'Program Chair' : (activeTab as string).charAt(0).toUpperCase() + (activeTab as string).slice(1)}</span>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-textPrimary mb-1">Official Email</label>
+                    <input
+                      {...registerAdminLogin('email')}
+                      type="email"
+                      placeholder={`${activeTab}@rgmcet.edu.in`}
+                      className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium"
+                    />
+                    {adminLoginErrors.email && <p className="text-xs text-alert mt-1">{adminLoginErrors.email.message}</p>}
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-textPrimary mb-1">Password</label>
+                    <div className="relative">
+                      <input
+                        {...registerAdminLogin('password')}
+                        type={showPassword ? 'text' : 'password'}
+                        placeholder="Enter password"
+                        className="w-full px-3.5 py-2 pr-10 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      />
+                      <button type="button" onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-textSecondary hover:text-textPrimary p-1 rounded-md">
+                        {showPassword ? <EyeOff className="w-4 h-4 text-teal-600" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    {adminLoginErrors.password && <p className="text-xs text-alert mt-1">{adminLoginErrors.password.message}</p>}
+                  </div>
+                  <div className="pt-2">
+                    <button type="submit" disabled={isAdminLoginSubmitting}
+                      className="w-full py-2.5 px-4 bg-teal-700 hover:bg-teal-800 text-white font-bold rounded-xl shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer">
+                      {isAdminLoginSubmitting ? 'Authenticating...' : `Log In as ${activeTab === 'program_chair' ? 'Program Chair' : (activeTab as string).charAt(0).toUpperCase() + (activeTab as string).slice(1)}`}
+                    </button>
+                  </div>
+                  <p className="text-center text-xs text-textSecondary pt-1">Need access? Contact the IT Administrator</p>
                 </form>
               ) : activeTab === 'admin' ? (
                 /* ── ADMIN LOGIN — accepts @rgmcet.edu.in OR the 3 tier-1 Gmail super-admin addresses (no department) ── */

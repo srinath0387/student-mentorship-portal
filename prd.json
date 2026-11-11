@@ -1,172 +1,36 @@
 {
-  "project": "RGM ManageBAC Portal",
+  "project": "RGM ManageBAC Portal — Oversight Audit",
   "last_updated": "2026-11-11",
   "tasks": [
     {
-      "id": "T001",
-      "title": "Fix proof_url sanitize and linkify submission text",
-      "description": "Sanitize proof_url and auto-linkify submission text in AcademicDutiesPage and DutySubmissionModal.",
-      "files_affected": [
-        "frontend/src/features/academic-duties/DutySubmissionModal.tsx",
-        "frontend/src/features/academic-duties/AcademicDutiesPage.tsx"
-      ],
-      "acceptance_criteria": "Proof links open correctly. Embedded URLs in text are clickable.",
+      "id": "O001",
+      "title": "Fix getHomePath double-statement on one line in Sidebar",
+      "description": "Line 338 of Sidebar.tsx has two return statements concatenated: 'return /oversight/dashboard?tab=home';  if (role === coordinator)...' — the coordinator/admin/faculty/student/parent branches are dead code and never execute. Split into proper if-else chain.",
+      "files_affected": ["frontend/src/components/layout/Sidebar.tsx"],
+      "acceptance_criteria": "getHomePath returns correct path for every role. Build passes.",
       "status": "done",
       "priority": "critical",
-      "commit_msg": "fix(academic-duties): sanitize proof_url and auto-linkify submission text"
+      "commit_msg": "fix(sidebar): restore dead getHomePath branches — split double-statement line"
     },
     {
-      "id": "T002",
-      "title": "Fix split route handlers and duplicate academic duties block in api.ts",
-      "description": "Reconstruct orphaned GET /faculty/api-scores and GET /faculty/api-duties/pending handlers. Remove 350-line duplicate v1 block.",
-      "files_affected": [
-        "backend/src/handlers/api.ts"
-      ],
-      "acceptance_criteria": "Backend build exits 0. No duplicate routes.",
+      "id": "O002",
+      "title": "TopBar breadcrumb — add missing tab labels for oversight + home tabs",
+      "description": "TAB_LABELS in TopBar.tsx is missing: home, research, placements, subjects, manage-attendance, placement, scoreboard, incharge (coordinator), placement-tracker, mentoring, unregistered, rankings, leave-credits, hod-credentials, student-passwords, admin-management. All these show blank child breadcrumb when active.",
+      "files_affected": ["frontend/src/components/layout/TopBar.tsx"],
+      "acceptance_criteria": "Every sidebar sub-item shows correct breadcrumb text in TopBar. Build passes.",
+      "status": "done",
+      "priority": "high",
+      "commit_msg": "fix(topbar): add missing tab breadcrumb labels for all roles"
+    },
+    {
+      "id": "O003",
+      "title": "Oversight: verify all 4 roles redirect to /oversight/dashboard on login",
+      "description": "Audit LandingPage login flow for director, principal, management, program_chair. Confirm assignedRole check covers all 4. Add management-login path check in AuthPage pathname detection (currently only hod-login, admin-login detected — oversight paths hit the default fallback which redirects to LandingPage).",
+      "files_affected": ["frontend/src/features/auth/AuthPage.tsx"],
+      "acceptance_criteria": "Visiting /director-login, /principal-login, /management-login, /oversight-login, /program-chair-login all show the correct login form (not redirect away). Build passes.",
       "status": "done",
       "priority": "critical",
-      "commit_msg": "fix(backend): reconstruct split handlers and remove duplicate academic duties block"
-    },
-    {
-      "id": "T003",
-      "title": "Fix json_agg null row bug in GET /academic-duties",
-      "description": "Add FILTER (WHERE ae.id IS NOT NULL) to json_agg to prevent phantom null assignees.",
-      "files_affected": [
-        "backend/src/handlers/api.ts"
-      ],
-      "acceptance_criteria": "Duties with no assignees show 0/0, not 1/0.",
-      "status": "done",
-      "priority": "high",
-      "commit_msg": "fix(backend): add FILTER WHERE to json_agg to prevent null-row phantom assignees"
-    },
-    {
-      "id": "T004",
-      "title": "Preserve cycle history before recurring duty reset",
-      "description": "Insert into academic_duty_cycle_history before resetting recurring duty on HOD approval.",
-      "files_affected": [
-        "backend/src/handlers/api.ts",
-        "frontend/src/features/academic-duties/AcademicDutiesPage.tsx"
-      ],
-      "acceptance_criteria": "After approving a recurring cycle, cycle history is stored and visible to HOD.",
-      "status": "done",
-      "priority": "high",
-      "commit_msg": "feat(academic-duties): save cycle history before resetting recurring duty"
-    },
-    {
-      "id": "T005",
-      "title": "Move ReviewPanel into full-width colspan row",
-      "description": "ReviewPanel was inside first <td> breaking table layout. Move it to a separate <tr> spanning all columns.",
-      "files_affected": [
-        "frontend/src/features/academic-duties/AcademicDutiesPage.tsx"
-      ],
-      "acceptance_criteria": "ReviewPanel renders in full-width row. Table layout correct.",
-      "status": "done",
-      "priority": "medium",
-      "commit_msg": "fix(academic-duties): move ReviewPanel into full-width colspan row"
-    },
-    {
-      "id": "T006",
-      "title": "Profile photo system: auth guards + stale cache + fallback + initials",
-      "description": "requireAuth on faculty-profile endpoints, LEFT JOIN photo_url in GET /faculty, TopBar onError fallback, isMountedRef in upload modal, initials .slice(0,2), updatePhotoUrl in onSuccess, photo_url in InspectionModal props.",
-      "files_affected": [
-        "backend/src/handlers/api.ts",
-        "frontend/src/components/layout/TopBar.tsx",
-        "frontend/src/components/common/ProfilePhotoUploadModal.tsx",
-        "frontend/src/features/faculty/tabs/FacultyProfileTab.tsx",
-        "frontend/src/features/faculty/components/FacultyProfileInspectionModal.tsx",
-        "frontend/src/features/profile/ProfilePage.tsx"
-      ],
-      "acceptance_criteria": "Profile photos load, update, fall back to initials, and display correctly in all views.",
-      "status": "done",
-      "priority": "critical",
-      "commit_msg": "fix(profile): auth guards, stale cache, photo fallback, initials, updatePhotoUrl"
-    },
-    {
-      "id": "T007",
-      "title": "Attendance: Coordinator Excel export and defaulters CSV",
-      "description": "ATT-BUG-15: Download Excel button had no onClick. ATT-BUG-16: Defaulters button used window.print(). Fix both to export proper .xlsx files.",
-      "files_affected": [
-        "frontend/src/features/attendance/coordinator/CoordinatorAttendancePage.tsx"
-      ],
-      "acceptance_criteria": "Both download buttons export proper .xlsx files.",
-      "status": "done",
-      "priority": "high",
-      "commit_msg": "fix(attendance): coordinator excel export and defaulters CSV"
-    },
-    {
-      "id": "T008",
-      "title": "Attendance: Clash result reset, roster invalidation, reject reason modal",
-      "description": "ATT-BUG-11: Stale clash result after save. ATT-BUG-01: saveMutation missing roster invalidation. ATT-BUG-20: Reject reason hardcoded.",
-      "files_affected": [
-        "frontend/src/features/attendance/admin/AttendanceSetupPage.tsx",
-        "frontend/src/features/attendance/faculty/FacultyAttendancePage.tsx",
-        "frontend/src/features/attendance/reports/AttendanceReportsPage.tsx"
-      ],
-      "acceptance_criteria": "Clash clears after save. Roster refreshes after attendance saved. Reject reason modal shows.",
-      "status": "done",
-      "priority": "high",
-      "commit_msg": "fix(attendance): clash result reset, roster invalidation, reject reason modal"
-    },
-    {
-      "id": "T009",
-      "title": "Attendance: Faculty timetable other-faculty filter, hour reset, HOD CSV columns",
-      "description": "ATT-BUG-03: rawSubjectTT included other faculty slots. ATT-BUG-04: hour toggles not reset on subject change. ATT-BUG-10: HOD CSV had raw DB columns.",
-      "files_affected": [
-        "frontend/src/features/attendance/faculty/FacultyAttendancePage.tsx",
-        "frontend/src/features/attendance/hod/HodAttendancePage.tsx"
-      ],
-      "acceptance_criteria": "Timetable shows only own slots. Hours reset on subject switch. HOD CSV has clean columns.",
-      "status": "done",
-      "priority": "high",
-      "commit_msg": "fix(attendance): timetable faculty filter, hour reset, HOD CSV clean columns"
-    },
-    {
-      "id": "T010",
-      "title": "Documents: Fix React Fragment key placement",
-      "description": "In DocumentsManagementPage.tsx, filtered.map renders <><tr key={doc.id}> \u2014 key is on the inner <tr> but the outer Fragment <> has no key, causing React reconciliation warnings. Fix: use <Fragment key={doc.id}><tr>...</tr></Fragment>.",
-      "files_affected": [
-        "frontend/src/features/documents/DocumentsManagementPage.tsx"
-      ],
-      "acceptance_criteria": "No React key-on-fragment warnings in console. Table renders correctly.",
-      "status": "in-progress",
-      "priority": "medium",
-      "commit_msg": "fix(documents): move React key from inner tr to outer Fragment in map"
-    },
-    {
-      "id": "T011",
-      "title": "Placement: Per-row delete pending state + null guard on top_companies",
-      "description": "PL-BUG-01: Shared deleteMutation.isPending disables ALL delete buttons when one is deleting \u2014 use a per-row pendingId state. PL-BUG-03: summary.top_companies.length accessed without optional chain \u2014 crashes if undefined. Fix: summary?.top_companies?.length > 0.",
-      "files_affected": [
-        "frontend/src/features/placement/PlacementTrackerSection.tsx"
-      ],
-      "acceptance_criteria": "Only the row being deleted shows spinner/disabled state. No crash when top_companies is absent.",
-      "status": "in-progress",
-      "priority": "medium",
-      "commit_msg": "fix(placement): per-row delete pending state and top_companies null guard"
-    },
-    {
-      "id": "T012",
-      "title": "Faculty Leave: Replace prompt() with modal for duty decline reason",
-      "description": "LEAVE-BUG-03: prompt() on line ~666 blocks the browser thread and is disallowed in many environments. Replace with a small inline modal that captures the decline reason. LEAVE-BUG-02: dutyResponseMutation.isPending disables ALL duty Accept/Decline buttons \u2014 use per-row pendingId.",
-      "files_affected": [
-        "frontend/src/features/leave/FacultyLeaveTab.tsx"
-      ],
-      "acceptance_criteria": "Decline reason captured via modal, not prompt(). Only the clicked row's buttons disable while mutation is pending.",
-      "status": "in-progress",
-      "priority": "medium",
-      "commit_msg": "fix(leave): replace prompt() with modal for duty decline, per-row pending state"
-    },
-    {
-      "id": "T013",
-      "title": "Meeting Log: Per-row delete pending state",
-      "description": "MEET-BUG-01: Shared deleteMutation.isPending disables ALL delete buttons when one meeting is being deleted. Use a per-row pendingId state so only the deleting row shows spinner/disabled.",
-      "files_affected": [
-        "frontend/src/features/mentor/MeetingLogModal.tsx"
-      ],
-      "acceptance_criteria": "Only the meeting being deleted shows disabled state. Other rows remain interactive.",
-      "status": "in-progress",
-      "priority": "low",
-      "commit_msg": "fix(meetings): per-row delete pending state in MeetingLogModal"
+      "commit_msg": "fix(auth): add oversight role path detection in AuthPage"
     }
   ]
 }

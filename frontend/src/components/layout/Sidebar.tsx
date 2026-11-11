@@ -335,7 +335,8 @@ function getNavGroups(role: string | null | undefined): NavGroup[] {
 
 /** Home path for each role — navigates to the home/welcome screen */
 function getHomePath(role: string | null | undefined): string {
-  if (['director', 'principal', 'management', 'program_chair'].includes(role || '')) return '/oversight/dashboard?tab=home';  if (role === 'coordinator') return '/coordinator/dashboard?tab=home';
+  if (['director', 'principal', 'management', 'program_chair'].includes(role || '')) return '/oversight/dashboard?tab=home';
+  if (role === 'coordinator') return '/coordinator/dashboard?tab=home';
   if (role === 'admin') return '/admin/dashboard?tab=home';
   if (role === 'faculty') return '/faculty/dashboard?tab=home';
   if (role === 'hod') return '/hod/dashboard?tab=home';
