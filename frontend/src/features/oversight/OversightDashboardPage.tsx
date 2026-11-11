@@ -1391,7 +1391,11 @@ export const OversightDashboardPage: React.FC = () => {
                 </button>
               ))}
             </div>
-            <div className="relative w-full sm:w-56">
+          </div>
+
+          {/* ── Department Search — visible on data tabs ── */}
+          {activeTab !== 'home' && activeTab !== 'faculty' && activeTab !== 'research' && (
+            <div className="relative w-full sm:w-56 mb-4">
               <Search className="w-3.5 h-3.5 text-textMuted absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
@@ -1401,7 +1405,7 @@ export const OversightDashboardPage: React.FC = () => {
                 className="w-full pl-8 pr-3 py-2 text-xs bg-surface border border-borderLine rounded-xl focus:outline-none focus:ring-1 focus:ring-brand-primary"
               />
             </div>
-          </div>
+          )}
 
           {/* ── Home Screen ── */}
           {activeTab === 'home' && (

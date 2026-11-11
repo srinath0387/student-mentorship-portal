@@ -1,36 +1,42 @@
 {
-  "project": "RGM ManageBAC Portal — Oversight Audit",
+  "project": "RGM ManageBAC Portal \u2014 Oversight Data Connections",
   "last_updated": "2026-11-11",
   "tasks": [
     {
-      "id": "O001",
-      "title": "Fix getHomePath double-statement on one line in Sidebar",
-      "description": "Line 338 of Sidebar.tsx has two return statements concatenated: 'return /oversight/dashboard?tab=home';  if (role === coordinator)...' — the coordinator/admin/faculty/student/parent branches are dead code and never execute. Split into proper if-else chain.",
-      "files_affected": ["frontend/src/components/layout/Sidebar.tsx"],
-      "acceptance_criteria": "getHomePath returns correct path for every role. Build passes.",
+      "id": "O004",
+      "title": "Add program_chair to all shared backend routes used by oversight dashboard",
+      "description": "15 routes have director/principal/management but are missing program_chair. These include /hod/placement-summary, /student-placements verify+delete, /mentor-meetings/department, /hod/mentoring-compliance, /leaderboard/hod, /documents/*, /notices/broadcast, /academic-duties/* approve/reject. Without this, program_chair gets 403 on all placement and meeting log tabs.",
+      "files_affected": [
+        "backend/src/handlers/api.ts"
+      ],
+      "acceptance_criteria": "program_chair can access all oversight dashboard tabs without 403. Backend build passes.",
       "status": "done",
       "priority": "critical",
-      "commit_msg": "fix(sidebar): restore dead getHomePath branches — split double-statement line"
+      "commit_msg": "fix(backend): add program_chair to all shared oversight routes"
     },
     {
-      "id": "O002",
-      "title": "TopBar breadcrumb — add missing tab labels for oversight + home tabs",
-      "description": "TAB_LABELS in TopBar.tsx is missing: home, research, placements, subjects, manage-attendance, placement, scoreboard, incharge (coordinator), placement-tracker, mentoring, unregistered, rankings, leave-credits, hod-credentials, student-passwords, admin-management. All these show blank child breadcrumb when active.",
-      "files_affected": ["frontend/src/components/layout/TopBar.tsx"],
-      "acceptance_criteria": "Every sidebar sub-item shows correct breadcrumb text in TopBar. Build passes.",
-      "status": "done",
-      "priority": "high",
-      "commit_msg": "fix(topbar): add missing tab breadcrumb labels for all roles"
-    },
-    {
-      "id": "O003",
-      "title": "Oversight: verify all 4 roles redirect to /oversight/dashboard on login",
-      "description": "Audit LandingPage login flow for director, principal, management, program_chair. Confirm assignedRole check covers all 4. Add management-login path check in AuthPage pathname detection (currently only hod-login, admin-login detected — oversight paths hit the default fallback which redirects to LandingPage).",
-      "files_affected": ["frontend/src/features/auth/AuthPage.tsx"],
-      "acceptance_criteria": "Visiting /director-login, /principal-login, /management-login, /oversight-login, /program-chair-login all show the correct login form (not redirect away). Build passes.",
+      "id": "O005",
+      "title": "Oversight: verify student-placements GET scoping for director/program_chair",
+      "description": "GET /student-placements line 8377: role check excludes program_chair from seeing all placements (falls into else branch, treated as student). Fix: add program_chair to the admin/principal/director/management group so they see all placements without department filter.",
+      "files_affected": [
+        "backend/src/handlers/api.ts"
+      ],
+      "acceptance_criteria": "program_chair sees all student placements in oversight dashboard. Build passes.",
       "status": "done",
       "priority": "critical",
-      "commit_msg": "fix(auth): add oversight role path detection in AuthPage"
+      "commit_msg": "fix(backend): program_chair sees all placements in GET /student-placements"
+    },
+    {
+      "id": "O006",
+      "title": "Oversight page: show search bar in certifications/students/faculty tabs",
+      "description": "The department search input is currently only shown when viewMode is not 'powerbi', but it's hidden inside the hidden tab nav block. Move the search bar to above the tab content area so oversight users can filter by department in all tabs.",
+      "files_affected": [
+        "frontend/src/features/oversight/OversightDashboardPage.tsx"
+      ],
+      "acceptance_criteria": "Department search bar visible in all oversight tab views. Build passes.",
+      "status": "done",
+      "priority": "medium",
+      "commit_msg": "feat(oversight): show department search bar above tab content in all views"
     }
   ]
 }

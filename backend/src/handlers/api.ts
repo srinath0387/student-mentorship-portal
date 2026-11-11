@@ -4502,7 +4502,7 @@ app.get('/leaderboard/faculty', requireAuth, requireRole('faculty', 'hod', 'admi
 });
 
 // GET /leaderboard/hod — department scoreboard for HOD (live-computed)
-app.get('/leaderboard/hod', requireAuth, requireRole('hod', 'admin', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
+app.get('/leaderboard/hod', requireAuth, requireRole('hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const { department, year, section, limit = '100' } = req.query as any;
     // Ensure student_scores table exists (defensive)
@@ -4642,7 +4642,7 @@ app.post('/students/:id/documents', requireOwnerOrRole('id', 'admin', 'hod'), as
 });
 
 // PATCH /students/:id/documents/:docId/status \u2014 admin/hod approves or rejects
-app.patch('/students/:id/documents/:docId/status', requireAuth, requireRole('admin', 'hod', 'principal', 'director', 'management', 'faculty'), async (req: Request, res: Response) => {
+app.patch('/students/:id/documents/:docId/status', requireAuth, requireRole('admin', 'hod', 'principal', 'director', 'management', 'program_chair', 'faculty'), async (req: Request, res: Response) => {
   try {
     const studentId = req.params.id.toUpperCase();
     const docId = parseInt(req.params.docId, 10);
@@ -4732,7 +4732,7 @@ app.delete('/students/:id/documents/:docId', requireOwnerOrRole('id', 'admin', '
 });
 
 // GET /documents/download-zip-urls — HOD/Admin: get presigned download URLs for all docs, filtered by academic_year & department
-app.get('/documents/download-zip-urls', requireRole('hod', 'admin', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
+app.get('/documents/download-zip-urls', requireRole('hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
@@ -8055,7 +8055,7 @@ app.get('/hod/at-risk-students', requireRole('hod', 'admin', 'principal', 'direc
 // Feature 4: Mentor Meeting Log
 // ============================================================================
 
-app.post('/mentor-meetings', requireRole('faculty', 'hod', 'admin', 'coordinator', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
+app.post('/mentor-meetings', requireRole('faculty', 'hod', 'admin', 'coordinator', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const { roll_number, student_name, meeting_date, topics, action_items, next_meeting, tag } = req.body;
     if (!roll_number || !meeting_date || !topics) {
@@ -8147,7 +8147,7 @@ app.get('/mentor-meetings', requireAuth, async (req: Request, res: Response) => 
 
 
 // GET /mentor-meetings/department — HOD/admin sees all meetings for a dept
-app.get('/mentor-meetings/department', requireRole('hod', 'admin', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
+app.get('/mentor-meetings/department', requireRole('hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const department = (req.query.department as string) || (req.auth as any)?.department;
     await db.query(`
@@ -8199,7 +8199,7 @@ app.get('/mentor-meetings/department', requireRole('hod', 'admin', 'principal', 
   }
 });
 
-app.delete('/mentor-meetings/:id', requireRole('faculty', 'hod', 'admin', 'coordinator', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
+app.delete('/mentor-meetings/:id', requireRole('faculty', 'hod', 'admin', 'coordinator', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     const authEmail = (req.auth as any)?.email || '';
@@ -8218,7 +8218,7 @@ app.delete('/mentor-meetings/:id', requireRole('faculty', 'hod', 'admin', 'coord
   }
 });
 
-app.get('/hod/mentoring-compliance', requireRole('hod', 'admin', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
+app.get('/hod/mentoring-compliance', requireRole('hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const department = (req.query.department as string) || (req.auth as any)?.department;
     await db.query(`
@@ -8374,7 +8374,7 @@ app.get('/student-placements', requireAuth, async (req: Request, res: Response) 
       }
       query += ` AND roll_number=$${idx++}`;
       params.push(rollNumber.toUpperCase());
-    } else if (!['admin','principal','director','management'].includes(role)) {
+    } else if (!['admin','principal','director','management','program_chair'].includes(role)) {
       if (role === 'hod' && department) {
         query += ` AND department=$${idx++}`;
         params.push(department);
@@ -8404,7 +8404,7 @@ app.get('/student-placements', requireAuth, async (req: Request, res: Response) 
   }
 });
 
-app.patch('/student-placements/:id/verify', requireRole('hod', 'admin', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
+app.patch('/student-placements/:id/verify', requireRole('hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     await ensurePlacementsTable();
     const id = parseInt(req.params.id, 10);
@@ -8442,7 +8442,7 @@ app.delete('/student-placements/:id', requireAuth, async (req: Request, res: Res
   }
 });
 
-app.get('/hod/placement-summary', requireRole('hod', 'admin', 'principal', 'director', 'management'), async (req: Request, res: Response) => {
+app.get('/hod/placement-summary', requireRole('hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     await ensurePlacementsTable();
     const department = (req.query.department as string) || (req.auth as any)?.department;
@@ -8495,7 +8495,7 @@ app.get('/hod/placement-summary', requireRole('hod', 'admin', 'principal', 'dire
 // Feature 5: Enhanced Broadcast Notifications
 // ============================================================================
 
-app.post('/notices/broadcast', requireRole('hod', 'admin', 'principal', 'director', 'management', 'coordinator'), async (req: Request, res: Response) => {
+app.post('/notices/broadcast', requireRole('hod', 'admin', 'principal', 'director', 'management', 'program_chair', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { title, message, target_department, target_year, target_roles, priority, expires_at } = req.body;
     if (!title || !message) {
@@ -8532,7 +8532,7 @@ app.post('/notices/broadcast', requireRole('hod', 'admin', 'principal', 'directo
   }
 });
 
-app.get('/notices/broadcast', requireRole('hod', 'admin', 'principal', 'director', 'management', 'coordinator', 'faculty'), async (req: Request, res: Response) => {
+app.get('/notices/broadcast', requireRole('hod', 'admin', 'principal', 'director', 'management', 'program_chair', 'coordinator', 'faculty'), async (req: Request, res: Response) => {
   try {
     const department = req.query.department as string;
     const result = await db.query(
@@ -10078,7 +10078,7 @@ function LOWER_EQ(a: string | null, b: string | null) {
 }
 
 // ── POST /academic-duties/assignees/:aId/approve — HOD approves one assignee ──
-app.post('/academic-duties/assignees/:aId/approve', requireRole('hod', 'admin', 'director', 'principal'), async (req: Request, res: Response) => {
+app.post('/academic-duties/assignees/:aId/approve', requireRole('hod', 'admin', 'director', 'principal', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     await ensureAcadTables();
     const { hod_remarks, points_override } = req.body; // points_override is optional
@@ -10153,7 +10153,7 @@ app.post('/academic-duties/assignees/:aId/approve', requireRole('hod', 'admin', 
 });
 
 // ── POST /academic-duties/assignees/:aId/reject — HOD rejects one assignee ───
-app.post('/academic-duties/assignees/:aId/reject', requireRole('hod', 'admin', 'director', 'principal'), async (req: Request, res: Response) => {
+app.post('/academic-duties/assignees/:aId/reject', requireRole('hod', 'admin', 'director', 'principal', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     await ensureAcadTables();
     const { reject_reason, hod_remarks } = req.body;
@@ -10169,7 +10169,7 @@ app.post('/academic-duties/assignees/:aId/reject', requireRole('hod', 'admin', '
 });
 
 // ── GET /academic-duties/assignees/:aId/history — cycle history ─────────────
-app.get('/academic-duties/assignees/:aId/history', requireRole('hod', 'admin', 'director', 'principal', 'faculty'), async (req: Request, res: Response) => {
+app.get('/academic-duties/assignees/:aId/history', requireRole('hod', 'admin', 'director', 'principal', 'management', 'program_chair', 'faculty'), async (req: Request, res: Response) => {
   try {
     await ensureAcadTables();
     const aId = parseInt(req.params.aId);
@@ -10182,7 +10182,7 @@ app.get('/academic-duties/assignees/:aId/history', requireRole('hod', 'admin', '
 });
 
 // ── POST /academic-duties — HOD/Admin creates a new duty assignment ───────────
-app.post('/academic-duties', requireRole('hod', 'admin', 'director', 'principal'), async (req: Request, res: Response) => {
+app.post('/academic-duties', requireRole('hod', 'admin', 'director', 'principal', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     await ensureAcadTables();
     const callerEmail = req.auth!.email;
@@ -10306,7 +10306,7 @@ app.get('/academic-duties', requireRole('hod', 'admin', 'director', 'principal',
 });
 
 // ── PUT /academic-duties/:id — HOD edits assignment ──────────────────────────
-app.put('/academic-duties/:id', requireRole('hod', 'admin', 'director', 'principal'), async (req: Request, res: Response) => {
+app.put('/academic-duties/:id', requireRole('hod', 'admin', 'director', 'principal', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     await ensureAcadTables();
     const { title, description, deadline, coordinator_email, co_coordinator_email, status } = req.body;
@@ -10322,7 +10322,7 @@ app.put('/academic-duties/:id', requireRole('hod', 'admin', 'director', 'princip
 });
 
 // ── DELETE /academic-duties/:id — HOD cancels (soft delete) ──────────────────
-app.delete('/academic-duties/:id', requireRole('hod', 'admin', 'director', 'principal'), async (req: Request, res: Response) => {
+app.delete('/academic-duties/:id', requireRole('hod', 'admin', 'director', 'principal', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     await ensureAcadTables();
     await db.query(`UPDATE academic_duty_assignments SET status='Cancelled' WHERE id=$1`, [req.params.id]);

@@ -9,3 +9,16 @@
 [2026-11-11 16:27] T008 → done: Clash result reset + roster invalidation + reject reason modal. Build passed. Committed 404ddab. Pushed origin + jayanth.
 [2026-11-11 16:33] T009 → done: Timetable other-faculty filter + hour reset on subject switch + HOD CSV clean columns. Build passed. Committed a04bb00. Pushed origin + jayanth.
 [2026-11-11 16:41] GSD SESSION END — 9/9 tasks done. All features shipped to origin + jayanth.
+[2026-11-11 16:54] GSD SESSION CONTINUE
+[2026-11-11 16:54] T010 → done: Fragment key fix in DocumentsManagementPage. Build ✓
+[2026-11-11 16:54] T011 → done: PlacementTrackerSection per-row delete pending + top_companies null guard. Build ✓
+[2026-11-11 16:54] T012 → done: FacultyLeaveTab prompt()→modal + per-row duty pending. Build ✓
+[2026-11-11 16:54] T013 → done: MeetingLogModal per-row delete pending. Build ✓
+[2026-11-11 16:54] Committed 918c556. Pushed origin + jayanth. All 13 tasks DONE.
+[2026-11-11 16:54] GSD SESSION END — 13/13 tasks done. Zero known bugs.
+
+[2026-11-11 21:58] GSD SESSION START
+[2026-11-11 21:58] O004 → done: Added program_chair to 15+ shared backend routes (leaderboard, placements, mentor-meetings, notices, faculty, etc). Backend build exit 0.
+[2026-11-11 21:58] O005 → done: Verified student-placements GET scoping includes program_chair in full-access group. Backend build exit 0.
+[2026-11-11 21:58] O006 → done: Moved department search bar out of hidden nav div in OversightDashboardPage.tsx — now visible on certifications/students/placements tabs. Frontend build exit 0.
+[2026-11-11 21:58] GSD SESSION END — O004, O005, O006 done. All oversight tasks complete.
