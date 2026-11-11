@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { PanelLeft, Bell, Search, User, LogOut, ChevronDown, X, Code2, Sun, Moon, CalendarCheck, Users, UserCheck, Plus, CheckCheck, AlertTriangle, ShieldAlert, Info, Calendar } from 'lucide-react';
+import { PanelLeft, Bell, Search, User, LogOut, ChevronDown, ChevronRight, X, Code2, Sun, Moon, CalendarCheck, Users, UserCheck, Plus, CheckCheck, AlertTriangle, ShieldAlert, Info, Calendar } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { StudentProfile, BroadcastNotification } from '../../types';
 import { BroadcastComposeModal } from '../common/BroadcastComposeModal';
@@ -14,6 +14,45 @@ interface TopBarProps {
 export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  /**
+   * Breadcrumb — derives a 1-2 segment label from the current URL.
+   * Pattern: "Parent > Sub-page" (e.g. "Faculty Portal > Leave & Duties")
+   * Pure display — no routing logic changed.
+   */
+  const breadcrumb = (() => {
+    const p = location.pathname;
+    const q = new URLSearchParams(location.search).get('tab') || '';
+    const TAB_LABELS: Record<string, string> = {
+      attendance: 'Attendance', leaves: 'Leave & OD', performance: 'CGPA & Rankings',
+      students: 'Student Directory', faculty: 'Faculty & Mentors', holidays: 'Holiday Calendar',
+      overview: 'Dept Overview', rankings: 'CGPA & Rankings', mentees: 'Mentees',
+      analytics: 'CGPA Analytics', profile: 'My Profile', 'coding-profiles': 'Coding Profiles',
+      permissions: 'On-Duty Permissions', certifications: 'Certificates', documents: 'Documents',
+      academics: 'Academics', 'personal-info': 'Personal Info', powerbi: 'Power BI Dashboard',
+      freshers: 'Fresher Directory', incharge: 'Class Incharges', onboarding: 'Coordinator Hub',
+    };
+    const tab = TAB_LABELS[q] || '';
+    if (p === '/dashboard') return { parent: 'Dashboard', child: '' };
+    if (p.startsWith('/faculty/dashboard')) return { parent: 'Faculty Portal', child: tab };
+    if (p.startsWith('/hod/dashboard')) return { parent: 'HOD Portal', child: tab };
+    if (p.startsWith('/admin/dashboard')) return { parent: 'Administration', child: tab };
+    if (p.startsWith('/coordinator/dashboard')) return { parent: 'Coordinator Hub', child: tab };
+    if (p.startsWith('/oversight/dashboard')) return { parent: 'Institutional Oversight', child: tab };
+    if (p.startsWith('/admin/faculty')) return { parent: 'Administration', child: 'Faculty Management' };
+    if (p.startsWith('/attendance/workload')) return { parent: 'Attendance', child: 'Faculty Workload' };
+    if (p.startsWith('/attendance/reports')) return { parent: 'Attendance', child: 'Reports' };
+    if (p.startsWith('/attendance')) return { parent: 'Attendance', child: 'Mark Attendance' };
+    if (p.startsWith('/academic-duties')) return { parent: 'Leave & Duties', child: 'Academic Duties' };
+    if (p.startsWith('/my-duties')) return { parent: 'Leave & Duties', child: 'My Duties' };
+    if (p.startsWith('/faculty/api')) return { parent: 'Faculty', child: 'API Score' };
+    if (p.startsWith('/coding-analytics')) return { parent: 'Overview', child: 'Coding Leaderboard' };
+    if (p.startsWith('/documents')) return { parent: 'Documents', child: '' };
+    if (p.startsWith('/mentor')) return { parent: 'My Profile', child: 'My Mentor' };
+    if (p.startsWith('/profile')) return { parent: 'My Profile', child: tab };
+    return { parent: '', child: '' };
+  })();
 
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -211,16 +250,31 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
 
   return (
     <header className="h-16 bg-surface border-b border-borderLine px-4 md:px-6 flex items-center justify-between sticky top-0 z-30 shadow-xs">
-      {/* Left — sidebar toggle */}
-      <div className="flex items-center gap-3">
+      {/* Left — sidebar toggle + breadcrumb */}
+      <div className="flex items-center gap-3 min-w-0">
         <button
           onClick={onMenuToggle}
-          className="p-2 rounded-xl text-textSecondary hover:bg-surface-2 hover:text-brand-primary transition-all focus:outline-none"
+          className="p-2 rounded-xl text-textSecondary hover:bg-surface-2 hover:text-brand-primary transition-all focus:outline-none shrink-0"
           aria-label="Toggle Navigation Menu"
           title="Toggle Navigation Menu"
         >
           <PanelLeft className="w-5 h-5" />
         </button>
+
+        {/* Breadcrumb — hidden on xs, visible from sm up */}
+        {breadcrumb.parent && (
+          <nav className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-textSecondary min-w-0">
+            <span className="truncate max-w-[120px] lg:max-w-[160px]">{breadcrumb.parent}</span>
+            {breadcrumb.child && (
+              <>
+                <ChevronRight className="w-3 h-3 shrink-0 text-textMuted" />
+                <span className="font-bold text-textPrimary truncate max-w-[120px] lg:max-w-[200px]">
+                  {breadcrumb.child}
+                </span>
+              </>
+            )}
+          </nav>
+        )}
       </div>
 
       {/* Right */}
