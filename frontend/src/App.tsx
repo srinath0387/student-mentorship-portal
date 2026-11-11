@@ -208,6 +208,23 @@ const MainLayout: React.FC = () => {
     }
   }, [location.pathname, location.search]);
 
+  // ── Role-based colour theme — swap CSS class on <html> ──
+  useEffect(() => {
+    const html = document.documentElement;
+    // Remove any previous role theme
+    html.classList.remove(
+      'theme-hod', 'theme-faculty', 'theme-admin',
+      'theme-coordinator', 'theme-student', 'theme-parent', 'theme-oversight'
+    );
+    if (role === 'hod') html.classList.add('theme-hod');
+    else if (role === 'faculty') html.classList.add('theme-faculty');
+    else if (role === 'admin') html.classList.add('theme-admin');
+    else if (role === 'coordinator') html.classList.add('theme-coordinator');
+    else if (role === 'parent') html.classList.add('theme-parent');
+    else if (['director', 'principal', 'management', 'program_chair'].includes(role || '')) html.classList.add('theme-oversight');
+    else html.classList.add('theme-student'); // default for student + guests
+  }, [role]);
+
   // Auth guard: redirect to root if not authenticated
   if (!isLoading && !isAuthenticated) {
     return <Navigate to="/" replace />;

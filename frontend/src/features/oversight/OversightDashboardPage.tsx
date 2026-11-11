@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, GraduationCap, BookOpen, Award, BarChart2,
   ShieldCheck, Eye, Sparkles, Filter, Search, Download, Users,
@@ -17,7 +18,7 @@ import type {
   OversightPublication
 } from '../../types';
 
-type MainTab = 'students' | 'faculty' | 'certifications' | 'research' | 'placements';
+type MainTab = 'home' | 'students' | 'faculty' | 'certifications' | 'research' | 'placements';
 type ViewMode = 'grid' | 'powerbi';
 type CadreFilter = 'all' | 'professors' | 'associate' | 'assistant' | 'doctorates';
 
@@ -285,10 +286,20 @@ function SlicerPill<T extends string>({ value, options, onChange, label }: {
 // MAIN COMPONENT
 // ══════════════════════════════════════════════════════════════════════════════
 export const OversightDashboardPage: React.FC = () => {
-  const { role } = useAuth();
+  const { role, user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
 
   // ── State ──────────────────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<MainTab>('students');
+  const [activeTab, setActiveTab] = useState<MainTab>('home');
+
+  // Sync tab from URL ?tab= param
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const tab = params.get('tab');
+    if (tab) setActiveTab(tab as MainTab);
+    else setActiveTab('home');
+  }, [location.search]);
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [selectedDept, setSelectedDept] = useState<string>('All');
   const [cadreFilter, setCadreFilter] = useState<CadreFilter>('all');
@@ -1363,8 +1374,8 @@ export const OversightDashboardPage: React.FC = () => {
         renderPowerBICanvas()
       ) : (
         <>
-          {/* ── Tab Navigation ── */}
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* ── Tab Navigation — hidden: nav via sidebar ── */}
+          <div className="hidden flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap gap-1 bg-surface border border-borderLine rounded-2xl p-1">
               {tabs.map(t => (
                 <button
@@ -1391,6 +1402,42 @@ export const OversightDashboardPage: React.FC = () => {
               />
             </div>
           </div>
+
+          {/* ── Home Screen ── */}
+          {activeTab === 'home' && (
+            <div className="space-y-6">
+              <div className="bg-gradient-to-r from-brand-primary to-teal-700 rounded-2xl px-6 py-7 text-white shadow-xl flex items-center gap-5">
+                <div className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center text-2xl font-black shrink-0">
+                  {(user?.name || 'O').charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-white/70 uppercase tracking-widest mb-1">Welcome back</p>
+                  <h1 className="text-xl font-black">{user?.name || 'Oversight'}</h1>
+                  <p className="text-sm text-white/80 mt-0.5">Institutional Oversight · {role?.charAt(0).toUpperCase()}{role?.slice(1)}</p>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-bold text-textMuted uppercase tracking-widest mb-3">Quick Navigation</p>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                  {[
+                    { label: 'Student Analytics', tab: 'students', color: 'bg-blue-50 text-blue-700 border-blue-200' },
+                    { label: 'Faculty Analytics', tab: 'faculty', color: 'bg-green-50 text-green-700 border-green-200' },
+                    { label: 'Certifications', tab: 'certifications', color: 'bg-orange-50 text-orange-700 border-orange-200' },
+                    { label: 'Research', tab: 'research', color: 'bg-purple-50 text-purple-700 border-purple-200' },
+                    { label: 'Placements', tab: 'placements', color: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
+                  ].map(({ label, tab, color }) => (
+                    <button
+                      key={tab}
+                      onClick={() => navigate('/oversight/dashboard?tab=' + tab)}
+                      className={`flex items-center justify-center text-center px-3 py-4 rounded-xl border text-xs font-bold transition-all hover:scale-105 hover:shadow-md ${color}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* ── Tab Content ── */}
           {isLoading ? (

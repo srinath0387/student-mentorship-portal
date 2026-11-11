@@ -294,17 +294,11 @@ const oversightNav: NavGroup[] = [
     title: 'Institutional Oversight',
     icon: LayoutDashboard,
     items: [
-      { label: 'Executive Dashboard', path: '/oversight/dashboard', icon: LayoutDashboard },
-    ],
-  },
-  {
-    title: 'Academics & Students',
-    icon: Award,
-    items: [
-      { label: 'Academic & CGPA', path: '/admin/dashboard?tab=performance', icon: Award },
-      { label: 'Student Directory', path: '/admin/dashboard?tab=students', icon: Users },
-      { label: 'Certifications', path: '/admin/dashboard?tab=certifications', icon: CheckCircle2 },
-      { label: 'Coding Leaderboard', path: '/coding-analytics', icon: BarChart2 },
+      { label: 'Student Analytics', path: '/oversight/dashboard?tab=students', icon: Users },
+      { label: 'Faculty Analytics', path: '/oversight/dashboard?tab=faculty', icon: User },
+      { label: 'Certifications', path: '/oversight/dashboard?tab=certifications', icon: CheckCircle2 },
+      { label: 'Research', path: '/oversight/dashboard?tab=research', icon: FileBarChart },
+      { label: 'Placements', path: '/oversight/dashboard?tab=placements', icon: Award },
     ],
   },
   {
@@ -321,6 +315,7 @@ const oversightNav: NavGroup[] = [
     icon: User,
     items: [
       { label: 'Faculty & Mentors', path: '/admin/dashboard?tab=faculty', icon: ShieldCheck },
+      { label: 'Coding Leaderboard', path: '/coding-analytics', icon: BarChart2 },
       { label: 'Documents', path: '/documents', icon: FolderOpen },
     ],
   },
@@ -340,8 +335,7 @@ function getNavGroups(role: string | null | undefined): NavGroup[] {
 
 /** Home path for each role — navigates to the home/welcome screen */
 function getHomePath(role: string | null | undefined): string {
-  if (['director', 'principal', 'management', 'program_chair'].includes(role || '')) return '/oversight/dashboard?tab=home';
-  if (role === 'coordinator') return '/coordinator/dashboard?tab=home';
+  if (['director', 'principal', 'management', 'program_chair'].includes(role || '')) return '/oversight/dashboard?tab=home';  if (role === 'coordinator') return '/coordinator/dashboard?tab=home';
   if (role === 'admin') return '/admin/dashboard?tab=home';
   if (role === 'faculty') return '/faculty/dashboard?tab=home';
   if (role === 'hod') return '/hod/dashboard?tab=home';

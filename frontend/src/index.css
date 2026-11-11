@@ -41,6 +41,72 @@
     --shadow-brand: 0 4px 14px rgba(91, 79, 233, 0.25);
   }
 
+  /* ── Role-based brand colour themes ── */
+  /* Applied to <html> by App.tsx when role is detected */
+
+  /* HOD — Emerald Green */
+  .theme-hod {
+    --color-brand-primary: #16a34a;
+    --color-brand-hover:   #15803d;
+    --color-brand-soft:    #dcfce7;
+    --color-brand-subtle:  #f0fdf4;
+    --shadow-brand: 0 4px 14px rgba(22, 163, 74, 0.25);
+  }
+
+  /* Faculty — Warm Amber-Orange */
+  .theme-faculty {
+    --color-brand-primary: #ea580c;
+    --color-brand-hover:   #c2410c;
+    --color-brand-soft:    #ffedd5;
+    --color-brand-subtle:  #fff7ed;
+    --shadow-brand: 0 4px 14px rgba(234, 88, 12, 0.25);
+  }
+
+  /* Admin — Deep Blue (keep default-ish but richer) */
+  .theme-admin {
+    --color-brand-primary: #1d4ed8;
+    --color-brand-hover:   #1e40af;
+    --color-brand-soft:    #dbeafe;
+    --color-brand-subtle:  #eff6ff;
+    --shadow-brand: 0 4px 14px rgba(29, 78, 216, 0.25);
+  }
+
+  /* Coordinator — Purple */
+  .theme-coordinator {
+    --color-brand-primary: #7c3aed;
+    --color-brand-hover:   #6d28d9;
+    --color-brand-soft:    #ede9fe;
+    --color-brand-subtle:  #f5f3ff;
+    --shadow-brand: 0 4px 14px rgba(124, 58, 237, 0.25);
+  }
+
+  /* Student — Sky Blue */
+  .theme-student {
+    --color-brand-primary: #0284c7;
+    --color-brand-hover:   #0369a1;
+    --color-brand-soft:    #e0f2fe;
+    --color-brand-subtle:  #f0f9ff;
+    --shadow-brand: 0 4px 14px rgba(2, 132, 199, 0.25);
+  }
+
+  /* Parent — Rose */
+  .theme-parent {
+    --color-brand-primary: #be123c;
+    --color-brand-hover:   #9f1239;
+    --color-brand-soft:    #ffe4e6;
+    --color-brand-subtle:  #fff1f2;
+    --shadow-brand: 0 4px 14px rgba(190, 18, 60, 0.25);
+  }
+
+  /* Oversight (Director/Principal/Management) — Slate Teal */
+  .theme-oversight {
+    --color-brand-primary: #0f766e;
+    --color-brand-hover:   #0d6b63;
+    --color-brand-soft:    #ccfbf1;
+    --color-brand-subtle:  #f0fdfa;
+    --shadow-brand: 0 4px 14px rgba(15, 118, 110, 0.25);
+  }
+
   .dark {
     /* ── Core Surfaces ── */
     --color-background:   #070C18;
