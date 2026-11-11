@@ -11,7 +11,7 @@
  * - All routing, auth, role logic unchanged.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -350,13 +350,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
 
   const navGroups = getNavGroups(role);
 
-  // Which accordion group is currently open (-1 = none)
-  const [openGroup, setOpenGroup] = useState<number>(() =>
-    findActiveGroupIndex(navGroups, location.pathname, location.search)
-  );
+  // Start with ALL groups closed on login (-1 = nothing open)
+  const [openGroup, setOpenGroup] = useState<number>(-1);
 
-  // When route changes, auto-open the group that owns the active item
+  // Track first render so we don't auto-open on login
+  const isFirstRender = useRef(true);
+
+  // After user navigates (e.g. via back button or breadcrumb), auto-open the correct group
+  // Skip on first mount so the sidebar is fully closed on login
   useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
     const idx = findActiveGroupIndex(navGroups, location.pathname, location.search);
     if (idx !== -1) setOpenGroup(idx);
   }, [location.pathname, location.search]);
