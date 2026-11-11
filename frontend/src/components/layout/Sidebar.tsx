@@ -36,6 +36,7 @@ import {
   ClipboardList,
   CheckSquare,
   ChevronRight,
+  Home,
   LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -337,6 +338,17 @@ function getNavGroups(role: string | null | undefined): NavGroup[] {
   return studentNav;
 }
 
+/** Home path for each role — navigates to the home/welcome screen */
+function getHomePath(role: string | null | undefined): string {
+  if (['director', 'principal', 'management', 'program_chair'].includes(role || '')) return '/oversight/dashboard?tab=home';
+  if (role === 'coordinator') return '/coordinator/dashboard?tab=home';
+  if (role === 'admin') return '/admin/dashboard?tab=home';
+  if (role === 'faculty') return '/faculty/dashboard?tab=home';
+  if (role === 'hod') return '/hod/dashboard?tab=home';
+  if (role === 'parent') return '/dashboard?tab=home';
+  return '/dashboard'; // student
+}
+
 function isItemActive(itemPath: string, pathname: string, search: string): boolean {
   const cur = pathname + search;
   if (itemPath.includes('?')) return cur === itemPath;
@@ -432,6 +444,33 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
 
         {/* ── Accordion Navigation ── */}
         <nav className="flex-1 overflow-y-auto overflow-x-hidden py-2 px-1.5 space-y-0.5">
+
+          {/* ── Home shortcut (always visible, above accordion groups) ── */}
+          {(() => {
+            const homePath = getHomePath(role);
+            const isHomeActive = (location.pathname + location.search) === homePath
+              || (location.search === '' && homePath.includes(location.pathname + '?tab=home'));
+            return (
+              <button
+                type="button"
+                onClick={() => { navigate(homePath); setOpenGroup(-1); }}
+                title={collapsed ? 'Home' : undefined}
+                className={[
+                  'w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-bold transition-all duration-200 select-none mb-1',
+                  collapsed ? 'lg:justify-center lg:px-0 lg:py-3' : '',
+                  isHomeActive
+                    ? 'bg-brand-soft text-brand-primary'
+                    : 'text-textSecondary hover:bg-surface-2 hover:text-textPrimary',
+                ].join(' ')}
+              >
+                <Home className="shrink-0 w-[17px] h-[17px]" />
+                <span className={['flex-1 text-left truncate transition-all duration-300', collapsed ? 'lg:hidden' : 'block'].join(' ')}>
+                  Home
+                </span>
+              </button>
+            );
+          })()}
+
           {navGroups.map((group, idx) => {
             const GroupIcon = group.icon;
             const isOpen_ = openGroup === idx;

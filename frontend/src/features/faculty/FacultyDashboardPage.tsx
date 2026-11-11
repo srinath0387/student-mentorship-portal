@@ -73,7 +73,7 @@ export const FacultyDashboardPage: React.FC = () => {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
-  const activeTab = searchParams.get('tab') || 'mentees';
+  const activeTab = searchParams.get('tab') || 'home';
 
   // Use the logged-in faculty's ID from auth context
   const facultyId = user?.rollNumber || '';
@@ -1183,6 +1183,45 @@ export const FacultyDashboardPage: React.FC = () => {
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab: Home / Welcome */}
+      {activeTab === 'home' && (
+        <div className="space-y-6">
+          <div className="bg-gradient-to-r from-brand-primary to-indigo-700 rounded-2xl px-6 py-7 text-white shadow-xl flex items-center gap-5">
+            <div className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center text-2xl font-black shrink-0">
+              {(user?.name || 'F').charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-white/70 uppercase tracking-widest mb-1">Welcome back</p>
+              <h1 className="text-xl font-black">{user?.name || 'Faculty'}</h1>
+              <p className="text-sm text-white/80 mt-0.5">{user?.department} · Faculty</p>
+            </div>
+          </div>
+          <div>
+            <p className="text-xs font-bold text-textMuted uppercase tracking-widest mb-3">Quick Navigation</p>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              {[
+                { label: 'Assigned Mentees', tab: 'mentees', color: 'bg-blue-50 text-blue-700 border-blue-200' },
+                { label: 'Attendance Records', tab: 'attendance', color: 'bg-purple-50 text-purple-700 border-purple-200' },
+                { label: 'Leave & Duties', tab: 'leaves', color: 'bg-orange-50 text-orange-700 border-orange-200' },
+                { label: 'My Faculty Profile', tab: 'profile', color: 'bg-green-50 text-green-700 border-green-200' },
+                { label: 'CGPA Analytics', tab: 'analytics', color: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
+                { label: 'Placement Eligibility', tab: 'placement', color: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
+                { label: 'API Scoreboard', tab: 'scoreboard', color: 'bg-pink-50 text-pink-700 border-pink-200' },
+                { label: 'Class Incharge', tab: 'incharge', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+              ].map(({ label, tab, color }) => (
+                <button
+                  key={tab}
+                  onClick={() => setSearchParams({ tab })}
+                  className={`flex items-center justify-center text-center px-3 py-4 rounded-xl border text-xs font-bold transition-all hover:scale-105 hover:shadow-md ${color}`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
         </div>

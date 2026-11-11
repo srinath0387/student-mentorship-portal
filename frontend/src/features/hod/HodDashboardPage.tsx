@@ -128,7 +128,7 @@ function mapStudentToHodEntry(student: any, index: number, liveSolved?: number):
 }
 
 export const HodDashboardPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'unregistered' | 'certifications' | 'leaves' | 'holidays' | 'attendance' | 'analytics' | 'students' | 'rankings' | 'placement' | 'mentees' | 'settings' | 'powerbi' | 'mentoring' | 'placement-tracker'>('overview');
+  const [activeTab, setActiveTab] = useState<'home' | 'overview' | 'unregistered' | 'certifications' | 'leaves' | 'holidays' | 'attendance' | 'analytics' | 'students' | 'rankings' | 'placement' | 'mentees' | 'settings' | 'powerbi' | 'mentoring' | 'placement-tracker'>('home');
   const [hodAttendanceSubTab, setHodAttendanceSubTab] = useState<'grid' | 'unposted' | 'tracking' | 'allotments'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -192,8 +192,10 @@ export const HodDashboardPage: React.FC = () => {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const tab = params.get('tab');
-    if (tab === 'overview' || tab === 'unregistered' || tab === 'certifications' || tab === 'leaves' || tab === 'holidays' || tab === 'attendance' || tab === 'analytics' || tab === 'students' || tab === 'rankings' || tab === 'placement' || tab === 'mentees' || tab === 'settings' || tab === 'powerbi' || tab === 'mentoring' || tab === 'placement-tracker') {
+    if (tab === 'home' || tab === 'overview' || tab === 'unregistered' || tab === 'certifications' || tab === 'leaves' || tab === 'holidays' || tab === 'attendance' || tab === 'analytics' || tab === 'students' || tab === 'rankings' || tab === 'placement' || tab === 'mentees' || tab === 'settings' || tab === 'powerbi' || tab === 'mentoring' || tab === 'placement-tracker') {
       setActiveTab(tab as any);
+    } else if (!tab) {
+      setActiveTab('home');
     }
   }, [location.search]);
 
@@ -642,6 +644,51 @@ export const HodDashboardPage: React.FC = () => {
           </nav>
         </div>
       </div>
+
+      {/* ── TAB: Home / Welcome ── */}
+      {activeTab === 'home' && (
+        <div className="space-y-6">
+          {/* Welcome banner */}
+          <div className="bg-gradient-to-r from-brand-primary to-indigo-700 rounded-2xl px-6 py-7 text-white shadow-xl flex items-center gap-5">
+            <div className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center text-2xl font-black shrink-0">
+              {(user?.name || 'H').charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-white/70 uppercase tracking-widest mb-1">Welcome back</p>
+              <h1 className="text-xl font-black">{user?.name?.replace(/\s*\(HOD.*$/i, '').trim() || 'HOD'}</h1>
+              <p className="text-sm text-white/80 mt-0.5">{user?.department} · Head of Department</p>
+            </div>
+          </div>
+          {/* Quick-nav cards */}
+          <div>
+            <p className="text-xs font-bold text-textMuted uppercase tracking-widest mb-3">Quick Navigation — select a section from the sidebar or use shortcuts below</p>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              {[
+                { label: 'Year-Wise Overview', tab: 'overview', color: 'bg-blue-50 text-blue-700 border-blue-200' },
+                { label: 'Certification Analytics', tab: 'certifications', color: 'bg-green-50 text-green-700 border-green-200' },
+                { label: 'Leave & OD Approvals', tab: 'leaves', color: 'bg-orange-50 text-orange-700 border-orange-200' },
+                { label: 'Attendance Tracker', tab: 'attendance', color: 'bg-purple-50 text-purple-700 border-purple-200' },
+                { label: 'Student Directory', tab: 'students', color: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
+                { label: 'CGPA & Rankings', tab: 'rankings', color: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
+                { label: 'My Mentees', tab: 'mentees', color: 'bg-pink-50 text-pink-700 border-pink-200' },
+                { label: 'Placement Tracker', tab: 'placement-tracker', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+                { label: 'Academic Analytics', tab: 'analytics', color: 'bg-teal-50 text-teal-700 border-teal-200' },
+                { label: 'Holiday Calendar', tab: 'holidays', color: 'bg-red-50 text-red-700 border-red-200' },
+                { label: 'Power BI Canvas', tab: 'powerbi', color: 'bg-slate-50 text-slate-700 border-slate-200' },
+                { label: 'Account Settings', tab: 'settings', color: 'bg-gray-50 text-gray-700 border-gray-200' },
+              ].map(({ label, tab, color }) => (
+                <button
+                  key={tab}
+                  onClick={() => navigate('/hod/dashboard?tab=' + tab)}
+                  className={`flex items-center justify-center text-center px-3 py-4 rounded-xl border text-xs font-bold transition-all hover:scale-105 hover:shadow-md ${color}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── TAB: Power BI Canvas ── */}
       {activeTab === 'powerbi' && (

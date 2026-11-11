@@ -47,8 +47,8 @@ export const CoordinatorDashboardPage: React.FC = () => {
   const { user } = useAuth();  // must be before any useState that uses user?.department
 
   const [activeTab, setActiveTab] = useState<
-    'onboarding' | 'freshers' | 'subjects' | 'attendance' | 'manage-attendance' | 'leaves' | 'calendar' | 'incharge' | 'promotion'
-  >('onboarding');
+    'home' | 'onboarding' | 'freshers' | 'subjects' | 'attendance' | 'manage-attendance' | 'leaves' | 'calendar' | 'incharge' | 'promotion'
+  >('home');
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -66,6 +66,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
     const params = new URLSearchParams(location.search);
     const tab = params.get('tab');
     if (tab) setActiveTab(tab as any);
+    else setActiveTab('home');
   }, [location.search]);
 
   // Inspection Modal State for 360 Fresher Profile
@@ -580,6 +581,48 @@ export const CoordinatorDashboardPage: React.FC = () => {
           <span>Promotion</span>
         </button>
       </div>
+
+      {/* ════════════════════════════════════════════════════════════════════════ */}
+      {/* HOME: Welcome Screen */}
+      {/* ════════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'home' && (
+        <div className="space-y-6">
+          <div className="bg-gradient-to-r from-brand-primary to-indigo-700 rounded-2xl px-6 py-7 text-white shadow-xl flex items-center gap-5">
+            <div className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center text-2xl font-black shrink-0">
+              {(user?.name || 'C').charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-white/70 uppercase tracking-widest mb-1">Welcome back</p>
+              <h1 className="text-xl font-black">{user?.name || 'Coordinator'}</h1>
+              <p className="text-sm text-white/80 mt-0.5">{user?.department || 'Department'} · Year Coordinator</p>
+            </div>
+          </div>
+          <div>
+            <p className="text-xs font-bold text-textMuted uppercase tracking-widest mb-3">Quick Navigation</p>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              {[
+                { label: '1st Year Onboarding', tab: 'onboarding', color: 'bg-blue-50 text-blue-700 border-blue-200' },
+                { label: 'Freshers Directory', tab: 'freshers', color: 'bg-green-50 text-green-700 border-green-200' },
+                { label: 'Section Subjects', tab: 'subjects', color: 'bg-orange-50 text-orange-700 border-orange-200' },
+                { label: 'Attendance Overview', tab: 'attendance', color: 'bg-purple-50 text-purple-700 border-purple-200' },
+                { label: 'Allotments & Rosters', tab: 'manage-attendance', color: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
+                { label: 'Student OD Approvals', tab: 'leaves', color: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
+                { label: 'Holiday Calendar', tab: 'calendar', color: 'bg-red-50 text-red-700 border-red-200' },
+                { label: 'Class Incharges', tab: 'incharge', color: 'bg-pink-50 text-pink-700 border-pink-200' },
+                { label: 'Year Promotion', tab: 'promotion', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+              ].map(({ label, tab, color }) => (
+                <button
+                  key={tab}
+                  onClick={() => navigate('/coordinator/dashboard?tab=' + tab)}
+                  className={`flex items-center justify-center text-center px-3 py-4 rounded-xl border text-xs font-bold transition-all hover:scale-105 hover:shadow-md ${color}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ════════════════════════════════════════════════════════════════════════ */}
       {/* TAB 0: 1ST YEAR ONBOARDING & ROLL NUMBER GENERATION */}
