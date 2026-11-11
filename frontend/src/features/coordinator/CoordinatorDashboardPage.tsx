@@ -470,8 +470,8 @@ export const CoordinatorDashboardPage: React.FC = () => {
         </div>
       </div>
 
-      {/* ── Main Tab Navigation ── */}
-      <div className="flex flex-wrap bg-surface-2 p-1 rounded-2xl border border-borderLine max-w-5xl gap-1">
+      {/* ── Main Tab Navigation — hidden: nav via sidebar ── */}
+      <div className="hidden flex flex-wrap bg-surface-2 p-1 rounded-2xl border border-borderLine max-w-5xl gap-1">
         <button
           onClick={() => navigate('/coordinator/dashboard?tab=onboarding')}
           className={`py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${

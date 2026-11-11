@@ -924,8 +924,8 @@ export const FacultyDashboardPage: React.FC = () => {
         )}
       </div>
 
-      {/* Sub-Tab Switcher */}
-      <div className="bg-surface border border-borderLine rounded-2xl shadow-xs overflow-hidden">
+      {/* Sub-Tab Switcher — hidden: nav via sidebar */}
+      <div className="hidden">
         <div className="overflow-x-auto">
           <nav className="flex px-2 pt-2 pb-0 gap-1 border-b border-borderLine">
             <button
