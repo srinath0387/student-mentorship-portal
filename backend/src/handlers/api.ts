@@ -2580,7 +2580,7 @@ app.get('/students/by-email/:email', async (req: Request, res: Response) => {
 
 // GET /students/mentor-lookup — HOD & Admin: search a student by roll no / name and return their assigned mentor details
 // NOTE: Must be registered BEFORE /students/:id to avoid Express param route shadowing
-app.get('/students/mentor-lookup', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
+app.get('/students/mentor-lookup', requireRole('hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const q = String(req.query.q || '').trim();
     if (!q || q.length < 2) return res.json([]);
@@ -8729,7 +8729,7 @@ app.post('/attendance/allotments/single', requireRole('admin', 'hod', 'coordinat
 });
 
 // 2. Get Allotments (Admin, HOD, Coordinator, Faculty)
-app.get('/attendance/allotments', requireRole('admin', 'hod', 'coordinator', 'faculty'), async (req: Request, res: Response) => {
+app.get('/attendance/allotments', requireRole('admin', 'hod', 'coordinator', 'faculty', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const semester = (req.query.semester as string) || '';
     const department = (req.query.department as string) || '';
@@ -8986,7 +8986,7 @@ app.delete('/attendance/rosters/:rosterId', requireRole('admin', 'hod', 'coordin
 });
 
 // 5. Get Roster for an Allotment (Admin, HOD, Faculty, Coordinator)
-app.get('/attendance/rosters/:allotmentId', requireRole('admin', 'hod', 'faculty', 'coordinator', 'student'), async (req: Request, res: Response) => {
+app.get('/attendance/rosters/:allotmentId', requireRole('admin', 'hod', 'faculty', 'coordinator', 'student', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const { allotmentId } = req.params;
     const sessionDate = (req.query.date as string || req.query.session_date as string || '').trim();
@@ -9138,7 +9138,7 @@ app.get('/attendance/rosters/:allotmentId', requireRole('admin', 'hod', 'faculty
 });
 
 // 6. Faculty: Get My Allotted Subjects for a Semester
-app.get('/attendance/my-subjects', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student'), async (req: Request, res: Response) => {
+app.get('/attendance/my-subjects', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const semester = (req.query.semester as string) || '';
     const facultyEmail = ((req.query.faculty_email as string) || req.auth?.email || '').toLowerCase().trim();
@@ -9324,7 +9324,7 @@ app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordin
 });
 
 // 8. Get Attendance Sessions (Filter by Allotment, Date range, Role-scoped)
-app.get('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student'), async (req: Request, res: Response) => {
+app.get('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const allotmentId = req.query.allotment_id as string;
     const dateFrom = req.query.date_from as string;
@@ -9381,7 +9381,7 @@ app.get('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordina
 });
 
 // 9. Get Single Session Details with Records (Role-scoped)
-app.get('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student'), async (req: Request, res: Response) => {
+app.get('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const sessRes = await db.query(
@@ -9876,7 +9876,7 @@ app.get('/faculty/:email/api-score', requireRole('faculty', 'hod', 'admin', 'dir
 
 
 // GET /faculty/api-duties/pending — HOD/Admin pending approvals
-app.get('/faculty/api-duties/pending', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
+app.get('/faculty/api-duties/pending', requireRole('hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
@@ -9929,7 +9929,7 @@ app.post('/faculty/:email/api-duties', requireRole('faculty', 'hod', 'admin'), a
 });
 
 // GET /faculty/:email/api-duties
-app.get('/faculty/:email/api-duties', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+app.get('/faculty/:email/api-duties', requireRole('faculty', 'hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const callerRole = req.auth?.role;
     const callerEmail = req.auth?.email?.toLowerCase();
@@ -10039,7 +10039,7 @@ const ensureAcadTables = async () => {
 };
 
 // ── GET /academic-duties/my — Faculty: list duties assigned to me ─────────────
-app.get('/academic-duties/my', requireRole('faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
+app.get('/academic-duties/my', requireRole('faculty', 'hod', 'admin', 'coordinator', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     await ensureAcadTables();
     const myEmail = req.auth?.email?.toLowerCase();
@@ -10361,7 +10361,7 @@ app.post('/academic-duties/:id/submit', requireRole('faculty', 'hod', 'admin', '
 
 // 10c. Not Posted Attendance Tracker — supports single date (?date=) or range (?from=&to=)
 
-app.get('/attendance/not-posted', requireRole('faculty', 'hod', 'coordinator', 'admin'), async (req: Request, res: Response) => {
+app.get('/attendance/not-posted', requireRole('faculty', 'hod', 'coordinator', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
@@ -10525,7 +10525,7 @@ app.post('/attendance/no-class-request', requireRole('faculty', 'hod', 'admin'),
 });
 
 // Get no-class requests (admin sees all, hod sees their dept)
-app.get('/attendance/no-class-requests', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
+app.get('/attendance/no-class-requests', requireRole('hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
@@ -10694,7 +10694,7 @@ app.get('/attendance/monthly-report', requireRole('hod', 'admin', 'director', 'p
 
 // 10d. Live Daily Period-by-Period Monitoring Grid (ported from dsattendance hod_dashboard.php)
 // Returns status for Periods 1 to 7 across all sections of a department or 1st year
-app.get('/attendance/daily-period-grid', requireRole('faculty', 'hod', 'coordinator', 'admin'), async (req: Request, res: Response) => {
+app.get('/attendance/daily-period-grid', requireRole('faculty', 'hod', 'coordinator', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const dateStr = (req.query.date as string) || new Date().toISOString().split('T')[0];
     const semester = (req.query.semester as string) || '';
@@ -11003,7 +11003,7 @@ app.get('/attendance/student/:rollNumber/daywise', requireAuth, async (req: Requ
 // 13. Subject Attendance Summary (Per-Student Attendance Table for Faculty/HOD/Admin)
 // Respects each individual student's joining_date
 // 13. Subject Attendance Summary (Per-Student Attendance Table for Faculty/HOD/Admin)
-app.get('/attendance/subject/:allotmentId/summary', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student'), async (req: Request, res: Response) => {
+app.get('/attendance/subject/:allotmentId/summary', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const { allotmentId } = req.params;
 
@@ -11127,7 +11127,7 @@ app.get('/attendance/subject/:allotmentId/summary', requireRole('faculty', 'hod'
 });
 
 // 13b. Attendance: Get Daywise Attendance Matrix for a Subject Allotment
-app.get('/attendance/subject/:allotmentId/daywise', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student'), async (req: Request, res: Response) => {
+app.get('/attendance/subject/:allotmentId/daywise', requireRole('faculty', 'hod', 'admin', 'coordinator', 'student', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const { allotmentId } = req.params;
     const allotRes = await db.query('SELECT * FROM subject_allotments WHERE id = $1', [allotmentId]);
@@ -12935,7 +12935,7 @@ app.put('/student/username', requireAuth, async (req: Request, res: Response) =>
 });
 
 // 19g. Coordinator & Admin: Get 1st Year Freshers Directory & Migration Tracking
-app.get('/coordinator/freshers', requireRole('coordinator', 'admin'), async (req: Request, res: Response) => {
+app.get('/coordinator/freshers', requireRole('coordinator', 'admin', 'principal', 'director', 'management', 'program_chair', 'hod'), async (req: Request, res: Response) => {
   try {
     const department = (req.query.department as string) || '';
     const section = (req.query.section as string) || '';
@@ -13053,7 +13053,7 @@ app.get('/coordinator/freshers/duplicates', requireRole('coordinator', 'admin'),
 });
 
 
-app.get('/coordinator/freshers/stats', requireRole('coordinator', 'admin'), async (_req: Request, res: Response) => {
+app.get('/coordinator/freshers/stats', requireRole('coordinator', 'admin', 'principal', 'director', 'management', 'program_chair', 'hod'), async (_req: Request, res: Response) => {
   try {
     const totalRes = await db.query(`SELECT COUNT(*) as count FROM students WHERE year = '1st Year'`);
     const stage0Res = await db.query(`SELECT COUNT(*) as count FROM students WHERE year = '1st Year' AND migration_stage = 0`);
@@ -13110,7 +13110,7 @@ app.post('/coordinator/class-incharge', requireRole('coordinator', 'admin'), asy
 });
 
 // 19j. Class Incharge: List All 1st Year Class Incharges
-app.get('/coordinator/class-incharge', requireRole('coordinator', 'admin', 'faculty'), async (req: Request, res: Response) => {
+app.get('/coordinator/class-incharge', requireRole('coordinator', 'admin', 'faculty', 'principal', 'director', 'management', 'program_chair', 'hod'), async (req: Request, res: Response) => {
   try {
     const semester = (req.query.semester as string) || '';
     const department = (req.query.department as string) || '';
@@ -13148,7 +13148,7 @@ app.delete('/coordinator/class-incharge/:id', requireRole('coordinator', 'admin'
 });
 
 // 19l. Faculty: Get Sections where Logged-in Faculty is Class Incharge (1st Year Only)
-app.get('/faculty/incharge-sections', requireRole('faculty', 'admin', 'coordinator'), async (req: Request, res: Response) => {
+app.get('/faculty/incharge-sections', requireRole('faculty', 'admin', 'coordinator', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const email = req.auth?.email;
     if (!email) {
@@ -13390,7 +13390,7 @@ app.post('/attendance/allotments/fresher-section-sync', requireRole('coordinator
 });
 
 // 19p. Coordinator / Admin: Get Section-wise Fresher Attendance Overview
-app.get('/coordinator/fresher-attendance', requireRole('coordinator', 'admin', 'hod'), async (req: Request, res: Response) => {
+app.get('/coordinator/fresher-attendance', requireRole('coordinator', 'admin', 'hod', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const semester = (req.query.semester as string) || '1-1';
     const department = (req.query.department as string) || 'All';
@@ -13933,7 +13933,7 @@ app.get('/faculty/subjects-handled/:email', requireAuth, async (req: Request, re
 });
 
 // POST /faculty/subjects-handled/:email — Add single or bulk subject handled records
-app.post('/faculty/subjects-handled/:email', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+app.post('/faculty/subjects-handled/:email', requireRole('faculty', 'hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     await ensureLeaveAndSubjectsHandledTables();
     const email = req.params.email.toLowerCase().trim();
@@ -13983,7 +13983,7 @@ app.post('/faculty/subjects-handled/:email', requireRole('faculty', 'hod', 'admi
 });
 
 // DELETE /faculty/subjects-handled/:id — Delete a record
-app.delete('/faculty/subjects-handled/:id', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+app.delete('/faculty/subjects-handled/:id', requireRole('faculty', 'hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     await ensureLeaveAndSubjectsHandledTables();
     const { id } = req.params;
@@ -14167,7 +14167,7 @@ const LEAVE_QUOTAS: Record<string, number> = {
 };
 
 // GET /faculty/leaves/my-summary — Current faculty's leave balances & history
-app.get('/faculty/leaves/my-summary', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+app.get('/faculty/leaves/my-summary', requireRole('faculty', 'hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     await ensureLeaveAndSubjectsHandledTables();
     // Prefer explicit caller_email query param (sent by frontend per-tab) over token-derived email
@@ -14287,7 +14287,7 @@ app.get('/faculty/leaves/my-summary', requireRole('faculty', 'hod', 'admin'), as
 });
 
 // GET /faculty/leaves/reassigned-duties — Get duties reassigned to the current faculty
-app.get('/faculty/leaves/reassigned-duties', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+app.get('/faculty/leaves/reassigned-duties', requireRole('faculty', 'hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     await ensureLeaveAndSubjectsHandledTables();
     // Prefer explicit caller_email query param (sent by frontend per-tab) over token-derived email
@@ -14532,7 +14532,7 @@ app.post('/faculty/leaves/apply', requireRole('faculty', 'hod', 'admin'), async 
 });
 
 // GET /hod/leaves/faculty — HOD fetch faculty leave requests (filtered by HOD department or all for admin/principal)
-app.get('/hod/leaves/faculty', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
+app.get('/hod/leaves/faculty', requireRole('hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     await ensureLeaveAndSubjectsHandledTables();
     const callerRole = req.auth?.role;
@@ -14573,7 +14573,7 @@ app.get('/hod/leaves/faculty', requireRole('hod', 'admin'), async (req: Request,
 });
 
 // PUT /hod/leaves/faculty/:id/status — HOD Approve or Reject leave (Stage 2)
-app.put('/hod/leaves/faculty/:id/status', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
+app.put('/hod/leaves/faculty/:id/status', requireRole('hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     await ensureLeaveAndSubjectsHandledTables();
     const { id } = req.params;
@@ -14898,7 +14898,7 @@ app.delete('/faculty/leaves/:id', requireRole('faculty', 'hod', 'admin'), async 
 });
 
 // DELETE /hod/leaves/faculty/:id — HOD or Admin delete/cancel a faculty leave -> restores faculty leave balance & deletes adjustments
-app.delete('/hod/leaves/faculty/:id', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
+app.delete('/hod/leaves/faculty/:id', requireRole('hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     await ensureLeaveAndSubjectsHandledTables();
     const { id } = req.params;
@@ -14984,7 +14984,7 @@ app.get('/student/permissions/my-history', requireAuth, async (req: Request, res
 });
 
 // GET /hod/permissions/students — HOD/Coordinator/Mentor view student permissions
-app.get('/hod/permissions/students', requireRole('hod', 'admin', 'faculty', 'coordinator'), async (req: Request, res: Response) => {
+app.get('/hod/permissions/students', requireRole('hod', 'admin', 'faculty', 'coordinator', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     await ensureLeaveAndSubjectsHandledTables();
     const callerRole = req.auth?.role;
@@ -15699,7 +15699,7 @@ const ensureCertificationTables = async () => {
  * GET /certifications/summary
  * Returns top certifications with student counts for dashboard summary cards.
  */
-app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
+app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'faculty', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     await ensureCertificationTables();
     const callerRole = req.auth?.role;
@@ -15815,7 +15815,7 @@ app.get('/certifications/summary', requireRole('admin', 'super_admin', 'hod', 'f
  * Role-scoped typeahead search returning certification name, issuer, and student count.
  * Case-insensitive grouping and supports filters.
  */
-app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
+app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'faculty', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     await ensureCertificationTables();
     const query = (req.query.q as string || '').trim();
@@ -15928,7 +15928,7 @@ app.get('/certifications/search', requireRole('admin', 'super_admin', 'hod', 'fa
  * Returns students who hold a specific certification (role-scoped).
  * Case-insensitive match, deduplicates roll numbers, and supports department, year, section, and search filters.
  */
-app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
+app.get('/certifications/students', requireRole('admin', 'super_admin', 'hod', 'faculty', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     await ensureCertificationTables();
     const certName = (req.query.cert_name as string || '').trim();
@@ -16177,7 +16177,7 @@ app.post('/internships', requireAuth, async (req: Request, res: Response) => {
  * PUT /internships/:id/verify
  * Verify an internship (Mentor, HOD, Admin)
  */
-app.put('/internships/:id/verify', requireRole('faculty', 'hod', 'admin', 'super_admin'), async (req: Request, res: Response) => {
+app.put('/internships/:id/verify', requireRole('faculty', 'hod', 'admin', 'super_admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { verification_status, remarks } = req.body;
