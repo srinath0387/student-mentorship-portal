@@ -157,3 +157,61 @@ describe('Academic-calendar posting lock', () => {
     expect(adminApprove.body.request.status).toBe('Approved');
   });
 });
+
+describe('Admin attendance control', () => {
+  const tt = (subject: string, period: number, section = 'A') => ({
+    id: `T-${subject}-${period}`, day_of_week: 'Monday', department: 'CSE (Data Science)', semester_label: '3-1',
+    section, subject_name: subject, subject_type: 'Theory', period_start: period, num_periods: 1,
+    faculty_email: 'ramesh@rgmcet.edu.in', faculty_name: 'Dr. Ramesh', room_no: '101',
+  });
+
+  it('day-status classifies each class as posted / not posted / no class, plus extra sessions', async () => {
+    routeDb([
+      ['FROM timetable_entries', [tt('DBMS', 1), tt('OS', 2), tt('CN', 3)]],
+      ['FROM attendance_sessions s JOIN subject_allotments', [
+        { session_id: 'S1', period_start: 1, num_periods: 1, department: 'CSE (Data Science)', semester_label: '3-1', section: 'A', subject_name: 'DBMS', faculty_email: 'ramesh@rgmcet.edu.in', total_marked: 60, present_count: 55 },
+        { session_id: 'S9', period_start: 6, num_periods: 1, department: 'CSE (Data Science)', semester_label: '3-1', section: 'A', subject_name: 'DBMS', faculty_email: 'ramesh@rgmcet.edu.in', total_marked: 60, present_count: 50 },
+      ]],
+      ['FROM attendance_no_class_requests', [{ id: 7, department: 'CSE (Data Science)', semester_label: '3-1', section: 'A', subject_name: 'CN', period_start: 3, reason: 'Exam' }]],
+    ]);
+    const res = await request(app).get('/attendance/admin/day-status?date=2026-11-09').set('Authorization', ADMIN());
+    expect(res.status).toBe(200);
+    expect(res.body.day_of_week).toBe('Monday');
+    expect(res.body.summary).toEqual({ scheduled: 3, posted: 1, not_posted: 1, no_class: 1, extra: 1 });
+    const bySubject = Object.fromEntries(res.body.slots.filter((s: any) => !s.extra_class).map((s: any) => [s.subject_name, s.status]));
+    expect(bySubject).toEqual({ DBMS: 'posted', OS: 'not_posted', CN: 'no_class' });
+    expect(res.body.slots.find((s: any) => s.extra_class).session.session_id).toBe('S9');
+  });
+
+  it('day-status is not available to faculty', async () => {
+    routeDb([]);
+    const res = await request(app).get('/attendance/admin/day-status?date=2026-11-09').set('Authorization', FACULTY());
+    expect(res.status).toBe(403);
+  });
+
+  it('remove-class records approved no-class entries and can delete posted attendance', async () => {
+    const calls = routeDb([
+      ['FROM timetable_entries', [tt('DBMS', 1), tt('OS', 2)]],
+      ['DELETE FROM attendance_sessions', [{ id: 'S1' }]],
+    ]);
+    const res = await request(app).post('/attendance/admin/cancel-class').set('Authorization', ADMIN())
+      .send({ date: '2026-11-09', department: 'CSE (Data Science)', section: 'a', reason: 'Mid exams', delete_posted: true });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ cancelled: 2, deleted_sessions: 2 });
+    const inserts = calls.filter(c => c.sql.includes('INSERT INTO attendance_no_class_requests'));
+    expect(inserts).toHaveLength(2);
+    expect(inserts[0].params[9]).toBe('admin@rgmcet.edu.in');
+    const tq = calls.find(c => c.sql.includes('FROM timetable_entries'))!;
+    expect(tq.params).toEqual(['Monday', 'CSE (Data Science)', 'A']);
+  });
+
+  it('remove-class requires a reason and is admin/HOD only', async () => {
+    routeDb([['FROM timetable_entries', [tt('DBMS', 1)]]]);
+    const noReason = await request(app).post('/attendance/admin/cancel-class').set('Authorization', ADMIN())
+      .send({ date: '2026-11-09', department: 'CSE (Data Science)' });
+    expect(noReason.status).toBe(400);
+    const asFaculty = await request(app).post('/attendance/admin/cancel-class').set('Authorization', FACULTY())
+      .send({ date: '2026-11-09', department: 'CSE (Data Science)', reason: 'x' });
+    expect(asFaculty.status).toBe(403);
+  });
+});

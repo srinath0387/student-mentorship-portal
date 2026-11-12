@@ -11110,6 +11110,182 @@ app.patch('/attendance/late-post-requests/:id/:decision', requireRole('admin'), 
   }
 });
 
+// ============================================================================
+// Admin attendance control — day status & remove-class
+// ============================================================================
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const normKey = (v: any) => String(v ?? '').toLowerCase().trim();
+const slotKey = (o: any) => [normKey(o.department), String(o.semester_label ?? ''), String(o.section ?? '').toUpperCase().trim(), normKey(o.subject_name), parseInt(o.period_start, 10) || 0].join('|');
+
+function dayOfWeekFor(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return DAY_NAMES[new Date(Date.UTC(y, (m || 1) - 1, d || 1)).getUTCDay()];
+}
+
+/** Department scope for the caller: null = all departments. */
+function attendanceDeptScope(req: Request): string | null {
+  const role = req.auth?.role;
+  const dept = req.auth?.department;
+  if (role === 'hod' && dept && dept !== '*') return dept;
+  if (role === 'admin' && dept && !['*', 'All'].includes(dept) && !req.auth?.isSuperAdmin) return dept;
+  return null;
+}
+
+// GET /attendance/admin/day-status?date=YYYY-MM-DD&department=&semester=&section=
+// Every timetable class on the date with status posted / not_posted / no_class, plus extra
+// (unscheduled) sessions that were posted, so admins can view, edit or delete any of them.
+app.get('/attendance/admin/day-status', requireRole('admin', 'hod', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    const dateStr = String(req.query.date || new Date().toISOString().split('T')[0]).slice(0, 10);
+    const scope = attendanceDeptScope(req);
+    const department = scope || (req.query.department && req.query.department !== 'All' ? String(req.query.department) : '');
+    const semester = req.query.semester && req.query.semester !== 'All' ? String(req.query.semester) : '';
+    const section = req.query.section && req.query.section !== 'All' ? String(req.query.section).toUpperCase() : '';
+    const dayOfWeek = dayOfWeekFor(dateStr);
+
+    const holidayRes = await db.query(`SELECT title FROM holiday_calendar WHERE date = $1 LIMIT 1`, [dateStr]).catch(() => ({ rows: [] as any[] }));
+    const holiday = holidayRes.rows[0]?.title || null;
+
+    const params: any[] = [dayOfWeek];
+    let where = `t.day_of_week = $1`;
+    if (department) { params.push(department); where += ` AND t.department = $${params.length}`; }
+    if (semester) { params.push(semester); where += ` AND t.semester_label = $${params.length}`; }
+    if (section) { params.push(section); where += ` AND UPPER(t.section) = $${params.length}`; }
+    const slotsRes = await db.query(
+      `SELECT t.* FROM timetable_entries t WHERE ${where} ORDER BY t.department, t.semester_label, t.section, t.period_start`, params);
+
+    const sParams: any[] = [dateStr];
+    let sWhere = `s.session_date = $1`;
+    if (department) { sParams.push(department); sWhere += ` AND a.department = $${sParams.length}`; }
+    if (semester) { sParams.push(semester); sWhere += ` AND a.semester_label = $${sParams.length}`; }
+    if (section) { sParams.push(section); sWhere += ` AND UPPER(a.section) = $${sParams.length}`; }
+    const sessRes = await db.query(
+      `SELECT s.id AS session_id, s.period_start, s.num_periods, s.recorded_by, s.allotment_id,
+              a.department, a.semester_label, a.section, a.subject_name, a.faculty_email, a.faculty_name,
+              (SELECT COUNT(*) FROM attendance_records r WHERE r.session_id = s.id)::int AS total_marked,
+              (SELECT COUNT(*) FROM attendance_records r WHERE r.session_id = s.id AND r.is_present = true)::int AS present_count
+       FROM attendance_sessions s JOIN subject_allotments a ON a.id = s.allotment_id
+       WHERE ${sWhere}`, sParams);
+
+    const noClassRes = await db.query(
+      `SELECT id, department, semester_label, section, subject_name, period_start, reason, reviewed_by
+       FROM attendance_no_class_requests WHERE status = 'Approved' AND date = $1`, [dateStr]).catch(() => ({ rows: [] as any[] }));
+
+    const sessionsByKey = new Map<string, any>();
+    for (const sres of sessRes.rows) sessionsByKey.set(slotKey(sres), sres);
+    const noClassByKey = new Map<string, any>();
+    for (const n of noClassRes.rows) noClassByKey.set(slotKey(n), n);
+
+    const used = new Set<string>();
+    const slots = slotsRes.rows.map((t: any) => {
+      const key = slotKey(t);
+      const sess = sessionsByKey.get(key);
+      const nc = noClassByKey.get(key);
+      if (sess) used.add(key);
+      return {
+        timetable_id: t.id,
+        department: t.department, semester_label: t.semester_label, section: t.section,
+        subject_name: t.subject_name, subject_type: t.subject_type,
+        period_start: t.period_start, num_periods: t.num_periods,
+        faculty_email: t.faculty_email, faculty_name: t.faculty_name, room_no: t.room_no,
+        status: sess ? 'posted' : nc ? 'no_class' : 'not_posted',
+        session: sess || null,
+        no_class: nc || null,
+      };
+    });
+    const extra = sessRes.rows.filter((sres: any) => !used.has(slotKey(sres))).map((sres: any) => ({
+      timetable_id: null,
+      department: sres.department, semester_label: sres.semester_label, section: sres.section,
+      subject_name: sres.subject_name, period_start: sres.period_start, num_periods: sres.num_periods,
+      faculty_email: sres.faculty_email, faculty_name: sres.faculty_name,
+      status: 'posted', extra_class: true, session: sres, no_class: null,
+    }));
+
+    const all = [...slots, ...extra];
+    res.json({
+      date: dateStr,
+      day_of_week: dayOfWeek,
+      holiday,
+      summary: {
+        scheduled: slots.length,
+        posted: slots.filter((x: any) => x.status === 'posted').length,
+        not_posted: slots.filter((x: any) => x.status === 'not_posted').length,
+        no_class: slots.filter((x: any) => x.status === 'no_class').length,
+        extra: extra.length,
+      },
+      slots: all,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /attendance/admin/cancel-class — remove class(es) for a date.
+// Body: { date, department, semester_label?, section?, subject_name?, period_start?, reason, delete_posted? }
+// Matching timetable slots are recorded as approved "no class" entries (so they no longer show as
+// not-posted). With delete_posted=true, attendance already posted for them that day is deleted.
+app.post('/attendance/admin/cancel-class', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+  try {
+    const b = req.body || {};
+    const dateStr = String(b.date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return res.status(400).json({ error: 'A valid date is required' });
+    const scope = attendanceDeptScope(req);
+    const department = scope || (b.department ? String(b.department) : '');
+    if (!department) return res.status(400).json({ error: 'Department is required' });
+    if (scope && b.department && b.department !== scope) return res.status(403).json({ error: 'You can only remove classes in your own department.' });
+    const reason = String(b.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'Please give a reason (e.g. exam, event, holiday declared late).' });
+
+    const params: any[] = [dayOfWeekFor(dateStr), department];
+    let where = `t.day_of_week = $1 AND t.department = $2`;
+    if (b.semester_label) { params.push(String(b.semester_label)); where += ` AND t.semester_label = $${params.length}`; }
+    if (b.section) { params.push(String(b.section).toUpperCase()); where += ` AND UPPER(t.section) = $${params.length}`; }
+    if (b.subject_name) { params.push(normKey(b.subject_name)); where += ` AND LOWER(TRIM(t.subject_name)) = $${params.length}`; }
+    if (b.period_start !== undefined && b.period_start !== null && b.period_start !== '') { params.push(parseInt(b.period_start, 10)); where += ` AND t.period_start = $${params.length}`; }
+    const slotsRes = await db.query(`SELECT t.* FROM timetable_entries t WHERE ${where}`, params);
+    if (slotsRes.rows.length === 0) return res.status(404).json({ error: 'No timetable classes match on that date.' });
+
+    let cancelled = 0, deletedSessions = 0;
+    for (const t of slotsRes.rows) {
+      await db.query(
+        `INSERT INTO attendance_no_class_requests
+           (faculty_email, faculty_name, date, semester_label, department, section, subject_name, period_start, reason, status, reviewed_by, reviewed_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Approved',$10,NOW())
+         ON CONFLICT (faculty_email, date, semester_label, section, subject_name, period_start) DO UPDATE
+           SET status = 'Approved', reason = EXCLUDED.reason, reviewed_by = EXCLUDED.reviewed_by, reviewed_at = NOW(), reject_reason = NULL`,
+        [String(t.faculty_email || '').toLowerCase(), t.faculty_name || null, dateStr, t.semester_label, t.department,
+         String(t.section || '').toUpperCase(), t.subject_name, t.period_start, `Removed by ${req.auth!.role}: ${reason}`, req.auth!.email]
+      );
+      cancelled++;
+      if (b.delete_posted) {
+        const del = await db.query(
+          `DELETE FROM attendance_sessions s USING subject_allotments a
+           WHERE a.id = s.allotment_id AND s.session_date = $1 AND s.period_start = $2
+             AND a.department = $3 AND a.semester_label = $4 AND UPPER(a.section) = $5 AND LOWER(TRIM(a.subject_name)) = $6
+           RETURNING s.id`,
+          [dateStr, t.period_start, t.department, t.semester_label, String(t.section || '').toUpperCase(), normKey(t.subject_name)]
+        );
+        deletedSessions += del.rows.length;
+      }
+    }
+    res.json({ success: true, cancelled, deleted_sessions: deletedSessions,
+      message: `${cancelled} class${cancelled === 1 ? '' : 'es'} removed for ${dateStr}${deletedSessions ? `; ${deletedSessions} posted attendance record${deletedSessions === 1 ? '' : 's'} deleted` : ''}.` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /attendance/no-class-requests/:id — undo a removed class (admin)
+app.delete('/attendance/no-class-requests/:id', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    const r = await db.query(`DELETE FROM attendance_no_class_requests WHERE id = $1 RETURNING id`, [req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // No-Class Request: faculty submits request to mark a slot as no class held for a specific date
 app.post('/attendance/no-class-request', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
   try {

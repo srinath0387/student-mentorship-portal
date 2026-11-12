@@ -102,7 +102,7 @@
         "backend/tests/smoke/attendance.test.ts"
       ],
       "acceptance_criteria": "Endpoints admin/HOD-scoped, tested, build passes.",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "commit_msg": "feat(attendance): admin day-status and remove-class endpoints"
     },
