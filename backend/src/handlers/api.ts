@@ -8200,6 +8200,180 @@ app.get('/risk/me', requireRole('student', 'parent'), async (req: Request, res: 
   }
 });
 
+// ============================================================================
+// Monthly principal's report — GET /reports/monthly?month=YYYY-MM
+// Department-wise: attendance %, attendance-posting compliance, at-risk students,
+// new certifications, new placements; plus the faculty with the lowest posting compliance.
+// ============================================================================
+function monthRange(month: string): { from: string; to: string; label: string } | null {
+  const m = /^(\d{4})-(\d{2})$/.exec(month);
+  if (!m) return null;
+  const y = Number(m[1]); const mo = Number(m[2]);
+  if (mo < 1 || mo > 12) return null;
+  const last = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  const label = new Date(Date.UTC(y, mo - 1, 1)).toLocaleString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  return { from: `${m[1]}-${m[2]}-01`, to: `${m[1]}-${m[2]}-${String(last).padStart(2, '0')}`, label };
+}
+
+app.get('/reports/monthly', requireRole('admin', 'hod', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    const nowMonth = new Date().toISOString().slice(0, 7);
+    const range = monthRange(String(req.query.month || nowMonth));
+    if (!range) return res.status(400).json({ error: 'month must be YYYY-MM' });
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const upTo = range.to < todayStr ? range.to : todayStr; // compliance only counts days that have happened
+
+    // Department scope
+    let scope: string[] | null = null;
+    if (req.auth?.role === 'hod' && req.auth.department && req.auth.department !== '*') scope = [req.auth.department];
+    else if (req.auth?.role === 'program_chair') scope = CSE_ALLIED_DEPTS;
+    else if (req.auth?.role === 'admin' && req.auth.department && !['*', 'All'].includes(req.auth.department) && !req.auth.isSuperAdmin) scope = [req.auth.department];
+    const inScope = (d: string) => !scope || scope.includes(d);
+
+    // 1. Attendance held/attended in the month, by department
+    const attRes = await db.query(
+      `SELECT a.department,
+              COALESCE(SUM(s.num_periods * (SELECT COUNT(*) FROM attendance_records r WHERE r.session_id = s.id)), 0)::bigint AS held,
+              COALESCE(SUM(s.num_periods * (SELECT COUNT(*) FROM attendance_records r WHERE r.session_id = s.id AND r.is_present = true)), 0)::bigint AS attended,
+              COUNT(*)::int AS sessions
+       FROM attendance_sessions s JOIN subject_allotments a ON a.id = s.allotment_id
+       WHERE s.session_date BETWEEN $1 AND $2
+       GROUP BY a.department`, [range.from, range.to]);
+
+    // 2. Posting compliance: scheduled timetable classes on working days vs posted / removed
+    const [ttRes, sessRes, holRes, ncRes] = await Promise.all([
+      db.query(`SELECT department, semester_label, section, subject_name, period_start, day_of_week, faculty_email, faculty_name FROM timetable_entries`),
+      db.query(`SELECT s.session_date::text AS d, s.period_start, a.department, a.semester_label, a.section, a.subject_name
+                FROM attendance_sessions s JOIN subject_allotments a ON a.id = s.allotment_id
+                WHERE s.session_date BETWEEN $1 AND $2`, [range.from, upTo]),
+      db.query(`SELECT date::text AS d FROM holiday_calendar WHERE date BETWEEN $1 AND $2`, [range.from, upTo]).catch(() => ({ rows: [] as any[] })),
+      db.query(`SELECT date::text AS d, department, semester_label, section, subject_name, period_start FROM attendance_no_class_requests
+                WHERE status = 'Approved' AND date BETWEEN $1 AND $2`, [range.from, upTo]).catch(() => ({ rows: [] as any[] })),
+    ]);
+    const holidays = new Set(holRes.rows.map((h: any) => h.d));
+    const posted = new Set(sessRes.rows.map((x: any) => `${x.d}|${slotKey(x)}`));
+    const removed = new Set(ncRes.rows.map((x: any) => `${x.d}|${slotKey(x)}`));
+    const byWeekday = new Map<string, any[]>();
+    for (const t of ttRes.rows) {
+      if (!inScope(t.department)) continue;
+      const list = byWeekday.get(t.day_of_week) || [];
+      list.push(t);
+      byWeekday.set(t.day_of_week, list);
+    }
+    const deptCompliance = new Map<string, { scheduled: number; posted: number }>();
+    const facultyCompliance = new Map<string, { name: string; department: string; scheduled: number; posted: number }>();
+    if (range.from <= upTo) {
+      for (let d = new Date(range.from + 'T00:00:00Z'); d.toISOString().slice(0, 10) <= upTo; d.setUTCDate(d.getUTCDate() + 1)) {
+        const ds = d.toISOString().slice(0, 10);
+        const wd = DAY_NAMES[d.getUTCDay()];
+        if (wd === 'Sunday' || holidays.has(ds)) continue;
+        for (const t of byWeekday.get(wd) || []) {
+          const key = `${ds}|${slotKey(t)}`;
+          if (removed.has(key)) continue;
+          const ok = posted.has(key);
+          const dc = deptCompliance.get(t.department) || { scheduled: 0, posted: 0 };
+          dc.scheduled++; if (ok) dc.posted++;
+          deptCompliance.set(t.department, dc);
+          const fe = String(t.faculty_email || '').toLowerCase();
+          if (fe) {
+            const fc = facultyCompliance.get(fe) || { name: t.faculty_name || fe, department: t.department, scheduled: 0, posted: 0 };
+            fc.scheduled++; if (ok) fc.posted++;
+            facultyCompliance.set(fe, fc);
+          }
+        }
+      }
+    }
+
+    // 3. New certifications and placements in the month
+    const certRes = await db.query(
+      `SELECT s.department, COUNT(*)::int AS n FROM (
+         SELECT UPPER(TRIM(sc.roll_number)) AS roll FROM student_certifications sc WHERE sc.created_at::date BETWEEN $1 AND $2
+           AND COALESCE(LOWER(sc.status), '') <> 'rejected'
+         UNION ALL
+         SELECT UPPER(TRIM(c.student_id)) FROM certifications c WHERE c.created_at::date BETWEEN $1 AND $2
+       ) x JOIN students s ON UPPER(s.roll_number) = x.roll GROUP BY s.department`, [range.from, range.to]
+    ).catch(() => db.query(
+      `SELECT s.department, COUNT(*)::int AS n FROM certifications c JOIN students s ON UPPER(s.roll_number) = UPPER(c.student_id)
+       WHERE c.created_at::date BETWEEN $1 AND $2 GROUP BY s.department`, [range.from, range.to]).catch(() => ({ rows: [] as any[] })));
+    const placeRes = await db.query(
+      `SELECT COALESCE(p.department, s.department) AS department, COUNT(*)::int AS n, MAX(p.package_lpa)::float AS max_lpa
+       FROM student_placements p LEFT JOIN students s ON UPPER(s.roll_number) = UPPER(p.roll_number)
+       WHERE COALESCE(p.offer_date, p.created_at::date) BETWEEN $1 AND $2
+       GROUP BY COALESCE(p.department, s.department)`, [range.from, range.to]).catch(() => ({ rows: [] as any[] }));
+
+    // 4. At-risk students (current position), by department
+    let riskByDept = new Map<string, { high: number; medium: number }>();
+    try {
+      const where = scope ? { where: 'st.department = ANY($1)', params: [scope] } : { where: 'TRUE', params: [] as any[] };
+      for (const r of await computeStudentRisks(where, {})) {
+        if (r.level === 'low') continue;
+        const x = riskByDept.get(r.department) || { high: 0, medium: 0 };
+        if (r.level === 'high') x.high++; else x.medium++;
+        riskByDept.set(r.department, x);
+      }
+    } catch { riskByDept = new Map(); }
+
+    const depts = new Set<string>();
+    for (const r of attRes.rows) if (inScope(r.department)) depts.add(r.department);
+    for (const d of deptCompliance.keys()) depts.add(d);
+    for (const r of certRes.rows) if (r.department && inScope(r.department)) depts.add(r.department);
+    for (const r of placeRes.rows) if (r.department && inScope(r.department)) depts.add(r.department);
+    for (const d of riskByDept.keys()) if (inScope(d)) depts.add(d);
+
+    const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 1000) / 10 : null);
+    const departments = Array.from(depts).sort().map(d => {
+      const att = attRes.rows.find((r: any) => r.department === d);
+      const comp = deptCompliance.get(d);
+      const cert = certRes.rows.find((r: any) => r.department === d);
+      const pl = placeRes.rows.find((r: any) => r.department === d);
+      const rk = riskByDept.get(d);
+      return {
+        department: d,
+        attendance_pct: att ? pct(Number(att.attended), Number(att.held)) : null,
+        sessions_posted: att ? Number(att.sessions) : 0,
+        classes_scheduled: comp?.scheduled || 0,
+        classes_posted: comp?.posted || 0,
+        posting_compliance_pct: comp ? pct(comp.posted, comp.scheduled) : null,
+        at_risk_high: rk?.high || 0,
+        at_risk_medium: rk?.medium || 0,
+        new_certifications: cert ? Number(cert.n) : 0,
+        new_placements: pl ? Number(pl.n) : 0,
+        highest_package_lpa: pl?.max_lpa ?? null,
+      };
+    });
+
+    const sum = (k: keyof typeof departments[number]) => departments.reduce((t, d) => t + (Number(d[k]) || 0), 0);
+    const totHeld = attRes.rows.filter((r: any) => inScope(r.department)).reduce((t: number, r: any) => t + Number(r.held), 0);
+    const totAtt = attRes.rows.filter((r: any) => inScope(r.department)).reduce((t: number, r: any) => t + Number(r.attended), 0);
+    const lowestCompliance = Array.from(facultyCompliance.entries())
+      .filter(([, f]) => f.scheduled >= 4)
+      .map(([email, f]) => ({ faculty_email: email, faculty_name: f.name, department: f.department, scheduled: f.scheduled, posted: f.posted, compliance_pct: pct(f.posted, f.scheduled) }))
+      .sort((a, b) => (a.compliance_pct ?? 0) - (b.compliance_pct ?? 0))
+      .slice(0, 10);
+
+    res.json({
+      month: String(req.query.month || nowMonth),
+      label: range.label,
+      period: { from: range.from, to: range.to, compliance_counted_to: upTo },
+      totals: {
+        attendance_pct: pct(totAtt, totHeld),
+        classes_scheduled: sum('classes_scheduled'),
+        classes_posted: sum('classes_posted'),
+        posting_compliance_pct: pct(sum('classes_posted'), sum('classes_scheduled')),
+        at_risk_high: sum('at_risk_high'),
+        at_risk_medium: sum('at_risk_medium'),
+        new_certifications: sum('new_certifications'),
+        new_placements: sum('new_placements'),
+      },
+      departments,
+      lowest_posting_compliance: lowestCompliance,
+      generated_at: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /oversight/faculty-by-cadre?department=CSE&cadre=associate
 // ============================================================================
 app.get('/oversight/faculty-by-cadre', requireRole('director', 'principal', 'management', 'program_chair', 'admin', 'hod'), async (req: Request, res: Response) => {

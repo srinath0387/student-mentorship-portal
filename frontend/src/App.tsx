@@ -31,6 +31,7 @@ const OversightDashboardPage = lazy(() => import('./features/oversight/Oversight
 const FacultyWorkloadPage = lazy(() => import('./features/attendance/workload/FacultyWorkloadPage').then(m => ({ default: m.FacultyWorkloadPage })));
 const AttendanceReportsPage = lazy(() => import('./features/attendance/reports/AttendanceReportsPage').then(m => ({ default: m.AttendanceReportsPage })));
 const DocumentsManagementPage = lazy(() => import('./features/documents/DocumentsManagementPage').then(m => ({ default: m.DocumentsManagementPage })));
+const MonthlyReportPage = lazy(() => import('./features/reports/MonthlyReportPage'));
 const RiskAlertsPage = lazy(() => import('./features/risk/RiskAlertsPage'));
 const AttendanceControlPage = lazy(() => import('./features/attendance/admin/AttendanceControlPage'));
 const FacultyApiPage = lazy(() => import('./features/faculty/FacultyApiPage').then(m => ({ default: m.FacultyApiPage })));
@@ -242,7 +243,7 @@ const MainLayout: React.FC = () => {
       />
       <div
         className={[
-          'flex-1 flex flex-col min-w-0 transition-all duration-200',
+          'flex-1 flex flex-col min-w-0 transition-all duration-200 print:!pl-0',
           collapsed ? 'lg:pl-14' : 'lg:pl-[220px]',
         ].join(' ')}
       >
@@ -256,7 +257,7 @@ const MainLayout: React.FC = () => {
             }
           }}
         />
-        <main ref={mainRef} className="flex-1 overflow-y-auto p-4 md:p-8">
+        <main ref={mainRef} className="flex-1 overflow-y-auto p-4 md:p-8 print:overflow-visible print:p-0">
           <div className="max-w-7xl w-full mx-auto">
             <Suspense fallback={<DashboardSkeleton />}>
               <Outlet />
@@ -336,6 +337,9 @@ export const App: React.FC = () => {
               <Route path="/attendance" element={<AttendancePage />} />
               <Route element={<ProtectedRoute allowedRoles={['faculty', 'hod', 'admin', 'coordinator', 'director', 'principal', 'management', 'program_chair']} />}>
                 <Route path="/risk" element={<RiskAlertsPage />} />
+              </Route>
+              <Route element={<ProtectedRoute allowedRoles={['hod', 'admin', 'director', 'principal', 'management', 'program_chair']} />}>
+                <Route path="/reports/monthly" element={<MonthlyReportPage />} />
               </Route>
               <Route path="/attendance/workload" element={<FacultyWorkloadPage />} />
               <Route path="/attendance/reports" element={<AttendanceReportsPage />} />

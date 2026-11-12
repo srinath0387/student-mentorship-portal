@@ -3,7 +3,7 @@ import { Heart, Sparkles } from 'lucide-react';
 
 export const Footer: React.FC = () => {
   return (
-    <footer className="w-full sticky bottom-0 z-10 py-1.5 sm:py-2 px-4 border-t border-borderLine bg-surface dark:bg-[#0f172a] shrink-0">
+    <footer className="print:hidden w-full sticky bottom-0 z-10 py-1.5 sm:py-2 px-4 border-t border-borderLine bg-surface dark:bg-[#0f172a] shrink-0">
       <div className="max-w-7xl mx-auto flex flex-col items-center gap-0.5 sm:gap-1 text-center">
         {/* Motto Banner */}
         <div className="flex items-center justify-center gap-1.5">

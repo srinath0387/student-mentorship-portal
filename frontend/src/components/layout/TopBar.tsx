@@ -264,7 +264,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
   }, []);
 
   return (
-    <header className="h-16 bg-surface border-b border-borderLine px-4 md:px-6 flex items-center justify-between sticky top-0 z-30 shadow-xs">
+    <header className="print:hidden h-16 bg-surface border-b border-borderLine px-4 md:px-6 flex items-center justify-between sticky top-0 z-30 shadow-xs">
       {/* Left — sidebar toggle + breadcrumb */}
       <div className="flex items-center gap-3 min-w-0">
         <button

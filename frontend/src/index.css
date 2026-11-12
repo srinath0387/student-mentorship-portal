@@ -394,3 +394,13 @@ html:not(.dark):not(.theme-landing) .bg-white:is(.rounded-lg, .rounded-xl, .roun
   border-color: transparent;
   box-shadow: var(--shadow-sm);
 }
+
+/* Printing reports: hide app chrome */
+@media print {
+  [data-print="hide"] { display: none !important; }
+  html, :root, html:not(.dark) {
+    --color-background: #ffffff; --color-surface: #ffffff; --color-surface-2: #f3f4f6; --neu-bg: #ffffff;
+    --shadow-xs: none; --shadow-sm: none; --shadow-md: none; --shadow-lg: none; --shadow-xl: none;
+  }
+  body, main { background: #ffffff !important; }
+}

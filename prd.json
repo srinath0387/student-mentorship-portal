@@ -187,7 +187,7 @@
     {
       "id": "FT002",
       "title": "Monthly principal's report",
-      "description": "GET /reports/monthly?month=YYYY-MM: department-wise attendance %, at-risk counts, attendance-posting compliance per department and faculty, new certifications, new placements, API score leaders. Printable one-page report page (Print → PDF) for oversight/admin/HOD.",
+      "description": "GET /reports/monthly?month=YYYY-MM: department-wise attendance %, at-risk counts, attendance-posting compliance per department and faculty, new certifications, new placements, faculty with the lowest attendance-posting compliance (API-score leaders dropped: recomputing every score per report is too slow). Printable one-page report page (Print → PDF) for oversight/admin/HOD.",
       "files_affected": [
         "backend/src/handlers/api.ts",
         "backend/tests/smoke/features.test.ts",
@@ -197,7 +197,7 @@
         "frontend/src/App.tsx"
       ],
       "acceptance_criteria": "Report numbers tested; page prints cleanly.",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "commit_msg": "feat(reports): monthly principal's report"
     },

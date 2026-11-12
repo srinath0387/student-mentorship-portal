@@ -92,3 +92,29 @@ describe('FT001 risk alerts', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('FT002 monthly report', () => {
+  it('computes attendance, posting compliance, certifications and placements by department', async () => {
+    const slot = { department: 'CSE (Data Science)', semester_label: '3-1', section: 'A', subject_name: 'DBMS', period_start: 1, day_of_week: 'Monday', faculty_email: 'ramesh@rgmcet.edu.in', faculty_name: 'Dr. Ramesh' };
+    const posted = ['2026-10-05', '2026-10-12', '2026-10-19'].map(d => ({ d, period_start: 1, department: 'CSE (Data Science)', semester_label: '3-1', section: 'A', subject_name: 'DBMS' }));
+    routeDb([
+      ['GROUP BY a.department', [{ department: 'CSE (Data Science)', held: '180', attended: '153', sessions: 3 }]],
+      ['FROM timetable_entries', [slot]],
+      ["s.session_date::text AS d", posted],
+      ['FROM student_certifications sc', [{ department: 'CSE (Data Science)', n: 7 }]],
+      ['FROM student_placements p', [{ department: 'CSE (Data Science)', n: 2, max_lpa: 12.5 }]],
+    ]);
+    const res = await request(app).get('/reports/monthly?month=2026-10').set('Authorization', ADMIN());
+    expect(res.status).toBe(200);
+    expect(res.body.label).toContain('October');
+    const d = res.body.departments.find((x: any) => x.department === 'CSE (Data Science)');
+    expect(d).toMatchObject({ attendance_pct: 85, classes_scheduled: 4, classes_posted: 3, posting_compliance_pct: 75, new_certifications: 7, new_placements: 2, highest_package_lpa: 12.5 });
+    expect(res.body.lowest_posting_compliance[0]).toMatchObject({ faculty_email: 'ramesh@rgmcet.edu.in', scheduled: 4, posted: 3, compliance_pct: 75 });
+  });
+
+  it('rejects a bad month and is not available to faculty', async () => {
+    routeDb([]);
+    expect((await request(app).get('/reports/monthly?month=2026-13').set('Authorization', ADMIN())).status).toBe(400);
+    expect((await request(app).get('/reports/monthly').set('Authorization', bearer('faculty', 'x@rgmcet.edu.in'))).status).toBe(403);
+  });
+});

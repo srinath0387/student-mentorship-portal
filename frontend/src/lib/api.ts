@@ -1041,6 +1041,8 @@ export const api = {
     return fetchWithAuth(`/attendance/sessions${query}`);
   },
 
+  getMonthlyReport: async (month: string) => fetchWithAuth(`/reports/monthly?month=${encodeURIComponent(month)}`),
+
   // ── Student risk alerts ──
   getRiskStudents: async (params: { department?: string; year?: string; section?: string; level?: string }) => {
     const q = new URLSearchParams();

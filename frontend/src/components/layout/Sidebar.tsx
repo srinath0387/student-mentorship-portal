@@ -141,6 +141,7 @@ const adminNav: NavGroup[] = [
     icon: LayoutDashboard,
     items: [
       { label: 'Admin Dashboard', path: '/admin/dashboard?tab=home', icon: LayoutDashboard },
+      { label: 'Monthly Report', path: '/reports/monthly', icon: FileBarChart },
     ],
   },
   {
@@ -217,6 +218,7 @@ const hodNav: NavGroup[] = [
       { label: 'Certification Analytics', path: '/hod/dashboard?tab=certifications', icon: CheckCircle2 },
       { label: 'Academic & Holiday Calendar', path: '/hod/dashboard?tab=holidays', icon: Calendar },
       { label: 'At-Risk Students', path: '/risk', icon: ShieldCheck },
+      { label: 'Monthly Report', path: '/reports/monthly', icon: FileBarChart },
       { label: 'Unregistered Students', path: '/hod/dashboard?tab=unregistered', icon: FileBarChart },
     ],
   },
@@ -319,6 +321,7 @@ const oversightNav: NavGroup[] = [
     title: 'Institutional Oversight',
     icon: LayoutDashboard,
     items: [
+      { label: 'Monthly Principal\'s Report', path: '/reports/monthly', icon: FileBarChart },
       { label: 'Student Analytics', path: '/oversight/dashboard?tab=students', icon: Users },
       { label: 'At-Risk Students', path: '/risk', icon: ShieldCheck },
       { label: 'Faculty Analytics', path: '/oversight/dashboard?tab=faculty', icon: User },
@@ -438,7 +441,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
       )}
 
       <aside
-        className={[
+        data-print="hide" className={[
           'fixed top-0 left-0 bottom-0 z-50 flex flex-col bg-surface border-r border-borderLine dark:border-borderLine',
           'transition-all duration-300 ease-in-out overflow-hidden',
           collapsed ? 'lg:w-[60px]' : 'lg:w-[232px]',
