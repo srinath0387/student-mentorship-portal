@@ -215,3 +215,25 @@ describe('Admin attendance control', () => {
     expect(asFaculty.status).toBe(403);
   });
 });
+
+describe('Student / parent attendance view', () => {
+  const PARENT = () => `Bearer ${signSessionToken({ role: 'parent', email: 'parent_23091a3201@rgmcet.edu.in', reg: '23091A3201' })}`;
+
+  it('reports periods held/attended from posted sessions, matching roll numbers case-insensitively', async () => {
+    const calls = routeDb([
+      ['FROM students WHERE UPPER(roll_number)', [{ roll_number: '23091A3201', name: 'Aarav', department: 'CSE (Data Science)', section: 'A' }]],
+      ['FROM subject_rosters sr', [{ allotment_id: 'AL1', subject_name: 'DBMS Lab', subject_type: 'Lab', semester_label: '3-1', faculty_name: 'Dr. Ramesh', total_periods_held: '4', periods_attended: '3' }]],
+    ]);
+    const res = await request(app).get('/attendance/student/23091a3201').set('Authorization', PARENT());
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ overall_percentage: 75, total_periods_held: 4, total_periods_attended: 3 });
+    const q = calls.find(c => c.sql.includes('FROM subject_rosters sr'))!.sql;
+    expect(q).toContain('UPPER(r.roll_number) = UPPER(sr.roll_number)');
+  });
+
+  it('stops a parent reading another student’s attendance', async () => {
+    routeDb([]);
+    const res = await request(app).get('/attendance/student/23091A3299').set('Authorization', PARENT());
+    expect(res.status).toBe(403);
+  });
+});

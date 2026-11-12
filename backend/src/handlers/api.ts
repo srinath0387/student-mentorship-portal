@@ -7371,7 +7371,7 @@ async function fetchCurrentSemesterAttendance(depts: string[] | null): Promise<S
       JOIN subject_allotments a ON a.id = r.allotment_id
       JOIN cur ON cur.roll_number = r.roll_number AND cur.semester = a.semester_label
       LEFT JOIN attendance_sessions s ON s.allotment_id = a.id
-      LEFT JOIN attendance_records ar ON ar.session_id = s.id AND ar.roll_number = r.roll_number
+      LEFT JOIN attendance_records ar ON ar.session_id = s.id AND UPPER(ar.roll_number) = UPPER(r.roll_number)
       GROUP BY r.roll_number
     )
     SELECT st.roll_number, st.name, st.department, st.year, st.section, cur.semester,
@@ -11610,9 +11610,12 @@ app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res
   try {
     const rollNumber = req.params.rollNumber.toUpperCase();
 
-    // Security check: students can only view own attendance
+    // Security check: students can only view own attendance; parents only their ward's
     if (req.auth?.role === 'student' && req.auth.regNo && req.auth.regNo.toUpperCase() !== rollNumber && !req.auth.email.toUpperCase().includes(rollNumber)) {
       return res.status(403).json({ error: 'Access denied: Students can only view their own attendance.' });
+    }
+    if (req.auth?.role === 'parent' && (req.auth.regNo || '').toUpperCase() !== rollNumber) {
+      return res.status(403).json({ error: 'Access denied: Parents can only view their ward\'s attendance.' });
     }
 
     // Get student details
@@ -11635,7 +11638,7 @@ app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res
       FROM subject_rosters sr
       JOIN subject_allotments a ON a.id = sr.allotment_id
       LEFT JOIN attendance_sessions s ON s.allotment_id = a.id
-      LEFT JOIN attendance_records r ON r.session_id = s.id AND r.roll_number = sr.roll_number
+      LEFT JOIN attendance_records r ON r.session_id = s.id AND UPPER(r.roll_number) = UPPER(sr.roll_number)
       WHERE UPPER(sr.roll_number) = $1
       GROUP BY a.id, a.subject_name, a.subject_type, a.semester_label, a.faculty_name, sr.joining_date
       ORDER BY a.semester_label, a.subject_name`,
@@ -11838,7 +11841,7 @@ app.get('/attendance/subject/:allotmentId/summary', requireRole('faculty', 'hod'
        CROSS JOIN (SELECT $1::uuid AS id, $2::text AS section) allotment
        LEFT JOIN students st ON st.roll_number = r.roll_number
        LEFT JOIN attendance_sessions s ON s.allotment_id = $1
-       LEFT JOIN attendance_records ar ON ar.session_id = s.id AND ar.roll_number = r.roll_number
+       LEFT JOIN attendance_records ar ON ar.session_id = s.id AND UPPER(ar.roll_number) = UPPER(r.roll_number)
        WHERE r.allotment_id = $1
        GROUP BY r.id, r.roll_number, r.joining_date, st.name, allotment.section
        ORDER BY r.roll_number`,
@@ -12748,7 +12751,7 @@ app.get('/attendance/reports/year-summary', requireRole('admin', 'hod', 'faculty
       JOIN subject_allotments a ON a.id = r.allotment_id
       LEFT JOIN students st ON st.roll_number = r.roll_number
       LEFT JOIN attendance_sessions s ON s.allotment_id = a.id
-      LEFT JOIN attendance_records ar ON ar.session_id = s.id AND ar.roll_number = r.roll_number
+      LEFT JOIN attendance_records ar ON ar.session_id = s.id AND UPPER(ar.roll_number) = UPPER(r.roll_number)
       WHERE r.allotment_id = ANY($1)
       GROUP BY st.roll_number, st.name, st.section, st.department, r.allotment_id, r.joining_date, a.subject_name, a.semester_label
       ORDER BY st.roll_number, a.subject_name
@@ -12892,7 +12895,7 @@ app.get('/attendance/analytics/semester-summary', requireRole('admin', 'hod', 'f
         JOIN subject_allotments a ON a.id = r.allotment_id
         JOIN students st ON st.roll_number = r.roll_number
         LEFT JOIN attendance_sessions s ON s.allotment_id = a.id
-        LEFT JOIN attendance_records ar ON ar.session_id = s.id AND ar.roll_number = r.roll_number
+        LEFT JOIN attendance_records ar ON ar.session_id = s.id AND UPPER(ar.roll_number) = UPPER(r.roll_number)
         WHERE a.semester_label = $1 AND r.roll_number = ANY($2)
         GROUP BY st.roll_number, st.name, st.section, st.department, a.id, a.subject_name, a.subject_type, a.faculty_name
         ORDER BY st.roll_number, a.subject_name
@@ -13047,7 +13050,7 @@ app.get('/attendance/analytics/semester-summary', requireRole('admin', 'hod', 'f
       JOIN subject_allotments a ON a.id = r.allotment_id
       LEFT JOIN students st ON st.roll_number = r.roll_number
       LEFT JOIN attendance_sessions s ON s.allotment_id = a.id
-      LEFT JOIN attendance_records ar ON ar.session_id = s.id AND ar.roll_number = r.roll_number
+      LEFT JOIN attendance_records ar ON ar.session_id = s.id AND UPPER(ar.roll_number) = UPPER(r.roll_number)
       WHERE r.allotment_id = ANY($1)
       GROUP BY st.roll_number, st.name, st.section, st.department, r.allotment_id, a.subject_name, a.subject_type, a.section, a.department
       ORDER BY st.roll_number, a.subject_name

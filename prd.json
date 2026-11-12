@@ -146,7 +146,7 @@
         "frontend/src/features/attendance/hod/HodAttendancePage.tsx"
       ],
       "acceptance_criteria": "Test: a posted session is reflected in student summary percentages.",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "commit_msg": "test(attendance): posted sessions reflected in student and HOD views"
     }
