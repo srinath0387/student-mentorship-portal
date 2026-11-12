@@ -37,3 +37,4 @@
 [2026-11-12 12:57] AT002 → done: academic-calendar posting lock + late-post request/approve endpoints. 109 tests pass, build ✓. Committed e82b9fb.
 [2026-11-12 12:58] AT003 → done: admin day-status, cancel-class, undo endpoints. 113 tests pass, build ✓. Committed 7767550.
 [2026-11-12 13:02] AT004 → done: AttendanceControlPage (posted/not-posted/edit/remove/approvals) + admin sidebar Main/Attendance/Assign. tsc + build ✓, screenshots checked. Committed 64557b5.
+[2026-11-12 13:27] AT005 → done: faculty slot matching, period-aware posted check, per-hour multi-hour save, not-posted list, My Students, mobile nav, late-post request UI. tsc + build ✓, screenshots checked. Committed 0266d51.
