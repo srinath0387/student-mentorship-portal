@@ -1,5 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { MyRiskCard } from '../../risk/RiskAlertsPage';
+import { LiveCheckinCard } from './LiveCheckinCard';
+import { useAuth as useAuthForCheckin } from '../../../context/AuthContext';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, Download, TrendingUp, Calendar, BookOpen, Clock, ShieldCheck, XCircle } from 'lucide-react';
 import { api } from '../../../lib/api';
@@ -9,6 +11,8 @@ interface Props {
 }
 
 export const StudentAttendanceView: React.FC<Props> = ({ rollNumber }) => {
+  // Only the student themself checks in (not parents viewing this page)
+  const isStudentViewer = useAuthForCheckin().user?.role === 'student';
   const [activeTab, setActiveTab] = useState<'subjects' | 'daywise'>('subjects');
 
   // 1. Fetch Subject Summary Attendance
@@ -64,6 +68,7 @@ export const StudentAttendanceView: React.FC<Props> = ({ rollNumber }) => {
 
   return (
     <div className="space-y-5">
+      {isStudentViewer && <LiveCheckinCard />}
       <MyRiskCard />
       {/* Student Overview Header Card */}
       <div className="bg-surface border border-borderLine rounded-2xl p-5 shadow-xs space-y-4">

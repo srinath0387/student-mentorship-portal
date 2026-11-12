@@ -9363,6 +9363,140 @@ app.post('/parent/alerts/dispatch', requireRole('admin'), async (req: Request, r
   }
 });
 
+// ============================================================================
+// Live-code attendance (anti-proxy)
+// The main faculty starts a live session for a class period. A 6-digit code derived from a random
+// per-session secret rotates every 30 s (current + previous window accepted). Students on the roll
+// enter it once while the window is open. Closing returns the check-ins, which pre-fill the normal
+// attendance form — the faculty reviews and submits as usual.
+// ============================================================================
+const LIVE_STEP_SECONDS = 30;
+
+let liveTablesReady: Promise<void> | null = null;
+function ensureLiveTables(): Promise<void> {
+  if (!liveTablesReady) {
+    liveTablesReady = db.query(`
+      CREATE TABLE IF NOT EXISTS live_attendance (
+        id SERIAL PRIMARY KEY,
+        allotment_id TEXT NOT NULL,
+        session_date DATE NOT NULL,
+        period_start INT NOT NULL DEFAULT 1,
+        num_periods INT NOT NULL DEFAULT 1,
+        faculty_email TEXT NOT NULL,
+        secret TEXT NOT NULL,
+        started_at TIMESTAMPTZ DEFAULT NOW(),
+        expires_at TIMESTAMPTZ NOT NULL,
+        closed BOOLEAN NOT NULL DEFAULT FALSE
+      );
+      CREATE TABLE IF NOT EXISTS live_attendance_checkins (
+        live_id INT NOT NULL REFERENCES live_attendance(id) ON DELETE CASCADE,
+        roll_number TEXT NOT NULL,
+        checked_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (live_id, roll_number)
+      );
+    `).then(() => undefined).catch((err: any) => { liveTablesReady = null; throw err; });
+  }
+  return liveTablesReady;
+}
+
+function liveCode(secret: string, step: number): string {
+  const h = crypto.createHmac('sha256', secret).update(String(step)).digest();
+  return String(h.readUInt32BE(0) % 1000000).padStart(6, '0');
+}
+const liveStep = (ms = Date.now()) => Math.floor(ms / 1000 / LIVE_STEP_SECONDS);
+
+async function ownLive(req: Request, id: string): Promise<any | null> {
+  const r = await db.query('SELECT * FROM live_attendance WHERE id = $1', [id]);
+  const live = r.rows[0];
+  if (!live || String(live.faculty_email).toLowerCase() !== req.auth!.email.toLowerCase()) return null;
+  return live;
+}
+
+// POST /attendance/live/start — { allotment_id, session_date?, period_start, num_periods, minutes? }
+app.post('/attendance/live/start', requireRole('faculty', 'hod'), async (req: Request, res: Response) => {
+  try {
+    await ensureLiveTables();
+    const b = req.body || {};
+    const allot = (await db.query('SELECT * FROM subject_allotments WHERE id = $1', [b.allotment_id])).rows[0];
+    if (!allot) return res.status(404).json({ error: 'Subject allotment not found' });
+    if (String(allot.faculty_email || '').toLowerCase() !== req.auth!.email.toLowerCase()) {
+      return res.status(403).json({ error: 'Only the main faculty of this subject can take attendance.' });
+    }
+    const minutes = Math.min(30, Math.max(2, Number(b.minutes) || 10));
+    const secret = crypto.randomBytes(24).toString('hex');
+    const r = await db.query(
+      `INSERT INTO live_attendance (allotment_id, session_date, period_start, num_periods, faculty_email, secret, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW() + ($7 || ' minutes')::interval) RETURNING id, expires_at`,
+      [String(allot.id), String(b.session_date || todayIST()).slice(0, 10), Number(b.period_start) || 1, Number(b.num_periods) || 1,
+       req.auth!.email.toLowerCase(), secret, String(minutes)]);
+    res.json({ live_id: r.rows[0].id, expires_at: r.rows[0].expires_at, subject_name: allot.subject_name, section: allot.section });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /attendance/live/:id — current code + check-ins (owner only)
+app.get('/attendance/live/:id', requireRole('faculty', 'hod'), async (req: Request, res: Response) => {
+  try {
+    await ensureLiveTables();
+    const live = await ownLive(req, req.params.id);
+    if (!live) return res.status(404).json({ error: 'Live session not found' });
+    const step = liveStep();
+    const checkins = await db.query(
+      `SELECT c.roll_number, c.checked_at, st.name FROM live_attendance_checkins c
+       LEFT JOIN students st ON UPPER(st.roll_number) = UPPER(c.roll_number)
+       WHERE c.live_id = $1 ORDER BY c.checked_at`, [live.id]);
+    const active = !live.closed && new Date(live.expires_at).getTime() > Date.now();
+    res.json({
+      live_id: live.id, active,
+      code: active ? liveCode(live.secret, step) : null,
+      seconds_left_in_code: LIVE_STEP_SECONDS - Math.floor((Date.now() / 1000) % LIVE_STEP_SECONDS),
+      expires_at: live.expires_at,
+      checkins: checkins.rows,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /attendance/live/:id/close — stop and return the checked-in roll numbers
+app.post('/attendance/live/:id/close', requireRole('faculty', 'hod'), async (req: Request, res: Response) => {
+  try {
+    await ensureLiveTables();
+    const live = await ownLive(req, req.params.id);
+    if (!live) return res.status(404).json({ error: 'Live session not found' });
+    await db.query('UPDATE live_attendance SET closed = TRUE WHERE id = $1', [live.id]);
+    const r = await db.query('SELECT UPPER(roll_number) AS roll_number FROM live_attendance_checkins WHERE live_id = $1', [live.id]);
+    res.json({ live_id: live.id, allotment_id: live.allotment_id, session_date: String(live.session_date).slice(0, 10), checked_in: r.rows.map((x: any) => x.roll_number) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /attendance/live/checkin — { code } (student)
+app.post('/attendance/live/checkin', requireRole('student'), async (req: Request, res: Response) => {
+  try {
+    await ensureLiveTables();
+    const code = String(req.body?.code || '').replace(/\D/g, '');
+    if (code.length !== 6) return res.status(400).json({ error: 'Enter the 6-digit code shown in class.' });
+    const roll = req.auth!.regNo.toUpperCase();
+    const r = await db.query(
+      `SELECT la.*, a.subject_name FROM live_attendance la
+       JOIN subject_allotments a ON a.id::text = la.allotment_id
+       JOIN subject_rosters sr ON sr.allotment_id::text = la.allotment_id AND UPPER(sr.roll_number) = $1
+       WHERE la.closed = FALSE AND la.expires_at > NOW()`, [roll]);
+    const step = liveStep();
+    const match = r.rows.find((l: any) => code === liveCode(l.secret, step) || code === liveCode(l.secret, step - 1));
+    if (!match) return res.status(400).json({ error: 'That code is not valid for any of your classes right now. Check the latest code and try again.' });
+    const ins = await db.query(
+      `INSERT INTO live_attendance_checkins (live_id, roll_number) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING live_id`, [match.id, roll]);
+    res.json({ success: true, already: ins.rows.length === 0, subject_name: match.subject_name,
+      message: ins.rows.length ? `Checked in to ${match.subject_name}.` : `You are already checked in to ${match.subject_name}.` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /oversight/faculty-by-cadre?department=CSE&cadre=associate
 // ============================================================================
 app.get('/oversight/faculty-by-cadre', requireRole('director', 'principal', 'management', 'program_chair', 'admin', 'hod'), async (req: Request, res: Response) => {

@@ -1041,6 +1041,13 @@ export const api = {
     return fetchWithAuth(`/attendance/sessions${query}`);
   },
 
+  // ── Live-code attendance ──
+  startLiveAttendance: async (data: { allotment_id: string; session_date: string; period_start: number; num_periods: number; minutes?: number }) =>
+    fetchWithAuth('/attendance/live/start', { method: 'POST', body: JSON.stringify(data) }),
+  getLiveAttendance: async (id: number) => fetchWithAuth(`/attendance/live/${id}`),
+  closeLiveAttendance: async (id: number) => fetchWithAuth(`/attendance/live/${id}/close`, { method: 'POST' }),
+  liveCheckin: async (code: string) => fetchWithAuth('/attendance/live/checkin', { method: 'POST', body: JSON.stringify({ code }) }),
+
   // ── Parent alerts ──
   getParentAlerts: async () => fetchWithAuth('/parent/alerts'),
   dispatchParentAlerts: async (date: string, send: boolean) =>

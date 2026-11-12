@@ -323,3 +323,44 @@ describe('FT007 parent alerts', () => {
     expect(res.body.preview[0].text).toContain('Aarav (23091A3201) was absent on 2026-11-09 for DBMS, OS');
   });
 });
+
+describe('FT008 live-code attendance', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const crypto = require('crypto');
+  const codeFor = (secret: string, step: number) => String(crypto.createHmac('sha256', secret).update(String(step)).digest().readUInt32BE(0) % 1000000).padStart(6, '0');
+  const step = () => Math.floor(Date.now() / 1000 / 30);
+  const live = { id: 4, allotment_id: 'AL1', secret: 'test-secret', faculty_email: 'ramesh@rgmcet.edu.in', closed: false, expires_at: new Date(Date.now() + 600000).toISOString(), subject_name: 'DBMS', session_date: '2026-11-12' };
+  const STUDENT = () => bearer('student', '23091a3201@rgmcet.edu.in');
+
+  it('accepts the current and previous code once per student, rejects others', async () => {
+    let calls = routeDb([['FROM live_attendance la', [live]], ['INSERT INTO live_attendance_checkins', [{ live_id: 4 }]]]);
+    const ok = await request(app).post('/attendance/live/checkin').set('Authorization', STUDENT()).send({ code: codeFor('test-secret', step()) });
+    expect(ok.status).toBe(200);
+    expect(ok.body).toMatchObject({ success: true, already: false, subject_name: 'DBMS' });
+    expect(calls.find(c => c.sql.includes('INSERT INTO live_attendance_checkins'))!.params).toEqual([4, '23091A3201']);
+
+    routeDb([['FROM live_attendance la', [live]]]);
+    const prev = await request(app).post('/attendance/live/checkin').set('Authorization', STUDENT()).send({ code: codeFor('test-secret', step() - 1) });
+    expect(prev.body.already).toBe(true);
+
+    const bad = await request(app).post('/attendance/live/checkin').set('Authorization', STUDENT()).send({ code: codeFor('test-secret', step() - 5) });
+    expect(bad.status).toBe(400);
+    calls = routeDb([]);
+    const notOnRoll = await request(app).post('/attendance/live/checkin').set('Authorization', STUDENT()).send({ code: codeFor('test-secret', step()) });
+    expect(notOnRoll.status).toBe(400);
+  });
+
+  it('only the main faculty can start; the owner sees the rotating code', async () => {
+    routeDb([['SELECT * FROM subject_allotments WHERE id', [{ id: 'AL1', faculty_email: 'main@rgmcet.edu.in', subject_name: 'DBMS', section: 'A' }]]]);
+    const co = await request(app).post('/attendance/live/start').set('Authorization', bearer('faculty', 'ramesh@rgmcet.edu.in')).send({ allotment_id: 'AL1', period_start: 1 });
+    expect(co.status).toBe(403);
+
+    routeDb([['SELECT * FROM live_attendance WHERE id', [live]], ['FROM live_attendance_checkins c', [{ roll_number: '23091A3201', name: 'A' }]]]);
+    const view = await request(app).get('/attendance/live/4').set('Authorization', bearer('faculty', 'ramesh@rgmcet.edu.in'));
+    expect(view.status).toBe(200);
+    expect([codeFor('test-secret', step()), codeFor('test-secret', step() + 1)]).toContain(view.body.code);
+    expect(view.body.checkins).toHaveLength(1);
+    const other = await request(app).get('/attendance/live/4').set('Authorization', bearer('faculty', 'other@rgmcet.edu.in'));
+    expect(other.status).toBe(404);
+  });
+});

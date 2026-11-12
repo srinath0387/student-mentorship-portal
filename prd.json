@@ -296,7 +296,7 @@
         "frontend/src/lib/api.ts"
       ],
       "acceptance_criteria": "Code rotation/expiry, roster-only, single check-in tested.",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "commit_msg": "feat(attendance): rotating-code live attendance"
     },

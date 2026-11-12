@@ -4,6 +4,7 @@ import { BookOpen, Users, Calendar, CheckCircle2, Clock, FileText, AlertTriangle
 import { api } from '../../../lib/api';
 import { SubjectAllotment, SubjectRosterEntry, TimetableEntry, SemesterLabel } from '../../../types';
 import { useAuth } from '../../../context/AuthContext';
+import { LiveCodePanel } from './LiveCodePanel';
 
 const ALL_SEMESTERS: SemesterLabel[] = ['1-1','1-2','2-1','2-2','3-1','3-2','4-1','4-2'];
 const PERIOD_TIMES: Record<number,string> = {
@@ -30,6 +31,7 @@ export const FacultyAttendancePage: React.FC = () => {
   const [isLoaded, setIsLoaded] = useState(false);
   // Period chosen from the Not Posted list (a subject can have two periods on one day)
   const [preferredPeriod, setPreferredPeriod] = useState<number | null>(null);
+  const [showLiveCode, setShowLiveCode] = useState(false);
   const [hour1, setHour1] = useState(true);
   const [hour2, setHour2] = useState(true);
   const [hour3, setHour3] = useState(true);
@@ -712,6 +714,7 @@ export const FacultyAttendancePage: React.FC = () => {
                     <div className="flex gap-2 pt-1">
                       <button onClick={()=>setRecords(p=>p.map(r=>({...r,h1:true,h2:true,h3:true})))} className="px-3 py-1.5 bg-[#28a745] text-white font-bold text-xs rounded-lg hover:bg-green-600">All Present</button>
                       <button onClick={()=>setRecords(p=>p.map(r=>r.is_on_od ? r : ({...r,h1:false,h2:false,h3:false})))} className="px-3 py-1.5 bg-[#dc3545] text-white font-bold text-xs rounded-lg hover:bg-red-600">All Absent</button>
+                      <button onClick={()=>setShowLiveCode(true)} disabled={!subjectId || postingLocked} className="px-3 py-1.5 bg-brand-primary text-white font-bold text-xs rounded-lg disabled:opacity-40">📡 Live code</button>
                     </div>
                   </div>
 
@@ -1172,6 +1175,24 @@ export const FacultyAttendancePage: React.FC = () => {
           )}
         </div>
       </div>
+
+      {showLiveCode && subjectId && (
+        <LiveCodePanel
+          allotmentId={subjectId}
+          sessionDate={date}
+          periodStart={basePeriod}
+          numPeriods={totalActiveHours}
+          subjectLabel={`${activeSubject?.subject_name || ''} · ${activeSubject?.semester_label || ''} ${activeSubject?.section || ''}`}
+          onClose={() => setShowLiveCode(false)}
+          onResult={(rolls) => {
+            const set = new Set(rolls.map(r => r.toUpperCase()));
+            setRecords(p => p.map(r => r.is_on_od ? r : ({ ...r, h1: set.has(r.roll_number.toUpperCase()), h2: set.has(r.roll_number.toUpperCase()), h3: set.has(r.roll_number.toUpperCase()) })));
+            setShowLiveCode(false);
+            setFeedback({ type: 'success', text: `${set.size} students checked in. Review the list and submit.` });
+            setTimeout(() => setFeedback(null), 6000);
+          }}
+        />
+      )}
 
       {/* ── Absent Review Modal ── */}
       {showAbsentModal&&(
