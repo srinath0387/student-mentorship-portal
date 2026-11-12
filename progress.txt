@@ -51,3 +51,4 @@
 [2026-11-12 14:41] FT003 → done: anonymous feedback (cycles, submit, summaries, page). 128 tests pass, builds ✓, screenshots checked. Committed 7e78b13.
 [2026-11-12 14:44] FT004 → done: placement drives (eligibility, funnel, student apply). 131 tests pass, builds ✓, screenshot checked. Committed b22a0cf.
 [2026-11-12 15:53] FT005 → done: appraisal workflow + snapshot, API score refactor. 134 tests pass, builds ✓, screenshot checked. Committed 0753eff.
+[2026-11-12 15:55] FT006 → done: accreditation pack API + Excel export page. 136 tests pass, builds ✓. Committed 00d9296.
