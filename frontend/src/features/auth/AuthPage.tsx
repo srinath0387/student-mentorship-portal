@@ -10,12 +10,14 @@ import { useAuth } from '../../context/AuthContext';
 import { PillButton } from '../../components/common/PillButton';
 import { Footer } from '../../components/layout/Footer';
 import { AuthAnimated3DBackground } from './AuthAnimated3DBackground';
+import { useLandingTheme } from '../../lib/pageTheme';
 import { UserRole } from '../../types';
 
 // Admin/HOD login is handled server-side via POST /auth/admin-login.
 // No admin email or password is stored in the frontend bundle.
 
 export const AuthPage: React.FC = () => {
+  useLandingTheme();
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const params = useParams<{ role?: string }>();

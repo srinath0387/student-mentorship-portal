@@ -22,7 +22,7 @@ import {
   UserPlus,
   X
 } from 'lucide-react';
-import { AuthAnimated3DBackground } from './AuthAnimated3DBackground';
+import { useLandingTheme } from '../../lib/pageTheme';
 import { Footer } from '../../components/layout/Footer';
 import { UserRole } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -136,6 +136,7 @@ const ALL_ROLES: RoleOption[] = [
 ];
 
 export const LandingPage: React.FC = () => {
+  useLandingTheme();
   const navigate = useNavigate();
   const { login, registerSession } = useAuth();
 
@@ -566,13 +567,10 @@ export const LandingPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen h-screen flex flex-col justify-between overflow-x-hidden overflow-y-auto bg-transparent relative text-slate-100 selection:bg-brand-primary selection:text-white">
-      {/* ── Fixed Animated 3D Background Layer ── */}
-      <AuthAnimated3DBackground />
-
+    <div className="neu-page min-h-screen h-screen flex flex-col justify-between overflow-x-hidden overflow-y-auto relative text-slate-700 selection:bg-brand-primary selection:text-white">
       {/* ── Top Header Brand ── */}
       <div className="z-10 relative pt-3 sm:pt-4 md:pt-5 pb-1 px-4 text-center max-w-3xl mx-auto shrink-0">
-        <div className="inline-flex items-center justify-center w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-white/95 p-1 shadow-lg shadow-cyan-500/20 mb-1.5 ring-2 ring-white/20 backdrop-blur-md overflow-hidden hover:scale-105 transition-transform duration-300">
+        <div className="inline-flex items-center justify-center w-11 h-11 sm:w-12 sm:h-12 rounded-2xl neu-raised-sm p-1.5 mb-2 overflow-hidden hover:scale-105 transition-transform duration-300">
           <img
             src="/rgmcet-crest.png"
             alt="RGM Official Institutional Crest"
@@ -582,19 +580,19 @@ export const LandingPage: React.FC = () => {
 
         {/* Brand Title: RGM ManageBAC */}
         <h1 className="text-2xl sm:text-3xl md:text-4xl font-black tracking-wider flex items-center justify-center gap-1 sm:gap-1.5 flex-wrap leading-tight">
-          <span className="text-white font-black drop-shadow-sm">RGM</span>
-          <span className="text-cyan-400 font-black drop-shadow-[0_0_16px_rgba(56,217,232,0.9)] tracking-tight">Manage</span>
-          <span className="text-white font-bold tracking-normal">BAC</span>
+          <span className="text-slate-800 font-black">RGM</span>
+          <span className="text-brand-primary font-black tracking-tight">Manage</span>
+          <span className="text-slate-800 font-bold tracking-normal">BAC</span>
         </h1>
 
-        <p className="mt-1 text-[11px] sm:text-xs text-slate-300 font-medium max-w-xl mx-auto leading-normal px-2 line-clamp-2 sm:line-clamp-none">
+        <p className="mt-1 text-[11px] sm:text-xs text-slate-500 font-medium max-w-xl mx-auto leading-normal px-2 line-clamp-2 sm:line-clamp-none">
           A digital initiative by the institute facilitating Faculty, Staff, Students and Parents to access and process Academics, Research, Supporting services at one common platform.
         </p>
       </div>
 
       {/* ── Main Unified Login Container ── */}
       <main className="z-10 relative flex-1 max-w-xl w-full mx-auto px-4 py-2 sm:py-3 flex flex-col justify-center items-center my-auto min-h-0">
-        <div className="w-full bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-black/25 relative">
+        <div className="w-full neu-raised rounded-[28px] p-6 sm:p-8 relative">
           {/* ── Searchable / Typeahead Role Selector Dropdown ── */}
           <div className="relative mb-4 sm:mb-5" ref={dropdownRef}>
             <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500 mb-1.5">
@@ -607,7 +605,7 @@ export const LandingPage: React.FC = () => {
                 setIsDropdownOpen(!isDropdownOpen);
                 setTimeout(() => searchInputRef.current?.focus(), 50);
               }}
-              className="w-full flex items-center justify-between p-3.5 sm:p-4 rounded-2xl bg-slate-50 hover:bg-slate-100/80 border border-slate-200 text-left transition-all group focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
+              className="w-full flex items-center justify-between p-3.5 sm:p-4 rounded-2xl neu-raised-sm text-left group focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
             >
               <div className="flex items-center gap-3 min-w-0">
                 {selectedRole ? (
@@ -631,9 +629,9 @@ export const LandingPage: React.FC = () => {
 
             {/* Dropdown Menu Modal */}
             {isDropdownOpen && (
-              <div className="absolute top-full inset-x-0 mt-1.5 bg-white border border-slate-200 rounded-2xl shadow-2xl z-[100] flex flex-col animate-in fade-in zoom-in-95 duration-150" style={{maxHeight: 'min(300px, 48vh)'}}>
+              <div className="absolute top-full inset-x-0 mt-1.5 neu-panel rounded-2xl z-[100] flex flex-col animate-in fade-in zoom-in-95 duration-150" style={{maxHeight: 'min(300px, 48vh)'}}>
                 {/* Typeahead Search Input */}
-                <div className="p-2.5 border-b border-slate-200 bg-slate-50/90 shrink-0 z-10 flex items-center gap-2 rounded-t-2xl">
+                <div className="p-2.5 border-b border-slate-300/50 shrink-0 z-10 flex items-center gap-2 rounded-t-2xl">
                   <Search className="w-3.5 h-3.5 text-brand-primary shrink-0 ml-1" />
                   <input
                     ref={searchInputRef}
@@ -667,7 +665,7 @@ export const LandingPage: React.FC = () => {
                             className={`w-full flex items-center justify-between p-2 rounded-xl text-left transition-all ${
                               selectedRole?.id === role.id 
                                 ? 'bg-brand-soft text-brand-primary border border-brand-primary/30 font-bold' 
-                                : 'hover:bg-slate-50 text-slate-700'
+                                : 'hover:bg-white/50 text-slate-700'
                             }`}
                           >
                             <div className="flex items-center gap-2.5 min-w-0">
@@ -703,7 +701,7 @@ export const LandingPage: React.FC = () => {
                             className={`w-full flex items-center justify-between p-2 rounded-xl text-left transition-all ${
                               selectedRole?.id === role.id 
                                 ? 'bg-brand-soft text-brand-primary border border-brand-primary/30 font-bold' 
-                                : 'hover:bg-slate-50 text-slate-700'
+                                : 'hover:bg-white/50 text-slate-700'
                             }`}
                           >
                             <div className="flex items-center gap-2.5 min-w-0">
@@ -741,7 +739,7 @@ export const LandingPage: React.FC = () => {
             <form onSubmit={handleLoginSubmit} className="space-y-3.5 sm:space-y-4">
               {/* Student Segment Toggle */}
               {selectedRole.id === 'student' && (
-                <div className="flex rounded-xl bg-slate-100 p-1 border border-slate-200">
+                <div className="flex rounded-xl neu-inset p-1">
                   <button
                     type="button"
                     onClick={() => {
@@ -803,7 +801,7 @@ export const LandingPage: React.FC = () => {
                             ? 'enter your mail'
                             : 'yourname@rgmcet.edu.in'
                     }
-                    className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-xs sm:text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
+                    className="w-full pl-10 pr-4 py-3 rounded-xl neu-inset border border-transparent text-slate-800 placeholder-slate-400 text-xs sm:text-sm font-medium focus:outline-none transition-all"
                   />
                 </div>
               </div>
@@ -818,7 +816,7 @@ export const LandingPage: React.FC = () => {
                     value={selectedDept}
                     onChange={(e) => setSelectedDept(e.target.value)}
                     aria-label="Department Selection"
-                    className="w-full px-3.5 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-xs sm:text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary cursor-pointer transition-all"
+                    className="w-full px-3.5 py-3 rounded-xl neu-inset border border-transparent text-slate-800 text-xs sm:text-sm font-medium focus:outline-none cursor-pointer transition-all"
                   >
                     {VALID_DEPARTMENT_NAMES.map(dept => (
                       <option key={dept} value={dept}>{dept}</option>
@@ -840,7 +838,7 @@ export const LandingPage: React.FC = () => {
                       type="date"
                       value={fresherDob}
                       onChange={(e) => setFresherDob(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
+                      className="w-full px-3.5 py-2.5 rounded-xl neu-inset border border-transparent text-slate-800 text-xs font-medium focus:outline-none"
                     />
                     <div className="relative">
                       <input
@@ -848,7 +846,7 @@ export const LandingPage: React.FC = () => {
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         placeholder="Password (if set)"
-                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
+                        className="w-full px-3.5 py-2.5 rounded-xl neu-inset border border-transparent text-slate-800 placeholder-slate-400 text-xs font-medium focus:outline-none"
                       />
                     </div>
                   </div>
@@ -887,7 +885,7 @@ export const LandingPage: React.FC = () => {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="Enter your password"
-                      className="w-full pl-10 pr-10 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-xs sm:text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
+                      className="w-full pl-10 pr-10 py-3 rounded-xl neu-inset border border-transparent text-slate-800 placeholder-slate-400 text-xs sm:text-sm font-medium focus:outline-none transition-all"
                     />
                     <button
                       type="button"
@@ -912,7 +910,7 @@ export const LandingPage: React.FC = () => {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full py-3.5 px-4 rounded-xl bg-brand-primary hover:bg-brand-primary/95 text-white font-black text-sm shadow-md shadow-brand-primary/25 hover:shadow-lg hover:shadow-brand-primary/35 hover:scale-[1.01] active:scale-[0.99] transition-all duration-150 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full py-3.5 px-4 rounded-xl bg-brand-primary hover:bg-brand-primary/95 text-white font-black text-sm neu-accent hover:scale-[1.01] active:scale-[0.99] transition-all duration-150 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isLoading ? (
                   <>
@@ -958,7 +956,7 @@ export const LandingPage: React.FC = () => {
       </main>
 
       {/* ── Global Footer ── */}
-      <div className="z-10 relative shrink-0">
+      <div className="z-10 relative shrink-0 neu-footer">
         <Footer />
       </div>
 
@@ -972,7 +970,7 @@ export const LandingPage: React.FC = () => {
           />
 
           {/* Modal Card */}
-          <div className="relative z-10 w-full max-w-sm bg-white border border-slate-200 rounded-2xl shadow-2xl p-6">
+          <div className="relative z-10 w-full max-w-sm neu-panel rounded-2xl p-6">
             {/* Header */}
             <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2.5">
@@ -1084,7 +1082,7 @@ export const LandingPage: React.FC = () => {
                       value={forgotEmail}
                       onChange={e => setForgotEmail(e.target.value)}
                       placeholder={selectedRole?.id === 'student' ? 'yourmail@rgmcet.edu.in' : 'yourname@rgmcet.edu.in'}
-                      className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
+                      className="w-full pl-10 pr-4 py-3 rounded-xl neu-inset border border-transparent text-slate-800 placeholder-slate-400 text-sm font-medium focus:outline-none"
                       required
                     />
                   </div>
@@ -1092,7 +1090,7 @@ export const LandingPage: React.FC = () => {
                 <button
                   type="submit"
                   disabled={forgotLoading}
-                  className="w-full py-3 rounded-xl bg-brand-primary hover:bg-brand-primary/95 disabled:opacity-60 text-white text-sm font-bold shadow-md shadow-brand-primary/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full py-3 rounded-xl bg-brand-primary hover:bg-brand-primary/95 disabled:opacity-60 text-white text-sm font-bold neu-accent transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   {forgotLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
                   {forgotLoading ? 'Sending OTP...' : 'Send OTP'}
@@ -1112,7 +1110,7 @@ export const LandingPage: React.FC = () => {
                     onChange={e => setForgotOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
                     placeholder="6-digit code"
                     maxLength={6}
-                    className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-sm font-mono tracking-[0.3em] text-center focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
+                    className="w-full px-4 py-3 rounded-xl neu-inset border border-transparent text-slate-800 placeholder-slate-400 text-sm font-mono tracking-[0.3em] text-center focus:outline-none"
                     required
                   />
                 </div>
@@ -1125,7 +1123,7 @@ export const LandingPage: React.FC = () => {
                       value={forgotNewPassword}
                       onChange={e => setForgotNewPassword(e.target.value)}
                       placeholder="Min. 8 characters"
-                      className="w-full pl-10 pr-10 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
+                      className="w-full pl-10 pr-10 py-3 rounded-xl neu-inset border border-transparent text-slate-800 placeholder-slate-400 text-sm font-medium focus:outline-none"
                       required
                     />
                     <button type="button" onClick={() => setShowForgotNewPw(p => !p)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
@@ -1142,7 +1140,7 @@ export const LandingPage: React.FC = () => {
                       value={forgotConfirmPassword}
                       onChange={e => setForgotConfirmPassword(e.target.value)}
                       placeholder="Re-enter new password"
-                      className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
+                      className="w-full pl-10 pr-4 py-3 rounded-xl neu-inset border border-transparent text-slate-800 placeholder-slate-400 text-sm font-medium focus:outline-none"
                       required
                     />
                   </div>
@@ -1151,14 +1149,14 @@ export const LandingPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => { setForgotStep('email'); setForgotError(null); setForgotSuccess(null); }}
-                    className="flex-1 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold transition-all cursor-pointer"
+                    className="flex-1 py-3 rounded-xl neu-raised-sm text-slate-700 text-sm font-bold cursor-pointer"
                   >
                     ← Back
                   </button>
                   <button
                     type="submit"
                     disabled={forgotLoading}
-                    className="flex-1 py-3 rounded-xl bg-brand-primary hover:bg-brand-primary/95 disabled:opacity-60 text-white text-sm font-bold shadow-md shadow-brand-primary/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    className="flex-1 py-3 rounded-xl bg-brand-primary hover:bg-brand-primary/95 disabled:opacity-60 text-white text-sm font-bold neu-accent transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
                     {forgotLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                     {forgotLoading ? 'Resetting...' : 'Reset Password'}
@@ -1180,7 +1178,7 @@ export const LandingPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => { setShowForgotModal(false); setForgotStep('email'); }}
-                  className="w-full py-3 rounded-xl bg-brand-primary hover:bg-brand-primary/95 text-white text-sm font-bold transition-all cursor-pointer shadow-md shadow-brand-primary/20"
+                  className="w-full py-3 rounded-xl bg-brand-primary hover:bg-brand-primary/95 text-white text-sm font-bold transition-all cursor-pointer neu-accent"
                 >
                   Back to Login
                 </button>

@@ -107,6 +107,21 @@
     --shadow-brand: 0 4px 14px rgba(15, 118, 110, 0.25);
   }
 
+  /* Landing & login pages (no user signed in) — Fuchsia, a hue no role uses.
+     html-qualified so it also wins over .dark and over any stale role class. */
+  html.theme-landing {
+    --color-brand-primary: #a21caf;
+    --color-brand-hover:   #86198f;
+    --color-brand-soft:    #fae8ff;
+    --color-brand-subtle:  #fdf4ff;
+    --shadow-brand: 0 4px 14px rgba(162, 28, 175, 0.28);
+
+    /* Neumorphic surface tokens */
+    --neu-bg:    #e8eaf1;
+    --neu-light: rgba(255, 255, 255, 0.92);
+    --neu-dark:  rgba(160, 166, 189, 0.55);
+  }
+
   .dark {
     /* ── Core Surfaces ── */
     --color-background:   #070C18;
@@ -294,4 +309,49 @@
   0%, 45%  { opacity: 0; }
   50%, 95% { opacity: 1; }
   100%     { opacity: 0; }
+}
+
+/* ── Neumorphism (landing & login pages) ───────────────────────────────────
+   Soft extruded surfaces: elements share the page colour and are shaped only by a
+   light shadow (top-left) and a dark shadow (bottom-right). Inset = pressed in. */
+.neu-page {
+  background:
+    radial-gradient(1200px 600px at 15% -10%, rgba(162, 28, 175, 0.07), transparent 60%),
+    radial-gradient(900px 500px at 110% 110%, rgba(162, 28, 175, 0.06), transparent 60%),
+    var(--neu-bg, #e8eaf1);
+}
+.neu-raised {
+  background: var(--neu-bg, #e8eaf1);
+  box-shadow: 12px 12px 28px var(--neu-dark), -12px -12px 28px var(--neu-light);
+}
+.neu-raised-sm {
+  background: var(--neu-bg, #e8eaf1);
+  box-shadow: 5px 5px 12px var(--neu-dark), -5px -5px 12px var(--neu-light);
+  transition: box-shadow 0.18s ease;
+}
+.neu-raised-sm:hover {
+  box-shadow: 3px 3px 8px var(--neu-dark), -3px -3px 8px var(--neu-light);
+}
+.neu-inset {
+  background: var(--neu-bg, #e8eaf1);
+  box-shadow: inset 4px 4px 9px var(--neu-dark), inset -4px -4px 9px var(--neu-light);
+}
+.neu-inset:focus {
+  box-shadow: inset 4px 4px 9px var(--neu-dark), inset -4px -4px 9px var(--neu-light),
+              0 0 0 2px rgba(162, 28, 175, 0.35);
+}
+.neu-panel {
+  background: var(--neu-bg, #e8eaf1);
+  box-shadow: 14px 14px 34px rgba(120, 126, 150, 0.45), -10px -10px 26px var(--neu-light);
+}
+.neu-accent {
+  box-shadow: 6px 6px 14px rgba(162, 28, 175, 0.32), -6px -6px 14px var(--neu-light);
+}
+.neu-accent:active:not(:disabled) {
+  box-shadow: inset 3px 3px 8px rgba(0, 0, 0, 0.25), inset -3px -3px 8px rgba(255, 255, 255, 0.2);
+}
+/* Footer blends into the neumorphic landing surface */
+.neu-footer > * {
+  background: transparent !important;
+  border-top-color: rgba(160, 166, 189, 0.35) !important;
 }
