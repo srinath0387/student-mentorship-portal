@@ -1041,6 +1041,14 @@ export const api = {
     return fetchWithAuth(`/attendance/sessions${query}`);
   },
 
+  // ── Student risk alerts ──
+  getRiskStudents: async (params: { department?: string; year?: string; section?: string; level?: string }) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => { if (v && v !== 'All') q.set(k, v); });
+    return fetchWithAuth(`/risk/students?${q.toString()}`);
+  },
+  getMyRisk: async () => fetchWithAuth('/risk/me'),
+
   // ── Admin attendance control ──
   getAttendanceDayStatus: async (params: { date: string; department?: string; semester?: string; section?: string }) => {
     const q = new URLSearchParams({ date: params.date });

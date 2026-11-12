@@ -8051,6 +8051,155 @@ app.get('/oversight/attendance-overview', requireRole('director', 'principal', '
   }
 });
 
+// ============================================================================
+// Student risk alerts (early warning)
+// Score from data already in the system. Points:
+//   attendance < 65% → 40 (critical) | < 75% → 25
+//   CGPA < 5 → 25 | < 6 → 15
+//   latest semester GPA dropped by >= 1.0 → 15
+//   no mentor meeting in the last 60 days → 10
+//   no coding profile linked (2nd year onwards) → 5
+// Level: >= 40 high, >= 20 medium, otherwise low.
+// ============================================================================
+interface RiskReason { code: string; label: string; points: number }
+interface StudentRisk {
+  roll_number: string; name: string; department: string; year: string; section: string;
+  cgpa: number | null; attendance_pct: number | null; score: number; level: 'high' | 'medium' | 'low';
+  reasons: RiskReason[]; last_mentor_meeting: string | null;
+}
+
+function scoreStudentRisk(input: {
+  attendancePct: number | null; cgpa: number | null; gpaDrop: number | null;
+  daysSinceMeeting: number | null; codingProfiles: number; year: string;
+}): { score: number; level: 'high' | 'medium' | 'low'; reasons: RiskReason[] } {
+  const reasons: RiskReason[] = [];
+  const a = input.attendancePct;
+  if (a !== null && a < 65) reasons.push({ code: 'attendance_critical', label: `Attendance ${a.toFixed(1)}% (below 65%)`, points: 40 });
+  else if (a !== null && a < 75) reasons.push({ code: 'attendance_low', label: `Attendance ${a.toFixed(1)}% (below 75%)`, points: 25 });
+  const c = input.cgpa;
+  if (c !== null && c > 0 && c < 5) reasons.push({ code: 'cgpa_critical', label: `CGPA ${c.toFixed(2)} (below 5)`, points: 25 });
+  else if (c !== null && c > 0 && c < 6) reasons.push({ code: 'cgpa_low', label: `CGPA ${c.toFixed(2)} (below 6)`, points: 15 });
+  if (input.gpaDrop !== null && input.gpaDrop >= 1) reasons.push({ code: 'gpa_drop', label: `Semester GPA fell by ${input.gpaDrop.toFixed(2)}`, points: 15 });
+  if (input.daysSinceMeeting === null || input.daysSinceMeeting > 60) {
+    reasons.push({ code: 'no_mentoring', label: input.daysSinceMeeting === null ? 'No mentor meeting recorded' : `No mentor meeting for ${input.daysSinceMeeting} days`, points: 10 });
+  }
+  if (input.codingProfiles === 0 && input.year && input.year !== '1st Year') reasons.push({ code: 'no_coding', label: 'No coding profile linked', points: 5 });
+  const score = reasons.reduce((t, r) => t + r.points, 0);
+  return { score, level: score >= 40 ? 'high' : score >= 20 ? 'medium' : 'low', reasons };
+}
+
+/** Which students the caller may see. Returns SQL condition on alias st + params. */
+async function riskScope(req: Request): Promise<{ where: string; params: any[] } | null> {
+  const role = req.auth?.role;
+  const email = (req.auth?.email || '').toLowerCase();
+  if (role === 'student' || role === 'parent') return { where: 'UPPER(st.roll_number) = $1', params: [(req.auth?.regNo || '').toUpperCase()] };
+  if (role === 'faculty') {
+    const f = await db.query('SELECT faculty_id FROM faculty WHERE LOWER(email) = $1 LIMIT 1', [email]).catch(() => ({ rows: [] as any[] }));
+    const fid = f.rows[0]?.faculty_id || '';
+    return {
+      where: `(st.roll_number IN (SELECT ma.roll_number FROM mentor_assignments ma WHERE UPPER(ma.faculty_id) = UPPER($1))
+               OR UPPER(COALESCE(st.faculty_mentor_id, '')) = UPPER($1))`,
+      params: [fid],
+    };
+  }
+  if (role === 'hod' && req.auth?.department && req.auth.department !== '*') return { where: 'st.department = $1', params: [req.auth.department] };
+  if (role === 'program_chair') return { where: 'st.department = ANY($1)', params: [CSE_ALLIED_DEPTS] };
+  if (['admin', 'principal', 'director', 'management', 'coordinator'].includes(role || '')) {
+    if (role === 'admin' && req.auth?.department && !['*', 'All'].includes(req.auth.department) && !req.auth.isSuperAdmin) {
+      return { where: 'st.department = $1', params: [req.auth.department] };
+    }
+    if (role === 'coordinator') return { where: `st.year = '1st Year'`, params: [] };
+    return { where: 'TRUE', params: [] };
+  }
+  return null;
+}
+
+async function computeStudentRisks(scope: { where: string; params: any[] }, filters: { department?: string; year?: string; section?: string }): Promise<StudentRisk[]> {
+  const params = [...scope.params];
+  let where = scope.where;
+  if (filters.department && filters.department !== 'All') { params.push(filters.department); where += ` AND st.department = $${params.length}`; }
+  if (filters.year && filters.year !== 'All') { params.push(filters.year); where += ` AND st.year = $${params.length}`; }
+  if (filters.section && filters.section !== 'All') { params.push(filters.section.toUpperCase()); where += ` AND UPPER(st.section) = $${params.length}`; }
+
+  const studentsRes = await db.query(
+    `SELECT st.roll_number, st.name, st.department, st.year, st.section, st.cgpa,
+            (SELECT COUNT(*) FROM coding_profiles cp WHERE cp.student_id = st.roll_number)::int AS coding_profiles,
+            (SELECT MAX(mm.meeting_date)::text FROM mentor_meetings mm WHERE UPPER(mm.roll_number) = UPPER(st.roll_number)) AS last_meeting,
+            (SELECT a1.semester_gpa - a0.semester_gpa FROM academics a0, academics a1
+              WHERE a0.student_id = st.roll_number AND a1.student_id = st.roll_number
+                AND a0.semester = (SELECT MAX(semester) FROM academics x WHERE x.student_id = st.roll_number AND x.semester_gpa IS NOT NULL)
+                AND a1.semester = (SELECT MAX(semester) FROM academics y WHERE y.student_id = st.roll_number AND y.semester_gpa IS NOT NULL
+                                    AND y.semester < a0.semester)
+              LIMIT 1) AS gpa_drop
+     FROM students st
+     WHERE ${where}
+     ORDER BY st.department, st.year, st.section, st.roll_number`,
+    params
+  );
+  const rolls = studentsRes.rows.map((r: any) => String(r.roll_number).toUpperCase());
+  const attendance = new Map<string, number>();
+  if (rolls.length > 0) {
+    const att = await fetchCurrentSemesterAttendance(null).catch(() => [] as StudentAttendanceRow[]);
+    const wanted = new Set(rolls);
+    for (const a of att) if (wanted.has(String(a.roll_number).toUpperCase())) attendance.set(String(a.roll_number).toUpperCase(), a.percentage);
+  }
+  const today = Date.now();
+  return studentsRes.rows.map((r: any) => {
+    const roll = String(r.roll_number).toUpperCase();
+    const cgpa = r.cgpa === null || r.cgpa === undefined ? null : parseFloat(r.cgpa);
+    const att = attendance.has(roll) ? attendance.get(roll)! : null;
+    const days = r.last_meeting ? Math.floor((today - new Date(r.last_meeting).getTime()) / 86400000) : null;
+    const drop = r.gpa_drop === null || r.gpa_drop === undefined ? null : parseFloat(r.gpa_drop);
+    const risk = scoreStudentRisk({ attendancePct: att, cgpa, gpaDrop: drop, daysSinceMeeting: days, codingProfiles: parseInt(r.coding_profiles || '0', 10), year: r.year || '' });
+    return {
+      roll_number: r.roll_number, name: r.name, department: r.department, year: r.year, section: r.section,
+      cgpa, attendance_pct: att, last_mentor_meeting: r.last_meeting || null, ...risk,
+    };
+  });
+}
+
+// GET /risk/students?department=&year=&section=&level=high|medium|all
+app.get('/risk/students', requireRole('faculty', 'hod', 'admin', 'coordinator', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    const scope = await riskScope(req);
+    if (!scope) return res.status(403).json({ error: 'Not allowed' });
+    if (db.isMock) return res.json({ summary: { total: 0, high: 0, medium: 0, low: 0 }, students: [] });
+    const all = await computeStudentRisks(scope, {
+      department: req.query.department as string, year: req.query.year as string, section: req.query.section as string,
+    });
+    const level = String(req.query.level || 'flagged');
+    const students = all
+      .filter(s => level === 'all' ? true : level === 'high' ? s.level === 'high' : level === 'medium' ? s.level === 'medium' : s.level !== 'low')
+      .sort((a, b) => b.score - a.score || String(a.roll_number).localeCompare(String(b.roll_number)));
+    const reasonCounts: Record<string, number> = {};
+    for (const s of all) for (const r of s.reasons) if (s.level !== 'low') reasonCounts[r.code] = (reasonCounts[r.code] || 0) + 1;
+    res.json({
+      summary: {
+        total: all.length,
+        high: all.filter(s => s.level === 'high').length,
+        medium: all.filter(s => s.level === 'medium').length,
+        low: all.filter(s => s.level === 'low').length,
+        by_reason: reasonCounts,
+      },
+      students,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /risk/me — a student's (or parent's ward's) own risk flags
+app.get('/risk/me', requireRole('student', 'parent'), async (req: Request, res: Response) => {
+  try {
+    const scope = await riskScope(req);
+    if (!scope || db.isMock) return res.json(null);
+    const rows = await computeStudentRisks(scope, {});
+    res.json(rows[0] || null);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /oversight/faculty-by-cadre?department=CSE&cadre=associate
 // ============================================================================
 app.get('/oversight/faculty-by-cadre', requireRole('director', 'principal', 'management', 'program_chair', 'admin', 'hod'), async (req: Request, res: Response) => {

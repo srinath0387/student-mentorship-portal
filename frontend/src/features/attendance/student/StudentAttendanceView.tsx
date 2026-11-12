@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { MyRiskCard } from '../../risk/RiskAlertsPage';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, Download, TrendingUp, Calendar, BookOpen, Clock, ShieldCheck, XCircle } from 'lucide-react';
 import { api } from '../../../lib/api';
@@ -63,6 +64,7 @@ export const StudentAttendanceView: React.FC<Props> = ({ rollNumber }) => {
 
   return (
     <div className="space-y-5">
+      <MyRiskCard />
       {/* Student Overview Header Card */}
       <div className="bg-surface border border-borderLine rounded-2xl p-5 shadow-xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">

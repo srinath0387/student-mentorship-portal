@@ -166,6 +166,190 @@
       "status": "done",
       "priority": "high",
       "commit_msg": "feat(attendance): lab co-faculty credited in workload; attendance stays with main faculty"
+    },
+    {
+      "id": "FT001",
+      "title": "Student risk alerts (early warning)",
+      "description": "Weekly-style risk score per student from existing data: current-semester attendance (<75 high, <65 critical), CGPA < 6, latest semester GPA drop >= 1.0, no coding profile linked, no mentor meeting in 60 days. GET /risk/students (scoped: mentor → mentees, HOD → dept, admin/oversight → all, filters) with reasons. Page 'At-Risk Students' for faculty mentors, HOD, admin, oversight; parents and students see their own risk flags.",
+      "files_affected": [
+        "backend/src/handlers/api.ts",
+        "backend/tests/smoke/features.test.ts",
+        "frontend/src/features/risk/RiskAlertsPage.tsx",
+        "frontend/src/lib/api.ts",
+        "frontend/src/components/layout/Sidebar.tsx",
+        "frontend/src/App.tsx"
+      ],
+      "acceptance_criteria": "Scoring tested per factor; scoping tested; tsc+build pass.",
+      "status": "done",
+      "priority": "high",
+      "commit_msg": "feat(risk): student early-warning risk alerts"
+    },
+    {
+      "id": "FT002",
+      "title": "Monthly principal's report",
+      "description": "GET /reports/monthly?month=YYYY-MM: department-wise attendance %, at-risk counts, attendance-posting compliance per department and faculty, new certifications, new placements, API score leaders. Printable one-page report page (Print → PDF) for oversight/admin/HOD.",
+      "files_affected": [
+        "backend/src/handlers/api.ts",
+        "backend/tests/smoke/features.test.ts",
+        "frontend/src/features/reports/MonthlyReportPage.tsx",
+        "frontend/src/lib/api.ts",
+        "frontend/src/components/layout/Sidebar.tsx",
+        "frontend/src/App.tsx"
+      ],
+      "acceptance_criteria": "Report numbers tested; page prints cleanly.",
+      "status": "pending",
+      "priority": "high",
+      "commit_msg": "feat(reports): monthly principal's report"
+    },
+    {
+      "id": "FT003",
+      "title": "Student feedback on faculty (anonymous)",
+      "description": "Admin opens a feedback cycle (semester, dates, questions on a 1–5 scale + comment). Students rate each subject/faculty on their rosters once per cycle; responses stored without student identity (only a submission marker). HOD/admin/oversight see per-faculty averages; faculty see their own summary after the cycle closes.",
+      "files_affected": [
+        "backend/src/handlers/api.ts",
+        "backend/tests/smoke/features.test.ts",
+        "frontend/src/features/feedback/*",
+        "frontend/src/lib/api.ts",
+        "frontend/src/components/layout/Sidebar.tsx",
+        "frontend/src/App.tsx"
+      ],
+      "acceptance_criteria": "Anonymity (no roll number in responses), one submission per student per subject, scoped summaries — tested.",
+      "status": "pending",
+      "priority": "medium",
+      "commit_msg": "feat(feedback): anonymous student feedback on faculty"
+    },
+    {
+      "id": "FT004",
+      "title": "Placement drive eligibility matcher",
+      "description": "Placement drives (company, role, package, min CGPA, max backlogs, allowed departments/batches, required skills). Eligible-student list computed from CGPA, academics, skills; export to Excel; track applied / shortlisted / placed per student.",
+      "files_affected": [
+        "backend/src/handlers/api.ts",
+        "backend/tests/smoke/features.test.ts",
+        "frontend/src/features/placement/PlacementDrivesPage.tsx",
+        "frontend/src/lib/api.ts",
+        "frontend/src/components/layout/Sidebar.tsx",
+        "frontend/src/App.tsx"
+      ],
+      "acceptance_criteria": "Eligibility filter tested; funnel counts tested.",
+      "status": "pending",
+      "priority": "medium",
+      "commit_msg": "feat(placement): drives with eligibility matcher and funnel"
+    },
+    {
+      "id": "FT005",
+      "title": "Faculty appraisal",
+      "description": "Yearly appraisal per faculty pre-filled from API score pillars, attendance-posting compliance, FDPs, publications, certifications and feedback averages. Faculty self-remarks → HOD remarks/rating → principal approval. Printable.",
+      "files_affected": [
+        "backend/src/handlers/api.ts",
+        "backend/tests/smoke/features.test.ts",
+        "frontend/src/features/appraisal/*",
+        "frontend/src/lib/api.ts",
+        "frontend/src/components/layout/Sidebar.tsx",
+        "frontend/src/App.tsx"
+      ],
+      "acceptance_criteria": "Workflow states and permissions tested.",
+      "status": "pending",
+      "priority": "medium",
+      "commit_msg": "feat(appraisal): faculty appraisal workflow"
+    },
+    {
+      "id": "FT006",
+      "title": "NAAC/NBA accreditation data pack",
+      "description": "One-click Excel workbook per department/year: student strength by year, faculty list with qualification/designation/experience, student-faculty ratio, FDPs/workshops, publications & patents, student certifications, placements, attendance summary, feedback summary.",
+      "files_affected": [
+        "backend/src/handlers/api.ts",
+        "backend/tests/smoke/features.test.ts",
+        "frontend/src/features/accreditation/AccreditationPage.tsx",
+        "frontend/src/lib/api.ts",
+        "frontend/src/components/layout/Sidebar.tsx",
+        "frontend/src/App.tsx"
+      ],
+      "acceptance_criteria": "Each sheet populated from live data; export works.",
+      "status": "pending",
+      "priority": "high",
+      "commit_msg": "feat(accreditation): NAAC/NBA data pack export"
+    },
+    {
+      "id": "FT007",
+      "title": "Parent alerts (in-app) + messaging provider hook",
+      "description": "Automatic parent notifications: absent today, attendance below 75%, monthly summary. Shown in the parent portal. A messaging provider (SMS/WhatsApp) can be plugged in via env config; disabled until credentials are provided.",
+      "files_affected": [
+        "backend/src/handlers/api.ts",
+        "backend/tests/smoke/features.test.ts",
+        "frontend/src/features/attendance/parent/ParentAttendanceView.tsx",
+        "frontend/src/lib/api.ts"
+      ],
+      "acceptance_criteria": "Alerts generated from attendance; provider disabled by default.",
+      "status": "pending",
+      "priority": "medium",
+      "commit_msg": "feat(parents): attendance alerts for parents"
+    },
+    {
+      "id": "FT008",
+      "title": "Code-based attendance (anti-proxy)",
+      "description": "Faculty opens a live code for a class period; a 6-digit code rotates every 30 s. Students on the roster enter it within the window; one check-in per student; faculty review and submit as a normal session (only main faculty).",
+      "files_affected": [
+        "backend/src/handlers/api.ts",
+        "backend/tests/smoke/features.test.ts",
+        "frontend/src/features/attendance/faculty/LiveCodePanel.tsx",
+        "frontend/src/features/attendance/student/StudentAttendanceView.tsx",
+        "frontend/src/lib/api.ts"
+      ],
+      "acceptance_criteria": "Code rotation/expiry, roster-only, single check-in tested.",
+      "status": "pending",
+      "priority": "medium",
+      "commit_msg": "feat(attendance): rotating-code live attendance"
+    },
+    {
+      "id": "FT009",
+      "title": "CO-PO attainment (OBE)",
+      "description": "Per allotted subject: define Course Outcomes, map CO→PO matrix (0–3), enter CO attainment (% students reaching target per assessment), compute CO attainment levels and PO attainment. Department PO summary for NBA.",
+      "files_affected": [
+        "backend/src/handlers/api.ts",
+        "backend/tests/smoke/features.test.ts",
+        "frontend/src/features/obe/*",
+        "frontend/src/lib/api.ts",
+        "frontend/src/components/layout/Sidebar.tsx",
+        "frontend/src/App.tsx"
+      ],
+      "acceptance_criteria": "Attainment calculations tested.",
+      "status": "pending",
+      "priority": "medium",
+      "commit_msg": "feat(obe): CO-PO mapping and attainment"
+    },
+    {
+      "id": "FT010",
+      "title": "Alumni tracking",
+      "description": "Alumni records (batch, company/higher studies, role, location, LinkedIn), self-update link for passed-out students, analytics by batch/department.",
+      "files_affected": [
+        "backend/src/handlers/api.ts",
+        "backend/tests/smoke/features.test.ts",
+        "frontend/src/features/alumni/AlumniPage.tsx",
+        "frontend/src/lib/api.ts",
+        "frontend/src/components/layout/Sidebar.tsx",
+        "frontend/src/App.tsx"
+      ],
+      "acceptance_criteria": "CRUD + analytics tested.",
+      "status": "pending",
+      "priority": "low",
+      "commit_msg": "feat(alumni): alumni tracking"
+    },
+    {
+      "id": "FT011",
+      "title": "Exam seating & invigilation planner",
+      "description": "Exam sessions (date, slot, rooms with capacity), auto seat allocation by roll number across rooms, invigilator assignment from faculty (balanced, avoids clashes), printable seating and duty lists.",
+      "files_affected": [
+        "backend/src/handlers/api.ts",
+        "backend/tests/smoke/features.test.ts",
+        "frontend/src/features/exams/ExamPlannerPage.tsx",
+        "frontend/src/lib/api.ts",
+        "frontend/src/components/layout/Sidebar.tsx",
+        "frontend/src/App.tsx"
+      ],
+      "acceptance_criteria": "Allocation and clash avoidance tested.",
+      "status": "pending",
+      "priority": "low",
+      "commit_msg": "feat(exams): seating and invigilation planner"
     }
   ]
 }

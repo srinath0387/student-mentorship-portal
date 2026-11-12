@@ -97,6 +97,7 @@ const facultyNav: NavGroup[] = [
     icon: LayoutDashboard,
     items: [
       { label: 'Assigned Mentees', path: '/faculty/dashboard?tab=mentees', icon: Users },
+      { label: 'At-Risk Mentees', path: '/risk', icon: ShieldCheck },
       { label: 'Placement Eligibility', path: '/faculty/dashboard?tab=placement', icon: Award },
       { label: 'API Scoreboard', path: '/faculty/dashboard?tab=scoreboard', icon: BarChart2 },
     ],
@@ -170,6 +171,7 @@ const adminNav: NavGroup[] = [
     title: 'Students',
     icon: Users,
     items: [
+      { label: 'At-Risk Students', path: '/risk', icon: ShieldCheck },
       { label: 'Student Directory', path: '/admin/dashboard?tab=students', icon: Users },
       { label: 'CGPA & Top Performers', path: '/admin/dashboard?tab=performance', icon: Award },
       { label: 'Certifications', path: '/admin/dashboard?tab=certifications', icon: CheckCircle2 },
@@ -214,7 +216,8 @@ const hodNav: NavGroup[] = [
       { label: 'Year-Wise Overview', path: '/hod/dashboard?tab=overview', icon: Building2 },
       { label: 'Certification Analytics', path: '/hod/dashboard?tab=certifications', icon: CheckCircle2 },
       { label: 'Academic & Holiday Calendar', path: '/hod/dashboard?tab=holidays', icon: Calendar },
-      { label: 'At-Risk Students', path: '/hod/dashboard?tab=unregistered', icon: FileBarChart },
+      { label: 'At-Risk Students', path: '/risk', icon: ShieldCheck },
+      { label: 'Unregistered Students', path: '/hod/dashboard?tab=unregistered', icon: FileBarChart },
     ],
   },
   {
@@ -264,6 +267,7 @@ const coordinatorNav: NavGroup[] = [
     items: [
       { label: 'Onboarding', path: '/coordinator/dashboard?tab=onboarding', icon: LayoutDashboard },
       { label: 'Fresher Directory', path: '/coordinator/dashboard?tab=freshers', icon: Users },
+      { label: 'At-Risk Freshers', path: '/risk', icon: ShieldCheck },
       { label: 'Subject Allocation', path: '/coordinator/dashboard?tab=subjects', icon: FileText },
       { label: 'Class Incharges', path: '/coordinator/dashboard?tab=incharge', icon: Award },
       { label: 'Year Promotion', path: '/coordinator/dashboard?tab=promotion', icon: CheckCircle2 },
@@ -316,6 +320,7 @@ const oversightNav: NavGroup[] = [
     icon: LayoutDashboard,
     items: [
       { label: 'Student Analytics', path: '/oversight/dashboard?tab=students', icon: Users },
+      { label: 'At-Risk Students', path: '/risk', icon: ShieldCheck },
       { label: 'Faculty Analytics', path: '/oversight/dashboard?tab=faculty', icon: User },
       { label: 'Certifications', path: '/oversight/dashboard?tab=certifications', icon: CheckCircle2 },
       { label: 'Research', path: '/oversight/dashboard?tab=research', icon: FileBarChart },
