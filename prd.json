@@ -17,7 +17,7 @@
     {
       "id": "RB002",
       "title": "Frontend: ResumeBuilderPage component with editable sections",
-      "description": "Create frontend/src/features/resume/ResumeBuilderPage.tsx. Sections: (1) Objective/Summary editor (textarea with ATS tips). (2) Projects: add/edit/delete with title, description, tech_stack[], github_url, demo_url. (3) Internships: pulled from /internships API \u2014 show, editable. (4) Languages known: add/delete. (5) Hobbies/Interests. (6) Extra-curricular: title, role, year. (7) Links: LinkedIn, GitHub, Portfolio, LeetCode. (8) ATS Score panel: live scoring (0-100) based on completeness \u2014 objective filled (+10), skills > 3 (+15), certifications > 0 (+15), projects > 0 (+15), internships > 0 (+15), academics filled (+10), coding profiles > 0 (+10), achievements (+10) \u2014 with green/yellow/red indicator. Layout: left panel = form editor sections with save button, right panel = live resume PREVIEW using CSS (not PDF yet). Remove soon:true from sidebar.",
+      "description": "Create frontend/src/features/resume/ResumeBuilderPage.tsx. Sections: (1) Objective/Summary editor (textarea with ATS tips). (2) Projects: add/edit/delete with title, description, tech_stack[], github_url, demo_url. (3) Internships: pulled from /internships API — show, editable. (4) Languages known: add/delete. (5) Hobbies/Interests. (6) Extra-curricular: title, role, year. (7) Links: LinkedIn, GitHub, Portfolio, LeetCode. (8) ATS Score panel: live scoring (0-100) based on completeness — objective filled (+10), skills > 3 (+15), certifications > 0 (+15), projects > 0 (+15), internships > 0 (+15), academics filled (+10), coding profiles > 0 (+10), achievements (+10) — with green/yellow/red indicator. Layout: left panel = form editor sections with save button, right panel = live resume PREVIEW using CSS (not PDF yet). Remove soon:true from sidebar.",
       "files_affected": [
         "frontend/src/features/resume/ResumeBuilderPage.tsx",
         "frontend/src/components/layout/Sidebar.tsx"
@@ -30,7 +30,7 @@
     {
       "id": "RB003",
       "title": "Frontend: Professional Resume Templates + PDF Download",
-      "description": "Add 3 ATS-friendly resume template renderers in frontend/src/features/resume/templates/. Template 1: Classic (single-column, clean, Times-style). Template 2: Modern (two-column sidebar with skills/certs left, experience right). Template 3: Minimal (all single column, very clean, maximizes ATS). Each template is a React component receiving the full resume data as props. PDF download using jspdf: use html2canvas approach \u2014 render the preview div to canvas then save. Add template switcher UI (3 cards to pick). Add a Download PDF button with loading state. The PDF should be A4, properly formatted, with no colored backgrounds (ATS-safe). Name the file <name>_Resume_<date>.pdf.",
+      "description": "Add 3 ATS-friendly resume template renderers in frontend/src/features/resume/templates/. Template 1: Classic (single-column, clean, Times-style). Template 2: Modern (two-column sidebar with skills/certs left, experience right). Template 3: Minimal (all single column, very clean, maximizes ATS). Each template is a React component receiving the full resume data as props. PDF download using jspdf: use html2canvas approach — render the preview div to canvas then save. Add template switcher UI (3 cards to pick). Add a Download PDF button with loading state. The PDF should be A4, properly formatted, with no colored backgrounds (ATS-safe). Name the file <name>_Resume_<date>.pdf.",
       "files_affected": [
         "frontend/src/features/resume/templates/ClassicTemplate.tsx",
         "frontend/src/features/resume/templates/ModernTemplate.tsx",
@@ -66,6 +66,89 @@
       "status": "done",
       "priority": "high",
       "commit_msg": "feat(resume): integrate LeetCode and GitHub stats into ATS templates and live sync editor"
+    },
+    {
+      "id": "AT001",
+      "title": "Backend: fix attendance crash bugs (not-posted, no-class request, session delete scoping)",
+      "description": "GET /attendance/not-posted selects holiday_calendar.holiday_name (column is title) so it 500s on every call; posted-slot matching ignores department so same semester/section/subject in two departments mark each other posted. POST /attendance/no-class-request selects faculty.faculty_name (column is name) so it 500s. DELETE /attendance/sessions/:id HOD department check reads sess.department which is never selected.",
+      "files_affected": [
+        "backend/src/handlers/api.ts",
+        "backend/tests/smoke/attendance.test.ts"
+      ],
+      "acceptance_criteria": "Tests cover not-posted holiday/department matching and no-class request. Backend tests + build pass.",
+      "status": "done",
+      "priority": "critical",
+      "commit_msg": "fix(attendance): not-posted tracker and no-class requests crashed on every call"
+    },
+    {
+      "id": "AT002",
+      "title": "Backend: academic calendar lock — no posting outside the semester without admin approval",
+      "description": "POST /attendance/sessions: when academic_calendar has entries and session_date falls outside every semester range, faculty/HOD posting is blocked unless an approved late-posting request exists for that allotment+date. New table attendance_late_post_requests; endpoints: POST /attendance/late-post-requests (faculty/hod), GET (admin all, hod dept, faculty own), PATCH :id/approve|reject (admin). Admin posting is never blocked. No calendar configured = no lock (nothing breaks).",
+      "files_affected": [
+        "backend/src/handlers/api.ts",
+        "backend/tests/smoke/attendance.test.ts"
+      ],
+      "acceptance_criteria": "Posting after the semester end returns 423 with code SEMESTER_LOCKED; posting is allowed after approval; admin bypasses. Tests pass.",
+      "status": "pending",
+      "priority": "high",
+      "commit_msg": "feat(attendance): lock posting outside the academic calendar until admin approval"
+    },
+    {
+      "id": "AT003",
+      "title": "Backend: admin day-status + remove-class endpoints",
+      "description": "GET /attendance/admin/day-status?date&department&semester&section — every timetable slot for the date with status posted / not_posted / no_class, faculty, session_id, present/total. POST /attendance/admin/cancel-class — admin removes a class (one slot, or every slot of a section/department) for a date: stored as approved no-class entries; optionally deletes an already-posted session. DELETE of a posted session and PUT edit already exist for admin.",
+      "files_affected": [
+        "backend/src/handlers/api.ts",
+        "backend/tests/smoke/attendance.test.ts"
+      ],
+      "acceptance_criteria": "Endpoints admin/HOD-scoped, tested, build passes.",
+      "status": "pending",
+      "priority": "high",
+      "commit_msg": "feat(attendance): admin day-status and remove-class endpoints"
+    },
+    {
+      "id": "AT004",
+      "title": "Frontend: admin Attendance Control page + sidebar per the hand-drawn spec",
+      "description": "Sidebar for admin: Main (Admin Dashboard); Attendance (Attendance Posted, Attendance Not Posted, Reports, View Timetables, Editing of Attendance); Assign (Assign Subject to Faculty, Assign Students to Faculty by semester/year/section, Remove Class for a Date, Academic Calendar & Late-Post Approvals). New AttendanceControlPage with those views (posted list with view/edit/delete, not-posted list, edit-attendance editor, remove-class form, late-post approvals). Assign items deep-link into AttendanceSetupPage tabs (allotment / roster / timetable) via ?sub=.",
+      "files_affected": [
+        "frontend/src/features/attendance/admin/AttendanceControlPage.tsx",
+        "frontend/src/features/attendance/admin/AttendanceSetupPage.tsx",
+        "frontend/src/features/admin/AdminDashboardPage.tsx",
+        "frontend/src/components/layout/Sidebar.tsx",
+        "frontend/src/lib/api.ts",
+        "frontend/src/App.tsx"
+      ],
+      "acceptance_criteria": "All sidebar items open the right view; posted/not-posted/edit/delete/remove-class/approvals work against the API. tsc + build pass; screenshots checked.",
+      "status": "pending",
+      "priority": "high",
+      "commit_msg": "feat(attendance): admin attendance control centre and Assign menu"
+    },
+    {
+      "id": "AT005",
+      "title": "Frontend: faculty take-attendance fixes + My Students view + late-post request",
+      "description": "(1) Not-posted list read a pendingSlots field the API never returns → flatten byDate[].pendingSlots, last 14 days. (2) existingSession picked the first session of the day for the subject regardless of period → match the timetable period. (3) Multi-hour classes: absent review counted 'missed any hour' but save stored 'attended any hour' → when hours differ, save one session per hour so what students/HOD see matches. (4) New 'My Students' tab: roster per allotted subject/section. (5) When the API says SEMESTER_LOCKED, offer 'Request admin approval'.",
+      "files_affected": [
+        "frontend/src/features/attendance/faculty/FacultyAttendancePage.tsx",
+        "frontend/src/lib/api.ts"
+      ],
+      "acceptance_criteria": "tsc + build pass; posting flow verified against mocked API.",
+      "status": "pending",
+      "priority": "high",
+      "commit_msg": "fix(attendance): faculty posting accuracy, not-posted list, My Students, late-post requests"
+    },
+    {
+      "id": "AT006",
+      "title": "Verify saved attendance reaches student and HOD views",
+      "description": "Trace student (/attendance/student/:roll, daywise) and HOD views against the session/record tables written by faculty; fix any mismatch (e.g. per-hour sessions counted correctly).",
+      "files_affected": [
+        "backend/src/handlers/api.ts",
+        "frontend/src/features/attendance/student/StudentAttendanceView.tsx",
+        "frontend/src/features/attendance/hod/HodAttendancePage.tsx"
+      ],
+      "acceptance_criteria": "Test: a posted session is reflected in student summary percentages.",
+      "status": "pending",
+      "priority": "medium",
+      "commit_msg": "test(attendance): posted sessions reflected in student and HOD views"
     }
   ]
 }

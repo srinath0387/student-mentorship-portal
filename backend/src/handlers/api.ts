@@ -9915,7 +9915,7 @@ app.delete('/attendance/sessions/:id', requireRole('faculty', 'hod', 'admin', 'c
 
     // Fetch session to verify ownership for faculty
     const sessRes = await db.query(
-      `SELECT s.id, a.faculty_email FROM attendance_sessions s
+      `SELECT s.id, a.faculty_email, a.department FROM attendance_sessions s
        JOIN subject_allotments a ON a.id = s.allotment_id
        WHERE s.id = $1`,
       [id]
@@ -10852,20 +10852,20 @@ app.get('/attendance/not-posted', requireRole('faculty', 'hod', 'coordinator', '
     }
 
     // Fetch holidays once
-    const holidayRes = await db.query(`SELECT date::text AS date, holiday_name FROM holiday_calendar WHERE date BETWEEN $1 AND $2`, [fromStr, toStr]);
+    const holidayRes = await db.query(`SELECT date::text AS date, title AS holiday_name FROM holiday_calendar WHERE date BETWEEN $1 AND $2`, [fromStr, toStr]);
     const holidays = new Set(holidayRes.rows.map((h: any) => h.date));
     const holidayNames: Record<string,string> = {};
     for (const h of holidayRes.rows) holidayNames[h.date] = h.holiday_name;
 
     // Fetch approved no-class requests in range
     const noClassRes = await db.query(
-      `SELECT date::text AS date, semester_label, section, subject_name, period_start, faculty_email
+      `SELECT date::text AS date, department, semester_label, section, subject_name, period_start, faculty_email
        FROM attendance_no_class_requests
        WHERE status = 'Approved' AND date BETWEEN $1 AND $2`,
       [fromStr, toStr]
     );
     const noClassSet = new Set(noClassRes.rows.map((r: any) =>
-      `${r.date}|${r.semester_label}|${r.section.toUpperCase()}|${r.subject_name.toLowerCase()}|${r.period_start}`
+      `${r.date}|${(r.department || '').toLowerCase().trim()}|${r.semester_label}|${(r.section || '').toUpperCase()}|${(r.subject_name || '').toLowerCase()}|${r.period_start}`
     ));
 
     // Build timetable filter condition
@@ -10922,10 +10922,11 @@ app.get('/attendance/not-posted', requireRole('faculty', 'hod', 'coordinator', '
       let postedCount = 0;
 
       for (const slot of timetableSlots.rows) {
-        const noClassKey = `${dateStr}|${slot.semester_label}|${(slot.section||'').toUpperCase()}|${(slot.subject_name||'').toLowerCase()}|${slot.period_start}`;
+        const noClassKey = `${dateStr}|${(slot.department||'').toLowerCase().trim()}|${slot.semester_label}|${(slot.section||'').toUpperCase()}|${(slot.subject_name||'').toLowerCase()}|${slot.period_start}`;
         if (noClassSet.has(noClassKey)) { postedCount++; continue; } // approved no-class = treated as resolved
 
         const posted = postedSessions.rows.some((sess: any) =>
+          (sess.department || '').toLowerCase().trim() === (slot.department || '').toLowerCase().trim() &&
           sess.semester_label === slot.semester_label &&
           (sess.section||'').toUpperCase() === (slot.section||'').toUpperCase() &&
           (sess.subject_name||'').toLowerCase() === (slot.subject_name||'').toLowerCase() &&
@@ -10970,7 +10971,7 @@ app.post('/attendance/no-class-request', requireRole('faculty', 'hod', 'admin'),
       return res.status(400).json({ error: 'Missing required fields' });
     }
     const facultyEmail = req.auth!.email.toLowerCase();
-    const facultyRes = await db.query(`SELECT faculty_name FROM faculty WHERE LOWER(email) = $1 LIMIT 1`, [facultyEmail]);
+    const facultyRes = await db.query(`SELECT name AS faculty_name FROM faculty WHERE LOWER(email) = $1 LIMIT 1`, [facultyEmail]);
     const facultyName = facultyRes.rows[0]?.faculty_name || req.auth!.email;
 
     await db.query(
