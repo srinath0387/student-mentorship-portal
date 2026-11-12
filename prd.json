@@ -54,6 +54,18 @@
       "status": "done",
       "priority": "high",
       "commit_msg": "feat(resume): route registration + student dashboard ATS card"
+    },
+    {
+      "id": "RB005",
+      "title": "Resume: Integrate LeetCode & GitHub synced coding profile stats into ATS templates and editor",
+      "description": "Auto-extract student LeetCode, GitHub, HackerRank, CodeChef, and GFG profile metrics from coding_profiles table. Auto-populate header links if missing. Add a dedicated Coding Profiles & Problem Solving section with problem breakdown (Easy/Med/Hard), contest rating, public repos, and star counts across Classic, Modern, and Minimal templates. Add a dedicated Coding Profiles live sync card in the editor.",
+      "files_affected": [
+        "frontend/src/features/resume/ResumeBuilderPage.tsx"
+      ],
+      "acceptance_criteria": "LeetCode and GitHub metrics render prominently in Classic, Modern, and Minimal templates. Links auto-populate. Build passes.",
+      "status": "done",
+      "priority": "high",
+      "commit_msg": "feat(resume): integrate LeetCode and GitHub stats into ATS templates and live sync editor"
     }
   ]
 }

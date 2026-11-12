@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import React, { useState, useEffect, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   FileText, Download, Save, Plus, Trash2, ChevronDown, ChevronUp,
-  CheckCircle, AlertCircle, XCircle, ExternalLink, Eye, Edit3,
-  Briefcase, Award, Code2, BookOpen, User, Link2, Star, Zap,
-  GraduationCap, Globe, Music, Users, RefreshCw
+  CheckCircle, AlertCircle, XCircle, Eye, Edit3,
+  Briefcase, Award, Code2, User, Link2, Star, Zap,
+  GraduationCap, Globe, Music, Users, RefreshCw, Trophy, Github, Check
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
@@ -19,6 +19,7 @@ interface ExtraCurr {
 }
 interface ResumeLinks {
   linkedin?: string; github?: string; portfolio?: string; leetcode?: string; hackerrank?: string;
+  codechef?: string; gfg?: string;
 }
 interface ResumeData {
   objective?: string;
@@ -27,6 +28,30 @@ interface ResumeData {
   hobbies?: string[];
   extra_curr?: ExtraCurr[];
   links?: ResumeLinks;
+  include_coding?: boolean;
+}
+
+interface CodingProfileRecord {
+  id?: string;
+  platform: string;
+  handle: string;
+  streak?: number;
+  repositories_count?: number;
+  commits_count?: number;
+  prs_merged?: number;
+  score_rating?: number;
+  easy_count?: number;
+  medium_count?: number;
+  hard_count?: number;
+  contest_rating?: number;
+  stars_count?: number;
+  top_language?: string;
+}
+
+// ─── Helpers to Extract Coding Stats ─────────────────────────────────────────
+function getPlatformProfile(profiles: CodingProfileRecord[] | undefined, name: string): CodingProfileRecord | undefined {
+  if (!profiles || !Array.isArray(profiles)) return undefined;
+  return profiles.find(p => p.platform?.toLowerCase() === name.toLowerCase());
 }
 
 // ─── ATS Score Calculator ─────────────────────────────────────────────────────
@@ -39,7 +64,18 @@ function calcATS(full: any, rd: ResumeData): number {
   if ((full?.internships?.length ?? 0) > 0 || (rd.extra_curr?.length ?? 0) > 0) score += 15;
   const hasAcademics = (full?.academics?.length ?? 0) > 0;
   if (hasAcademics) score += 10;
-  if ((full?.codingProfiles?.length ?? 0) > 0) score += 10;
+  
+  // Coding profiles score: LeetCode/GitHub synced profiles
+  const profiles: CodingProfileRecord[] = full?.codingProfiles || [];
+  const lc = getPlatformProfile(profiles, 'leetcode');
+  const gh = getPlatformProfile(profiles, 'github');
+  if (profiles.length > 0) {
+    let codingPoints = 5;
+    if ((lc?.score_rating ?? 0) > 0 || (lc?.easy_count ?? 0) + (lc?.medium_count ?? 0) > 0) codingPoints += 5;
+    if ((gh?.repositories_count ?? 0) > 0 || (gh?.streak ?? 0) > 0) codingPoints += 5;
+    score += Math.min(codingPoints, 15);
+  }
+
   if ((full?.achievements?.length ?? 0) > 0) score += 10;
   return Math.min(score, 100);
 }
@@ -134,30 +170,75 @@ export default function ResumeBuilderPage() {
 
   // Local editable state
   const [rd, setRd] = useState<ResumeData>({
-    objective: '', projects: [], languages: [], hobbies: [], extra_curr: [], links: {}
+    objective: '', projects: [], languages: [], hobbies: [], extra_curr: [], links: {}, include_coding: true
   });
   const [activeTemplate, setActiveTemplate] = useState<'classic' | 'modern' | 'minimal'>('classic');
   const [view, setView] = useState<'edit' | 'preview'>('edit');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [autofilledNotice, setAutofilledNotice] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
 
-  // Merge saved data when loaded
+  // Synced coding profiles
+  const codingProfiles: CodingProfileRecord[] = fullData?.codingProfiles || [];
+  const lcProfile = getPlatformProfile(codingProfiles, 'leetcode');
+  const ghProfile = getPlatformProfile(codingProfiles, 'github');
+  const hrProfile = getPlatformProfile(codingProfiles, 'hackerrank');
+  const ccProfile = getPlatformProfile(codingProfiles, 'codechef');
+  const gfgProfile = getPlatformProfile(codingProfiles, 'geeksforgeeks');
+  const cfProfile = getPlatformProfile(codingProfiles, 'codeforces');
+
+  // Autofill links helper from coding profiles
+  const autoPopulateLinks = (currentLinks: ResumeLinks = {}): ResumeLinks => {
+    const updated = { ...currentLinks };
+    if (!updated.github && ghProfile?.handle) {
+      updated.github = ghProfile.handle.startsWith('http') ? ghProfile.handle : `github.com/${ghProfile.handle}`;
+    }
+    if (!updated.leetcode && lcProfile?.handle) {
+      updated.leetcode = lcProfile.handle.startsWith('http') ? lcProfile.handle : `leetcode.com/${lcProfile.handle}`;
+    }
+    if (!updated.hackerrank && hrProfile?.handle) {
+      updated.hackerrank = hrProfile.handle.startsWith('http') ? hrProfile.handle : `hackerrank.com/${hrProfile.handle}`;
+    }
+    if (!updated.codechef && ccProfile?.handle) {
+      updated.codechef = ccProfile.handle.startsWith('http') ? ccProfile.handle : `codechef.com/users/${ccProfile.handle}`;
+    }
+    if (!updated.gfg && gfgProfile?.handle) {
+      updated.gfg = gfgProfile.handle.startsWith('http') ? gfgProfile.handle : `geeksforgeeks.org/user/${gfgProfile.handle}`;
+    }
+    return updated;
+  };
+
+  // Merge saved data when loaded & auto-populate missing GitHub/LeetCode links
   useEffect(() => {
     if (savedResumeData) {
+      const mergedLinks = autoPopulateLinks(savedResumeData.links || {});
       setRd({
         objective: savedResumeData.objective || '',
         projects: savedResumeData.projects || [],
         languages: savedResumeData.languages || [],
         hobbies: savedResumeData.hobbies || [],
         extra_curr: savedResumeData.extra_curr || [],
-        links: savedResumeData.links || {},
+        links: mergedLinks,
+        include_coding: savedResumeData.include_coding !== false,
       });
+    } else if (fullData) {
+      setRd(prev => ({
+        ...prev,
+        links: autoPopulateLinks(prev.links),
+      }));
     }
-  }, [savedResumeData]);
+  }, [savedResumeData, fullData]);
 
   const atsScore = calcATS(fullData, rd);
+
+  const handleManualAutofill = () => {
+    const newLinks = autoPopulateLinks(rd.links);
+    setRd(prev => ({ ...prev, links: newLinks }));
+    setAutofilledNotice(true);
+    setTimeout(() => setAutofilledNotice(false), 3000);
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -177,7 +258,6 @@ export default function ResumeBuilderPage() {
       const { default: html2canvas } = await import('html2canvas');
       const el = previewRef.current;
       if (!el) return;
-      // Switch to preview first
       setView('preview');
       await new Promise(r => setTimeout(r, 300));
       const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
@@ -237,6 +317,23 @@ export default function ResumeBuilderPage() {
 
     const baseStyle: React.CSSProperties = { fontFamily: 'Georgia, serif', background: '#fff', color: '#1a1a1a', padding: '32px', maxWidth: '794px', margin: '0 auto', fontSize: '11px', lineHeight: '1.5' };
 
+    // Resolve header links
+    const ghLink = rd.links?.github || (ghProfile?.handle ? `github.com/${ghProfile.handle}` : '');
+    const lcLink = rd.links?.leetcode || (lcProfile?.handle ? `leetcode.com/${lcProfile.handle}` : '');
+    const liLink = rd.links?.linkedin || '';
+    const portLink = rd.links?.portfolio || '';
+
+    // Check if we have active coding profiles to display
+    const hasCodingProfiles = rd.include_coding !== false && (
+      Boolean(lcProfile?.handle) ||
+      Boolean(ghProfile?.handle) ||
+      Boolean(ccProfile?.handle) ||
+      Boolean(hrProfile?.handle) ||
+      Boolean(gfgProfile?.handle) ||
+      Boolean(cfProfile?.handle)
+    );
+
+    // ─── 1. CLASSIC TEMPLATE ───────────────────────────────────────────────
     if (activeTemplate === 'classic') return (
       <div style={baseStyle}>
         {/* Header */}
@@ -245,11 +342,12 @@ export default function ResumeBuilderPage() {
           <div style={{ marginTop: '4px', fontSize: '10px', color: '#444' }}>
             {s.email} {s.phone ? `· ${s.phone}` : ''} {s.department ? `· ${s.department}` : ''}
           </div>
-          {rd.links && Object.values(rd.links).some(Boolean) && (
-            <div style={{ marginTop: '3px', fontSize: '10px', color: '#2563eb' }}>
-              {rd.links.linkedin && <span>LinkedIn: {rd.links.linkedin} </span>}
-              {rd.links.github && <span>· GitHub: {rd.links.github} </span>}
-              {rd.links.portfolio && <span>· Portfolio: {rd.links.portfolio}</span>}
+          {(liLink || ghLink || lcLink || portLink) && (
+            <div style={{ marginTop: '4px', fontSize: '10px', color: '#1d4ed8', display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '8px' }}>
+              {liLink && <span>LinkedIn: {liLink}</span>}
+              {ghLink && <span>GitHub: {ghLink}</span>}
+              {lcLink && <span>LeetCode: {lcLink}</span>}
+              {portLink && <span>Portfolio: {portLink}</span>}
             </div>
           )}
         </div>
@@ -257,13 +355,13 @@ export default function ResumeBuilderPage() {
         {/* Objective */}
         {rd.objective && (
           <div style={{ marginBottom: '12px' }}>
-            <h2 style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid #ccc', paddingBottom: '3px', marginBottom: '6px' }}>Objective</h2>
+            <h2 style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid #ccc', paddingBottom: '3px', marginBottom: '6px' }}>Professional Summary</h2>
             <p style={{ margin: 0 }}>{rd.objective}</p>
           </div>
         )}
 
         {/* Education */}
-        {fullData?.academics?.length > 0 && (
+        {(fullData?.academics?.length ?? 0) > 0 && (
           <div style={{ marginBottom: '12px' }}>
             <h2 style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid #ccc', paddingBottom: '3px', marginBottom: '6px' }}>Education</h2>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -272,7 +370,7 @@ export default function ResumeBuilderPage() {
                 <div style={{ color: '#555' }}>RGM College of Engineering & Technology</div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div>CGPA: {cgpa}</div>
+                <div>CGPA: <strong>{cgpa}</strong></div>
                 <div style={{ color: '#555' }}>Year {s.current_year || fullData.academics.length}</div>
               </div>
             </div>
@@ -280,10 +378,63 @@ export default function ResumeBuilderPage() {
         )}
 
         {/* Technical Skills */}
-        {fullData?.techSkills?.length > 0 && (
+        {(fullData?.techSkills?.length ?? 0) > 0 && (
           <div style={{ marginBottom: '12px' }}>
             <h2 style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid #ccc', paddingBottom: '3px', marginBottom: '6px' }}>Technical Skills</h2>
             <p style={{ margin: 0 }}>{fullData.techSkills.map((t: any) => t.skill_name).join(' · ')}</p>
+          </div>
+        )}
+
+        {/* Competitive Programming & Coding Profiles */}
+        {hasCodingProfiles && (
+          <div style={{ marginBottom: '12px' }}>
+            <h2 style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid #ccc', paddingBottom: '3px', marginBottom: '6px' }}>
+              Competitive Programming & Technical Profiles
+            </h2>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '4px' }}>
+              {lcProfile && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <span>
+                    <strong>LeetCode:</strong> @{lcProfile.handle} — <strong>{(lcProfile.score_rating ?? 0)}</strong> Problems Solved
+                    {((lcProfile.easy_count ?? 0) + (lcProfile.medium_count ?? 0) + (lcProfile.hard_count ?? 0) > 0) && (
+                      <span style={{ color: '#555' }}> ({lcProfile.easy_count ?? 0} Easy, {lcProfile.medium_count ?? 0} Med, {lcProfile.hard_count ?? 0} Hard)</span>
+                    )}
+                    {(lcProfile.contest_rating ?? 0) > 0 && (
+                      <span style={{ color: '#166534' }}> · Rating: {lcProfile.contest_rating}</span>
+                    )}
+                  </span>
+                  <span style={{ color: '#555', fontSize: '10px' }}>leetcode.com/{lcProfile.handle}</span>
+                </div>
+              )}
+              {ghProfile && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <span>
+                    <strong>GitHub:</strong> @{ghProfile.handle} — <strong>{(ghProfile.repositories_count ?? 0)}</strong> Public Repositories
+                    {(ghProfile.stars_count ?? 0) > 0 && <span> · {ghProfile.stars_count} Stars</span>}
+                    {(ghProfile.streak ?? 0) > 0 && <span style={{ color: '#c2410c' }}> · {ghProfile.streak}-Day Active Streak</span>}
+                  </span>
+                  <span style={{ color: '#555', fontSize: '10px' }}>github.com/{ghProfile.handle}</span>
+                </div>
+              )}
+              {ccProfile && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <span><strong>CodeChef:</strong> @{ccProfile.handle} {(ccProfile.contest_rating ?? 0) > 0 ? `· Rating: ${ccProfile.contest_rating}` : ''} {(ccProfile.stars_count ?? 0) > 0 ? `· ${ccProfile.stars_count}★` : ''}</span>
+                  <span style={{ color: '#555', fontSize: '10px' }}>codechef.com/users/{ccProfile.handle}</span>
+                </div>
+              )}
+              {hrProfile && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <span><strong>HackerRank:</strong> @{hrProfile.handle} {(hrProfile.score_rating ?? 0) > 0 ? `· Score: ${hrProfile.score_rating}` : ''}</span>
+                  <span style={{ color: '#555', fontSize: '10px' }}>hackerrank.com/{hrProfile.handle}</span>
+                </div>
+              )}
+              {gfgProfile && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <span><strong>GeeksforGeeks:</strong> @{gfgProfile.handle} {(gfgProfile.score_rating ?? 0) > 0 ? `· Problems: ${gfgProfile.score_rating}` : ''}</span>
+                  <span style={{ color: '#555', fontSize: '10px' }}>geeksforgeeks.org/user/{gfgProfile.handle}</span>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -297,18 +448,23 @@ export default function ResumeBuilderPage() {
                   <strong>{p.title || 'Project'}</strong>
                   {p.duration && <span style={{ color: '#555' }}>{p.duration}</span>}
                 </div>
-                {p.tech_stack?.length > 0 && <div style={{ color: '#555', fontSize: '10px' }}>Tech: {p.tech_stack.join(', ')}</div>}
+                {(p.tech_stack?.length ?? 0) > 0 && <div style={{ color: '#555', fontSize: '10px' }}>Tech Stack: {p.tech_stack.join(', ')}</div>}
                 {p.description && <p style={{ margin: '3px 0 0 0' }}>{p.description}</p>}
-                {(p.github_url || p.demo_url) && <div style={{ fontSize: '10px', color: '#2563eb' }}>{p.github_url && <span>GitHub: {p.github_url} </span>}{p.demo_url && <span>Demo: {p.demo_url}</span>}</div>}
+                {(p.github_url || p.demo_url) && (
+                  <div style={{ fontSize: '10px', color: '#1d4ed8', marginTop: '2px' }}>
+                    {p.github_url && <span>GitHub: {p.github_url} </span>}
+                    {p.demo_url && <span>· Demo: {p.demo_url}</span>}
+                  </div>
+                )}
               </div>
             ))}
           </div>
         )}
 
         {/* Internships */}
-        {fullData?.internships?.length > 0 && (
+        {(fullData?.internships?.length ?? 0) > 0 && (
           <div style={{ marginBottom: '12px' }}>
-            <h2 style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid #ccc', paddingBottom: '3px', marginBottom: '6px' }}>Internships / Work Experience</h2>
+            <h2 style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid #ccc', paddingBottom: '3px', marginBottom: '6px' }}>Internships & Experience</h2>
             {fullData.internships.map((i: any) => (
               <div key={i.id} style={{ marginBottom: '6px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -323,7 +479,7 @@ export default function ResumeBuilderPage() {
         )}
 
         {/* Certifications */}
-        {fullData?.certifications?.length > 0 && (
+        {(fullData?.certifications?.length ?? 0) > 0 && (
           <div style={{ marginBottom: '12px' }}>
             <h2 style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid #ccc', paddingBottom: '3px', marginBottom: '6px' }}>Certifications</h2>
             {fullData.certifications.slice(0, 5).map((c: any) => (
@@ -336,9 +492,9 @@ export default function ResumeBuilderPage() {
         )}
 
         {/* Achievements */}
-        {fullData?.achievements?.length > 0 && (
+        {(fullData?.achievements?.length ?? 0) > 0 && (
           <div style={{ marginBottom: '12px' }}>
-            <h2 style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid #ccc', paddingBottom: '3px', marginBottom: '6px' }}>Achievements</h2>
+            <h2 style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid #ccc', paddingBottom: '3px', marginBottom: '6px' }}>Achievements & Honors</h2>
             {fullData.achievements.slice(0, 4).map((a: any) => (
               <div key={a.id} style={{ marginBottom: '3px' }}>• <strong>{a.title}</strong>{a.description ? ` — ${a.description}` : ''}</div>
             ))}
@@ -363,7 +519,7 @@ export default function ResumeBuilderPage() {
               <p style={{ margin: 0 }}>{rd.languages?.join(' · ')}</p>
             </div>
           )}
-          {fullData?.softSkills?.length > 0 && (
+          {(fullData?.softSkills?.length ?? 0) > 0 && (
             <div style={{ flex: 1 }}>
               <h2 style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid #ccc', paddingBottom: '3px', marginBottom: '6px' }}>Soft Skills</h2>
               <p style={{ margin: 0 }}>{fullData.softSkills.map((s: any) => s.skill_name).join(' · ')}</p>
@@ -378,18 +534,10 @@ export default function ResumeBuilderPage() {
             <p style={{ margin: 0 }}>{rd.hobbies?.join(' · ')}</p>
           </div>
         )}
-
-        {/* Coding Profiles */}
-        {fullData?.codingProfiles?.length > 0 && (
-          <div style={{ marginTop: '10px' }}>
-            <h2 style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid #ccc', paddingBottom: '3px', marginBottom: '6px' }}>Coding Profiles</h2>
-            <div>{fullData.codingProfiles.map((c: any) => <span key={c.id} style={{ marginRight: '12px' }}><strong>{c.platform}:</strong> {c.username || c.profile_url}</span>)}</div>
-          </div>
-        )}
       </div>
     );
 
-    // Modern Template
+    // ─── 2. MODERN TEMPLATE ────────────────────────────────────────────────
     if (activeTemplate === 'modern') return (
       <div style={{ fontFamily: 'Arial, sans-serif', background: '#fff', color: '#1a1a1a', maxWidth: '794px', margin: '0 auto', fontSize: '11px', lineHeight: '1.5', display: 'flex' }}>
         {/* Left sidebar */}
@@ -402,42 +550,67 @@ export default function ResumeBuilderPage() {
             <div style={{ fontSize: '9px', color: '#94a3b8', marginTop: '2px' }}>{s.department}</div>
           </div>
 
+          {/* Contact */}
           <div style={{ marginBottom: '16px' }}>
-            <div style={{ fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', color: '#3b82f6', marginBottom: '6px' }}>Contact</div>
-            <div style={{ fontSize: '9.5px', color: '#cbd5e1' }}>{s.email}</div>
+            <div style={{ fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', color: '#60a5fa', marginBottom: '6px' }}>Contact</div>
+            <div style={{ fontSize: '9.5px', color: '#cbd5e1', wordBreak: 'break-all' }}>{s.email}</div>
             {s.phone && <div style={{ fontSize: '9.5px', color: '#cbd5e1', marginTop: '2px' }}>{s.phone}</div>}
-            {rd.links?.linkedin && <div style={{ fontSize: '9px', color: '#93c5fd', marginTop: '2px' }}>in/{rd.links.linkedin}</div>}
-            {rd.links?.github && <div style={{ fontSize: '9px', color: '#93c5fd', marginTop: '2px' }}>gh/{rd.links.github}</div>}
+            {liLink && <div style={{ fontSize: '9px', color: '#93c5fd', marginTop: '2px', wordBreak: 'break-all' }}>in/{liLink.replace(/https?:\/\/(www\.)?linkedin\.com\/in\//, '')}</div>}
+            {ghLink && <div style={{ fontSize: '9px', color: '#93c5fd', marginTop: '2px', wordBreak: 'break-all' }}>gh/{ghLink.replace(/https?:\/\/(www\.)?github\.com\//, '')}</div>}
+            {lcLink && <div style={{ fontSize: '9px', color: '#93c5fd', marginTop: '2px', wordBreak: 'break-all' }}>lc/{lcLink.replace(/https?:\/\/(www\.)?leetcode\.com\//, '')}</div>}
           </div>
 
-          {fullData?.techSkills?.length > 0 && (
+          {/* Coding Highlights Badge in Sidebar */}
+          {hasCodingProfiles && (
+            <div style={{ marginBottom: '16px', background: '#0f172a', padding: '8px', borderRadius: '8px', border: '1px solid #334155' }}>
+              <div style={{ fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', color: '#fbbf24', marginBottom: '6px' }}>Coding Stats</div>
+              {lcProfile && (
+                <div style={{ marginBottom: '4px', fontSize: '9.5px' }}>
+                  <span style={{ color: '#94a3b8' }}>LeetCode:</span> <strong style={{ color: '#4ade80' }}>{lcProfile.score_rating ?? 0}</strong> Solved
+                  {(lcProfile.contest_rating ?? 0) > 0 && <span style={{ color: '#94a3b8', fontSize: '8.5px' }}> · R: {lcProfile.contest_rating}</span>}
+                </div>
+              )}
+              {ghProfile && (
+                <div style={{ fontSize: '9.5px' }}>
+                  <span style={{ color: '#94a3b8' }}>GitHub:</span> <strong style={{ color: '#60a5fa' }}>{ghProfile.repositories_count ?? 0}</strong> Repos
+                  {(ghProfile.stars_count ?? 0) > 0 && <span style={{ color: '#fbbf24' }}> · ⭐{ghProfile.stars_count}</span>}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Technical Skills */}
+          {(fullData?.techSkills?.length ?? 0) > 0 && (
             <div style={{ marginBottom: '16px' }}>
-              <div style={{ fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', color: '#3b82f6', marginBottom: '6px' }}>Technical Skills</div>
+              <div style={{ fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', color: '#60a5fa', marginBottom: '6px' }}>Technical Skills</div>
               {fullData.techSkills.map((t: any) => (
                 <div key={t.id} style={{ background: '#334155', borderRadius: '4px', padding: '2px 6px', marginBottom: '3px', fontSize: '9.5px', color: '#e2e8f0' }}>{t.skill_name}</div>
               ))}
             </div>
           )}
 
-          {fullData?.softSkills?.length > 0 && (
+          {/* Soft Skills */}
+          {(fullData?.softSkills?.length ?? 0) > 0 && (
             <div style={{ marginBottom: '16px' }}>
-              <div style={{ fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', color: '#3b82f6', marginBottom: '6px' }}>Soft Skills</div>
+              <div style={{ fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', color: '#60a5fa', marginBottom: '6px' }}>Soft Skills</div>
               {fullData.softSkills.map((s: any) => (
                 <div key={s.id} style={{ fontSize: '9.5px', color: '#cbd5e1', marginBottom: '2px' }}>• {s.skill_name}</div>
               ))}
             </div>
           )}
 
+          {/* Languages */}
           {(rd.languages?.length ?? 0) > 0 && (
             <div style={{ marginBottom: '16px' }}>
-              <div style={{ fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', color: '#3b82f6', marginBottom: '6px' }}>Languages</div>
+              <div style={{ fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', color: '#60a5fa', marginBottom: '6px' }}>Languages</div>
               {rd.languages?.map(l => <div key={l} style={{ fontSize: '9.5px', color: '#cbd5e1', marginBottom: '2px' }}>• {l}</div>)}
             </div>
           )}
 
-          {fullData?.certifications?.length > 0 && (
+          {/* Certifications in sidebar */}
+          {(fullData?.certifications?.length ?? 0) > 0 && (
             <div>
-              <div style={{ fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', color: '#3b82f6', marginBottom: '6px' }}>Certifications</div>
+              <div style={{ fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', color: '#60a5fa', marginBottom: '6px' }}>Certifications</div>
               {fullData.certifications.slice(0, 4).map((c: any) => (
                 <div key={c.id} style={{ marginBottom: '4px' }}>
                   <div style={{ fontSize: '9.5px', color: '#e2e8f0' }}>{c.certification_name}</div>
@@ -457,7 +630,8 @@ export default function ResumeBuilderPage() {
             </div>
           )}
 
-          {fullData?.academics?.length > 0 && (
+          {/* Education */}
+          {(fullData?.academics?.length ?? 0) > 0 && (
             <div style={{ marginBottom: '16px' }}>
               <h2 style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '2px solid #3b82f6', paddingBottom: '3px', marginBottom: '8px' }}>Education</h2>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -467,6 +641,56 @@ export default function ResumeBuilderPage() {
             </div>
           )}
 
+          {/* Coding & Technical Profiles Section */}
+          {hasCodingProfiles && (
+            <div style={{ marginBottom: '16px' }}>
+              <h2 style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '2px solid #3b82f6', paddingBottom: '3px', marginBottom: '8px' }}>
+                Competitive Programming & Profiles
+              </h2>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '6px' }}>
+                {lcProfile && (
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '6px 8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <strong style={{ color: '#0f172a' }}>LeetCode (@{lcProfile.handle})</strong>
+                      <span style={{ color: '#2563eb', fontSize: '10px' }}>leetcode.com/{lcProfile.handle}</span>
+                    </div>
+                    <div style={{ marginTop: '2px', color: '#475569', fontSize: '10.5px' }}>
+                      <strong>{lcProfile.score_rating ?? 0} Problems Solved</strong>
+                      {((lcProfile.easy_count ?? 0) + (lcProfile.medium_count ?? 0) + (lcProfile.hard_count ?? 0) > 0) && (
+                        <span> — <span style={{ color: '#16a34a' }}>{lcProfile.easy_count ?? 0} Easy</span> · <span style={{ color: '#ea580c' }}>{lcProfile.medium_count ?? 0} Med</span> · <span style={{ color: '#dc2626' }}>{lcProfile.hard_count ?? 0} Hard</span></span>
+                      )}
+                      {(lcProfile.contest_rating ?? 0) > 0 && <span style={{ color: '#059669', fontWeight: 600 }}> · Contest Rating: {lcProfile.contest_rating}</span>}
+                    </div>
+                  </div>
+                )}
+                {ghProfile && (
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '6px 8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <strong style={{ color: '#0f172a' }}>GitHub (@{ghProfile.handle})</strong>
+                      <span style={{ color: '#2563eb', fontSize: '10px' }}>github.com/{ghProfile.handle}</span>
+                    </div>
+                    <div style={{ marginTop: '2px', color: '#475569', fontSize: '10.5px' }}>
+                      <strong>{ghProfile.repositories_count ?? 0} Public Repositories</strong>
+                      {(ghProfile.stars_count ?? 0) > 0 && <span> · {ghProfile.stars_count} Stars</span>}
+                      {(ghProfile.streak ?? 0) > 0 && <span style={{ color: '#ea580c' }}> · {ghProfile.streak}-Day Active Streak</span>}
+                    </div>
+                  </div>
+                )}
+                {ccProfile && (
+                  <div style={{ fontSize: '10.5px', color: '#334155' }}>
+                    • <strong>CodeChef:</strong> @{ccProfile.handle} {(ccProfile.contest_rating ?? 0) > 0 ? `· Rating: ${ccProfile.contest_rating}` : ''} {(ccProfile.stars_count ?? 0) > 0 ? `· ${ccProfile.stars_count}★` : ''}
+                  </div>
+                )}
+                {hrProfile && (
+                  <div style={{ fontSize: '10.5px', color: '#334155' }}>
+                    • <strong>HackerRank:</strong> @{hrProfile.handle} {(hrProfile.score_rating ?? 0) > 0 ? `· Score: ${hrProfile.score_rating}` : ''}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Projects */}
           {(rd.projects?.length ?? 0) > 0 && (
             <div style={{ marginBottom: '16px' }}>
               <h2 style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '2px solid #3b82f6', paddingBottom: '3px', marginBottom: '8px' }}>Projects</h2>
@@ -476,16 +700,17 @@ export default function ResumeBuilderPage() {
                     <strong style={{ color: '#1e293b' }}>{p.title}</strong>
                     {p.duration && <span style={{ color: '#6b7280', fontSize: '10px' }}>{p.duration}</span>}
                   </div>
-                  {p.tech_stack?.length > 0 && <div style={{ color: '#3b82f6', fontSize: '10px', marginTop: '1px' }}>Stack: {p.tech_stack.join(', ')}</div>}
+                  {(p.tech_stack?.length ?? 0) > 0 && <div style={{ color: '#3b82f6', fontSize: '10px', marginTop: '1px' }}>Stack: {p.tech_stack.join(', ')}</div>}
                   {p.description && <p style={{ margin: '3px 0 0 0', color: '#374151' }}>{p.description}</p>}
                 </div>
               ))}
             </div>
           )}
 
-          {fullData?.internships?.length > 0 && (
+          {/* Internships */}
+          {(fullData?.internships?.length ?? 0) > 0 && (
             <div style={{ marginBottom: '16px' }}>
-              <h2 style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '2px solid #3b82f6', paddingBottom: '3px', marginBottom: '8px' }}>Experience</h2>
+              <h2 style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '2px solid #3b82f6', paddingBottom: '3px', marginBottom: '8px' }}>Experience & Internships</h2>
               {fullData.internships.map((i: any) => (
                 <div key={i.id} style={{ marginBottom: '8px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}><strong>{i.company_name}</strong><span style={{ color: '#6b7280', fontSize: '10px' }}>{i.start_date?.slice(0,7)} – {i.end_date?.slice(0,7) || 'Present'}</span></div>
@@ -496,7 +721,8 @@ export default function ResumeBuilderPage() {
             </div>
           )}
 
-          {fullData?.achievements?.length > 0 && (
+          {/* Achievements */}
+          {(fullData?.achievements?.length ?? 0) > 0 && (
             <div style={{ marginBottom: '16px' }}>
               <h2 style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '2px solid #3b82f6', paddingBottom: '3px', marginBottom: '8px' }}>Achievements</h2>
               {fullData.achievements.slice(0, 4).map((a: any) => (
@@ -505,6 +731,7 @@ export default function ResumeBuilderPage() {
             </div>
           )}
 
+          {/* Extra-curricular */}
           {(rd.extra_curr?.length ?? 0) > 0 && (
             <div>
               <h2 style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '2px solid #3b82f6', paddingBottom: '3px', marginBottom: '8px' }}>Extra-Curricular</h2>
@@ -515,29 +742,62 @@ export default function ResumeBuilderPage() {
       </div>
     );
 
-    // Minimal Template
+    // ─── 3. MINIMAL TEMPLATE ───────────────────────────────────────────────
     return (
       <div style={{ fontFamily: '"Helvetica Neue", Helvetica, Arial, sans-serif', background: '#fff', color: '#111', maxWidth: '794px', margin: '0 auto', fontSize: '11px', lineHeight: '1.6', padding: '36px 48px' }}>
         <div style={{ borderBottom: '1.5px solid #111', paddingBottom: '10px', marginBottom: '16px' }}>
           <h1 style={{ fontSize: '20px', fontWeight: 300, margin: 0, letterSpacing: '3px', textTransform: 'uppercase' }}>{s.name}</h1>
-          <div style={{ marginTop: '4px', fontSize: '10px', color: '#555', letterSpacing: '0.5px' }}>
-            {[s.email, s.phone, rd.links?.linkedin && `linkedin.com/in/${rd.links.linkedin}`, rd.links?.github && `github.com/${rd.links.github}`].filter(Boolean).join('  |  ')}
+          <div style={{ marginTop: '4px', fontSize: '10px', color: '#555', letterSpacing: '0.5px', display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+            <span>{s.email}</span>
+            {s.phone && <span>{s.phone}</span>}
+            {liLink && <span>{liLink}</span>}
+            {ghLink && <span>{ghLink}</span>}
+            {lcLink && <span>{lcLink}</span>}
           </div>
         </div>
 
         {rd.objective && <><div style={{ fontSize: '9px', fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase', color: '#777', marginBottom: '4px' }}>Summary</div><p style={{ margin: '0 0 14px 0' }}>{rd.objective}</p></>}
 
-        {fullData?.academics?.length > 0 && (<>
+        {(fullData?.academics?.length ?? 0) > 0 && (<>
           <div style={{ fontSize: '9px', fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase', color: '#777', marginBottom: '4px' }}>Education</div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px' }}>
             <div><strong>{s.programme || 'B.Tech'}, {s.department}</strong> · RGM College of Engineering & Technology</div>
-            <div>CGPA: {cgpa}</div>
+            <div>CGPA: <strong>{cgpa}</strong></div>
           </div>
         </>)}
 
-        {fullData?.techSkills?.length > 0 && (<>
-          <div style={{ fontSize: '9px', fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase', color: '#777', marginBottom: '4px' }}>Skills</div>
+        {(fullData?.techSkills?.length ?? 0) > 0 && (<>
+          <div style={{ fontSize: '9px', fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase', color: '#777', marginBottom: '4px' }}>Technical Skills</div>
           <p style={{ margin: '0 0 14px 0' }}>{fullData.techSkills.map((t: any) => t.skill_name).join('  ·  ')}</p>
+        </>)}
+
+        {/* Coding Profiles & Problem Solving (ATS format) */}
+        {hasCodingProfiles && (<>
+          <div style={{ fontSize: '9px', fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase', color: '#777', marginBottom: '6px' }}>Competitive Programming & Profiles</div>
+          <div style={{ marginBottom: '14px', lineHeight: '1.7' }}>
+            {lcProfile && (
+              <div>
+                • <strong>LeetCode:</strong> leetcode.com/{lcProfile.handle} — <strong>{lcProfile.score_rating ?? 0}</strong> problems solved
+                {((lcProfile.easy_count ?? 0) + (lcProfile.medium_count ?? 0) + (lcProfile.hard_count ?? 0) > 0) && (
+                  <span> ({lcProfile.easy_count ?? 0} Easy, {lcProfile.medium_count ?? 0} Medium, {lcProfile.hard_count ?? 0} Hard)</span>
+                )}
+                {(lcProfile.contest_rating ?? 0) > 0 && <span>, Contest Rating {lcProfile.contest_rating}</span>}
+              </div>
+            )}
+            {ghProfile && (
+              <div>
+                • <strong>GitHub:</strong> github.com/{ghProfile.handle} — <strong>{ghProfile.repositories_count ?? 0}</strong> public repositories
+                {(ghProfile.stars_count ?? 0) > 0 && <span>, {ghProfile.stars_count} stars</span>}
+                {(ghProfile.streak ?? 0) > 0 && <span>, {ghProfile.streak}-day active commit streak</span>}
+              </div>
+            )}
+            {ccProfile && (
+              <div>• <strong>CodeChef:</strong> codechef.com/users/{ccProfile.handle} {(ccProfile.contest_rating ?? 0) > 0 ? `— Rating ${ccProfile.contest_rating}` : ''}</div>
+            )}
+            {hrProfile && (
+              <div>• <strong>HackerRank:</strong> hackerrank.com/{hrProfile.handle} {(hrProfile.score_rating ?? 0) > 0 ? `— Score ${hrProfile.score_rating}` : ''}</div>
+            )}
+          </div>
         </>)}
 
         {(rd.projects?.length ?? 0) > 0 && (<>
@@ -545,14 +805,14 @@ export default function ResumeBuilderPage() {
           {rd.projects?.map((p, i) => (
             <div key={p.id} style={{ marginBottom: i < (rd.projects?.length ?? 0) - 1 ? '10px' : '14px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><strong>{p.title}</strong>{p.duration && <span style={{ color: '#666' }}>{p.duration}</span>}</div>
-              {p.tech_stack?.length > 0 && <div style={{ color: '#555', fontSize: '10px' }}>Tech: {p.tech_stack.join(', ')}</div>}
+              {(p.tech_stack?.length ?? 0) > 0 && <div style={{ color: '#555', fontSize: '10px' }}>Tech: {p.tech_stack.join(', ')}</div>}
               {p.description && <div style={{ marginTop: '2px' }}>{p.description}</div>}
             </div>
           ))}
         </>)}
 
-        {fullData?.internships?.length > 0 && (<>
-          <div style={{ fontSize: '9px', fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase', color: '#777', marginBottom: '6px' }}>Experience</div>
+        {(fullData?.internships?.length ?? 0) > 0 && (<>
+          <div style={{ fontSize: '9px', fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase', color: '#777', marginBottom: '6px' }}>Experience & Internships</div>
           {fullData.internships.map((i: any, idx: number) => (
             <div key={i.id} style={{ marginBottom: idx < fullData.internships.length - 1 ? '10px' : '14px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><strong>{i.company_name}</strong><span style={{ color: '#666' }}>{i.start_date?.slice(0,7)} – {i.end_date?.slice(0,7) || 'Present'}</span></div>
@@ -561,7 +821,7 @@ export default function ResumeBuilderPage() {
           ))}
         </>)}
 
-        {fullData?.certifications?.length > 0 && (<>
+        {(fullData?.certifications?.length ?? 0) > 0 && (<>
           <div style={{ fontSize: '9px', fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase', color: '#777', marginBottom: '6px' }}>Certifications</div>
           {fullData.certifications.slice(0, 5).map((c: any) => (
             <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
@@ -572,7 +832,7 @@ export default function ResumeBuilderPage() {
           <div style={{ height: '10px' }} />
         </>)}
 
-        {fullData?.achievements?.length > 0 && (<>
+        {(fullData?.achievements?.length ?? 0) > 0 && (<>
           <div style={{ fontSize: '9px', fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase', color: '#777', marginBottom: '6px' }}>Achievements</div>
           {fullData.achievements.slice(0, 4).map((a: any) => <div key={a.id} style={{ marginBottom: '3px' }}>— {a.title}{a.description ? `: ${a.description}` : ''}</div>)}
           <div style={{ height: '10px' }} />
@@ -592,7 +852,7 @@ export default function ResumeBuilderPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-black text-textPrimary flex items-center gap-2"><FileText className="w-5 h-5 text-brand-primary" /> Resume Builder</h1>
-          <p className="text-xs text-textMuted mt-0.5">Build a professional, ATS-optimized resume — auto-filled from your profile data.</p>
+          <p className="text-xs text-textMuted mt-0.5">Build a professional, ATS-optimized resume — auto-filled from your profile and live coding stats.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <ATSBadge score={atsScore} />
@@ -609,8 +869,8 @@ export default function ResumeBuilderPage() {
       </div>
 
       {/* ATS Tips bar */}
-      <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-xs text-amber-800">
-        <strong>ATS Tips:</strong> Use keywords from job descriptions · Avoid tables in PDF · Keep skills quantified (e.g. "React, 2 yrs") · Certifications boost ATS by ~15 pts · Add projects and internships for best results.
+      <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl px-4 py-3 text-xs text-amber-700 dark:text-amber-300">
+        <strong>ATS Tips:</strong> Technical recruiters prioritize resumes with verified <strong>LeetCode problem counts</strong> and <strong>GitHub project links</strong>. Keep descriptions quantified with impact metrics.
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -625,11 +885,103 @@ export default function ResumeBuilderPage() {
                   <button key={t} onClick={() => setActiveTemplate(t)}
                     className={`py-3 px-2 rounded-xl border-2 text-xs font-bold capitalize transition-all ${activeTemplate === t ? 'border-brand-primary bg-brand-soft text-brand-primary' : 'border-borderLine text-textSecondary hover:border-brand-primary/40'}`}>
                     {t === 'classic' ? '📄 Classic' : t === 'modern' ? '🎨 Modern' : '✨ Minimal'}
-                    <div className="text-[9px] font-normal mt-0.5 opacity-70">{t === 'classic' ? 'ATS #1' : t === 'modern' ? 'Two-col' : 'Ultra-clean'}</div>
+                    <div className="text-[9px] font-normal mt-0.5 opacity-70">{t === 'classic' ? 'ATS #1 Standard' : t === 'modern' ? 'Two-Column UI' : 'Ultra-Clean Tech'}</div>
                   </button>
                 ))}
               </div>
             </div>
+
+            {/* Competitive Programming & Coding Profiles Sync */}
+            <Section title="Coding Profiles & Stats (LeetCode & GitHub)" icon={Trophy} tip="💡 Synced from your departmental coding profiles. These stats provide proof of hands-on technical competence for ATS screening.">
+              <div className="mt-3 space-y-3">
+                <div className="flex items-center justify-between p-2.5 bg-surface-2 border border-borderLine rounded-xl">
+                  <span className="text-xs font-bold text-textPrimary">Show Coding Profiles on Resume</span>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={rd.include_coding !== false}
+                      onChange={e => setRd(r => ({ ...r, include_coding: e.target.checked }))}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-borderLine peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-brand-primary"></div>
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {/* LeetCode Card */}
+                  <div className="bg-surface-2 border border-borderLine rounded-xl p-3 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-amber-500 flex items-center gap-1.5">
+                        <Code2 className="w-3.5 h-3.5" /> LeetCode
+                      </span>
+                      {lcProfile ? (
+                        <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Connected</span>
+                      ) : (
+                        <span className="text-[10px] text-textMuted">Not set</span>
+                      )}
+                    </div>
+                    {lcProfile ? (
+                      <div className="text-xs space-y-1">
+                        <p className="font-semibold text-textPrimary">@{lcProfile.handle}</p>
+                        <p className="text-textSecondary">
+                          Solved: <strong className="text-brand-primary">{lcProfile.score_rating ?? 0}</strong>
+                          {((lcProfile.easy_count ?? 0) + (lcProfile.medium_count ?? 0) + (lcProfile.hard_count ?? 0) > 0) && (
+                            <span className="text-[11px] text-textMuted"> ({lcProfile.easy_count ?? 0}E, {lcProfile.medium_count ?? 0}M, {lcProfile.hard_count ?? 0}H)</span>
+                          )}
+                        </p>
+                        {(lcProfile.contest_rating ?? 0) > 0 && (
+                          <p className="text-[11px] text-emerald-600 font-medium">Contest Rating: {lcProfile.contest_rating}</p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-textMuted">Add your LeetCode handle in Profile → Coding Profiles.</p>
+                    )}
+                  </div>
+
+                  {/* GitHub Card */}
+                  <div className="bg-surface-2 border border-borderLine rounded-xl p-3 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-textPrimary flex items-center gap-1.5">
+                        <Github className="w-3.5 h-3.5" /> GitHub
+                      </span>
+                      {ghProfile ? (
+                        <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Connected</span>
+                      ) : (
+                        <span className="text-[10px] text-textMuted">Not set</span>
+                      )}
+                    </div>
+                    {ghProfile ? (
+                      <div className="text-xs space-y-1">
+                        <p className="font-semibold text-textPrimary">@{ghProfile.handle}</p>
+                        <p className="text-textSecondary">
+                          Public Repos: <strong className="text-brand-primary">{ghProfile.repositories_count ?? 0}</strong>
+                        </p>
+                        {(ghProfile.stars_count ?? 0) > 0 && (
+                          <p className="text-[11px] text-amber-500 font-medium">⭐ {ghProfile.stars_count} Stars</p>
+                        )}
+                        {(ghProfile.streak ?? 0) > 0 && (
+                          <p className="text-[11px] text-orange-500 font-medium">🔥 {ghProfile.streak}-Day Streak</p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-textMuted">Add your GitHub handle in Profile → Coding Profiles.</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Additional coding handles */}
+                {(ccProfile || hrProfile || gfgProfile) && (
+                  <div className="p-2.5 bg-surface-2 border border-borderLine rounded-xl text-xs space-y-1">
+                    <span className="text-[11px] font-bold text-textMuted uppercase tracking-wider">Other Synced Profiles:</span>
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {ccProfile && <span className="px-2 py-0.5 bg-surface border border-borderLine rounded-md text-[11px]">CodeChef: <strong>@{ccProfile.handle}</strong></span>}
+                      {hrProfile && <span className="px-2 py-0.5 bg-surface border border-borderLine rounded-md text-[11px]">HackerRank: <strong>@{hrProfile.handle}</strong></span>}
+                      {gfgProfile && <span className="px-2 py-0.5 bg-surface border border-borderLine rounded-md text-[11px]">GFG: <strong>@{gfgProfile.handle}</strong></span>}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </Section>
 
             {/* Objective */}
             <Section title="Professional Summary / Objective" icon={User} tip="💡 ATS Tip: 2-3 sentences. Include your target role, top skills, and years of experience.">
@@ -640,21 +992,38 @@ export default function ResumeBuilderPage() {
                 placeholder="A motivated B.Tech CSE student with expertise in React, Node.js, and cloud development. Seeking to leverage 2+ internship experiences to contribute to innovative software teams…"
                 className="w-full mt-3 px-3 py-2 text-xs bg-surface border border-borderLine rounded-xl focus:outline-none focus:ring-1 focus:ring-brand-primary resize-none"
               />
-              <div className={`text-[10px] mt-1 text-right ${rd.objective && rd.objective.length > 30 ? 'text-green-600' : 'text-textMuted'}`}>
-                {rd.objective?.length || 0} chars {rd.objective && rd.objective.length > 30 ? '✓' : '(aim for 100+)'}
+              <div className={`text-[10px] mt-1 text-right ${(rd.objective?.length ?? 0) > 30 ? 'text-green-600 font-semibold' : 'text-textMuted'}`}>
+                {rd.objective?.length || 0} chars {(rd.objective?.length ?? 0) > 30 ? '✓' : '(aim for 100+)'}
               </div>
             </Section>
 
-            {/* Links */}
-            <Section title="Profile Links" icon={Link2}>
-              <div className="mt-3 space-y-2">
-                {(['linkedin', 'github', 'portfolio', 'leetcode', 'hackerrank'] as const).map(key => (
+            {/* Profile Links */}
+            <Section title="Profile Links" icon={Link2} tip="💡 Links are auto-populated from your coding profiles and displayed in the resume header.">
+              <div className="mt-2 mb-3 flex items-center justify-between">
+                <span className="text-xs text-textMuted">Contact Links</span>
+                <button
+                  type="button"
+                  onClick={handleManualAutofill}
+                  className="flex items-center gap-1 text-[11px] font-bold text-brand-primary hover:underline"
+                >
+                  <RefreshCw className="w-3 h-3" /> Auto-fill from coding profiles
+                </button>
+              </div>
+
+              {autofilledNotice && (
+                <div className="mb-3 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 rounded-lg text-xs flex items-center gap-1.5">
+                  <Check className="w-3.5 h-3.5" /> Links auto-filled from your coding profiles!
+                </div>
+              )}
+
+              <div className="space-y-2">
+                {(['linkedin', 'github', 'leetcode', 'portfolio', 'hackerrank'] as const).map(key => (
                   <div key={key} className="flex items-center gap-2">
                     <span className="text-xs text-textMuted w-24 capitalize">{key}</span>
                     <input
                       value={rd.links?.[key] || ''}
                       onChange={e => setRd(r => ({ ...r, links: { ...r.links, [key]: e.target.value } }))}
-                      placeholder={key === 'linkedin' ? 'username or full URL' : key === 'github' ? 'github.com/username' : 'https://…'}
+                      placeholder={key === 'linkedin' ? 'linkedin.com/in/username' : key === 'github' ? 'github.com/username' : key === 'leetcode' ? 'leetcode.com/username' : 'https://…'}
                       className="flex-1 px-3 py-1.5 text-xs bg-surface border border-borderLine rounded-xl focus:outline-none focus:ring-1 focus:ring-brand-primary"
                     />
                   </div>
@@ -719,10 +1088,11 @@ export default function ResumeBuilderPage() {
 
             {/* Auto-filled sections notice */}
             <div className="bg-surface border border-borderLine rounded-2xl p-4 space-y-2">
-              <p className="text-xs font-bold text-textPrimary">Auto-filled from your Profile ✓</p>
+              <p className="text-xs font-bold text-textPrimary">Auto-filled from your Profile & Stats ✓</p>
               <div className="grid grid-cols-2 gap-2">
                 {[
                   { label: 'Technical Skills', count: fullData?.techSkills?.length, icon: Code2 },
+                  { label: 'Coding Profiles', count: codingProfiles.length, icon: Trophy },
                   { label: 'Certifications', count: fullData?.certifications?.length, icon: Award },
                   { label: 'Achievements', count: fullData?.achievements?.length, icon: Star },
                   { label: 'Soft Skills', count: fullData?.softSkills?.length, icon: Zap },
@@ -736,7 +1106,7 @@ export default function ResumeBuilderPage() {
                   </div>
                 ))}
               </div>
-              <p className="text-[10px] text-textMuted">Go to your <strong>Profile</strong> page to add skills, certifications, achievements, and more.</p>
+              <p className="text-[10px] text-textMuted">Data syncs in real-time from the department database.</p>
             </div>
           </div>
         )}
@@ -746,9 +1116,9 @@ export default function ResumeBuilderPage() {
           <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-borderLine">
               <span className="text-xs font-bold text-textPrimary">Live Preview — {activeTemplate.charAt(0).toUpperCase() + activeTemplate.slice(1)} Template</span>
-              <span className="text-[10px] text-textMuted bg-surface-2 px-2 py-1 rounded-lg">A4 · PDF-ready</span>
+              <span className="text-[10px] text-textMuted bg-surface-2 px-2 py-1 rounded-lg">A4 · ATS-Optimized</span>
             </div>
-            <div className="overflow-auto max-h-[800px]" ref={previewRef} style={{ background: '#fff' }}>
+            <div className="overflow-auto max-h-[850px]" ref={previewRef} style={{ background: '#fff' }}>
               <ResumePreview />
             </div>
           </div>
