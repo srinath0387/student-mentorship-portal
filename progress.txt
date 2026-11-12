@@ -50,3 +50,4 @@
 [2026-11-12 14:37] FT002 → done: monthly report API + printable page. 125 tests pass, builds ✓, screen + PDF checked. Committed 7e1ffe8.
 [2026-11-12 14:41] FT003 → done: anonymous feedback (cycles, submit, summaries, page). 128 tests pass, builds ✓, screenshots checked. Committed 7e78b13.
 [2026-11-12 14:44] FT004 → done: placement drives (eligibility, funnel, student apply). 131 tests pass, builds ✓, screenshot checked. Committed b22a0cf.
+[2026-11-12 15:53] FT005 → done: appraisal workflow + snapshot, API score refactor. 134 tests pass, builds ✓, screenshot checked. Committed 0753eff.
