@@ -89,7 +89,7 @@
         "backend/tests/smoke/attendance.test.ts"
       ],
       "acceptance_criteria": "Posting after the semester end returns 423 with code SEMESTER_LOCKED; posting is allowed after approval; admin bypasses. Tests pass.",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "commit_msg": "feat(attendance): lock posting outside the academic calendar until admin approval"
     },

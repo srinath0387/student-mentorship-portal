@@ -9666,6 +9666,54 @@ app.get('/attendance/my-subjects', requireRole('faculty', 'hod', 'admin', 'coord
 });
 
 /// 7. Save Attendance Session + Records (Faculty, HOD, Admin, Coordinator only — NOT students)
+// ============================================================================
+// Academic-calendar posting window
+// When the admin has configured semester dates (academic_calendar), attendance can only be
+// posted for dates inside a semester. Outside every semester (e.g. after the end date) faculty
+// and HODs need an admin-approved late-posting request for that class + date. Admins are never
+// blocked, and with no calendar configured nothing is locked.
+// ============================================================================
+async function ensureLatePostTable(): Promise<void> {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS attendance_late_post_requests (
+      id             SERIAL PRIMARY KEY,
+      allotment_id   TEXT NOT NULL,
+      session_date   DATE NOT NULL,
+      faculty_email  TEXT NOT NULL,
+      faculty_name   TEXT,
+      department     TEXT,
+      semester_label TEXT,
+      section        TEXT,
+      subject_name   TEXT,
+      reason         TEXT,
+      status         TEXT NOT NULL DEFAULT 'Pending',
+      reviewed_by    TEXT,
+      reviewed_at    TIMESTAMPTZ,
+      reject_reason  TEXT,
+      created_at     TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE (allotment_id, session_date)
+    )
+  `);
+}
+
+interface PostingWindow { locked: boolean; configured: boolean; message?: string; semester?: any }
+
+async function getPostingWindow(dateStr: string): Promise<PostingWindow> {
+  let rows: any[] = [];
+  try {
+    const r = await db.query(`SELECT academic_year, semester, start_date::text AS start_date, end_date::text AS end_date FROM academic_calendar ORDER BY end_date DESC`);
+    rows = r.rows || [];
+  } catch { rows = []; }
+  if (rows.length === 0) return { locked: false, configured: false };
+  const inside = rows.find((c: any) => c.start_date <= dateStr && dateStr <= c.end_date);
+  if (inside) return { locked: false, configured: true, semester: inside };
+  const ended = rows.find((c: any) => c.end_date < dateStr);
+  const message = ended
+    ? `${dateStr} is after the end of ${ended.academic_year} semester ${ended.semester} (ended ${ended.end_date}). Attendance can be posted only after admin approval.`
+    : `${dateStr} is outside the academic calendar. Attendance can be posted only after admin approval.`;
+  return { locked: true, configured: true, message, semester: ended || null };
+}
+
 app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { allotment_id, session_date, num_periods, period_start, records } = req.body;
@@ -9708,8 +9756,30 @@ app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordin
       });
     }
 
-    const recordedBy = req.auth?.email?.toLowerCase() || allotment.faculty_email;
+    // 2. Academic-calendar window — outside the semester requires an approved late-posting request
+    if (req.auth?.role !== 'admin') {
+      const win = await getPostingWindow(String(session_date).slice(0, 10));
+      if (win.locked) {
+        let requestStatus: string | null = null;
+        try {
+          await ensureLatePostTable();
+          const lr = await db.query(
+            `SELECT status FROM attendance_late_post_requests WHERE allotment_id = $1 AND session_date = $2 LIMIT 1`,
+            [String(allotment_id), session_date]
+          );
+          requestStatus = lr.rows[0]?.status || null;
+        } catch { requestStatus = null; }
+        if (requestStatus !== 'Approved') {
+          return res.status(423).json({
+            code: 'SEMESTER_LOCKED',
+            error: win.message,
+            request_status: requestStatus ? requestStatus.toLowerCase() : 'none',
+          });
+        }
+      }
+    }
 
+    const recordedBy = req.auth?.email?.toLowerCase() || allotment.faculty_email;
 
     // Check if session already exists for this slot
     const existing = await db.query(
@@ -10958,6 +11028,83 @@ app.get('/attendance/not-posted', requireRole('faculty', 'hod', 'coordinator', '
       summary: { total_scheduled: totalScheduled, total_posted: totalPosted, total_pending: totalPending },
       byDate,
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /attendance/posting-window?date=YYYY-MM-DD — is posting open for this date?
+app.get('/attendance/posting-window', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const dateStr = String(req.query.date || new Date().toISOString().split('T')[0]).slice(0, 10);
+    const win = await getPostingWindow(dateStr);
+    res.json({ date: dateStr, ...win, locked: req.auth?.role === 'admin' ? false : win.locked });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /attendance/late-post-requests — faculty/HOD ask the admin to allow posting outside the semester
+app.post('/attendance/late-post-requests', requireRole('faculty', 'hod'), async (req: Request, res: Response) => {
+  try {
+    const { allotment_id, session_date, reason } = req.body || {};
+    if (!allotment_id || !session_date) return res.status(400).json({ error: 'allotment_id and session_date are required' });
+    const allotRes = await db.query('SELECT * FROM subject_allotments WHERE id = $1', [allotment_id]);
+    const allot = allotRes.rows[0];
+    if (!allot) return res.status(404).json({ error: 'Subject allotment not found' });
+    const email = req.auth!.email.toLowerCase();
+    if (req.auth!.role === 'faculty' && String(allot.faculty_email || '').toLowerCase() !== email) {
+      return res.status(403).json({ error: 'You can only request for subjects you handle.' });
+    }
+    await ensureLatePostTable();
+    await db.query(
+      `INSERT INTO attendance_late_post_requests
+         (allotment_id, session_date, faculty_email, faculty_name, department, semester_label, section, subject_name, reason, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Pending')
+       ON CONFLICT (allotment_id, session_date) DO UPDATE
+         SET reason = EXCLUDED.reason, faculty_email = EXCLUDED.faculty_email, status = 'Pending',
+             reviewed_by = NULL, reviewed_at = NULL, reject_reason = NULL`,
+      [String(allotment_id), session_date, email, req.auth!.name || allot.faculty_name || email, allot.department,
+       allot.semester_label, allot.section, allot.subject_name, String(reason || '').slice(0, 500)]
+    );
+    res.json({ success: true, message: 'Request sent. You can post attendance once the admin approves it.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /attendance/late-post-requests?status=Pending|Approved|Rejected|all
+app.get('/attendance/late-post-requests', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureLatePostTable();
+    const status = String(req.query.status || 'Pending');
+    const params: any[] = [];
+    let q = `SELECT * FROM attendance_late_post_requests WHERE 1=1`;
+    if (status !== 'all') { params.push(status); q += ` AND status = $${params.length}`; }
+    if (req.auth!.role === 'faculty') { params.push(req.auth!.email.toLowerCase()); q += ` AND LOWER(faculty_email) = $${params.length}`; }
+    else if (req.auth!.role === 'hod' && req.auth!.department && req.auth!.department !== '*') { params.push(req.auth!.department); q += ` AND department = $${params.length}`; }
+    q += ` ORDER BY created_at DESC LIMIT 500`;
+    const r = await db.query(q, params);
+    res.json({ requests: r.rows });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /attendance/late-post-requests/:id/approve | reject — admin decision
+app.patch('/attendance/late-post-requests/:id/:decision', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    const decision = req.params.decision;
+    if (decision !== 'approve' && decision !== 'reject') return res.status(404).json({ error: 'Unknown action' });
+    await ensureLatePostTable();
+    const r = await db.query(
+      `UPDATE attendance_late_post_requests
+         SET status = $1, reviewed_by = $2, reviewed_at = NOW(), reject_reason = $3
+       WHERE id = $4 RETURNING *`,
+      [decision === 'approve' ? 'Approved' : 'Rejected', req.auth!.email, decision === 'reject' ? String(req.body?.reject_reason || '') : null, req.params.id]
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Request not found' });
+    res.json({ success: true, request: r.rows[0] });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

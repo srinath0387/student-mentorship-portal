@@ -92,3 +92,68 @@ describe('POST /attendance/no-class-request', () => {
     expect(insert.params[5]).toBe('A');
   });
 });
+
+describe('Academic-calendar posting lock', () => {
+  const allotment = { id: 'AL1', faculty_email: 'ramesh@rgmcet.edu.in', department: 'CSE (Data Science)', semester_label: '3-1', section: 'A', subject_name: 'DBMS' };
+  const semesterEnded = [{ academic_year: '2026-27', semester: 'Odd', start_date: '2026-07-01', end_date: '2026-11-01' }];
+  const body = { allotment_id: 'AL1', session_date: '2026-11-09', num_periods: 1, period_start: 1, records: [{ roll_number: '23091a3201', is_present: true }] };
+  const baseRoutes = (calendar: any[], lateStatus?: string): Route[] => [
+    ['FROM subject_allotments WHERE id', [allotment]],
+    ['FROM academic_calendar', calendar],
+    ['SELECT status FROM attendance_late_post_requests', lateStatus ? [{ status: lateStatus }] : []],
+    ['INSERT INTO attendance_sessions', [{ id: 'S1' }]],
+  ];
+
+  it('blocks faculty posting after the semester end until approved', async () => {
+    routeDb(baseRoutes(semesterEnded));
+    const res = await request(app).post('/attendance/sessions').set('Authorization', FACULTY()).send(body);
+    expect(res.status).toBe(423);
+    expect(res.body).toMatchObject({ code: 'SEMESTER_LOCKED', request_status: 'none' });
+    expect(res.body.error).toContain('2026-11-01');
+  });
+
+  it('reports a pending request while still blocking', async () => {
+    routeDb(baseRoutes(semesterEnded, 'Pending'));
+    const res = await request(app).post('/attendance/sessions').set('Authorization', FACULTY()).send(body);
+    expect(res.status).toBe(423);
+    expect(res.body.request_status).toBe('pending');
+  });
+
+  it('allows posting once the admin approved the late-posting request', async () => {
+    routeDb(baseRoutes(semesterEnded, 'Approved'));
+    const res = await request(app).post('/attendance/sessions').set('Authorization', FACULTY()).send(body);
+    expect(res.status).toBe(200);
+    expect(res.body.session_id).toBe('S1');
+  });
+
+  it('never blocks the admin', async () => {
+    routeDb(baseRoutes(semesterEnded));
+    const res = await request(app).post('/attendance/sessions').set('Authorization', ADMIN()).send(body);
+    expect(res.status).toBe(200);
+  });
+
+  it('does not lock anything when no academic calendar is configured', async () => {
+    routeDb(baseRoutes([]));
+    const res = await request(app).post('/attendance/sessions').set('Authorization', FACULTY()).send(body);
+    expect(res.status).toBe(200);
+  });
+
+  it('lets faculty request approval only for their own subjects; only admin can approve', async () => {
+    let calls = routeDb([['FROM subject_allotments WHERE id', [{ ...allotment, faculty_email: 'someone@rgmcet.edu.in' }]]]);
+    const notMine = await request(app).post('/attendance/late-post-requests').set('Authorization', FACULTY()).send({ allotment_id: 'AL1', session_date: '2026-11-09' });
+    expect(notMine.status).toBe(403);
+
+    calls = routeDb([['FROM subject_allotments WHERE id', [allotment]]]);
+    const mine = await request(app).post('/attendance/late-post-requests').set('Authorization', FACULTY()).send({ allotment_id: 'AL1', session_date: '2026-11-09', reason: 'Semester extended for labs' });
+    expect(mine.status).toBe(200);
+    expect(calls.some(c => c.sql.includes('INSERT INTO attendance_late_post_requests'))).toBe(true);
+
+    const facultyApprove = await request(app).patch('/attendance/late-post-requests/1/approve').set('Authorization', FACULTY());
+    expect(facultyApprove.status).toBe(403);
+
+    routeDb([['UPDATE attendance_late_post_requests', [{ id: 1, status: 'Approved' }]]]);
+    const adminApprove = await request(app).patch('/attendance/late-post-requests/1/approve').set('Authorization', ADMIN());
+    expect(adminApprove.status).toBe(200);
+    expect(adminApprove.body.request.status).toBe('Approved');
+  });
+});
