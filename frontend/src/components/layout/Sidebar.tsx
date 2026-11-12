@@ -136,6 +136,37 @@ const facultyNav: NavGroup[] = [
 
 const adminNav: NavGroup[] = [
   {
+    title: 'Main',
+    icon: LayoutDashboard,
+    items: [
+      { label: 'Admin Dashboard', path: '/admin/dashboard?tab=home', icon: LayoutDashboard },
+    ],
+  },
+  {
+    title: 'Attendance',
+    icon: CalendarCheck,
+    items: [
+      { label: 'Attendance Posted', path: '/admin/attendance?view=posted', icon: CheckCircle2 },
+      { label: 'Attendance Not Posted', path: '/admin/attendance?view=not-posted', icon: CalendarCheck },
+      { label: 'Reports', path: '/attendance/reports', icon: FileBarChart },
+      { label: 'View Timetables', path: '/admin/dashboard?tab=attendance&sub=timetable', icon: Calendar },
+      { label: 'Editing of Attendance', path: '/admin/attendance?view=edit', icon: FileCheck },
+      { label: 'Faculty Workload', path: '/attendance/workload', icon: BarChart2 },
+      { label: 'Holiday Calendar', path: '/admin/dashboard?tab=holidays', icon: Calendar },
+    ],
+  },
+  {
+    title: 'Assign',
+    icon: ClipboardList,
+    items: [
+      { label: 'Subject Master', path: '/admin/dashboard?tab=attendance&sub=subjects', icon: FileText },
+      { label: 'Assign Subject to Faculty', path: '/admin/dashboard?tab=attendance&sub=allotment', icon: User },
+      { label: 'Assign Students to Faculty', path: '/admin/dashboard?tab=attendance&sub=roster', icon: Users },
+      { label: 'Remove Class for a Date', path: '/admin/attendance?view=remove', icon: CalendarCheck },
+      { label: 'Academic Calendar & Approvals', path: '/admin/attendance?view=calendar', icon: Calendar },
+    ],
+  },
+  {
     title: 'Students',
     icon: Users,
     items: [
@@ -144,16 +175,6 @@ const adminNav: NavGroup[] = [
       { label: 'Certifications', path: '/admin/dashboard?tab=certifications', icon: CheckCircle2 },
       { label: 'Coding Leaderboard', path: '/coding-analytics', icon: BarChart2 },
       { label: 'Documents', path: '/documents', icon: FolderOpen },
-    ],
-  },
-  {
-    title: 'Attendance',
-    icon: CalendarCheck,
-    items: [
-      { label: 'Attendance Mgmt', path: '/admin/dashboard?tab=attendance', icon: CalendarCheck },
-      { label: 'Faculty Workload', path: '/attendance/workload', icon: BarChart2 },
-      { label: 'Attendance Reports', path: '/attendance/reports', icon: FileBarChart },
-      { label: 'Holiday Calendar', path: '/admin/dashboard?tab=holidays', icon: Calendar },
     ],
   },
   {

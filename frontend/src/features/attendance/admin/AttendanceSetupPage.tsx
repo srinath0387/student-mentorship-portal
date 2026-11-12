@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as XLSX from 'xlsx';
@@ -29,7 +30,13 @@ const StatusMsg:React.FC<{msg:{type:string;message:string}|null}> = ({msg}) => {
 };
 
 export const AttendanceSetupPage: React.FC = () => {
-  const [tab, setTab] = useState<TabId>('subjects');
+  // Deep link from the sidebar: /admin/dashboard?tab=attendance&sub=allotment|roster|timetable|subjects
+  const [searchParams] = useSearchParams();
+  const subParam = searchParams.get('sub') as TabId | null;
+  const [tab, setTab] = useState<TabId>(subParam && ['subjects', 'allotment', 'roster', 'timetable'].includes(subParam) ? subParam : 'subjects');
+  useEffect(() => {
+    if (subParam && ['subjects', 'allotment', 'roster', 'timetable'].includes(subParam)) setTab(subParam);
+  }, [subParam]);
   const qc = useQueryClient();
   const { user } = useAuth();
   // isSuperAdmin = truly global admin (department='*'); dept admins (admin-EEE) are scoped like HOD

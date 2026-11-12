@@ -31,6 +31,7 @@ const OversightDashboardPage = lazy(() => import('./features/oversight/Oversight
 const FacultyWorkloadPage = lazy(() => import('./features/attendance/workload/FacultyWorkloadPage').then(m => ({ default: m.FacultyWorkloadPage })));
 const AttendanceReportsPage = lazy(() => import('./features/attendance/reports/AttendanceReportsPage').then(m => ({ default: m.AttendanceReportsPage })));
 const DocumentsManagementPage = lazy(() => import('./features/documents/DocumentsManagementPage').then(m => ({ default: m.DocumentsManagementPage })));
+const AttendanceControlPage = lazy(() => import('./features/attendance/admin/AttendanceControlPage'));
 const FacultyApiPage = lazy(() => import('./features/faculty/FacultyApiPage').then(m => ({ default: m.FacultyApiPage })));
 const AcademicDutiesPage = lazy(() => import('./features/academic-duties/AcademicDutiesPage'));
 const MyDutiesPage = lazy(() => import('./features/academic-duties/MyDutiesPage'));
@@ -364,6 +365,7 @@ export const App: React.FC = () => {
               {/* HOD-only routes */}
               <Route element={<ProtectedRoute allowedRoles={['hod', 'admin']} />}>
                 <Route path="/hod/dashboard" element={<HodDashboardPage />} />
+                <Route path="/admin/attendance" element={<AttendanceControlPage />} />
               </Route>
 
               {/* Faculty Directory & Management: Admin, HOD, Coordinator & Oversight Roles */}

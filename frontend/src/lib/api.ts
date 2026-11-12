@@ -1035,6 +1035,26 @@ export const api = {
     return fetchWithAuth(`/attendance/sessions${query}`);
   },
 
+  // ── Admin attendance control ──
+  getAttendanceDayStatus: async (params: { date: string; department?: string; semester?: string; section?: string }) => {
+    const q = new URLSearchParams({ date: params.date });
+    if (params.department && params.department !== 'All') q.set('department', params.department);
+    if (params.semester && params.semester !== 'All') q.set('semester', params.semester);
+    if (params.section && params.section !== 'All') q.set('section', params.section);
+    return fetchWithAuth(`/attendance/admin/day-status?${q.toString()}`);
+  },
+  cancelClass: async (data: { date: string; department: string; semester_label?: string; section?: string; subject_name?: string; period_start?: number; reason: string; delete_posted?: boolean }) =>
+    fetchWithAuth('/attendance/admin/cancel-class', { method: 'POST', body: JSON.stringify(data) }),
+  undoCancelledClass: async (noClassId: number) =>
+    fetchWithAuth(`/attendance/no-class-requests/${noClassId}`, { method: 'DELETE' }),
+  getPostingWindow: async (date: string) => fetchWithAuth(`/attendance/posting-window?date=${encodeURIComponent(date)}`),
+  requestLatePost: async (data: { allotment_id: string; session_date: string; reason: string }) =>
+    fetchWithAuth('/attendance/late-post-requests', { method: 'POST', body: JSON.stringify(data) }),
+  getLatePostRequests: async (status: 'Pending' | 'Approved' | 'Rejected' | 'all' = 'Pending') =>
+    fetchWithAuth(`/attendance/late-post-requests?status=${status}`),
+  decideLatePostRequest: async (id: number, decision: 'approve' | 'reject', reject_reason?: string) =>
+    fetchWithAuth(`/attendance/late-post-requests/${id}/${decision}`, { method: 'PATCH', body: JSON.stringify({ reject_reason }) }),
+
   getSessionDetails: async (sessionId: string) => {
     return fetchWithAuth(`/attendance/sessions/${sessionId}`);
   },

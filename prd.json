@@ -119,7 +119,7 @@
         "frontend/src/App.tsx"
       ],
       "acceptance_criteria": "All sidebar items open the right view; posted/not-posted/edit/delete/remove-class/approvals work against the API. tsc + build pass; screenshots checked.",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "commit_msg": "feat(attendance): admin attendance control centre and Assign menu"
     },
