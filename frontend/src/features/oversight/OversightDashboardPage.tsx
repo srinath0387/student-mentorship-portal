@@ -1639,10 +1639,10 @@ export const OversightDashboardPage: React.FC = () => {
       )}
 
       {/* Meeting Logs Section */}
-      <div className="rounded-2xl border border-slate-700/50 bg-slate-900/50 p-5 space-y-3">
-        <h3 className="text-sm font-bold text-white flex items-center gap-2">
+      <div className="rounded-2xl border border-borderLine bg-surface shadow-sm p-5 space-y-3">
+        <h3 className="text-sm font-bold text-textPrimary flex items-center gap-2">
           📋 Recent Mentor Meeting Logs
-          <span className="text-xs font-normal text-white/40">(institution-wide)</span>
+          <span className="text-xs font-normal text-textMuted">(institution-wide)</span>
         </h3>
         <MeetingLogsView
           logs={oversightMeetingLogs}

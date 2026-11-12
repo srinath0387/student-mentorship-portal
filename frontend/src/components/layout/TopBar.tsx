@@ -298,7 +298,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
         {/* Search — hidden for students */}
         {user?.role !== 'student' && (
           <div ref={searchRef} className="relative hidden md:block">
-            <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-surface-2 border border-borderLine text-xs text-textPrimary w-64 lg:w-80 focus-within:border-brand-primary focus-within:ring-2 focus-within:ring-brand-primary/15 transition-all">
+            <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl neu-inset border border-transparent dark:border-borderLine text-xs text-textPrimary w-64 lg:w-80 focus-within:border-brand-primary focus-within:ring-2 focus-within:ring-brand-primary/15 transition-all">
               <Search className="w-3.5 h-3.5 text-textMuted shrink-0" />
               <input
                 ref={searchInputRef}

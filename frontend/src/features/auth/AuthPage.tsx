@@ -9,7 +9,6 @@ import { cognitoSignUp, cognitoSignIn, cognitoSignOut, isCognitoConfigError, cog
 import { useAuth } from '../../context/AuthContext';
 import { PillButton } from '../../components/common/PillButton';
 import { Footer } from '../../components/layout/Footer';
-import { AuthAnimated3DBackground } from './AuthAnimated3DBackground';
 import { useLandingTheme } from '../../lib/pageTheme';
 import { UserRole } from '../../types';
 
@@ -1043,20 +1042,18 @@ export const AuthPage: React.FC = () => {
   };
 
   return (
-    <div className="h-screen bg-background flex flex-col justify-between overflow-y-auto sm:overflow-hidden relative">
-      {/* ── Fixed Animated 3D Background Layer ── */}
-      <AuthAnimated3DBackground />
+    <div className="h-screen neu-page flex flex-col justify-between overflow-y-auto sm:overflow-hidden relative">
 
       <div className="flex-1 flex flex-col justify-center py-2 sm:py-3 px-4 sm:px-6 lg:px-8 z-10 min-h-0 overflow-y-auto relative">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center shrink-0 mb-1 sm:mb-2">
-        <div className="inline-flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-white/95 p-1 shadow-lg shadow-cyan-500/20 mb-2 ring-1 ring-white/20 overflow-hidden">
+        <div className="inline-flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 rounded-2xl neu-raised-sm p-1.5 mb-2 overflow-hidden">
           <img
             src="/rgmcet-crest.png"
             alt="RGM Official Institutional Crest"
             className="w-full h-full object-contain filter drop-shadow-sm"
           />
         </div>
-        <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white drop-shadow-sm">
+        <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-800">
           {activeTab === 'hod'
             ? 'HOD Login'
             : activeTab === 'coordinator'
@@ -1069,7 +1066,7 @@ export const AuthPage: React.FC = () => {
             ? 'Parent Login'
             : 'Student Login'}
         </h1>
-        <p className="mt-1 text-xs text-slate-300 font-medium">
+        <p className="mt-1 text-xs text-slate-500 font-medium">
           Sign in to access your institutional portal
         </p>
       </div>
@@ -1092,7 +1089,7 @@ export const AuthPage: React.FC = () => {
       )}
 
       <div className="mt-2 sm:mt-3 sm:mx-auto sm:w-full sm:max-w-lg">
-        <div className="bg-white py-4 sm:py-5 px-5 sm:px-8 shadow-xl border border-gray-100 rounded-2xl">
+        <div className="neu-raised py-4 sm:py-5 px-5 sm:px-8 rounded-[24px]">
           {/* Inline Error Banner */}
           {errorMessage && (
             <div className="mb-4 flex items-start gap-3 bg-red-950/60 border border-red-500/50 rounded-xl px-3.5 py-2.5 text-xs animate-pulse-once">
@@ -2196,7 +2193,7 @@ export const AuthPage: React.FC = () => {
       </div>
       {/* ── Glassmorphism Tagline Banner ── */}
       <div className="w-full shrink-0 flex items-center justify-center py-1 sm:py-1.5 z-10 relative">
-        <div className="auth-glass-tag px-6 py-1 rounded-xl backdrop-blur-xl bg-white/10 dark:bg-white/5 border border-white/20 dark:border-white/10 shadow-sm shadow-brand-primary/10">
+        <div className="auth-glass-tag px-6 py-1 rounded-xl neu-raised-sm">
           <div className="auth-tag-crossfade">
             <span className="auth-tag-item text-xs font-extrabold tracking-wide bg-gradient-to-r from-brand-primary via-indigo-500 to-sky-500 bg-clip-text text-transparent">
               Where ever the data, there is Data Science ✨

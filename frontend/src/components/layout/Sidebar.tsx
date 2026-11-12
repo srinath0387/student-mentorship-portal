@@ -413,13 +413,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
 
       <aside
         className={[
-          'fixed top-0 left-0 bottom-0 z-50 flex flex-col bg-surface border-r border-borderLine',
+          'fixed top-0 left-0 bottom-0 z-50 flex flex-col bg-surface border-r border-borderLine dark:border-borderLine',
           'transition-all duration-300 ease-in-out overflow-hidden',
           collapsed ? 'lg:w-[60px]' : 'lg:w-[232px]',
           isOpen ? 'w-[232px] translate-x-0' : 'w-[232px] -translate-x-full',
           'lg:translate-x-0',
         ].join(' ')}
-        style={{ boxShadow: '1px 0 0 0 var(--color-borderLine)' }}
+        style={{ boxShadow: 'var(--sidebar-shadow, 1px 0 0 0 var(--color-borderLine))' }}
       >
 
         {/* ── Logo Header ── */}
@@ -454,7 +454,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
                   'w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-bold transition-all duration-200 select-none mb-1',
                   collapsed ? 'lg:justify-center lg:px-0 lg:py-3' : '',
                   isHomeActive
-                    ? 'bg-brand-soft text-brand-primary'
+                    ? 'neu-pressed text-brand-primary'
                     : 'text-textSecondary hover:bg-surface-2 hover:text-textPrimary',
                 ].join(' ')}
               >
@@ -484,7 +484,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
                     'w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-bold transition-all duration-200 select-none',
                     collapsed ? 'lg:justify-center lg:px-0 lg:py-3' : '',
                     isOpen_ || hasActive
-                      ? 'bg-brand-soft text-brand-primary'
+                      ? 'neu-pressed text-brand-primary'
                       : 'text-textSecondary hover:bg-surface-2 hover:text-textPrimary',
                   ].join(' ')}
                 >
@@ -542,7 +542,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
                             'relative flex items-center gap-2.5 rounded-xl text-xs font-medium transition-all duration-200',
                             collapsed ? 'lg:justify-center lg:px-0 lg:py-2.5 px-3 py-2' : 'px-3 py-2',
                             active && !item.soon
-                              ? 'bg-brand-primary/10 text-brand-primary font-semibold'
+                              ? 'neu-pressed text-brand-primary font-semibold'
                               : 'text-textSecondary hover:bg-surface-2 hover:text-textPrimary',
                           ].join(' ')}
                         >

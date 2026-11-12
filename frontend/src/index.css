@@ -6,12 +6,18 @@
 
 @layer base {
   :root {
+    /* ── Neumorphic surface (light mode): page, cards and panels share one soft
+       colour and are shaped by a light (top-left) + dark (bottom-right) shadow ── */
+    --neu-bg:    #e8eaf1;
+    --neu-light: rgba(255, 255, 255, 0.92);
+    --neu-dark:  rgba(160, 166, 189, 0.55);
+
     /* ── Core Surfaces ── */
-    --color-background:   #F3F4F8;
-    --color-surface:      #FFFFFF;
-    --color-surface-2:    #F8F9FC;
-    --color-borderLine:   #E4E7EE;
-    --color-borderStrong: #C8CDD8;
+    --color-background:   #e8eaf1;
+    --color-surface:      #e8eaf1;
+    --color-surface-2:    #e1e4ec;
+    --color-borderLine:   #d5d9e3;
+    --color-borderStrong: #bcc3d1;
 
     /* ── Text ── */
     --color-textPrimary:   #0F172A;
@@ -32,12 +38,12 @@
     --color-warning:      #D97706;
     --color-warning-soft: #FEF3C7;
 
-    /* ── Shadows ── */
-    --shadow-xs: 0 1px 2px 0 rgba(15, 23, 42, 0.04);
-    --shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.07), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
-    --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
-    --shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.08), 0 4px 6px -4px rgba(15, 23, 42, 0.04);
-    --shadow-xl: 0 20px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
+    /* ── Shadows (neumorphic, extruded) ── */
+    --shadow-xs: 4px 4px 10px var(--neu-dark), -4px -4px 10px var(--neu-light);
+    --shadow-sm: 6px 6px 14px var(--neu-dark), -6px -6px 14px var(--neu-light);
+    --shadow-md: 8px 8px 18px var(--neu-dark), -8px -8px 18px var(--neu-light);
+    --shadow-lg: 12px 12px 26px var(--neu-dark), -10px -10px 22px var(--neu-light);
+    --shadow-xl: 16px 16px 34px var(--neu-dark), -12px -12px 28px var(--neu-light);
     --shadow-brand: 0 4px 14px rgba(91, 79, 233, 0.25);
   }
 
@@ -115,11 +121,6 @@
     --color-brand-soft:    #fae8ff;
     --color-brand-subtle:  #fdf4ff;
     --shadow-brand: 0 4px 14px rgba(162, 28, 175, 0.28);
-
-    /* Neumorphic surface tokens */
-    --neu-bg:    #e8eaf1;
-    --neu-light: rgba(255, 255, 255, 0.92);
-    --neu-dark:  rgba(160, 166, 189, 0.55);
   }
 
   .dark {
@@ -354,4 +355,42 @@
 .neu-footer > * {
   background: transparent !important;
   border-top-color: rgba(160, 166, 189, 0.35) !important;
+}
+
+/* ── Neumorphism inside the app (light mode) ───────────────────────────────── */
+/* Raised cards: the shadow shapes them, so drop the hairline border */
+html:not(.dark) :is(.bg-surface, .bg-surface-2):is(.shadow-xs, .shadow-sm, .shadow, .shadow-md, .shadow-lg, .shadow-xl) {
+  border-color: transparent;
+}
+/* Text fields, selects and search boxes look pressed into the surface */
+html:not(.dark) :is(
+  input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):not([type=color]):not([type=submit]):not([type=button]),
+  select,
+  textarea
+):not(.bg-transparent):not(.text-white):not([class*="bg-slate-8"]):not([class*="bg-slate-9"]):not([class*="bg-black"]) {
+  background-color: var(--neu-bg);
+  border-color: transparent;
+  box-shadow: inset 3px 3px 7px var(--neu-dark), inset -3px -3px 7px var(--neu-light);
+}
+html:not(.dark) :is(input, select, textarea):focus {
+  box-shadow: inset 3px 3px 7px var(--neu-dark), inset -3px -3px 7px var(--neu-light),
+              0 0 0 2px color-mix(in srgb, var(--color-brand-primary) 40%, transparent);
+}
+/* Pressed state for the active nav item */
+.neu-pressed {
+  background: var(--neu-bg);
+  box-shadow: inset 3px 3px 7px var(--neu-dark), inset -3px -3px 7px var(--neu-light);
+}
+/* Dark mode keeps its existing flat style */
+.dark .neu-pressed { background: var(--color-brand-soft); box-shadow: none; }
+.dark:not(.theme-landing) :is(.neu-raised, .neu-raised-sm, .neu-panel) { background: var(--color-surface); box-shadow: var(--shadow-md); }
+.dark:not(.theme-landing) .neu-inset { background: var(--color-surface-2); box-shadow: none; }
+/* Sidebar edge: soft extruded shadow in light mode, hairline in dark mode */
+html:not(.dark) { --sidebar-shadow: 6px 0 18px var(--neu-dark); }
+html:not(.dark) .fixed.flex-col.border-r.border-borderLine.bg-surface { border-right-color: transparent; }
+/* Hard-coded white cards blend into the neumorphic surface (toggle knobs etc. are rounded-full and stay white) */
+html:not(.dark):not(.theme-landing) .bg-white:is(.rounded-lg, .rounded-xl, .rounded-2xl, .rounded-3xl):is(.border, .shadow-xs, .shadow-sm, .shadow, .shadow-md, .shadow-lg, .shadow-xl) {
+  background-color: var(--neu-bg);
+  border-color: transparent;
+  box-shadow: var(--shadow-sm);
 }

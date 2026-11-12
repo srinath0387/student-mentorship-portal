@@ -133,7 +133,7 @@ export function FacultyApiScoreCard({ facultyEmail, readOnly = false }: Props) {
 
   if (scoreLoading) {
     return (
-      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 flex items-center justify-center">
+      <div className="bg-white dark:bg-surface rounded-2xl border border-gray-200 dark:border-borderLine shadow-sm p-8 flex items-center justify-center">
         <div className="text-center">
           <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-3" />
           <p className="text-sm text-gray-500">Loading API Score…</p>
@@ -144,7 +144,7 @@ export function FacultyApiScoreCard({ facultyEmail, readOnly = false }: Props) {
 
   if (scoreError || !score) {
     return (
-      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 text-center text-sm text-gray-500">
+      <div className="bg-white dark:bg-surface rounded-2xl border border-gray-200 dark:border-borderLine shadow-sm p-6 text-center text-sm text-gray-500">
         Unable to load API score data.
       </div>
     );
@@ -202,7 +202,7 @@ export function FacultyApiScoreCard({ facultyEmail, readOnly = false }: Props) {
 
   return (
     <>
-      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+      <div className="bg-white dark:bg-surface rounded-2xl border border-gray-200 dark:border-borderLine shadow-sm overflow-hidden">
         {/* Top Banner */}
         <div className={`px-6 py-5 ${gs.bg} border-b border-gray-100`}>
           <div className="flex items-center justify-between flex-wrap gap-4">
