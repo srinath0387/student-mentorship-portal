@@ -167,3 +167,47 @@ describe('FT003 anonymous feedback', () => {
     expect(faculty.status).toBe(403);
   });
 });
+
+describe('FT004 placement drives', () => {
+  const drive = { id: 3, company_name: 'Infosys', role_title: 'Systems Engineer', package_lpa: 3.6, drive_date: '2026-12-01', last_date: '2099-12-31',
+    min_cgpa: '6.5', max_backlogs: 0, departments: ['CSE (Data Science)'], batches: ['2023-2027'], required_skills: ['java', 'sql'], exclude_placed: false, status: 'Open' };
+  const row = (roll: string, cgpa: number, skills: string[], status: string | null = null) =>
+    ({ roll_number: roll, name: roll, email: `${roll.toLowerCase()}@rgmcet.edu.in`, department: 'CSE (Data Science)', batch: '2023-2027', section: 'A', year: '4th Year', cgpa, backlogs: 0, skills, application_status: status });
+
+  it('applies hard criteria in SQL and ranks by skill match, with funnel counts', async () => {
+    const calls = routeDb([
+      ['SELECT * FROM placement_drives WHERE id', [drive]],
+      ['FROM students st', [row('A1', 9.1, ['python']), row('A2', 7.0, ['java', 'mysql']), row('A3', 8.0, ['java'], 'Shortlisted')]],
+    ]);
+    const res = await request(app).get('/placement/drives/3/eligible').set('Authorization', ADMIN());
+    expect(res.status).toBe(200);
+    expect(res.body.students.map((s: any) => [s.roll_number, s.skills_matched.length])).toEqual([['A2', 2], ['A3', 1], ['A1', 0]]);
+    expect(res.body.funnel).toEqual({ eligible: 3, applied: 1, shortlisted: 1, selected: 0, rejected: 0 });
+    const q = calls.find(c => c.sql.includes('FROM students st'))!;
+    expect(q.params.slice(0, 2)).toEqual([6.5, 0]);
+    expect(q.sql).toContain('st.department = ANY');
+    expect(q.sql).toContain('st.batch = ANY');
+  });
+
+  it('selecting a student records the placement', async () => {
+    const calls = routeDb([
+      ['SELECT * FROM placement_drives WHERE id', [drive]],
+      ['FROM students st', [row('A2', 7.0, ['java'])]],
+    ]);
+    const res = await request(app).put('/placement/drives/3/applications/a2').set('Authorization', ADMIN()).send({ status: 'Selected' });
+    expect(res.status).toBe(200);
+    const ins = calls.find(c => c.sql.includes('INSERT INTO student_placements'))!;
+    expect(ins.params.slice(0, 1)).toEqual(['A2']);
+    expect(ins.params[4]).toBe('Infosys');
+  });
+
+  it('students can apply only when eligible', async () => {
+    routeDb([['SELECT * FROM placement_drives WHERE id', [drive]]]);
+    const no = await request(app).post('/placement/drives/3/apply').set('Authorization', bearer('student', 'a9@rgmcet.edu.in'));
+    expect(no.status).toBe(403);
+    const calls = routeDb([['SELECT * FROM placement_drives WHERE id', [drive]], ['FROM students st', [row('A2', 7.0, ['java'])]]]);
+    const yes = await request(app).post('/placement/drives/3/apply').set('Authorization', bearer('student', 'a2@rgmcet.edu.in'));
+    expect(yes.status).toBe(200);
+    expect(calls.some(c => c.sql.includes('INSERT INTO placement_drive_applications'))).toBe(true);
+  });
+});

@@ -1041,6 +1041,17 @@ export const api = {
     return fetchWithAuth(`/attendance/sessions${query}`);
   },
 
+  // ── Placement drives ──
+  getPlacementDrives: async () => fetchWithAuth('/placement/drives'),
+  createPlacementDrive: async (data: any) => fetchWithAuth('/placement/drives', { method: 'POST', body: JSON.stringify(data) }),
+  updatePlacementDrive: async (id: number, data: { status?: string; last_date?: string }) =>
+    fetchWithAuth(`/placement/drives/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  getDriveEligible: async (id: number) => fetchWithAuth(`/placement/drives/${id}/eligible`),
+  setDriveApplicationStatus: async (id: number, roll: string, status: string) =>
+    fetchWithAuth(`/placement/drives/${id}/applications/${encodeURIComponent(roll)}`, { method: 'PUT', body: JSON.stringify({ status }) }),
+  getMyPlacementDrives: async () => fetchWithAuth('/placement/drives/my'),
+  applyPlacementDrive: async (id: number) => fetchWithAuth(`/placement/drives/${id}/apply`, { method: 'POST' }),
+
   // ── Anonymous faculty feedback ──
   getFeedbackCycles: async () => fetchWithAuth('/feedback/cycles'),
   createFeedbackCycle: async (data: { title: string; department: string; semester_label: string; start_date: string; end_date: string }) =>

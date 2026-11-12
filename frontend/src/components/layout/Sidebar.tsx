@@ -75,6 +75,7 @@ const studentNav: NavGroup[] = [
       { label: 'Overall Report', path: '/profile?tab=coding-profiles', icon: PieChart },
       { label: 'Program Leaderboard', path: '/coding-analytics', icon: BarChart2 },
       { label: 'Faculty Feedback', path: '/feedback', icon: Star },
+      { label: 'Placement Drives', path: '/placement/drives', icon: Award },
     ],
   },
   {
@@ -100,6 +101,7 @@ const facultyNav: NavGroup[] = [
       { label: 'Assigned Mentees', path: '/faculty/dashboard?tab=mentees', icon: Users },
       { label: 'At-Risk Mentees', path: '/risk', icon: ShieldCheck },
       { label: 'Placement Eligibility', path: '/faculty/dashboard?tab=placement', icon: Award },
+      { label: 'Placement Drives', path: '/placement/drives', icon: Award },
       { label: 'API Scoreboard', path: '/faculty/dashboard?tab=scoreboard', icon: BarChart2 },
     ],
   },
@@ -176,6 +178,7 @@ const adminNav: NavGroup[] = [
     icon: Users,
     items: [
       { label: 'At-Risk Students', path: '/risk', icon: ShieldCheck },
+      { label: 'Placement Drives', path: '/placement/drives', icon: Award },
       { label: 'Student Directory', path: '/admin/dashboard?tab=students', icon: Users },
       { label: 'CGPA & Top Performers', path: '/admin/dashboard?tab=performance', icon: Award },
       { label: 'Certifications', path: '/admin/dashboard?tab=certifications', icon: CheckCircle2 },
@@ -223,6 +226,7 @@ const hodNav: NavGroup[] = [
       { label: 'At-Risk Students', path: '/risk', icon: ShieldCheck },
       { label: 'Monthly Report', path: '/reports/monthly', icon: FileBarChart },
       { label: 'Student Feedback', path: '/feedback', icon: Star },
+      { label: 'Placement Drives', path: '/placement/drives', icon: Award },
       { label: 'Unregistered Students', path: '/hod/dashboard?tab=unregistered', icon: FileBarChart },
     ],
   },
@@ -333,6 +337,7 @@ const oversightNav: NavGroup[] = [
       { label: 'Certifications', path: '/oversight/dashboard?tab=certifications', icon: CheckCircle2 },
       { label: 'Research', path: '/oversight/dashboard?tab=research', icon: FileBarChart },
       { label: 'Placements', path: '/oversight/dashboard?tab=placements', icon: Award },
+      { label: 'Placement Drives', path: '/placement/drives', icon: Award },
     ],
   },
   {

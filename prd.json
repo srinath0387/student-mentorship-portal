@@ -231,7 +231,7 @@
         "frontend/src/App.tsx"
       ],
       "acceptance_criteria": "Eligibility filter tested; funnel counts tested.",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "commit_msg": "feat(placement): drives with eligibility matcher and funnel"
     },

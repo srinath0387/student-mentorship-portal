@@ -8625,6 +8625,241 @@ app.get('/feedback/cycles/:id/summary', requireRole('faculty', 'hod', 'admin', '
   }
 });
 
+// ============================================================================
+// Placement drives — eligibility matcher and funnel
+// Hard criteria: min CGPA, max total backlogs, departments, batches, exclude already placed.
+// Required skills are a soft ranking signal (matched / required), since skills are self-entered.
+// Funnel per student: Eligible → Applied → Shortlisted → Selected / Rejected. Selecting a student
+// also records the offer in student_placements.
+// ============================================================================
+let driveTablesReady: Promise<void> | null = null;
+function ensureDriveTables(): Promise<void> {
+  if (!driveTablesReady) {
+    driveTablesReady = db.query(`
+      ALTER TABLE academics ADD COLUMN IF NOT EXISTS backlogs INT DEFAULT 0;
+      CREATE TABLE IF NOT EXISTS placement_drives (
+        id SERIAL PRIMARY KEY,
+        company_name TEXT NOT NULL,
+        role_title TEXT,
+        package_lpa NUMERIC(6,2),
+        drive_date DATE,
+        last_date DATE,
+        min_cgpa NUMERIC(4,2) DEFAULT 0,
+        max_backlogs INT DEFAULT 0,
+        departments TEXT[] DEFAULT '{}',
+        batches TEXT[] DEFAULT '{}',
+        required_skills TEXT[] DEFAULT '{}',
+        exclude_placed BOOLEAN DEFAULT FALSE,
+        description TEXT,
+        status TEXT NOT NULL DEFAULT 'Open',
+        created_by TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS placement_drive_applications (
+        drive_id INT NOT NULL REFERENCES placement_drives(id) ON DELETE CASCADE,
+        roll_number TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'Applied',
+        updated_by TEXT,
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (drive_id, roll_number)
+      );
+    `).then(() => undefined).catch((err: any) => { driveTablesReady = null; throw err; });
+  }
+  return driveTablesReady;
+}
+
+const DRIVE_STATUSES = ['Applied', 'Shortlisted', 'Selected', 'Rejected'];
+const toTextArray = (v: any): string[] => (Array.isArray(v) ? v : String(v || '').split(','))
+  .map((x: any) => String(x).trim()).filter(Boolean);
+
+/** Students meeting a drive's hard criteria, with skill match and application status. */
+async function eligibleForDrive(drive: any, deptScope: string[] | null, onlyRoll?: string): Promise<any[]> {
+  const params: any[] = [Number(drive.min_cgpa) || 0, Number(drive.max_backlogs ?? 0), drive.id];
+  let where = `COALESCE(st.cgpa, 0) >= $1 AND COALESCE(bk.backlogs, 0) <= $2`;
+  const depts: string[] = Array.isArray(drive.departments) ? drive.departments.filter(Boolean) : [];
+  const batches: string[] = Array.isArray(drive.batches) ? drive.batches.filter(Boolean) : [];
+  if (depts.length) { params.push(depts); where += ` AND st.department = ANY($${params.length})`; }
+  if (deptScope) { params.push(deptScope); where += ` AND st.department = ANY($${params.length})`; }
+  if (batches.length) { params.push(batches); where += ` AND st.batch = ANY($${params.length})`; }
+  if (drive.exclude_placed) where += ` AND NOT EXISTS (SELECT 1 FROM student_placements sp WHERE UPPER(sp.roll_number) = UPPER(st.roll_number))`;
+  if (onlyRoll) { params.push(onlyRoll.toUpperCase()); where += ` AND UPPER(st.roll_number) = $${params.length}`; }
+  const r = await db.query(
+    `SELECT st.roll_number, st.name, st.email, st.department, st.batch, st.section, st.year, COALESCE(st.cgpa, 0)::float AS cgpa,
+            COALESCE(bk.backlogs, 0)::int AS backlogs,
+            COALESCE((SELECT array_agg(DISTINCT LOWER(ts.specific_tool)) FROM tech_skills ts WHERE ts.student_id = st.roll_number), '{}') AS skills,
+            pda.status AS application_status
+     FROM students st
+     LEFT JOIN (SELECT student_id, SUM(COALESCE(backlogs, 0))::int AS backlogs FROM academics GROUP BY student_id) bk ON bk.student_id = st.roll_number
+     LEFT JOIN placement_drive_applications pda ON pda.drive_id = $3 AND UPPER(pda.roll_number) = UPPER(st.roll_number)
+     WHERE ${where}
+     ORDER BY st.cgpa DESC NULLS LAST, st.roll_number`, params);
+  const required = (Array.isArray(drive.required_skills) ? drive.required_skills : []).map((x: string) => x.toLowerCase());
+  return r.rows.map((x: any) => {
+    const skills: string[] = Array.isArray(x.skills) ? x.skills : [];
+    const matched = required.filter((need: string) => skills.some(sk => sk.includes(need) || need.includes(sk)));
+    return { ...x, skills_matched: matched, skills_required: required.length, application_status: x.application_status || 'Eligible' };
+  }).sort((a: any, b: any) => b.skills_matched.length - a.skills_matched.length || b.cgpa - a.cgpa);
+}
+
+function driveDeptScope(req: Request): string[] | null {
+  if (req.auth?.role === 'hod' && req.auth.department && req.auth.department !== '*') return [req.auth.department];
+  if (req.auth?.role === 'program_chair') return CSE_ALLIED_DEPTS;
+  return null;
+}
+
+// POST /placement/drives — create a drive (admin)
+app.post('/placement/drives', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureDriveTables();
+    const b = req.body || {};
+    if (!b.company_name) return res.status(400).json({ error: 'Company name is required' });
+    const r = await db.query(
+      `INSERT INTO placement_drives (company_name, role_title, package_lpa, drive_date, last_date, min_cgpa, max_backlogs, departments, batches, required_skills, exclude_placed, description, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+      [String(b.company_name).trim(), b.role_title || null, b.package_lpa || null, b.drive_date || null, b.last_date || null,
+       Number(b.min_cgpa) || 0, Number.isFinite(Number(b.max_backlogs)) ? Number(b.max_backlogs) : 0,
+       toTextArray(b.departments), toTextArray(b.batches), toTextArray(b.required_skills), Boolean(b.exclude_placed),
+       b.description || null, req.auth!.email]
+    );
+    res.json({ success: true, drive: r.rows[0] });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /placement/drives/:id — update status (Open/Closed) or details (admin)
+app.patch('/placement/drives/:id', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureDriveTables();
+    const status = req.body?.status;
+    if (status && !['Open', 'Closed'].includes(status)) return res.status(400).json({ error: 'status must be Open or Closed' });
+    const r = await db.query(`UPDATE placement_drives SET status = COALESCE($1, status), last_date = COALESCE($2, last_date) WHERE id = $3 RETURNING *`,
+      [status || null, req.body?.last_date || null, req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Drive not found' });
+    res.json({ success: true, drive: r.rows[0] });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /placement/drives — staff: all drives with funnel counts
+app.get('/placement/drives', requireRole('admin', 'hod', 'faculty', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    await ensureDriveTables();
+    const r = await db.query(
+      `SELECT d.*,
+              COUNT(a.*) FILTER (WHERE a.status IN ('Applied','Shortlisted','Selected','Rejected'))::int AS applied,
+              COUNT(a.*) FILTER (WHERE a.status IN ('Shortlisted','Selected'))::int AS shortlisted,
+              COUNT(a.*) FILTER (WHERE a.status = 'Selected')::int AS selected
+       FROM placement_drives d LEFT JOIN placement_drive_applications a ON a.drive_id = d.id
+       GROUP BY d.id ORDER BY COALESCE(d.drive_date, d.created_at::date) DESC, d.id DESC`);
+    res.json(r.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /placement/drives/:id/eligible — eligible students (+ funnel status)
+app.get('/placement/drives/:id/eligible', requireRole('admin', 'hod', 'faculty', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    await ensureDriveTables();
+    const d = await db.query('SELECT * FROM placement_drives WHERE id = $1', [req.params.id]);
+    const drive = d.rows[0];
+    if (!drive) return res.status(404).json({ error: 'Drive not found' });
+    const students = await eligibleForDrive(drive, driveDeptScope(req));
+    const count = (s: string) => students.filter(x => x.application_status === s).length;
+    res.json({
+      drive,
+      funnel: {
+        eligible: students.length,
+        applied: students.filter(x => x.application_status !== 'Eligible').length,
+        shortlisted: count('Shortlisted') + count('Selected'),
+        selected: count('Selected'),
+        rejected: count('Rejected'),
+      },
+      students,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /placement/drives/:id/applications/:roll — set a student's funnel status (admin/HOD)
+app.put('/placement/drives/:id/applications/:roll', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+  try {
+    await ensureDriveTables();
+    const status = String(req.body?.status || '');
+    if (!DRIVE_STATUSES.includes(status) && status !== 'Eligible') return res.status(400).json({ error: `status must be one of Eligible, ${DRIVE_STATUSES.join(', ')}` });
+    const d = await db.query('SELECT * FROM placement_drives WHERE id = $1', [req.params.id]);
+    const drive = d.rows[0];
+    if (!drive) return res.status(404).json({ error: 'Drive not found' });
+    const roll = req.params.roll.toUpperCase();
+    const eligible = await eligibleForDrive(drive, driveDeptScope(req), roll);
+    if (eligible.length === 0) return res.status(403).json({ error: 'Student is not eligible for this drive (or is outside your department).' });
+    if (status === 'Eligible') {
+      await db.query('DELETE FROM placement_drive_applications WHERE drive_id = $1 AND UPPER(roll_number) = $2', [drive.id, roll]);
+    } else {
+      await db.query(
+        `INSERT INTO placement_drive_applications (drive_id, roll_number, status, updated_by, updated_at) VALUES ($1,$2,$3,$4,NOW())
+         ON CONFLICT (drive_id, roll_number) DO UPDATE SET status = EXCLUDED.status, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+        [drive.id, roll, status, req.auth!.email]);
+    }
+    if (status === 'Selected') {
+      const st = eligible[0];
+      const exists = await db.query(
+        `SELECT 1 FROM student_placements WHERE UPPER(roll_number) = $1 AND LOWER(company_name) = LOWER($2) LIMIT 1`, [roll, drive.company_name]);
+      if (exists.rows.length === 0) {
+        await db.query(
+          `INSERT INTO student_placements (roll_number, student_name, department, batch, company_name, role_title, package_lpa, offer_date, placement_type, verified, verified_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Campus',TRUE,$9)`,
+          [roll, st.name, st.department, st.batch, drive.company_name, drive.role_title, drive.package_lpa, drive.drive_date || new Date().toISOString().slice(0, 10), req.auth!.email]
+        ).catch((e: any) => console.warn('[drives] could not record placement:', e.message));
+      }
+    }
+    res.json({ success: true, roll_number: roll, status });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /placement/drives/my — student: open drives they are eligible for, with their status
+app.get('/placement/drives/my', requireRole('student'), async (req: Request, res: Response) => {
+  try {
+    await ensureDriveTables();
+    const roll = req.auth!.regNo.toUpperCase();
+    const r = await db.query(`SELECT * FROM placement_drives WHERE status = 'Open' ORDER BY COALESCE(drive_date, created_at::date) DESC`);
+    const out: any[] = [];
+    for (const drive of r.rows) {
+      const me = await eligibleForDrive(drive, null, roll);
+      if (me.length) out.push({ ...drive, my_status: me[0].application_status, skills_matched: me[0].skills_matched, skills_required: me[0].skills_required });
+    }
+    res.json(out);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /placement/drives/:id/apply — student applies (must be eligible, drive open, before last date)
+app.post('/placement/drives/:id/apply', requireRole('student'), async (req: Request, res: Response) => {
+  try {
+    await ensureDriveTables();
+    const d = await db.query('SELECT * FROM placement_drives WHERE id = $1', [req.params.id]);
+    const drive = d.rows[0];
+    if (!drive) return res.status(404).json({ error: 'Drive not found' });
+    const today = new Date().toISOString().slice(0, 10);
+    if (drive.status !== 'Open' || (drive.last_date && String(drive.last_date).slice(0, 10) < today)) return res.status(400).json({ error: 'Applications for this drive are closed.' });
+    const roll = req.auth!.regNo.toUpperCase();
+    const me = await eligibleForDrive(drive, null, roll);
+    if (me.length === 0) return res.status(403).json({ error: 'You do not meet the eligibility criteria for this drive.' });
+    await db.query(
+      `INSERT INTO placement_drive_applications (drive_id, roll_number, status, updated_by) VALUES ($1,$2,'Applied',$2)
+       ON CONFLICT (drive_id, roll_number) DO NOTHING`, [drive.id, roll]);
+    res.json({ success: true, message: `Applied to ${drive.company_name}.` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /oversight/faculty-by-cadre?department=CSE&cadre=associate
 // ============================================================================
 app.get('/oversight/faculty-by-cadre', requireRole('director', 'principal', 'management', 'program_chair', 'admin', 'hod'), async (req: Request, res: Response) => {
