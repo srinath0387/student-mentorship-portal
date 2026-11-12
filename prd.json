@@ -214,7 +214,7 @@
         "frontend/src/App.tsx"
       ],
       "acceptance_criteria": "Anonymity (no roll number in responses), one submission per student per subject, scoped summaries — tested.",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "commit_msg": "feat(feedback): anonymous student feedback on faculty"
     },

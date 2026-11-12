@@ -1041,6 +1041,17 @@ export const api = {
     return fetchWithAuth(`/attendance/sessions${query}`);
   },
 
+  // ── Anonymous faculty feedback ──
+  getFeedbackCycles: async () => fetchWithAuth('/feedback/cycles'),
+  createFeedbackCycle: async (data: { title: string; department: string; semester_label: string; start_date: string; end_date: string }) =>
+    fetchWithAuth('/feedback/cycles', { method: 'POST', body: JSON.stringify(data) }),
+  updateFeedbackCycle: async (id: number, data: { start_date?: string; end_date?: string; title?: string }) =>
+    fetchWithAuth(`/feedback/cycles/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  getFeedbackMySubjects: async (cycleId: number) => fetchWithAuth(`/feedback/cycles/${cycleId}/my-subjects`),
+  submitFeedback: async (cycleId: number, data: { allotment_id: string; ratings: Record<string, number>; comment?: string }) =>
+    fetchWithAuth(`/feedback/cycles/${cycleId}/submit`, { method: 'POST', body: JSON.stringify(data) }),
+  getFeedbackSummary: async (cycleId: number) => fetchWithAuth(`/feedback/cycles/${cycleId}/summary`),
+
   getMonthlyReport: async (month: string) => fetchWithAuth(`/reports/monthly?month=${encodeURIComponent(month)}`),
 
   // ── Student risk alerts ──

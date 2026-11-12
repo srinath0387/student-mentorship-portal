@@ -8374,6 +8374,257 @@ app.get('/reports/monthly', requireRole('admin', 'hod', 'principal', 'director',
   }
 });
 
+// ============================================================================
+// Anonymous student feedback on faculty
+// feedback_responses holds ratings WITHOUT any student identity (and only a date, no time).
+// feedback_submissions only records that a student has submitted for a subject (to block
+// duplicates). Comments are shown only when a class has >= 3 responses; faculty see their own
+// results only after the cycle has closed.
+// ============================================================================
+const DEFAULT_FEEDBACK_QUESTIONS = [
+  { id: 'q1', text: 'Subject knowledge of the teacher' },
+  { id: 'q2', text: 'Clarity of explanation' },
+  { id: 'q3', text: 'Punctuality and regularity' },
+  { id: 'q4', text: 'Syllabus coverage' },
+  { id: 'q5', text: 'Encourages questions and clears doubts' },
+  { id: 'q6', text: 'Use of examples, real-world applications and teaching aids' },
+  { id: 'q7', text: 'Fairness in evaluation and feedback on work' },
+  { id: 'q8', text: 'Availability outside class' },
+  { id: 'q9', text: 'Overall teaching effectiveness' },
+];
+const FEEDBACK_MIN_FOR_COMMENTS = 3;
+
+let feedbackTablesReady: Promise<void> | null = null;
+function ensureFeedbackTables(): Promise<void> {
+  if (!feedbackTablesReady) {
+    feedbackTablesReady = db.query(`
+      CREATE TABLE IF NOT EXISTS feedback_cycles (
+        id SERIAL PRIMARY KEY,
+        title TEXT NOT NULL,
+        department TEXT NOT NULL DEFAULT 'All',
+        semester_label TEXT NOT NULL DEFAULT 'All',
+        start_date DATE NOT NULL,
+        end_date DATE NOT NULL,
+        questions JSONB NOT NULL,
+        created_by TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS feedback_submissions (
+        cycle_id INT NOT NULL REFERENCES feedback_cycles(id) ON DELETE CASCADE,
+        roll_number TEXT NOT NULL,
+        allotment_id TEXT NOT NULL,
+        PRIMARY KEY (cycle_id, roll_number, allotment_id)
+      );
+      CREATE TABLE IF NOT EXISTS feedback_responses (
+        id SERIAL PRIMARY KEY,
+        cycle_id INT NOT NULL REFERENCES feedback_cycles(id) ON DELETE CASCADE,
+        allotment_id TEXT NOT NULL,
+        faculty_email TEXT NOT NULL,
+        faculty_name TEXT,
+        department TEXT,
+        semester_label TEXT,
+        section TEXT,
+        subject_name TEXT,
+        ratings JSONB NOT NULL,
+        comment TEXT,
+        response_date DATE NOT NULL DEFAULT CURRENT_DATE
+      );
+      CREATE INDEX IF NOT EXISTS idx_feedback_responses_cycle ON feedback_responses(cycle_id, allotment_id);
+    `).then(() => undefined).catch((err: any) => { feedbackTablesReady = null; throw err; });
+  }
+  return feedbackTablesReady;
+}
+
+const feedbackStatus = (c: any, today = new Date().toISOString().slice(0, 10)) => {
+  const start = String(c.start_date).slice(0, 10); const end = String(c.end_date).slice(0, 10);
+  return today < start ? 'upcoming' : today > end ? 'closed' : 'open';
+};
+
+// POST /feedback/cycles — admin opens a feedback cycle
+app.post('/feedback/cycles', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureFeedbackTables();
+    const { title, department, semester_label, start_date, end_date, questions } = req.body || {};
+    if (!title || !start_date || !end_date) return res.status(400).json({ error: 'Title, start date and end date are required' });
+    if (String(start_date) > String(end_date)) return res.status(400).json({ error: 'Start date must be on or before the end date' });
+    const qs = Array.isArray(questions) && questions.length > 0
+      ? questions.map((q: any, i: number) => ({ id: `q${i + 1}`, text: String(q.text || q).trim() })).filter((q: any) => q.text)
+      : DEFAULT_FEEDBACK_QUESTIONS;
+    const r = await db.query(
+      `INSERT INTO feedback_cycles (title, department, semester_label, start_date, end_date, questions, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [String(title).trim(), department || 'All', semester_label || 'All', start_date, end_date, JSON.stringify(qs), req.auth!.email]
+    );
+    res.json({ success: true, cycle: { ...r.rows[0], status: feedbackStatus(r.rows[0]) } });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /feedback/cycles/:id — admin changes dates (e.g. extend or close early)
+app.patch('/feedback/cycles/:id', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureFeedbackTables();
+    const { start_date, end_date, title } = req.body || {};
+    const r = await db.query(
+      `UPDATE feedback_cycles SET start_date = COALESCE($1, start_date), end_date = COALESCE($2, end_date), title = COALESCE($3, title)
+       WHERE id = $4 RETURNING *`, [start_date || null, end_date || null, title || null, req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Cycle not found' });
+    res.json({ success: true, cycle: { ...r.rows[0], status: feedbackStatus(r.rows[0]) } });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /feedback/cycles — students see open cycles for them; staff see all
+app.get('/feedback/cycles', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureFeedbackTables();
+    const r = await db.query(`SELECT * FROM feedback_cycles ORDER BY start_date DESC, id DESC LIMIT 100`);
+    let cycles = r.rows.map((c: any) => ({ ...c, status: feedbackStatus(c) }));
+    if (req.auth!.role === 'student') {
+      const st = await db.query('SELECT department FROM students WHERE UPPER(roll_number) = $1', [req.auth!.regNo.toUpperCase()]).catch(() => ({ rows: [] as any[] }));
+      const dept = st.rows[0]?.department || req.auth!.department || '';
+      cycles = cycles.filter((c: any) => c.status === 'open' && (c.department === 'All' || c.department === dept));
+    } else if (req.auth!.role === 'parent') {
+      cycles = [];
+    }
+    res.json(cycles);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+async function loadOpenCycleForStudent(req: Request, cycleId: string): Promise<{ cycle: any; error?: string; status?: number }> {
+  const r = await db.query('SELECT * FROM feedback_cycles WHERE id = $1', [cycleId]);
+  const cycle = r.rows[0];
+  if (!cycle) return { cycle: null, error: 'Feedback cycle not found', status: 404 };
+  if (feedbackStatus(cycle) !== 'open') return { cycle, error: 'This feedback window is not open.', status: 400 };
+  return { cycle };
+}
+
+// GET /feedback/cycles/:id/my-subjects — the student's subjects with a submitted flag
+app.get('/feedback/cycles/:id/my-subjects', requireRole('student'), async (req: Request, res: Response) => {
+  try {
+    await ensureFeedbackTables();
+    const { cycle, error, status } = await loadOpenCycleForStudent(req, req.params.id);
+    if (error) return res.status(status || 400).json({ error });
+    const roll = req.auth!.regNo.toUpperCase();
+    const params: any[] = [roll, Number(req.params.id)];
+    let filter = '';
+    if (cycle.department && cycle.department !== 'All') { params.push(cycle.department); filter += ` AND a.department = $${params.length}`; }
+    if (cycle.semester_label && cycle.semester_label !== 'All') { params.push(cycle.semester_label); filter += ` AND a.semester_label = $${params.length}`; }
+    const r = await db.query(
+      `SELECT a.id AS allotment_id, a.subject_name, a.subject_type, a.semester_label, a.section, a.faculty_name, a.faculty_email,
+              EXISTS (SELECT 1 FROM feedback_submissions fs WHERE fs.cycle_id = $2 AND fs.roll_number = $1 AND fs.allotment_id = a.id::text) AS submitted
+       FROM subject_rosters r JOIN subject_allotments a ON a.id = r.allotment_id
+       WHERE UPPER(r.roll_number) = $1 ${filter}
+       ORDER BY a.subject_name`, params);
+    res.json({ cycle: { ...cycle, status: feedbackStatus(cycle) }, subjects: r.rows });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /feedback/cycles/:id/submit — { allotment_id, ratings: { q1: 1-5, ... }, comment }
+app.post('/feedback/cycles/:id/submit', requireRole('student'), async (req: Request, res: Response) => {
+  try {
+    await ensureFeedbackTables();
+    const { cycle, error, status } = await loadOpenCycleForStudent(req, req.params.id);
+    if (error) return res.status(status || 400).json({ error });
+    const roll = req.auth!.regNo.toUpperCase();
+    const { allotment_id, ratings, comment } = req.body || {};
+    if (!allotment_id || !ratings || typeof ratings !== 'object') return res.status(400).json({ error: 'allotment_id and ratings are required' });
+
+    const questions: any[] = Array.isArray(cycle.questions) ? cycle.questions : DEFAULT_FEEDBACK_QUESTIONS;
+    const clean: Record<string, number> = {};
+    for (const q of questions) {
+      const v = Number(ratings[q.id]);
+      if (!Number.isInteger(v) || v < 1 || v > 5) return res.status(400).json({ error: `Please rate every question from 1 to 5 (${q.text}).` });
+      clean[q.id] = v;
+    }
+
+    const on = await db.query(
+      `SELECT a.* FROM subject_rosters r JOIN subject_allotments a ON a.id = r.allotment_id
+       WHERE UPPER(r.roll_number) = $1 AND a.id::text = $2 LIMIT 1`, [roll, String(allotment_id)]);
+    const allot = on.rows[0];
+    if (!allot) return res.status(403).json({ error: 'You can only give feedback for subjects you are enrolled in.' });
+
+    const marker = await db.query(
+      `INSERT INTO feedback_submissions (cycle_id, roll_number, allotment_id) VALUES ($1,$2,$3)
+       ON CONFLICT DO NOTHING RETURNING cycle_id`, [cycle.id, roll, String(allotment_id)]);
+    if (marker.rows.length === 0) return res.status(409).json({ error: 'You have already given feedback for this subject.' });
+
+    // Anonymous response: no roll number, date only
+    await db.query(
+      `INSERT INTO feedback_responses (cycle_id, allotment_id, faculty_email, faculty_name, department, semester_label, section, subject_name, ratings, comment)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [cycle.id, String(allotment_id), String(allot.faculty_email || '').toLowerCase(), allot.faculty_name, allot.department,
+       allot.semester_label, allot.section, allot.subject_name, JSON.stringify(clean), String(comment || '').trim().slice(0, 1000) || null]
+    );
+    res.json({ success: true, message: 'Thank you — your feedback was recorded anonymously.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /feedback/cycles/:id/summary — averages per faculty + subject + section
+app.get('/feedback/cycles/:id/summary', requireRole('faculty', 'hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    await ensureFeedbackTables();
+    const cr = await db.query('SELECT * FROM feedback_cycles WHERE id = $1', [req.params.id]);
+    const cycle = cr.rows[0];
+    if (!cycle) return res.status(404).json({ error: 'Cycle not found' });
+    const st = feedbackStatus(cycle);
+    const role = req.auth!.role;
+    const params: any[] = [cycle.id];
+    let filter = '';
+    if (role === 'faculty') {
+      if (st !== 'closed') return res.status(403).json({ error: 'Your feedback results are available after the feedback window closes.' });
+      params.push(req.auth!.email.toLowerCase()); filter = ` AND LOWER(faculty_email) = $${params.length}`;
+    } else if (role === 'hod' && req.auth!.department && req.auth!.department !== '*') {
+      params.push(req.auth!.department); filter = ` AND department = $${params.length}`;
+    } else if (role === 'program_chair') {
+      params.push(CSE_ALLIED_DEPTS); filter = ` AND department = ANY($${params.length})`;
+    }
+    const r = await db.query(
+      `SELECT allotment_id, faculty_email, faculty_name, department, semester_label, section, subject_name, ratings, comment
+       FROM feedback_responses WHERE cycle_id = $1 ${filter}`, params);
+    const rosterSizes = await db.query(
+      `SELECT allotment_id::text AS allotment_id, COUNT(*)::int AS n FROM subject_rosters GROUP BY allotment_id`).catch(() => ({ rows: [] as any[] }));
+    const rosterMap = new Map<string, number>(rosterSizes.rows.map((x: any) => [String(x.allotment_id), Number(x.n)]));
+
+    const questions: any[] = Array.isArray(cycle.questions) ? cycle.questions : DEFAULT_FEEDBACK_QUESTIONS;
+    const groups = new Map<string, any>();
+    for (const row of r.rows) {
+      const k = String(row.allotment_id);
+      const g = groups.get(k) || { allotment_id: k, faculty_email: row.faculty_email, faculty_name: row.faculty_name, department: row.department,
+        semester_label: row.semester_label, section: row.section, subject_name: row.subject_name, responses: 0, sums: {} as Record<string, number>, comments: [] as string[] };
+      g.responses++;
+      const ratings = typeof row.ratings === 'string' ? JSON.parse(row.ratings) : row.ratings || {};
+      for (const q of questions) g.sums[q.id] = (g.sums[q.id] || 0) + (Number(ratings[q.id]) || 0);
+      if (row.comment) g.comments.push(row.comment);
+      groups.set(k, g);
+    }
+    const round2 = (v: number) => Math.round(v * 100) / 100;
+    const rows = Array.from(groups.values()).map(g => {
+      const per = Object.fromEntries(questions.map(q => [q.id, round2(g.sums[q.id] / g.responses)]));
+      const overall = round2(questions.reduce((t, q) => t + per[q.id], 0) / questions.length);
+      return {
+        allotment_id: g.allotment_id, faculty_email: g.faculty_email, faculty_name: g.faculty_name, department: g.department,
+        semester_label: g.semester_label, section: g.section, subject_name: g.subject_name,
+        responses: g.responses, enrolled: rosterMap.get(g.allotment_id) || null,
+        averages: per, overall,
+        comments: g.responses >= FEEDBACK_MIN_FOR_COMMENTS ? g.comments.sort(() => Math.random() - 0.5) : [],
+        comments_hidden: g.responses < FEEDBACK_MIN_FOR_COMMENTS && g.comments.length > 0,
+      };
+    }).sort((a, b) => b.overall - a.overall);
+    res.json({ cycle: { ...cycle, status: st }, questions, rows });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /oversight/faculty-by-cadre?department=CSE&cadre=associate
 // ============================================================================
 app.get('/oversight/faculty-by-cadre', requireRole('director', 'principal', 'management', 'program_chair', 'admin', 'hod'), async (req: Request, res: Response) => {

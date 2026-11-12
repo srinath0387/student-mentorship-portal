@@ -118,3 +118,52 @@ describe('FT002 monthly report', () => {
     expect((await request(app).get('/reports/monthly').set('Authorization', bearer('faculty', 'x@rgmcet.edu.in'))).status).toBe(403);
   });
 });
+
+describe('FT003 anonymous feedback', () => {
+  const STUDENT = () => bearer('student', '23091a3201@rgmcet.edu.in');
+  const openCycle = { id: 5, title: 'Odd sem 2026', department: 'All', semester_label: 'All', start_date: '2020-01-01', end_date: '2099-12-31',
+    questions: [{ id: 'q1', text: 'Clarity' }, { id: 'q2', text: 'Punctuality' }] };
+  const allot = { id: 'AL1', faculty_email: 'Ramesh@rgmcet.edu.in', faculty_name: 'Dr. Ramesh', department: 'CSE (Data Science)', semester_label: '3-1', section: 'A', subject_name: 'DBMS' };
+
+  it('stores the response without any student identity', async () => {
+    const calls = routeDb([
+      ['SELECT * FROM feedback_cycles WHERE id', [openCycle]],
+      ['FROM subject_rosters r JOIN subject_allotments a', [allot]],
+      ['INSERT INTO feedback_submissions', [{ cycle_id: 5 }]],
+    ]);
+    const res = await request(app).post('/feedback/cycles/5/submit').set('Authorization', STUDENT())
+      .send({ allotment_id: 'AL1', ratings: { q1: 5, q2: 4 }, comment: 'Explains well' });
+    expect(res.status).toBe(200);
+    const resp = calls.find(c => c.sql.includes('INSERT INTO feedback_responses'))!;
+    expect(resp.sql).not.toMatch(/roll_number/);
+    expect(JSON.stringify(resp.params)).not.toContain('23091A3201');
+    expect(resp.params[2]).toBe('ramesh@rgmcet.edu.in');
+  });
+
+  it('blocks duplicates, non-enrolled subjects and incomplete ratings', async () => {
+    routeDb([['SELECT * FROM feedback_cycles WHERE id', [openCycle]], ['FROM subject_rosters r JOIN subject_allotments a', [allot]]]);
+    const dup = await request(app).post('/feedback/cycles/5/submit').set('Authorization', STUDENT()).send({ allotment_id: 'AL1', ratings: { q1: 5, q2: 4 } });
+    expect(dup.status).toBe(409);
+
+    routeDb([['SELECT * FROM feedback_cycles WHERE id', [openCycle]]]);
+    const notMine = await request(app).post('/feedback/cycles/5/submit').set('Authorization', STUDENT()).send({ allotment_id: 'AL9', ratings: { q1: 5, q2: 4 } });
+    expect(notMine.status).toBe(403);
+
+    const incomplete = await request(app).post('/feedback/cycles/5/submit').set('Authorization', STUDENT()).send({ allotment_id: 'AL1', ratings: { q1: 5 } });
+    expect(incomplete.status).toBe(400);
+  });
+
+  it('summarises averages, hides comments below 3 responses, and holds faculty results until close', async () => {
+    const responses = [
+      { allotment_id: 'AL1', faculty_email: 'ramesh@rgmcet.edu.in', faculty_name: 'Dr. Ramesh', department: 'CSE (Data Science)', semester_label: '3-1', section: 'A', subject_name: 'DBMS', ratings: { q1: 5, q2: 4 }, comment: 'Good' },
+      { allotment_id: 'AL1', faculty_email: 'ramesh@rgmcet.edu.in', faculty_name: 'Dr. Ramesh', department: 'CSE (Data Science)', semester_label: '3-1', section: 'A', subject_name: 'DBMS', ratings: { q1: 3, q2: 4 }, comment: 'Too fast' },
+    ];
+    routeDb([['SELECT * FROM feedback_cycles WHERE id', [openCycle]], ['FROM feedback_responses WHERE cycle_id', responses], ['FROM subject_rosters GROUP BY', [{ allotment_id: 'AL1', n: 60 }]]]);
+    const admin = await request(app).get('/feedback/cycles/5/summary').set('Authorization', ADMIN());
+    expect(admin.status).toBe(200);
+    expect(admin.body.rows[0]).toMatchObject({ responses: 2, enrolled: 60, averages: { q1: 4, q2: 4 }, overall: 4, comments: [], comments_hidden: true });
+
+    const faculty = await request(app).get('/feedback/cycles/5/summary').set('Authorization', bearer('faculty', 'ramesh@rgmcet.edu.in'));
+    expect(faculty.status).toBe(403);
+  });
+});

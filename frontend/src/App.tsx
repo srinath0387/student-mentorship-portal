@@ -31,6 +31,7 @@ const OversightDashboardPage = lazy(() => import('./features/oversight/Oversight
 const FacultyWorkloadPage = lazy(() => import('./features/attendance/workload/FacultyWorkloadPage').then(m => ({ default: m.FacultyWorkloadPage })));
 const AttendanceReportsPage = lazy(() => import('./features/attendance/reports/AttendanceReportsPage').then(m => ({ default: m.AttendanceReportsPage })));
 const DocumentsManagementPage = lazy(() => import('./features/documents/DocumentsManagementPage').then(m => ({ default: m.DocumentsManagementPage })));
+const FeedbackPage = lazy(() => import('./features/feedback/FeedbackPage'));
 const MonthlyReportPage = lazy(() => import('./features/reports/MonthlyReportPage'));
 const RiskAlertsPage = lazy(() => import('./features/risk/RiskAlertsPage'));
 const AttendanceControlPage = lazy(() => import('./features/attendance/admin/AttendanceControlPage'));
@@ -337,6 +338,9 @@ export const App: React.FC = () => {
               <Route path="/attendance" element={<AttendancePage />} />
               <Route element={<ProtectedRoute allowedRoles={['faculty', 'hod', 'admin', 'coordinator', 'director', 'principal', 'management', 'program_chair']} />}>
                 <Route path="/risk" element={<RiskAlertsPage />} />
+              </Route>
+              <Route element={<ProtectedRoute allowedRoles={['student', 'faculty', 'hod', 'admin', 'director', 'principal', 'management', 'program_chair']} />}>
+                <Route path="/feedback" element={<FeedbackPage />} />
               </Route>
               <Route element={<ProtectedRoute allowedRoles={['hod', 'admin', 'director', 'principal', 'management', 'program_chair']} />}>
                 <Route path="/reports/monthly" element={<MonthlyReportPage />} />
