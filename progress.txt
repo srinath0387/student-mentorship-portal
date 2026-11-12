@@ -42,3 +42,5 @@
 [2026-11-12 13:42] GSD SESSION END — AT001–AT006 done.
 
 [2026-11-12 14:17] GSD SESSION START — Lab co-faculty
+[2026-11-12 14:17] AT007 → done: lab co-faculty (allotment field, workload + API score credit, view-only timetable, attendance main-only). 120 tests pass, builds ✓. Committed a18a318.
+[2026-11-12 14:17] GSD SESSION END — AT007 done.
