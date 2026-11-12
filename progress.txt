@@ -56,3 +56,5 @@
 [2026-11-12 16:00] FT008 → done: live-code attendance (rotating code, roster-only single check-in, pre-fill). 140 tests pass, builds ✓. Committed dc41c1c.
 [2026-11-12 16:06] FT009 → done: CO-PO mapping + attainment (course editor, dept summary). 142 tests pass, builds ✓, screenshot checked. Committed bcd53e6.
 [2026-11-12 16:09] FT010 → done: alumni (CRUD, batch import, self-update links, analytics). 145 tests pass, builds ✓, screenshot checked. Committed 021df3b.
+[2026-11-12 16:12] FT011 → done: exam seating & invigilation planner. 147 tests pass, builds ✓. Committed 6e5b7d3.
+[2026-11-12 16:12] GSD SESSION END — FT001–FT011 all done.
