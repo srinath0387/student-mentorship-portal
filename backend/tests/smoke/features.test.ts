@@ -256,3 +256,36 @@ describe('FT005 faculty appraisal workflow', () => {
     expect(calls.find(c => c.sql.includes('UPDATE faculty_appraisals'))!.sql).toContain("status = 'Draft'");
   });
 });
+
+describe('FT006 accreditation pack', () => {
+  it('builds sheet rows filtered to the academic year, with ratio and PhD counts', async () => {
+    routeDb([
+      ['GROUP BY department, year', [{ department: 'CSE (Data Science)', year: '3rd Year', students: 120 }, { department: 'CSE (Data Science)', year: '4th Year', students: 60 }]],
+      ['FROM faculty f LEFT JOIN faculty_full_profiles', [
+        { name: 'Dr. Ramesh', email: 'ramesh@rgmcet.edu.in', department: 'CSE (Data Science)',
+          personal: { designation: 'Professor', joining_date: '2016-07-01', prior_experience_years: 4 },
+          education: { highest_qualification: 'Ph.D', specialization: 'Data Mining' },
+          activities: [
+            { type: 'FDP', title: 'FDP on GenAI', organizer: 'ATAL', from_date: '2026-07-14', to_date: '2026-07-18', academic_year: '2026–27', level: 'National' },
+            { type: 'Workshop', title: 'Old workshop', organizer: 'X', date: '2024-08-01', academic_year: '2024–25', level: 'State' },
+          ],
+          publications: [{ category: 'Journal', title: 'Paper A', journal_name: 'IEEE Access', year: 2026 }, { category: 'Journal', title: 'Paper B', journal_name: 'J', year: 2020 }],
+          certifications: [] },
+        { name: 'Mr. Naveen', email: 'naveen@rgmcet.edu.in', department: 'CSE (Data Science)', personal: {}, education: { highest_qualification: 'M.Tech' }, activities: [], publications: [], certifications: [] },
+      ]],
+    ]);
+    const res = await request(app).get('/accreditation/pack?academic_year=2026-27').set('Authorization', ADMIN());
+    expect(res.status).toBe(200);
+    const sh = res.body.sheets;
+    expect(sh['Student-Faculty Ratio'][0]).toMatchObject({ 'Department': 'CSE (Data Science)', 'Students': 180, 'Faculty': 2, 'Student : Faculty': '90 : 1', 'Faculty with PhD': 1, 'PhD %': 50 });
+    expect(sh['FDPs & Workshops'].map((a: any) => a['Title'])).toEqual(['FDP on GenAI']);
+    expect(sh['Publications & Patents'].map((p: any) => p['Title'])).toEqual(['Paper A']);
+    expect(sh['Faculty'][0]['PhD']).toBe('Yes');
+  });
+
+  it('rejects a bad academic year and keeps HODs to their department', async () => {
+    routeDb([['FROM hod_credentials', [{ department: 'ECE' }]]]);
+    expect((await request(app).get('/accreditation/pack?academic_year=2026').set('Authorization', ADMIN())).status).toBe(400);
+    expect((await request(app).get('/accreditation/pack?department=CSE').set('Authorization', bearer('hod', 'hece@rgmcet.edu.in'))).status).toBe(403);
+  });
+});

@@ -147,6 +147,7 @@ const adminNav: NavGroup[] = [
     items: [
       { label: 'Admin Dashboard', path: '/admin/dashboard?tab=home', icon: LayoutDashboard },
       { label: 'Monthly Report', path: '/reports/monthly', icon: FileBarChart },
+      { label: 'NAAC / NBA Data Pack', path: '/accreditation', icon: FileCheck },
       { label: 'Student Feedback', path: '/feedback', icon: Star },
     ],
   },
@@ -227,6 +228,7 @@ const hodNav: NavGroup[] = [
       { label: 'Academic & Holiday Calendar', path: '/hod/dashboard?tab=holidays', icon: Calendar },
       { label: 'At-Risk Students', path: '/risk', icon: ShieldCheck },
       { label: 'Monthly Report', path: '/reports/monthly', icon: FileBarChart },
+      { label: 'NAAC / NBA Data Pack', path: '/accreditation', icon: FileCheck },
       { label: 'Student Feedback', path: '/feedback', icon: Star },
       { label: 'Placement Drives', path: '/placement/drives', icon: Award },
       { label: 'Faculty Appraisal', path: '/appraisal', icon: ClipboardCheck },
@@ -333,6 +335,7 @@ const oversightNav: NavGroup[] = [
     icon: LayoutDashboard,
     items: [
       { label: 'Monthly Principal\'s Report', path: '/reports/monthly', icon: FileBarChart },
+      { label: 'NAAC / NBA Data Pack', path: '/accreditation', icon: FileCheck },
       { label: 'Student Feedback', path: '/feedback', icon: Star },
       { label: 'Faculty Appraisal', path: '/appraisal', icon: ClipboardCheck },
       { label: 'Student Analytics', path: '/oversight/dashboard?tab=students', icon: Users },

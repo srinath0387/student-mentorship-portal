@@ -265,7 +265,7 @@
         "frontend/src/App.tsx"
       ],
       "acceptance_criteria": "Each sheet populated from live data; export works.",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "commit_msg": "feat(accreditation): NAAC/NBA data pack export"
     },

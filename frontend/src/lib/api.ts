@@ -1041,6 +1041,9 @@ export const api = {
     return fetchWithAuth(`/attendance/sessions${query}`);
   },
 
+  getAccreditationPack: async (academicYear: string, department: string) =>
+    fetchWithAuth(`/accreditation/pack?academic_year=${encodeURIComponent(academicYear)}&department=${encodeURIComponent(department)}`),
+
   // ── Faculty appraisal ──
   getAppraisals: async (academicYear: string) => fetchWithAuth(`/appraisals?academic_year=${encodeURIComponent(academicYear)}`),
   getAppraisal: async (email: string, academicYear: string) =>

@@ -9100,6 +9100,163 @@ app.post('/appraisals/:email/action', requireRole('faculty', 'hod', 'admin', 'pr
   }
 });
 
+// ============================================================================
+// NAAC / NBA accreditation data pack — GET /accreditation/pack?department=&academic_year=2026–27
+// Returns sheet-ready rows; the browser turns them into an Excel workbook.
+// ============================================================================
+app.get('/accreditation/pack', requireRole('admin', 'hod', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    const ay = normAY(String(req.query.academic_year || currentAcademicYear()));
+    const range = academicYearRange(ay);
+    if (!range) return res.status(400).json({ error: 'academic_year must look like 2026–27' });
+    let depts: string[] | null = null;
+    if (req.auth?.role === 'hod' && req.auth.department && req.auth.department !== '*') depts = [req.auth.department];
+    else if (req.auth?.role === 'program_chair') depts = CSE_ALLIED_DEPTS;
+    const requested = String(req.query.department || 'All');
+    if (requested !== 'All') {
+      if (depts && !depts.includes(requested)) return res.status(403).json({ error: 'Department outside your scope' });
+      depts = [requested];
+    }
+    const dp = depts ? [depts] : [];
+    const dw = (col: string, idx = 1) => (depts ? ` AND ${col} = ANY($${idx})` : '');
+
+    // 1. Student strength
+    const strength = await db.query(
+      `SELECT department, year, COUNT(*)::int AS students FROM students st WHERE 1=1 ${dw('st.department')}
+       GROUP BY department, year ORDER BY department, year`, dp);
+
+    // 2. Faculty profile
+    const fac = await db.query(
+      `SELECT f.name, f.email, f.department, f.faculty_id,
+              fp.personal, fp.education, fp.activities, fp.publications, fp.certifications
+       FROM faculty f LEFT JOIN faculty_full_profiles fp ON LOWER(fp.email) = LOWER(f.email)
+       WHERE f.email NOT LIKE 'pending_%' AND COALESCE(f.role, '') <> 'admin' ${dw('f.department')}
+       ORDER BY f.department, f.name`, dp);
+    const today = new Date();
+    const yearsSince = (d?: string) => {
+      if (!d) return null;
+      const t = new Date(d); if (isNaN(t.getTime())) return null;
+      return Math.max(0, Math.round(((today.getTime() - t.getTime()) / (365.25 * 86400000)) * 10) / 10);
+    };
+    const inYear = (x: any) => {
+      const tag = String(x?.academic_year || '').replace('-', '–');
+      if (tag) return tag === ay;
+      const d = String(x?.from_date || x?.date || x?.completion_date || '').slice(0, 10);
+      if (d) return d >= range.from && d <= range.to;
+      const y = Number(x?.year);
+      return y ? y === Number(ay.slice(0, 4)) || y === Number(ay.slice(0, 4)) + 1 : false;
+    };
+    const faculty: any[] = []; const activities: any[] = []; const publications: any[] = []; const facultyCerts: any[] = [];
+    for (const f of fac.rows) {
+      const personal = f.personal || {}; const edu = f.education || {};
+      const rgm = yearsSince(personal.joining_date);
+      const prior = (Number(personal.prior_experience_years) || 0) + (Number(personal.prior_experience_months) || 0) / 12;
+      faculty.push({
+        'Name': f.name, 'Email': f.email, 'Department': f.department, 'Designation': personal.designation || '',
+        'Highest Qualification': edu.highest_qualification || '', 'Specialization': edu.specialization || '',
+        'University': edu.university || '', 'Year of Passing': edu.year_of_passing || '',
+        'PhD': /ph\.?\s?d/i.test(String(edu.highest_qualification || '')) ? 'Yes' : 'No',
+        'Date of Joining': personal.joining_date || '', 'Experience at RGMCET (yrs)': rgm ?? '',
+        'Total Experience (yrs)': rgm !== null ? Math.round((rgm + prior) * 10) / 10 : (prior ? Math.round(prior * 10) / 10 : ''),
+      });
+      for (const a of (Array.isArray(f.activities) ? f.activities : []).filter(inYear)) {
+        activities.push({ 'Faculty': f.name, 'Department': f.department, 'Type': a.type, 'Role': a.role_type || 'Attended', 'Title': a.title,
+          'Organizer': a.organizer, 'From': a.from_date || a.date || '', 'To': a.to_date || a.date || '', 'Days': a.no_of_days || '', 'Level': a.level || '' });
+      }
+      for (const pb of (Array.isArray(f.publications) ? f.publications : []).filter(inYear)) {
+        publications.push({ 'Faculty': f.name, 'Department': f.department, 'Category': pb.category, 'Title': pb.title, 'Journal / Conference': pb.journal_name,
+          'Year': pb.year, 'DOI / Link': pb.doi_link || '', 'Co-authors': pb.co_authors || '', 'Patent Status': pb.patent_status || '', 'Application No.': pb.application_number || '' });
+      }
+      for (const c of (Array.isArray(f.certifications) ? f.certifications : []).filter(inYear)) {
+        facultyCerts.push({ 'Faculty': f.name, 'Department': f.department, 'Certification': c.title, 'Issuer': c.issuing_body, 'Completed': c.completion_date || '' });
+      }
+    }
+
+    // 3. Student-faculty ratio per department
+    const deptNames = Array.from(new Set([...strength.rows.map((r: any) => r.department), ...faculty.map(f => f['Department'])])).filter(Boolean).sort();
+    const ratio = deptNames.map(d => {
+      const st = strength.rows.filter((r: any) => r.department === d).reduce((t: number, r: any) => t + Number(r.students), 0);
+      const fc = faculty.filter(f => f['Department'] === d).length;
+      const phd = faculty.filter(f => f['Department'] === d && f['PhD'] === 'Yes').length;
+      return { 'Department': d, 'Students': st, 'Faculty': fc, 'Student : Faculty': fc ? `${Math.round((st / fc) * 10) / 10} : 1` : '—', 'Faculty with PhD': phd, 'PhD %': fc ? Math.round((phd / fc) * 100) : 0 };
+    });
+
+    // 4. Student certifications in the year
+    const sc = await db.query(
+      `SELECT st.roll_number, st.name, st.department, st.year, x.title, x.issuer, x.d FROM (
+         SELECT UPPER(TRIM(sc.roll_number)) AS roll, sc.certificate_name AS title, sc.issuer, COALESCE(sc.issue_date, sc.created_at::date) AS d
+         FROM student_certifications sc WHERE COALESCE(LOWER(sc.status), '') <> 'rejected'
+         UNION ALL
+         SELECT UPPER(TRIM(c.student_id)), c.title, c.provider, COALESCE(c.date_completed, c.created_at::date) FROM certifications c
+       ) x JOIN students st ON UPPER(st.roll_number) = x.roll
+       WHERE x.d BETWEEN '${range.from}' AND '${range.to}' ${dw('st.department')}
+       ORDER BY st.department, st.roll_number`, dp
+    ).catch(() => db.query(
+      `SELECT st.roll_number, st.name, st.department, st.year, c.title, c.provider AS issuer, COALESCE(c.date_completed, c.created_at::date) AS d
+       FROM certifications c JOIN students st ON UPPER(st.roll_number) = UPPER(c.student_id)
+       WHERE COALESCE(c.date_completed, c.created_at::date) BETWEEN '${range.from}' AND '${range.to}' ${dw('st.department')}`, dp).catch(() => ({ rows: [] as any[] })));
+
+    // 5. Placements in the year
+    const pl = await db.query(
+      `SELECT p.roll_number, COALESCE(p.student_name, st.name) AS name, COALESCE(p.department, st.department) AS department, COALESCE(p.batch, st.batch) AS batch,
+              p.company_name, p.role_title, p.package_lpa, p.offer_date, p.placement_type
+       FROM student_placements p LEFT JOIN students st ON UPPER(st.roll_number) = UPPER(p.roll_number)
+       WHERE COALESCE(p.offer_date, p.created_at::date) BETWEEN '${range.from}' AND '${range.to}' ${dw('COALESCE(p.department, st.department)')}
+       ORDER BY 3, p.package_lpa DESC NULLS LAST`, dp).catch(() => ({ rows: [] as any[] }));
+
+    // 6. Attendance (current semester) by department & year
+    const att = await fetchCurrentSemesterAttendance(depts).catch(() => [] as StudentAttendanceRow[]);
+    const attMap = new Map<string, { held: number; att: number; n: number; risk: number }>();
+    for (const a of att) {
+      const k = `${a.department}|${a.year}`;
+      const v = attMap.get(k) || { held: 0, att: 0, n: 0, risk: 0 };
+      v.held += a.held; v.att += a.attended; v.n++; if (a.percentage < ATTENDANCE_RISK_THRESHOLD) v.risk++;
+      attMap.set(k, v);
+    }
+    const attendance = Array.from(attMap.entries()).sort().map(([k, v]) => {
+      const [department, year] = k.split('|');
+      return { 'Department': department, 'Year': year, 'Students tracked': v.n, 'Attendance %': v.held ? Math.round((v.att / v.held) * 1000) / 10 : '', [`Below ${ATTENDANCE_RISK_THRESHOLD}%`]: v.risk };
+    });
+
+    // 7. Feedback summary (cycles that started in the year)
+    const fb = await db.query(
+      `SELECT fr.faculty_name, fr.faculty_email, fr.department, fr.subject_name, fr.semester_label, fr.section, fr.ratings
+       FROM feedback_responses fr JOIN feedback_cycles fc ON fc.id = fr.cycle_id
+       WHERE fc.start_date BETWEEN $${depts ? 2 : 1} AND $${depts ? 3 : 2} ${depts ? ' AND fr.department = ANY($1)' : ''}`,
+      depts ? [depts, range.from, range.to] : [range.from, range.to]).catch(() => ({ rows: [] as any[] }));
+    const fbMap = new Map<string, any>();
+    for (const r of fb.rows) {
+      const k = `${r.faculty_email}|${r.subject_name}|${r.semester_label}|${r.section}`;
+      const ratings = typeof r.ratings === 'string' ? JSON.parse(r.ratings) : r.ratings || {};
+      const vals = Object.values(ratings).map(Number).filter(v => v > 0);
+      const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+      const g = fbMap.get(k) || { 'Faculty': r.faculty_name || r.faculty_email, 'Department': r.department, 'Subject': r.subject_name, 'Class': `${r.semester_label} ${r.section}`, n: 0, sum: 0 };
+      g.n++; g.sum += avg; fbMap.set(k, g);
+    }
+    const feedback = Array.from(fbMap.values()).map(g => ({ 'Faculty': g['Faculty'], 'Department': g['Department'], 'Subject': g['Subject'], 'Class': g['Class'], 'Responses': g.n, 'Average (out of 5)': Math.round((g.sum / g.n) * 100) / 100 }));
+
+    res.json({
+      academic_year: ay,
+      department: requested,
+      generated_at: new Date().toISOString(),
+      sheets: {
+        'Student Strength': strength.rows.map((r: any) => ({ 'Department': r.department, 'Year': r.year, 'Students': Number(r.students) })),
+        'Student-Faculty Ratio': ratio,
+        'Faculty': faculty,
+        'FDPs & Workshops': activities,
+        'Publications & Patents': publications,
+        'Faculty Certifications': facultyCerts,
+        'Student Certifications': sc.rows.map((r: any) => ({ 'Roll Number': r.roll_number, 'Name': r.name, 'Department': r.department, 'Year': r.year, 'Certification': r.title, 'Issuer': r.issuer, 'Date': r.d ? String(r.d).slice(0, 10) : '' })),
+        'Placements': pl.rows.map((r: any) => ({ 'Roll Number': r.roll_number, 'Name': r.name, 'Department': r.department, 'Batch': r.batch, 'Company': r.company_name, 'Role': r.role_title || '', 'Package (LPA)': r.package_lpa === null ? '' : Number(r.package_lpa), 'Offer Date': r.offer_date ? String(r.offer_date).slice(0, 10) : '', 'Type': r.placement_type })),
+        'Attendance': attendance,
+        'Student Feedback': feedback,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /oversight/faculty-by-cadre?department=CSE&cadre=associate
 // ============================================================================
 app.get('/oversight/faculty-by-cadre', requireRole('director', 'principal', 'management', 'program_chair', 'admin', 'hod'), async (req: Request, res: Response) => {

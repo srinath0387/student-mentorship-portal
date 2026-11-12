@@ -31,6 +31,7 @@ const OversightDashboardPage = lazy(() => import('./features/oversight/Oversight
 const FacultyWorkloadPage = lazy(() => import('./features/attendance/workload/FacultyWorkloadPage').then(m => ({ default: m.FacultyWorkloadPage })));
 const AttendanceReportsPage = lazy(() => import('./features/attendance/reports/AttendanceReportsPage').then(m => ({ default: m.AttendanceReportsPage })));
 const DocumentsManagementPage = lazy(() => import('./features/documents/DocumentsManagementPage').then(m => ({ default: m.DocumentsManagementPage })));
+const AccreditationPage = lazy(() => import('./features/accreditation/AccreditationPage'));
 const AppraisalPage = lazy(() => import('./features/appraisal/AppraisalPage'));
 const PlacementDrivesPage = lazy(() => import('./features/placement/PlacementDrivesPage'));
 const FeedbackPage = lazy(() => import('./features/feedback/FeedbackPage'));
@@ -348,6 +349,7 @@ export const App: React.FC = () => {
               </Route>
               <Route element={<ProtectedRoute allowedRoles={['hod', 'admin', 'director', 'principal', 'management', 'program_chair']} />}>
                 <Route path="/reports/monthly" element={<MonthlyReportPage />} />
+                <Route path="/accreditation" element={<AccreditationPage />} />
               </Route>
               <Route path="/attendance/workload" element={<FacultyWorkloadPage />} />
               <Route path="/attendance/reports" element={<AttendanceReportsPage />} />
