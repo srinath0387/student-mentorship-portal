@@ -173,6 +173,7 @@ const adminNav: NavGroup[] = [
       { label: 'Assign Students to Faculty', path: '/admin/dashboard?tab=attendance&sub=roster', icon: Users },
       { label: 'Remove Class for a Date', path: '/admin/attendance?view=remove', icon: CalendarCheck },
       { label: 'Academic Calendar & Approvals', path: '/admin/attendance?view=calendar', icon: Calendar },
+      { label: 'Parent Alerts', path: '/admin/attendance?view=parents', icon: Users },
     ],
   },
   {

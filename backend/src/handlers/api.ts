@@ -9257,6 +9257,112 @@ app.get('/accreditation/pack', requireRole('admin', 'hod', 'principal', 'directo
   }
 });
 
+// ============================================================================
+// Parent alerts
+// In-app alerts for parents, generated from attendance. Phone messages (SMS/WhatsApp) go through
+// a generic webhook that is OFF until configured:
+//   MESSAGING_WEBHOOK_URL   — gateway endpoint that accepts POST { to, text }
+//   MESSAGING_WEBHOOK_TOKEN — optional bearer token
+// NOTE: the API Lambda runs in private subnets without a NAT gateway, so outbound calls also need
+// a NAT gateway (or the sender moved outside the VPC) before messages can actually leave AWS.
+// ============================================================================
+function messagingConfigured(): boolean { return Boolean(process.env.MESSAGING_WEBHOOK_URL); }
+
+async function sendParentMessage(to: string, text: string): Promise<boolean> {
+  const url = process.env.MESSAGING_WEBHOOK_URL;
+  if (!url || !to) return false;
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(process.env.MESSAGING_WEBHOOK_TOKEN ? { Authorization: `Bearer ${process.env.MESSAGING_WEBHOOK_TOKEN}` } : {}) },
+      body: JSON.stringify({ to, text }),
+      signal: AbortSignal.timeout(8000),
+    });
+    return r.ok;
+  } catch (err: any) {
+    console.warn('[parent messaging] send failed:', err.message);
+    return false;
+  }
+}
+
+const todayIST = () => new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
+
+// GET /parent/alerts — alerts about the parent's ward (also works for the student themself)
+app.get('/parent/alerts', requireRole('parent', 'student'), async (req: Request, res: Response) => {
+  try {
+    const roll = (req.auth!.regNo || '').toUpperCase();
+    if (!roll) return res.json({ alerts: [] });
+    const today = todayIST();
+    const weekAgo = new Date(Date.now() + 5.5 * 3600000 - 6 * 86400000).toISOString().slice(0, 10);
+    const absences = await db.query(
+      `SELECT s.session_date::text AS d, s.period_start, s.num_periods, a.subject_name
+       FROM attendance_records r JOIN attendance_sessions s ON s.id = r.session_id JOIN subject_allotments a ON a.id = s.allotment_id
+       WHERE UPPER(r.roll_number) = $1 AND r.is_present = false AND s.session_date BETWEEN $2 AND $3
+       ORDER BY s.session_date DESC, s.period_start`, [roll, weekAgo, today]);
+    const alerts: any[] = [];
+    const todays = absences.rows.filter((x: any) => x.d === today);
+    if (todays.length) {
+      alerts.push({ level: 'high', code: 'absent_today', title: 'Absent today',
+        detail: todays.map((x: any) => `${x.subject_name} (P${x.period_start}${x.num_periods > 1 ? `–${x.period_start + x.num_periods - 1}` : ''})`).join(', ') });
+    }
+    const earlier = absences.rows.filter((x: any) => x.d !== today);
+    if (earlier.length) {
+      const days = new Set(earlier.map((x: any) => x.d));
+      alerts.push({ level: 'medium', code: 'absent_week', title: `Absent in ${earlier.length} class${earlier.length === 1 ? '' : 'es'} on ${days.size} day${days.size === 1 ? '' : 's'} this week`,
+        detail: earlier.slice(0, 6).map((x: any) => `${x.d}: ${x.subject_name}`).join(' · ') });
+    }
+    const att = (await fetchCurrentSemesterAttendance(null).catch(() => [] as StudentAttendanceRow[])).find(a => String(a.roll_number).toUpperCase() === roll);
+    if (att && att.percentage < ATTENDANCE_RISK_THRESHOLD) {
+      alerts.push({ level: att.percentage < ATTENDANCE_CRITICAL_THRESHOLD ? 'high' : 'medium', code: 'attendance_low',
+        title: `Semester attendance ${att.percentage.toFixed(1)}%`, detail: `Below the required ${ATTENDANCE_RISK_THRESHOLD}% — may affect exam eligibility.` });
+    }
+    // Last month's attendance
+    const now = new Date(Date.now() + 5.5 * 3600000);
+    const lmStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString().slice(0, 10);
+    const lmEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0)).toISOString().slice(0, 10);
+    const lm = await db.query(
+      `SELECT COALESCE(SUM(s.num_periods), 0)::int AS held, COALESCE(SUM(CASE WHEN r.is_present THEN s.num_periods ELSE 0 END), 0)::int AS attended
+       FROM attendance_records r JOIN attendance_sessions s ON s.id = r.session_id
+       WHERE UPPER(r.roll_number) = $1 AND s.session_date BETWEEN $2 AND $3`, [roll, lmStart, lmEnd]);
+    const held = Number(lm.rows[0]?.held || 0);
+    const monthly = held ? { month: lmStart.slice(0, 7), held, attended: Number(lm.rows[0].attended), percentage: Math.round((Number(lm.rows[0].attended) / held) * 1000) / 10 } : null;
+    res.json({ roll_number: roll, alerts, monthly, current_semester: att ? { percentage: att.percentage, held: att.held, attended: att.attended } : null });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /parent/alerts/dispatch — { date, send } (admin)
+// Builds the day's absence messages for parents; sends them only when send=true and messaging is configured.
+app.post('/parent/alerts/dispatch', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    const date = String(req.body?.date || todayIST()).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+    const r = await db.query(
+      `SELECT st.roll_number, st.name, st.parent_phone, array_agg(DISTINCT a.subject_name ORDER BY a.subject_name) AS subjects
+       FROM attendance_records ar JOIN attendance_sessions s ON s.id = ar.session_id JOIN subject_allotments a ON a.id = s.allotment_id
+       JOIN students st ON UPPER(st.roll_number) = UPPER(ar.roll_number)
+       WHERE ar.is_present = false AND s.session_date = $1
+       GROUP BY st.roll_number, st.name, st.parent_phone ORDER BY st.roll_number`, [date]);
+    const messages = r.rows.map((x: any) => ({
+      roll_number: x.roll_number, name: x.name, to: x.parent_phone || '',
+      text: `RGMCET: Your ward ${x.name} (${x.roll_number}) was absent on ${date} for ${(x.subjects || []).join(', ')}.`,
+    }));
+    const withPhone = messages.filter((m: any) => m.to);
+    let sent = 0;
+    if (req.body?.send && messagingConfigured()) {
+      for (const m of withPhone) if (await sendParentMessage(m.to, m.text)) sent++;
+    }
+    res.json({
+      date, provider: messagingConfigured() ? 'webhook' : 'disabled',
+      absent_students: messages.length, with_parent_phone: withPhone.length, sent,
+      preview: messages.slice(0, 200),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /oversight/faculty-by-cadre?department=CSE&cadre=associate
 // ============================================================================
 app.get('/oversight/faculty-by-cadre', requireRole('director', 'principal', 'management', 'program_chair', 'admin', 'hod'), async (req: Request, res: Response) => {

@@ -289,3 +289,37 @@ describe('FT006 accreditation pack', () => {
     expect((await request(app).get('/accreditation/pack?department=CSE').set('Authorization', bearer('hod', 'hece@rgmcet.edu.in'))).status).toBe(403);
   });
 });
+
+describe('FT007 parent alerts', () => {
+  const PARENT = () => bearer('parent', 'parent_23091a3201@rgmcet.edu.in', '23091A3201');
+  const today = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
+
+  it('builds absent-today, this-week and low-attendance alerts for the ward', async () => {
+    routeDb([
+      ["r.is_present = false AND s.session_date BETWEEN", [
+        { d: today, period_start: 1, num_periods: 1, subject_name: 'DBMS' },
+        { d: '2000-01-01', period_start: 3, num_periods: 2, subject_name: 'OS Lab' },
+      ]],
+      ['WITH cur AS', [{ roll_number: '23091A3201', name: 'A', department: 'CSE', year: '3rd Year', section: 'A', semester: '3-1', held: '100', attended: '62' }]],
+      ['SUM(CASE WHEN r.is_present', [{ held: 80, attended: 60 }]],
+    ]);
+    const res = await request(app).get('/parent/alerts').set('Authorization', PARENT());
+    expect(res.status).toBe(200);
+    expect(res.body.alerts.map((a: any) => a.code)).toEqual(['absent_today', 'absent_week', 'attendance_low']);
+    expect(res.body.alerts[0].detail).toBe('DBMS (P1)');
+    expect(res.body.alerts[2].level).toBe('high');
+    expect(res.body.monthly).toMatchObject({ held: 80, attended: 60, percentage: 75 });
+  });
+
+  it('dispatch previews messages and sends nothing while messaging is not configured', async () => {
+    delete process.env.MESSAGING_WEBHOOK_URL;
+    routeDb([['GROUP BY st.roll_number, st.name, st.parent_phone', [
+      { roll_number: '23091A3201', name: 'Aarav', parent_phone: '9876543210', subjects: ['DBMS', 'OS'] },
+      { roll_number: '23091A3202', name: 'Bhavya', parent_phone: null, subjects: ['DBMS'] },
+    ]]]);
+    const res = await request(app).post('/parent/alerts/dispatch').set('Authorization', ADMIN()).send({ date: '2026-11-09', send: true });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ provider: 'disabled', absent_students: 2, with_parent_phone: 1, sent: 0 });
+    expect(res.body.preview[0].text).toContain('Aarav (23091A3201) was absent on 2026-11-09 for DBMS, OS');
+  });
+});

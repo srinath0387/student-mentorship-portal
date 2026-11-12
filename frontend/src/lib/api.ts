@@ -1041,6 +1041,11 @@ export const api = {
     return fetchWithAuth(`/attendance/sessions${query}`);
   },
 
+  // ── Parent alerts ──
+  getParentAlerts: async () => fetchWithAuth('/parent/alerts'),
+  dispatchParentAlerts: async (date: string, send: boolean) =>
+    fetchWithAuth('/parent/alerts/dispatch', { method: 'POST', body: JSON.stringify({ date, send }) }),
+
   getAccreditationPack: async (academicYear: string, department: string) =>
     fetchWithAuth(`/accreditation/pack?academic_year=${encodeURIComponent(academicYear)}&department=${encodeURIComponent(department)}`),
 

@@ -17,7 +17,7 @@ import { useAuth } from '../../../context/AuthContext';
  *   ?view=calendar     Academic calendar lock & late-posting approvals
  */
 
-type View = 'posted' | 'not-posted' | 'edit' | 'remove' | 'calendar';
+type View = 'posted' | 'not-posted' | 'edit' | 'remove' | 'calendar' | 'parents';
 
 interface DaySlot {
   timetable_id: string | null;
@@ -55,6 +55,7 @@ const VIEW_TITLES: Record<View, { title: string; sub: string }> = {
   edit: { title: 'Editing of Attendance', sub: 'Open any posted class to correct individual students. Admin edits are not limited to the same day.' },
   remove: { title: 'Remove Class for a Date', sub: 'Cancel one class, a whole section, or a department for a date (exam, event, late holiday).' },
   calendar: { title: 'Academic Calendar & Late-Posting Approvals', sub: 'Outside the semester dates, faculty can post attendance only after you approve their request.' },
+  parents: { title: 'Parent Alerts', sub: 'Absence messages for parents. Parents always see alerts in their portal; phone messages need a messaging gateway.' },
 };
 
 function Pill({ tone, children }: { tone: 'green' | 'amber' | 'slate' | 'red' | 'indigo'; children: React.ReactNode }) {
@@ -252,12 +253,61 @@ function LatePostApprovals() {
   );
 }
 
+// ── Parent alert messages ──────────────────────────────────────────────────
+function ParentDispatch() {
+  const [date, setDate] = useState(today());
+  const [result, setResult] = useState<any>(null);
+  const run = useMutation({
+    mutationFn: (send: boolean) => api.dispatchParentAlerts(date, send),
+    onSuccess: (r: any) => setResult(r),
+  });
+  React.useEffect(() => { run.mutate(false); /* preview on open and when the date changes */ // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date]);
+  const disabled = result?.provider === 'disabled';
+  return (
+    <div className="space-y-4">
+      <div className={`${card} p-4 flex flex-wrap items-center gap-2`}>
+        <input type="date" value={date} max={today()} onChange={e => setDate(e.target.value)} className={input} />
+        {result && <span className="text-[11px] text-textSecondary">{result.absent_students} students absent · {result.with_parent_phone} with a parent phone number</span>}
+        <button disabled={disabled || run.isPending || !result?.with_parent_phone} onClick={() => run.mutate(true)}
+          className="ml-auto px-3 py-2 text-xs font-bold rounded-xl bg-brand-primary text-white disabled:opacity-40">
+          {run.isPending ? 'Working…' : `Send ${result?.with_parent_phone || 0} messages`}
+        </button>
+      </div>
+      {disabled && (
+        <div className="px-4 py-3 rounded-xl bg-amber-500/10 text-amber-800 dark:text-amber-300 text-xs">
+          <b>Phone messaging is not switched on yet.</b> Parents already see these alerts when they log in. To also send SMS/WhatsApp, a messaging gateway
+          (MESSAGING_WEBHOOK_URL) must be configured, and the API needs outbound internet access (a NAT gateway), which the current AWS setup does not have.
+        </div>
+      )}
+      {result?.sent > 0 && <div className="px-4 py-2.5 rounded-xl bg-emerald-500/10 text-emerald-700 text-xs font-semibold">{result.sent} messages sent.</div>}
+      <div className={`${card} overflow-hidden`}>
+        <table className="w-full text-xs text-left">
+          <thead><tr className="bg-surface-2 border-b border-borderLine text-textMuted font-bold uppercase text-[10px] tracking-wider">
+            <th className="py-2.5 px-4">Student</th><th className="py-2.5 px-3">Parent phone</th><th className="py-2.5 px-3">Message</th></tr></thead>
+          <tbody className="divide-y divide-borderLine">
+            {!result ? <tr><td colSpan={3} className="py-8 text-center text-textMuted">Loading…</td></tr>
+              : result.preview.length === 0 ? <tr><td colSpan={3} className="py-8 text-center text-textMuted">No absences recorded on {date}.</td></tr>
+              : result.preview.map((m: any) => (
+                <tr key={m.roll_number}>
+                  <td className="py-2 px-4"><div className="font-mono font-bold text-textPrimary">{m.roll_number}</div><div className="text-textSecondary">{m.name}</div></td>
+                  <td className={`py-2 px-3 ${m.to ? 'text-textSecondary' : 'text-red-600'}`}>{m.to || 'missing'}</td>
+                  <td className="py-2 px-3 text-textSecondary">{m.text}</td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────
 export const AttendanceControlPage: React.FC = () => {
   const { user } = useAuth();
   const qc = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
-  const view = (['posted', 'not-posted', 'edit', 'remove', 'calendar'].includes(searchParams.get('view') || '') ? searchParams.get('view') : 'not-posted') as View;
+  const view = (['posted', 'not-posted', 'edit', 'remove', 'calendar', 'parents'].includes(searchParams.get('view') || '') ? searchParams.get('view') : 'not-posted') as View;
   const lockedDept = user?.role === 'hod' && user?.department ? user.department : '';
 
   const [date, setDate] = useState(today());
@@ -405,7 +455,7 @@ export const AttendanceControlPage: React.FC = () => {
         <div className={`px-4 py-2.5 rounded-xl text-xs font-semibold ${flash.ok ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'bg-red-500/10 text-red-700 dark:text-red-400'}`}>{flash.text}</div>
       )}
 
-      {view === 'calendar' ? <LatePostApprovals /> : (
+      {view === 'parents' ? <ParentDispatch /> : view === 'calendar' ? <LatePostApprovals /> : (
         <>
           <div className={`${card} p-3 flex flex-wrap items-center gap-2`}>
             <input type="date" value={date} max={today()} onChange={e => setDate(e.target.value)} className={input} />

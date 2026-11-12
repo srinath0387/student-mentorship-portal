@@ -280,7 +280,7 @@
         "frontend/src/lib/api.ts"
       ],
       "acceptance_criteria": "Alerts generated from attendance; provider disabled by default.",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "commit_msg": "feat(parents): attendance alerts for parents"
     },

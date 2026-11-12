@@ -5,6 +5,7 @@ import { StudentAttendanceView } from '../student/StudentAttendanceView';
 import { MeetingLogsView } from '../../../components/MeetingLogsView';
 import { api } from '../../../lib/api';
 import { Bell } from 'lucide-react';
+import { ParentAlertsCard } from '../../parents/ParentAlertsCard';
 
 export const ParentAttendanceView: React.FC = () => {
   const { user } = useAuth();
@@ -28,6 +29,8 @@ export const ParentAttendanceView: React.FC = () => {
           {wardRollNumber && <p className="mt-1 text-blue-500 dark:text-blue-400">Ward Roll No: <span className="font-mono">{wardRollNumber}</span></p>}
         </div>
       </div>
+
+      <ParentAlertsCard />
 
       {/* Reuse Student View for ward */}
       <StudentAttendanceView rollNumber={wardRollNumber} />
