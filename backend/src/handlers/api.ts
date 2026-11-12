@@ -10210,7 +10210,7 @@ app.get('/faculty/:email/api-score', requireRole('faculty', 'hod', 'admin', 'dir
       SELECT AVG(pct)::numeric(5,1) AS avg_pct FROM (
         SELECT ar.roll_number,
           CASE WHEN COUNT(*) > 0
-               THEN (SUM(CASE WHEN ar.status='present' THEN 1 ELSE 0 END)::float / COUNT(*)) * 100
+               THEN (SUM(CASE WHEN ar.is_present = true THEN 1 ELSE 0 END)::float / COUNT(*)) * 100
                ELSE 0 END AS pct
         FROM attendance_records ar
         JOIN attendance_sessions s ON s.id = ar.session_id
@@ -10260,7 +10260,7 @@ app.get('/faculty/:email/api-score', requireRole('faculty', 'hod', 'admin', 'dir
     const atRiskRows = await safeQuery(`
       SELECT COUNT(DISTINCT roll_number)::int AS total_atrisk FROM (
         SELECT ar2.roll_number,
-          SUM(CASE WHEN ar2.status='present' THEN 1 ELSE 0 END)::float / COUNT(*) AS pct
+          SUM(CASE WHEN ar2.is_present = true THEN 1 ELSE 0 END)::float / COUNT(*) AS pct
         FROM attendance_records ar2
         JOIN attendance_sessions s2 ON s2.id = ar2.session_id
         JOIN subject_allotments a2 ON a2.id = s2.allotment_id

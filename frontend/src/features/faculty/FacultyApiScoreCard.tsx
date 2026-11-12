@@ -123,8 +123,10 @@ export function FacultyApiScoreCard({ facultyEmail, readOnly = false }: Props) {
     enabled: !!facultyEmail && showDuties,
   });
 
-  const score: ApiScore | null = scoreData?.data ?? null;
-  const duties: Duty[] = dutiesData?.data ?? [];
+  // fetchWithAuth returns the JSON body directly (no axios-style `.data` wrapper)
+  const score: ApiScore | null = scoreData && typeof scoreData.total_score === 'number' ? scoreData : null;
+  const duties: Duty[] = (Array.isArray(dutiesData?.duties) ? dutiesData.duties : [])
+    .map((d: any) => ({ ...d, status: String(d.status || 'pending').toLowerCase() }));
 
   const handleDutySuccess = () => {
     refetchScore();
@@ -144,8 +146,16 @@ export function FacultyApiScoreCard({ facultyEmail, readOnly = false }: Props) {
 
   if (scoreError || !score) {
     return (
-      <div className="bg-white dark:bg-surface rounded-2xl border border-gray-200 dark:border-borderLine shadow-sm p-6 text-center text-sm text-gray-500">
-        Unable to load API score data.
+      <div className="bg-white dark:bg-surface rounded-2xl border border-gray-200 dark:border-borderLine shadow-sm p-6 text-center text-sm text-gray-500 space-y-2">
+        <p>Unable to load API score data.</p>
+        {scoreError instanceof Error && <p className="text-xs text-gray-400">{scoreError.message}</p>}
+        <button
+          type="button"
+          onClick={() => refetchScore()}
+          className="text-xs font-bold text-brand-primary hover:underline"
+        >
+          Retry
+        </button>
       </div>
     );
   }

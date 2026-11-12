@@ -163,3 +163,31 @@ describe('Faculty profile documents', () => {
     expect(certs[0].certificate_file_url).toBe('faculty/ramesh@rgmcet.edu.in/certifications/1700000000000_fdp.pdf');
   });
 });
+
+describe('Faculty API score', () => {
+  it('returns the score object directly (not wrapped in .data) for the faculty member', async () => {
+    db.query.mockReset();
+    db.query.mockResolvedValue({ rows: [], rowCount: 0 });
+    const token = signSessionToken({ role: 'faculty', email: 'ramesh@rgmcet.edu.in' });
+    const res = await request(app).get('/faculty/ramesh%40rgmcet.edu.in/api-score').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(typeof res.body.total_score).toBe('number');
+    expect(res.body.pillars.teaching.max).toBe(40);
+    expect(Array.isArray(res.body.duties)).toBe(true);
+  });
+
+  it('stops a faculty member reading another faculty member’s score', async () => {
+    const token = signSessionToken({ role: 'faculty', email: 'ramesh@rgmcet.edu.in' });
+    const res = await request(app).get('/faculty/other%40rgmcet.edu.in/api-score').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(403);
+  });
+
+  it('uses the is_present column for student attendance (attendance_records has no status column)', async () => {
+    db.query.mockClear();
+    const token = signSessionToken({ role: 'faculty', email: 'ramesh@rgmcet.edu.in' });
+    await request(app).get('/faculty/ramesh%40rgmcet.edu.in/api-score').set('Authorization', `Bearer ${token}`);
+    const sqls = db.query.mock.calls.map((c: any[]) => String(c[0]));
+    expect(sqls.some((q: string) => q.includes("status='present'"))).toBe(false);
+    expect(sqls.some((q: string) => q.includes('ar.is_present = true'))).toBe(true);
+  });
+});
