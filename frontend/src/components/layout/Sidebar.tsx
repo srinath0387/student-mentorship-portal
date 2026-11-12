@@ -86,7 +86,7 @@ const studentNav: NavGroup[] = [
       { label: 'My Mentor', path: '/mentor', icon: UserCheck },
       { label: 'Certificates', path: '/profile?tab=certifications', icon: CheckCircle2 },
       { label: 'Documents', path: '/profile?tab=documents', icon: FolderOpen },
-      { label: 'Resume Builder', path: '/resume-builder', icon: FileText, soon: true },
+      { label: 'Resume Builder', path: '/resume-builder', icon: FileText },
     ],
   },
 ];

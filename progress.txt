@@ -22,3 +22,10 @@
 [2026-11-11 21:58] O005 → done: Verified student-placements GET scoping includes program_chair in full-access group. Backend build exit 0.
 [2026-11-11 21:58] O006 → done: Moved department search bar out of hidden nav div in OversightDashboardPage.tsx — now visible on certifications/students/placements tabs. Frontend build exit 0.
 [2026-11-11 21:58] GSD SESSION END — O004, O005, O006 done. All oversight tasks complete.
+
+[2026-11-12 09:22] GSD SESSION START — Resume Builder
+[2026-11-12 09:22] RB001 → done: Backend resume_data table + GET/PUT /resume-data + GET /resume-full merged endpoint. Backend build exit 0.
+[2026-11-12 09:22] RB002 → done: ResumeBuilderPage with 3 templates (Classic/Modern/Minimal), ATS score live (0-100), 8 editor sections, PDF download via jspdf+html2canvas.
+[2026-11-12 09:22] RB003 → done: Templates embedded inline in ResumeBuilderPage. PDF download A4 with page-break support.
+[2026-11-12 09:22] RB004 → done: Route /resume-builder in App.tsx, removed soon:true from sidebar. Frontend build exit 0.
+[2026-11-12 09:22] GSD SESSION END — All 4 Resume Builder tasks done.

@@ -1645,6 +1645,22 @@ export const api = {
     });
   },
 
+  // ── Resume Builder ─────────────────────────────────────────────────────────
+  getResumeData: async (id: string): Promise<any> => {
+    return fetchWithAuth(`/students/${encodeURIComponent(id)}/resume-data`);
+  },
+
+  upsertResumeData: async (id: string, data: any): Promise<any> => {
+    return fetchWithAuth(`/students/${encodeURIComponent(id)}/resume-data`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  getResumeFull: async (id: string): Promise<any> => {
+    return fetchWithAuth(`/students/${encodeURIComponent(id)}/resume-full`);
+  },
+
   // ── Broadcast & Targeted Notifications ─────────────────────────────────────
   getBroadcastNotifications: async (): Promise<BroadcastNotification[]> => {
     return fetchWithAuth('/notifications/my');

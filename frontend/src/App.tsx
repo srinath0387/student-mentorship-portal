@@ -33,6 +33,7 @@ const DocumentsManagementPage = lazy(() => import('./features/documents/Document
 const FacultyApiPage = lazy(() => import('./features/faculty/FacultyApiPage').then(m => ({ default: m.FacultyApiPage })));
 const AcademicDutiesPage = lazy(() => import('./features/academic-duties/AcademicDutiesPage'));
 const MyDutiesPage = lazy(() => import('./features/academic-duties/MyDutiesPage'));
+const ResumeBuilderPage = lazy(() => import('./features/resume/ResumeBuilderPage'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -334,6 +335,7 @@ export const App: React.FC = () => {
               <Route path="/attendance/workload" element={<FacultyWorkloadPage />} />
               <Route path="/attendance/reports" element={<AttendanceReportsPage />} />
               <Route path="/documents" element={<DocumentsManagementPage />} />
+              <Route path="/resume-builder" element={<ResumeBuilderPage />} />
 
               {/* Faculty API leaderboard — HOD & Admin only */}
               <Route element={<ProtectedRoute allowedRoles={['hod', 'admin', 'director', 'principal', 'management', 'program_chair']} />}>

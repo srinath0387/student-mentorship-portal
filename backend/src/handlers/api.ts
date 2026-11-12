@@ -16205,6 +16205,122 @@ app.put('/internships/:id/verify', requireRole('faculty', 'hod', 'admin', 'super
 });
 
 // ============================================================================
+// Resume Builder
+// ============================================================================
+app.get('/students/:id/resume-data', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const rollNo = req.params.id.toUpperCase();
+    if (db.isMock) return res.json({});
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS resume_data (
+        student_id VARCHAR(30) PRIMARY KEY,
+        objective TEXT,
+        projects JSONB DEFAULT '[]',
+        languages JSONB DEFAULT '[]',
+        hobbies TEXT[] DEFAULT '{}',
+        extra_curr JSONB DEFAULT '[]',
+        links JSONB DEFAULT '{}',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `).catch(() => {});
+    const result = await db.query(`SELECT * FROM resume_data WHERE student_id = $1`, [rollNo]);
+    res.json(result.rows[0] || {});
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/students/:id/resume-data', requireOwnerOrRole('id', 'faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    const rollNo = req.params.id.toUpperCase();
+    if (db.isMock) return res.json({ message: 'saved' });
+    const { objective, projects, languages, hobbies, extra_curr, links } = req.body;
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS resume_data (
+        student_id VARCHAR(30) PRIMARY KEY,
+        objective TEXT,
+        projects JSONB DEFAULT '[]',
+        languages JSONB DEFAULT '[]',
+        hobbies TEXT[] DEFAULT '{}',
+        extra_curr JSONB DEFAULT '[]',
+        links JSONB DEFAULT '{}',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `).catch(() => {});
+    await db.query(`
+      INSERT INTO resume_data (student_id, objective, projects, languages, hobbies, extra_curr, links, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+      ON CONFLICT (student_id) DO UPDATE SET
+        objective = EXCLUDED.objective,
+        projects = EXCLUDED.projects,
+        languages = EXCLUDED.languages,
+        hobbies = EXCLUDED.hobbies,
+        extra_curr = EXCLUDED.extra_curr,
+        links = EXCLUDED.links,
+        updated_at = CURRENT_TIMESTAMP
+    `, [rollNo, objective || null, JSON.stringify(projects || []), JSON.stringify(languages || []),
+        hobbies || [], JSON.stringify(extra_curr || []), JSON.stringify(links || {})]);
+    const result = await db.query(`SELECT * FROM resume_data WHERE student_id = $1`, [rollNo]);
+    res.json(result.rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/students/:id/resume-full', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const rollNo = req.params.id.toUpperCase();
+    if (db.isMock) return res.json({ student: null, academics: [], codingProfiles: [], techSkills: [], certifications: [], softSkills: [], achievements: [], placement: null, internships: [], resumeData: {} });
+
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS resume_data (
+        student_id VARCHAR(30) PRIMARY KEY,
+        objective TEXT,
+        projects JSONB DEFAULT '[]',
+        languages JSONB DEFAULT '[]',
+        hobbies TEXT[] DEFAULT '{}',
+        extra_curr JSONB DEFAULT '[]',
+        links JSONB DEFAULT '{}',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `).catch(() => {});
+
+    const [
+      studentRes, academicsRes, codingRes, techSkillsRes, certsRes,
+      softSkillsRes, achievementsRes, placementRes, internshipsRes, resumeDataRes
+    ] = await Promise.all([
+      db.query(`SELECT * FROM students WHERE UPPER(roll_number) = $1 LIMIT 1`, [rollNo]),
+      db.query(`SELECT * FROM academics WHERE UPPER(student_id) = $1 ORDER BY semester ASC`, [rollNo]),
+      db.query(`SELECT * FROM coding_profiles WHERE UPPER(student_id) = $1`, [rollNo]),
+      db.query(`SELECT * FROM tech_skills WHERE UPPER(student_id) = $1`, [rollNo]),
+      db.query(`SELECT * FROM certifications WHERE UPPER(student_id) = $1 ORDER BY date_completed DESC NULLS LAST`, [rollNo]),
+      db.query(`SELECT * FROM soft_skills WHERE UPPER(student_id) = $1`, [rollNo]),
+      db.query(`SELECT * FROM achievements WHERE UPPER(student_id) = $1 ORDER BY achievement_date DESC NULLS LAST`, [rollNo]),
+      db.query(`SELECT * FROM placement_profile WHERE UPPER(student_id) = $1 LIMIT 1`,[rollNo]).catch(() => ({ rows: [] })),
+      db.query(`SELECT * FROM student_internships WHERE UPPER(student_id) = $1 ORDER BY start_date DESC`, [rollNo]).catch(() => ({ rows: [] })),
+      db.query(`SELECT * FROM resume_data WHERE student_id = $1`, [rollNo]),
+    ]);
+
+    if (studentRes.rows.length === 0) return res.status(404).json({ error: 'Student not found' });
+
+    res.json({
+      student:        studentRes.rows[0],
+      academics:      academicsRes.rows,
+      codingProfiles: codingRes.rows,
+      techSkills:     techSkillsRes.rows,
+      certifications: certsRes.rows,
+      softSkills:     softSkillsRes.rows,
+      achievements:   achievementsRes.rows,
+      placement:      placementRes.rows[0] || null,
+      internships:    internshipsRes.rows,
+      resumeData:     resumeDataRes.rows[0] || {},
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
 // Broadcast Notifications & Login Notice Engine
 // ============================================================================
 let broadcastTablesEnsured = false;

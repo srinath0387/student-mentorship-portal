@@ -1,42 +1,59 @@
 {
-  "project": "RGM ManageBAC Portal \u2014 Oversight Data Connections",
-  "last_updated": "2026-11-11",
+  "project": "RGM ManageBAC Portal",
   "tasks": [
     {
-      "id": "O004",
-      "title": "Add program_chair to all shared backend routes used by oversight dashboard",
-      "description": "15 routes have director/principal/management but are missing program_chair. These include /hod/placement-summary, /student-placements verify+delete, /mentor-meetings/department, /hod/mentoring-compliance, /leaderboard/hod, /documents/*, /notices/broadcast, /academic-duties/* approve/reject. Without this, program_chair gets 403 on all placement and meeting log tabs.",
+      "id": "RB001",
+      "title": "Backend: resume_data table + GET/POST /students/:id/resume-data endpoint",
+      "description": "Create a Postgres table resume_data (student_id PK, objective TEXT, projects JSONB, languages JSONB, hobbies TEXT[], extra_curr JSONB, links JSONB, updated_at). Add GET and PUT endpoints at /students/:id/resume-data (requireOwnerOrRole). Also add backend route GET /students/:id/resume-full that merges full-profile + resume-data + internships in one call. Add api client methods getResumeData, upsertResumeData, getResumeFull in frontend/src/lib/api.ts.",
       "files_affected": [
-        "backend/src/handlers/api.ts"
+        "backend/src/handlers/api.ts",
+        "frontend/src/lib/api.ts"
       ],
-      "acceptance_criteria": "program_chair can access all oversight dashboard tabs without 403. Backend build passes.",
+      "acceptance_criteria": "Backend build passes. GET /students/:id/resume-data returns saved data. GET /students/:id/resume-full merges all student data.",
       "status": "done",
-      "priority": "critical",
-      "commit_msg": "fix(backend): add program_chair to all shared oversight routes"
+      "priority": "high",
+      "commit_msg": "feat(resume): backend resume_data table + resume-full merged endpoint"
     },
     {
-      "id": "O005",
-      "title": "Oversight: verify student-placements GET scoping for director/program_chair",
-      "description": "GET /student-placements line 8377: role check excludes program_chair from seeing all placements (falls into else branch, treated as student). Fix: add program_chair to the admin/principal/director/management group so they see all placements without department filter.",
+      "id": "RB002",
+      "title": "Frontend: ResumeBuilderPage component with editable sections",
+      "description": "Create frontend/src/features/resume/ResumeBuilderPage.tsx. Sections: (1) Objective/Summary editor (textarea with ATS tips). (2) Projects: add/edit/delete with title, description, tech_stack[], github_url, demo_url. (3) Internships: pulled from /internships API \u2014 show, editable. (4) Languages known: add/delete. (5) Hobbies/Interests. (6) Extra-curricular: title, role, year. (7) Links: LinkedIn, GitHub, Portfolio, LeetCode. (8) ATS Score panel: live scoring (0-100) based on completeness \u2014 objective filled (+10), skills > 3 (+15), certifications > 0 (+15), projects > 0 (+15), internships > 0 (+15), academics filled (+10), coding profiles > 0 (+10), achievements (+10) \u2014 with green/yellow/red indicator. Layout: left panel = form editor sections with save button, right panel = live resume PREVIEW using CSS (not PDF yet). Remove soon:true from sidebar.",
       "files_affected": [
-        "backend/src/handlers/api.ts"
+        "frontend/src/features/resume/ResumeBuilderPage.tsx",
+        "frontend/src/components/layout/Sidebar.tsx"
       ],
-      "acceptance_criteria": "program_chair sees all student placements in oversight dashboard. Build passes.",
+      "acceptance_criteria": "Page loads at /resume-builder. ATS score updates live. All 8 sections editable and save to backend. Preview renders correctly.",
       "status": "done",
-      "priority": "critical",
-      "commit_msg": "fix(backend): program_chair sees all placements in GET /student-placements"
+      "priority": "high",
+      "commit_msg": "feat(resume): ResumeBuilderPage with ATS score + live preview"
     },
     {
-      "id": "O006",
-      "title": "Oversight page: show search bar in certifications/students/faculty tabs",
-      "description": "The department search input is currently only shown when viewMode is not 'powerbi', but it's hidden inside the hidden tab nav block. Move the search bar to above the tab content area so oversight users can filter by department in all tabs.",
+      "id": "RB003",
+      "title": "Frontend: Professional Resume Templates + PDF Download",
+      "description": "Add 3 ATS-friendly resume template renderers in frontend/src/features/resume/templates/. Template 1: Classic (single-column, clean, Times-style). Template 2: Modern (two-column sidebar with skills/certs left, experience right). Template 3: Minimal (all single column, very clean, maximizes ATS). Each template is a React component receiving the full resume data as props. PDF download using jspdf: use html2canvas approach \u2014 render the preview div to canvas then save. Add template switcher UI (3 cards to pick). Add a Download PDF button with loading state. The PDF should be A4, properly formatted, with no colored backgrounds (ATS-safe). Name the file <name>_Resume_<date>.pdf.",
       "files_affected": [
-        "frontend/src/features/oversight/OversightDashboardPage.tsx"
+        "frontend/src/features/resume/templates/ClassicTemplate.tsx",
+        "frontend/src/features/resume/templates/ModernTemplate.tsx",
+        "frontend/src/features/resume/templates/MinimalTemplate.tsx",
+        "frontend/src/features/resume/ResumeBuilderPage.tsx"
       ],
-      "acceptance_criteria": "Department search bar visible in all oversight tab views. Build passes.",
+      "acceptance_criteria": "All 3 templates render. PDF download works and produces A4 PDF. PDF filename is correct. Build passes.",
       "status": "done",
-      "priority": "medium",
-      "commit_msg": "feat(oversight): show department search bar above tab content in all views"
+      "priority": "high",
+      "commit_msg": "feat(resume): 3 ATS templates + jspdf PDF download"
+    },
+    {
+      "id": "RB004",
+      "title": "Frontend: Route + App.tsx integration + connect to student dashboard",
+      "description": "Register /resume-builder route in App.tsx lazy-importing ResumeBuilderPage. Add the route inside the student auth guard. Also add a Resume Builder quick-action card in the student home screen (StudentDashboardPage or wherever the home tab renders). The card should show the current ATS score percentage with a progress ring.",
+      "files_affected": [
+        "frontend/src/App.tsx",
+        "frontend/src/features/dashboard/StudentDashboardPage.tsx"
+      ],
+      "acceptance_criteria": "Navigating to /resume-builder works. Student dashboard home shows resume card with ATS score. Build passes.",
+      "status": "done",
+      "priority": "high",
+      "commit_msg": "feat(resume): route registration + student dashboard ATS card"
     }
   ]
 }
