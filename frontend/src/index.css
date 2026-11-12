@@ -404,3 +404,9 @@ html:not(.dark):not(.theme-landing) .bg-white:is(.rounded-lg, .rounded-xl, .roun
   }
   body, main { background: #ffffff !important; }
 }
+/* Printable modals (leave letter, leave statement): print only the modal content */
+@media print {
+  body.has-print-portal > #root { display: none !important; }
+  .print-portal > .fixed { position: static !important; inset: auto !important; background: #fff !important; padding: 0 !important; backdrop-filter: none !important; overflow: visible !important; display: block !important; }
+  .print-portal > .fixed > div { max-height: none !important; overflow: visible !important; box-shadow: none !important; border: none !important; }
+}

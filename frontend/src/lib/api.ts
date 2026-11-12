@@ -1529,6 +1529,9 @@ export const api = {
   },
 
   // ── MODULE 5: Faculty Leaves ──────────────────────────────────────────────
+  getFacultyLeaveBalance: async (email: string, year?: number) =>
+    fetchWithAuth(`/faculty/leaves/balance/${encodeURIComponent(email)}${year ? `?year=${year}` : ''}`),
+
   getMyFacultyLeaveSummary: async (email?: string) => {
     const qs = email ? `?caller_email=${encodeURIComponent(email)}` : '';
     return fetchWithAuth(`/faculty/leaves/my-summary${qs}`);

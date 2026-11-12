@@ -31,6 +31,8 @@ import {
   HolidayCalendarEntry,
 } from '../../types';
 import { LeaveLetterModal } from './LeaveLetterModal';
+import { LeaveBalanceTable } from './LeaveBalanceTable';
+import { LeaveStatementModal } from './LeaveStatementModal';
 
 const AVAILABLE_PERIODS = [
   { id: 'Period 1', label: 'Period 1 (09:00 - 09:50 AM)' },
@@ -332,6 +334,7 @@ export const FacultyLeaveTab: React.FC = () => {
   };
 
   const pendingCoveringDutiesCount = reassignedDuties.filter((d: any) => d.acceptance_status === 'Pending').length;
+  const [showStatement, setShowStatement] = useState(false);
 
   return (
     <div className="space-y-6">
@@ -385,6 +388,24 @@ export const FacultyLeaveTab: React.FC = () => {
           <p className="text-[11px] text-textMuted mt-1">{pendingCoveringDutiesCount} pending response</p>
         </div>
       </div>
+
+      {/* ── Leave eligibility table (granted / availed / applied / balance) ── */}
+      <div className="space-y-2">
+        <LeaveBalanceTable balances={balances} year={summary?.year} />
+        <div className="flex justify-end">
+          <button onClick={() => setShowStatement(true)} className="px-3 py-1.5 text-xs font-bold rounded-xl border border-borderLine hover:bg-surface-2">🖨️ Print leave statement</button>
+        </div>
+      </div>
+      {showStatement && (
+        <LeaveStatementModal
+          onClose={() => setShowStatement(false)}
+          facultyName={(summary?.leaves?.[0]?.faculty_name) || ''}
+          facultyEmail={email}
+          year={summary?.year}
+          balances={balances}
+          leaves={Array.isArray(summary?.leaves) ? summary.leaves.filter((l: any) => String(l.from_date || '').slice(0, 4) === String(summary?.year)) : []}
+        />
+      )}
 
       {/* ── Main Container ── */}
       <div className="bg-surface border border-borderLine rounded-2xl p-6 shadow-xs space-y-6">

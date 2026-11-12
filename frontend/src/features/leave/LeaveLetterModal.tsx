@@ -1,4 +1,8 @@
 import React, { useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../../lib/api';
+import { LeaveBalanceTable } from './LeaveBalanceTable';
+import { PrintPortal } from '../../components/common/PrintPortal';
 import {
   FileText,
   Printer,
@@ -24,6 +28,12 @@ export const LeaveLetterModal: React.FC<LeaveLetterModalProps> = ({
   leave,
 }) => {
   const printRef = useRef<HTMLDivElement>(null);
+  const leaveYear = leave ? Number(String(leave.from_date).slice(0, 4)) || new Date().getFullYear() : undefined;
+  const { data: balanceData } = useQuery({
+    queryKey: ['leaveBalance', leave?.faculty_email, leaveYear],
+    queryFn: () => api.getFacultyLeaveBalance(leave!.faculty_email, leaveYear),
+    enabled: Boolean(isOpen && leave?.faculty_email),
+  });
 
   if (!isOpen || !leave) return null;
 
@@ -58,6 +68,7 @@ export const LeaveLetterModal: React.FC<LeaveLetterModalProps> = ({
     : formattedAppliedDate;
 
   return (
+    <PrintPortal>
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in">
       <div className="bg-surface border border-borderLine rounded-2xl max-w-3xl w-full shadow-2xl flex flex-col max-h-[92vh] overflow-hidden">
         {/* Top Modal Controls (Hidden during print) */}
@@ -198,6 +209,14 @@ export const LeaveLetterModal: React.FC<LeaveLetterModalProps> = ({
                 </div>
               )}
 
+              {/* Leave eligibility: granted / availed / applied / balance */}
+              {balanceData?.balances && (
+                <div className="pt-2">
+                  <LeaveBalanceTable balances={balanceData.balances} year={leaveYear} variant="print"
+                    asOn={new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} />
+                </div>
+              )}
+
               {/* Remarks */}
               {leave.hod_remarks && (
                 <div className="text-[11px] bg-emerald-50 border border-emerald-200 p-2.5 rounded-lg">
@@ -253,5 +272,6 @@ export const LeaveLetterModal: React.FC<LeaveLetterModalProps> = ({
         </div>
       </div>
     </div>
+    </PrintPortal>
   );
 };

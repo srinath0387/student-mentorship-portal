@@ -17116,6 +17116,40 @@ const LEAVE_QUOTAS: Record<string, number> = {
   'Paid Leave': 999, // Unlimited / Loss of pay fallback
 };
 
+/**
+ * Leave eligibility for a calendar year: granted (admin credits or default quotas), availed
+ * (approved by the principal / deducted), in process, and balance — per leave type.
+ * Only leaves whose from_date falls in that year are counted.
+ */
+async function computeLeaveBalances(email: string, year: number, leavesRows?: any[]): Promise<Record<string, { quota: number; used: number; in_process: number; remaining: number }>> {
+  const creditRes = await db.query(
+    `SELECT * FROM faculty_leave_credits WHERE LOWER(faculty_email) = $1 AND year = $2 LIMIT 1`, [email, year]);
+  const c = creditRes.rows[0];
+  const quotas: Record<string, number> = {
+    'Casual Leave': c ? parseFloat(c.casual_leave_quota) : LEAVE_QUOTAS['Casual Leave'],
+    'Academic Leave': c ? parseFloat(c.academic_leave_quota) : LEAVE_QUOTAS['Academic Leave'],
+    'SP CL': c ? parseFloat(c.sp_cl_quota) : LEAVE_QUOTAS['SP CL'],
+  };
+  const rows = leavesRows ?? (await db.query('SELECT * FROM faculty_leaves WHERE LOWER(faculty_email) = $1', [email])).rows;
+  const used: Record<string, number> = { 'Casual Leave': 0, 'Academic Leave': 0, 'SP CL': 0, 'Paid Leave': 0 };
+  const inProcess: Record<string, number> = { 'Casual Leave': 0, 'Academic Leave': 0, 'SP CL': 0, 'Paid Leave': 0 };
+  const from = `${year}-01-01`; const to = `${year}-12-31`;
+  for (const l of rows) {
+    const d = (l.from_date instanceof Date ? l.from_date.toISOString() : String(l.from_date || '')).slice(0, 10);
+    if (!d || d < from || d > to) continue;
+    const type = l.leave_type; const days = parseFloat(l.num_days || '0');
+    if (used[type] === undefined) continue;
+    if (l.principal_status === 'Approved' || l.is_deducted) used[type] += days;
+    else if (l.status === 'Pending' || (l.hod_status === 'Approved' && l.principal_status === 'Pending')) inProcess[type] += days;
+  }
+  const out: Record<string, { quota: number; used: number; in_process: number; remaining: number }> = {};
+  for (const t of ['Casual Leave', 'Academic Leave', 'SP CL']) {
+    out[t] = { quota: quotas[t], used: used[t], in_process: inProcess[t], remaining: Math.max(0, quotas[t] - used[t] - inProcess[t]) };
+  }
+  out['Paid Leave'] = { quota: 0, used: used['Paid Leave'], in_process: inProcess['Paid Leave'], remaining: 999 };
+  return out;
+}
+
 // GET /faculty/leaves/my-summary — Current faculty's leave balances & history
 app.get('/faculty/leaves/my-summary', requireRole('faculty', 'hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
@@ -17125,24 +17159,8 @@ app.get('/faculty/leaves/my-summary', requireRole('faculty', 'hod', 'admin', 'pr
     if (!email) return res.status(401).json({ error: 'Unauthorized' });
 
     const currentYear = new Date().getFullYear();
-    const yearStart = `${currentYear}-01-01`;
-    const yearEnd = `${currentYear}-12-31`;
 
-    // Fetch custom credits if set by admin, otherwise default quotas
-    const creditRes = await db.query(
-      `SELECT * FROM faculty_leave_credits WHERE LOWER(faculty_email) = $1 AND year = $2 LIMIT 1`,
-      [email, currentYear]
-    );
-    const customCredits = creditRes.rows[0];
-
-    const activeQuotas = {
-      'Casual Leave': customCredits ? parseFloat(customCredits.casual_leave_quota) : LEAVE_QUOTAS['Casual Leave'],
-      'Academic Leave': customCredits ? parseFloat(customCredits.academic_leave_quota) : LEAVE_QUOTAS['Academic Leave'],
-      'SP CL': customCredits ? parseFloat(customCredits.sp_cl_quota) : LEAVE_QUOTAS['SP CL'],
-      'Paid Leave': 999,
-    };
-
-    // Fetch leaves for this faculty
+    // Fetch leaves for this faculty (history shows all years; balances count only the current year)
     const leavesRes = await db.query(
       `SELECT * FROM faculty_leaves 
        WHERE LOWER(faculty_email) = $1 
@@ -17168,62 +17186,7 @@ app.get('/faculty/leaves/my-summary', requireRole('faculty', 'hod', 'admin', 'pr
       adjustments: adjustments.filter((a: any) => a.leave_id === l.id),
     }));
 
-    // Deducted counts (Only leaves approved by Principal are deducted)
-    const deductedCounts: Record<string, number> = {
-      'Casual Leave': 0,
-      'Academic Leave': 0,
-      'SP CL': 0,
-      'Paid Leave': 0,
-    };
-
-    // In-process pending counts (Submitted / HOD approved but not yet Principal approved)
-    const inProcessCounts: Record<string, number> = {
-      'Casual Leave': 0,
-      'Academic Leave': 0,
-      'SP CL': 0,
-      'Paid Leave': 0,
-    };
-
-    leaves.forEach((l: any) => {
-      const type = l.leave_type;
-      const days = parseFloat(l.num_days || '0');
-      if (l.principal_status === 'Approved' || l.is_deducted) {
-        if (deductedCounts[type] !== undefined) {
-          deductedCounts[type] += days;
-        }
-      } else if (l.status === 'Pending' || (l.hod_status === 'Approved' && l.principal_status === 'Pending')) {
-        if (inProcessCounts[type] !== undefined) {
-          inProcessCounts[type] += days;
-        }
-      }
-    });
-
-    const balances = {
-      'Casual Leave': {
-        quota: activeQuotas['Casual Leave'],
-        used: deductedCounts['Casual Leave'],
-        in_process: inProcessCounts['Casual Leave'],
-        remaining: Math.max(0, activeQuotas['Casual Leave'] - deductedCounts['Casual Leave'] - inProcessCounts['Casual Leave']),
-      },
-      'Academic Leave': {
-        quota: activeQuotas['Academic Leave'],
-        used: deductedCounts['Academic Leave'],
-        in_process: inProcessCounts['Academic Leave'],
-        remaining: Math.max(0, activeQuotas['Academic Leave'] - deductedCounts['Academic Leave'] - inProcessCounts['Academic Leave']),
-      },
-      'SP CL': {
-        quota: activeQuotas['SP CL'],
-        used: deductedCounts['SP CL'],
-        in_process: inProcessCounts['SP CL'],
-        remaining: Math.max(0, activeQuotas['SP CL'] - deductedCounts['SP CL'] - inProcessCounts['SP CL']),
-      },
-      'Paid Leave': {
-        quota: 0,
-        used: deductedCounts['Paid Leave'],
-        in_process: inProcessCounts['Paid Leave'],
-        remaining: 999,
-      },
-    };
+    const balances = await computeLeaveBalances(email, currentYear, leaves);
 
     res.json({
       faculty_email: email,
@@ -17231,6 +17194,25 @@ app.get('/faculty/leaves/my-summary', requireRole('faculty', 'hod', 'admin', 'pr
       balances,
       leaves: leavesWithAdj,
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /faculty/leaves/balance/:email?year=YYYY — leave eligibility table for one faculty member
+// (faculty: own; HOD: own department; admin / principal / director / management: all)
+app.get('/faculty/leaves/balance/:email', requireRole('faculty', 'hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    await ensureLeaveAndSubjectsHandledTables();
+    const email = req.params.email.toLowerCase().trim();
+    const role = req.auth!.role;
+    if (role === 'faculty' && req.auth!.email.toLowerCase() !== email) return res.status(403).json({ error: 'Access denied' });
+    if (role === 'hod' && req.auth!.email.toLowerCase() !== email) {
+      const f = await db.query('SELECT department FROM faculty WHERE LOWER(email) = $1 LIMIT 1', [email]).catch(() => ({ rows: [] as any[] }));
+      if (!f.rows[0] || f.rows[0].department !== req.auth!.department) return res.status(403).json({ error: 'Access denied' });
+    }
+    const year = Number(req.query.year) || new Date().getFullYear();
+    res.json({ faculty_email: email, year, balances: await computeLeaveBalances(email, year) });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

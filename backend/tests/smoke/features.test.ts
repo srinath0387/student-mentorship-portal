@@ -465,3 +465,33 @@ describe('FT011 exam seating & invigilation', () => {
     expect(res.body.error).toContain('1 short');
   });
 });
+
+describe('Leave eligibility table', () => {
+  it('counts only the year’s leaves: availed (principal-approved), in process, balance', async () => {
+    routeDb([
+      ['FROM faculty_leave_credits', [{ casual_leave_quota: '12', academic_leave_quota: '6', sp_cl_quota: '7' }]],
+      ['SELECT * FROM faculty_leaves WHERE LOWER(faculty_email)', [
+        { leave_type: 'Casual Leave', num_days: '2', from_date: '2026-03-02', principal_status: 'Approved', status: 'Approved' },
+        { leave_type: 'Casual Leave', num_days: '1', from_date: '2026-11-20', principal_status: 'Pending', status: 'Pending', hod_status: 'Pending' },
+        { leave_type: 'Casual Leave', num_days: '5', from_date: '2025-12-29', principal_status: 'Approved', status: 'Approved' },
+        { leave_type: 'SP CL', num_days: '3', from_date: '2026-06-10', principal_status: 'Approved', status: 'Approved' },
+        { leave_type: 'Academic Leave', num_days: '2', from_date: '2026-07-01', principal_status: 'Rejected', status: 'Rejected', hod_status: 'Rejected' },
+        { leave_type: 'Paid Leave', num_days: '1.5', from_date: '2026-08-01', principal_status: 'Approved', status: 'Approved' },
+      ]],
+    ]);
+    const res = await request(app).get('/faculty/leaves/balance/ramesh%40rgmcet.edu.in?year=2026').set('Authorization', ADMIN());
+    expect(res.status).toBe(200);
+    expect(res.body.balances).toEqual({
+      'Casual Leave': { quota: 12, used: 2, in_process: 1, remaining: 9 },
+      'Academic Leave': { quota: 6, used: 0, in_process: 0, remaining: 6 },
+      'SP CL': { quota: 7, used: 3, in_process: 0, remaining: 4 },
+      'Paid Leave': { quota: 0, used: 1.5, in_process: 0, remaining: 999 },
+    });
+  });
+
+  it('faculty can only read their own balance', async () => {
+    routeDb([]);
+    const res = await request(app).get('/faculty/leaves/balance/other%40rgmcet.edu.in').set('Authorization', bearer('faculty', 'ramesh@rgmcet.edu.in'));
+    expect(res.status).toBe(403);
+  });
+});
