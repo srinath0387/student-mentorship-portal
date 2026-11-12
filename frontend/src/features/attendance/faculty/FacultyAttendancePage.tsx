@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Users, Calendar, CheckCircle2, Clock, FileText, AlertTriangle, Printer, LayoutDashboard, Check } from 'lucide-react';
+import { BookOpen, Users, Calendar, CheckCircle2, Clock, FileText, AlertTriangle, Printer, LayoutDashboard, Check, Lock } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { SubjectAllotment, SubjectRosterEntry, TimetableEntry, SemesterLabel } from '../../../types';
 import { useAuth } from '../../../context/AuthContext';
@@ -12,7 +12,10 @@ const PERIOD_TIMES: Record<number,string> = {
 };
 const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 
-type NavId = 'dashboard'|'mark'|'not_posted'|'reports'|'timetable';
+type NavId = 'dashboard'|'mark'|'not_posted'|'reports'|'timetable'|'students';
+
+// Local (IST) calendar date — toISOString() is UTC and shows yesterday before 05:30 IST
+const localToday = () => new Date().toLocaleDateString('en-CA');
 
 export const FacultyAttendancePage: React.FC = () => {
   const { user } = useAuth();
@@ -23,8 +26,10 @@ export const FacultyAttendancePage: React.FC = () => {
   const [sem, setSem] = useState<SemesterLabel|''>('');
   const [section, setSection] = useState('');
   const [subjectId, setSubjectId] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(localToday());
   const [isLoaded, setIsLoaded] = useState(false);
+  // Period chosen from the Not Posted list (a subject can have two periods on one day)
+  const [preferredPeriod, setPreferredPeriod] = useState<number | null>(null);
   const [hour1, setHour1] = useState(true);
   const [hour2, setHour2] = useState(true);
   const [hour3, setHour3] = useState(true);
@@ -84,12 +89,6 @@ export const FacultyAttendancePage: React.FC = () => {
     queryKey:['sessions',subjectId,date], queryFn:()=>subjectId&&date?api.getAttendanceSessions(subjectId,date,date).catch(()=>[]):Promise.resolve([]), enabled:Boolean(subjectId&&date&&isLoaded)
   });
   const sessions = Array.isArray(rawSessions)?rawSessions:[];
-  const existingSession = sessions[0]||null;
-  const isPosted = Boolean(existingSession);
-
-  const {data:sessionDetails} = useQuery({
-    queryKey:['sessionDetails',existingSession?.id], queryFn:()=>existingSession?.id?api.getSessionDetails(existingSession.id).catch(()=>null):Promise.resolve(null), enabled:Boolean(existingSession?.id)
-  });
 
   // Timetable — by faculty email
   const { data: rawTT = [] } = useQuery({
@@ -155,44 +154,69 @@ export const FacultyAttendancePage: React.FC = () => {
     return myTimetable.filter((t: TimetableEntry) => t.day_of_week === todayDay);
   }, [myTimetable, todayDay]);
 
+  // Timetable slots belonging to the active subject: same subject, section and semester.
+  // (Matching on the faculty email alone picked ANY of the faculty's classes that day, so attendance
+  // could be saved against another subject's period.)
+  const isActiveSubjectSlot = (t: any) => Boolean(activeSubject) &&
+    t.subject_name?.toLowerCase().trim() === activeSubject!.subject_name?.toLowerCase().trim() &&
+    (!t.section || t.section.toUpperCase() === activeSubject!.section?.toUpperCase()) &&
+    (!t.semester_label || t.semester_label === activeSubject!.semester_label);
+
   // Find matching scheduled timetable entry for the active subject on the selected date
   const matchedSlot = useMemo(() => {
     if (!activeSubject) return null;
-    return myTimetable.find((t: any) =>
-      t.day_of_week === selectedDay &&
-      (
-        // Match by faculty email
-        (t.faculty_email && t.faculty_email.toLowerCase().trim() === user?.email?.toLowerCase().trim()) ||
-        // Match by subject name + section + semester (handles email mismatch)
-        (
-          t.subject_name?.toLowerCase().trim() === activeSubject.subject_name?.toLowerCase().trim() &&
-          (!t.section || t.section.toUpperCase() === activeSubject.section?.toUpperCase()) &&
-          (!t.semester_label || t.semester_label === activeSubject.semester_label)
-        )
-      )
-    );
-  }, [myTimetable, activeSubject, selectedDay, user?.email]);
+    const candidates = myTimetable.filter((t: any) => t.day_of_week === selectedDay && isActiveSubjectSlot(t));
+    const me = user?.email?.toLowerCase().trim();
+    return (preferredPeriod !== null && candidates.find((t: any) => Number(t.period_start) === preferredPeriod))
+      || candidates.find((t: any) => t.faculty_email?.toLowerCase().trim() === me) || candidates[0] || null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myTimetable, activeSubject, selectedDay, user?.email, preferredPeriod]);
 
   // Days when this subject is officially scheduled in the timetable
   const scheduledDays = useMemo(() => {
     if (!activeSubject) return [];
-    return Array.from(new Set(
-      myTimetable
-        .filter((t: any) =>
-          (
-            (t.faculty_email && t.faculty_email.toLowerCase().trim() === user?.email?.toLowerCase().trim()) ||
-            (
-              t.subject_name?.toLowerCase().trim() === activeSubject.subject_name?.toLowerCase().trim() &&
-              (!t.section || t.section.toUpperCase() === activeSubject.section?.toUpperCase()) &&
-              (!t.semester_label || t.semester_label === activeSubject.semester_label)
-            )
-          )
-        )
-        .map((t: any) => t.day_of_week)
-    ));
-  }, [myTimetable, activeSubject, user?.email]);
+    return Array.from(new Set(myTimetable.filter((t: any) => isActiveSubjectSlot(t)).map((t: any) => t.day_of_week)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myTimetable, activeSubject]);
 
   const isUnscheduledDay = scheduledDays.length > 0 && !scheduledDays.includes(selectedDay);
+
+  // Sessions already posted for THIS class period. A multi-hour class is stored either as one
+  // session covering every hour, or as one session per hour when students attended only some hours.
+  const basePeriod = Number(matchedSlot?.period_start) || 1;
+  const classSessions = useMemo(
+    () => sessions.filter((s: any) => {
+      const ps = Number(s.period_start);
+      return ps >= basePeriod && ps < basePeriod + 3;
+    }),
+    [sessions, basePeriod]
+  );
+  const existingSession = classSessions.find((s: any) => Number(s.period_start) === basePeriod) || classSessions[0] || null;
+  const isPosted = classSessions.length > 0;
+
+  const { data: sessionDetailsList } = useQuery({
+    queryKey: ['sessionDetails', classSessions.map((s: any) => s.id).join(',')],
+    queryFn: () => Promise.all(classSessions.map((s: any) =>
+      api.getSessionDetails(s.id).then((d: any) => ({ session: s, records: Array.isArray(d?.records) ? d.records : [] })).catch(() => ({ session: s, records: [] }))
+    )),
+    enabled: classSessions.length > 0,
+  });
+  // roll → [hour1, hour2, hour3] presence reconstructed from the saved session(s)
+  const savedPresence = useMemo(() => {
+    const map = new Map<string, (boolean | undefined)[]>();
+    for (const d of sessionDetailsList || []) {
+      const start = Number(d.session.period_start) - basePeriod;
+      const span = Math.max(1, Number(d.session.num_periods) || 1);
+      for (const r of d.records) {
+        const roll = String(r.roll_number || '').toUpperCase().trim();
+        const arr = map.get(roll) || [undefined, undefined, undefined];
+        for (let k = start; k < start + span && k < 3; k++) if (k >= 0) arr[k] = Boolean(r.is_present);
+        map.set(roll, arr);
+      }
+    }
+    return map;
+  }, [sessionDetailsList, basePeriod]);
+  const sessionDetailsLoaded = !isPosted || Array.isArray(sessionDetailsList);
 
   // Dynamically set Hour checkboxes based on timetable scheduled duration (e.g. Mon: 1 hr, Wed: 2 hrs)
   useEffect(() => {
@@ -216,30 +240,37 @@ export const FacultyAttendancePage: React.FC = () => {
   }, [subjectId]);
 
   // Not posted
-  const {data:rawNotPosted={}} = useQuery({ queryKey:['notPosted',user?.email], queryFn:()=>api.getNotPostedAttendance({faculty_email:user?.email}).catch(()=>({})) });
-  // BUG-03 fix: backend returns { pendingSlots: [...] }, not a plain array
-  const notPosted: any[] = Array.isArray((rawNotPosted as any)?.pendingSlots) ? (rawNotPosted as any).pendingSlots : [];
+  // Last 14 days of my classes that still have no attendance
+  const notPostedFrom = useMemo(() => { const d = new Date(); d.setDate(d.getDate() - 13); return d.toLocaleDateString('en-CA'); }, []);
+  const {data:rawNotPosted={}} = useQuery({ queryKey:['notPosted',user?.email,notPostedFrom], queryFn:()=>api.getNotPostedAttendance({faculty_email:user?.email, from: notPostedFrom, to: localToday()}).catch(()=>({})) });
+  // The API returns { byDate: [{ date, pendingSlots: [...] }] }
+  const notPosted: any[] = useMemo(() => {
+    const days: any[] = Array.isArray((rawNotPosted as any)?.byDate) ? (rawNotPosted as any).byDate : [];
+    return days
+      .flatMap((d: any) => (Array.isArray(d.pendingSlots) ? d.pendingSlots : []).map((slot: any) => ({ ...slot, date: d.date })))
+      .sort((a: any, b: any) => String(b.date).localeCompare(String(a.date)) || Number(a.period_start) - Number(b.period_start));
+  }, [rawNotPosted]);
 
   useEffect(()=>{
     if(!isLoaded) return;
     if(roster.length===0) return;
-    if(isPosted&&sessionDetails?.records?.length>0){
-      // Bug fix: normalise roll numbers to UPPER for case-insensitive map lookup
-      const map = new Map<string,boolean>();
-      sessionDetails.records.forEach((r:any)=>map.set((r.roll_number||'').toUpperCase().trim(), Boolean(r.is_present)));
+    if(isPosted&&sessionDetailsLoaded&&savedPresence.size>0){
       setRecords(roster.map(s=>{
         const roll = (s.roll_number||'').toUpperCase().trim();
-        // Bug fix: use false as explicit default (not true) when key found; only default true when NOT in map at all
-        const saved = map.has(roll) ? map.get(roll)! : true;
+        const saved = savedPresence.get(roll);
+        // An hour with no saved value inherits the first saved hour; a student not in the session defaults to present
+        const first = saved ? (saved.find(v => v !== undefined) ?? true) : true;
+        const h = [0, 1, 2].map(k => (saved && saved[k] !== undefined ? saved[k]! : first));
+        const od = Boolean((s as any).is_on_od);
         return {
           roll_number: s.roll_number,
           student_name: s.student_name,
-          is_on_od: Boolean((s as any).is_on_od),
+          is_on_od: od,
           od_type: (s as any).od_type || '',
           od_reason: (s as any).od_reason || '',
-          h1: (s as any).is_on_od ? true : saved,
-          h2: (s as any).is_on_od ? true : saved,
-          h3: (s as any).is_on_od ? true : saved
+          h1: od ? true : h[0],
+          h2: od ? true : h[1],
+          h3: od ? true : h[2]
         };
       }));
     } else if(!isPosted) {
@@ -256,9 +287,35 @@ export const FacultyAttendancePage: React.FC = () => {
       })));
     }
     // Note: if isPosted but sessionDetails not loaded yet, don't reset — wait for it
-  },[roster,isPosted,sessionDetails,isLoaded]);
+  },[roster,isPosted,savedPresence,sessionDetailsLoaded,isLoaded]);
 
   const totalActiveHours = (hour1?1:0) + (hour2?1:0) + (hour3?1:0) || 1;
+
+  // Academic-calendar lock: outside the semester, posting needs an admin-approved request
+  const { data: postingWindow } = useQuery({
+    queryKey: ['postingWindow', date],
+    queryFn: () => api.getPostingWindow(date).catch(() => null),
+    enabled: Boolean(date),
+  });
+  const { data: myLateRequests } = useQuery({
+    queryKey: ['myLatePostRequests'],
+    queryFn: () => api.getLatePostRequests('all').catch(() => ({ requests: [] })),
+    enabled: Boolean(postingWindow?.locked),
+  });
+  const lateRequest = (Array.isArray(myLateRequests?.requests) ? myLateRequests.requests : [])
+    .find((r: any) => String(r.allotment_id) === String(subjectId) && String(r.session_date).slice(0, 10) === date) || null;
+  const postingLocked = Boolean(postingWindow?.locked) && lateRequest?.status !== 'Approved';
+  const [lateReason, setLateReason] = useState('');
+  const lateMutation = useMutation({
+    mutationFn: () => api.requestLatePost({ allotment_id: subjectId, session_date: date, reason: lateReason }),
+    onSuccess: () => {
+      setLateReason('');
+      qc.invalidateQueries({ queryKey: ['myLatePostRequests'] });
+      setFeedback({ type: 'success', text: 'Request sent to the admin. You can post once it is approved.' });
+      setTimeout(() => setFeedback(null), 5000);
+    },
+    onError: (err: any) => setFeedback({ type: 'error', text: err.message || 'Could not send the request.' }),
+  });
 
   const saveMutation = useMutation({
     mutationFn:async()=>{
@@ -266,18 +323,37 @@ export const FacultyAttendancePage: React.FC = () => {
       if(isNonWorkingDay && !allowOverrideExtraClass) {
         throw new Error(`Cannot post attendance on ${isSunday ? 'Sunday' : currentHoliday?.title}: Non-working day. Enable 'Special / Extra Class' override if authorized.`);
       }
-      const payload = {
-        allotment_id: subjectId,
-        session_date: date,
-        num_periods: totalActiveHours,
-        period_start: matchedSlot?.period_start || 1,
-        records: records.map(r => ({
-          roll_number: r.roll_number,
-          // BUG-08 fix: use OR logic — attending any period counts as present (not AND which penalises partial attendance)
-          is_present: r.is_on_od ? true : (hour1 ? (hour2 ? (hour3 ? (r.h1 || r.h2 || r.h3) : (r.h1 || r.h2)) : r.h1) : r.h1)
-        }))
-      };
-      return isPosted&&existingSession?.id ? api.updateAttendanceSession(existingSession.id,payload.records) : api.saveAttendanceSession(payload);
+      if(postingLocked) {
+        throw new Error(postingWindow?.message || 'This date is outside the academic calendar. Request admin approval first.');
+      }
+      if(isPosted && date !== localToday()) {
+        throw new Error('Editing is permitted only on the same date attendance was posted. Please contact your HOD or Admin for past-date corrections.');
+      }
+
+      // Hours being marked (offsets from the class's first period)
+      const offsets = [hour1 ? 0 : -1, hour2 ? 1 : -1, hour3 ? 2 : -1].filter(k => k >= 0);
+      if (offsets.length === 0) offsets.push(0);
+      const presence = (r: typeof records[number], k: number) => r.is_on_od ? true : (k === 0 ? r.h1 : k === 1 ? r.h2 : r.h3);
+      // Same answer for every hour → one session covering all hours; otherwise one session per hour,
+      // so a student who attended 1 of 2 lab hours is stored as 1/2 (not 2/2 or 0/2).
+      const uniform = records.every(r => offsets.every(k => presence(r, k) === presence(r, offsets[0])));
+      const targets = uniform
+        ? [{ period: basePeriod + offsets[0], n: offsets.length, rows: records.map(r => ({ roll_number: r.roll_number, is_present: presence(r, offsets[0]) })) }]
+        : offsets.map(k => ({ period: basePeriod + k, n: 1, rows: records.map(r => ({ roll_number: r.roll_number, is_present: presence(r, k) })) }));
+
+      // Remove previously saved sessions for this class that the new layout replaces
+      for (const old of classSessions) {
+        const keep = targets.some(t => t.period === Number(old.period_start) && t.n === Math.max(1, Number(old.num_periods) || 1));
+        if (!keep) await api.deleteAttendanceSession(old.id);
+      }
+      let last: any = null;
+      for (const t of targets) {
+        const same = classSessions.find((old: any) => Number(old.period_start) === t.period && Math.max(1, Number(old.num_periods) || 1) === t.n);
+        last = same
+          ? await api.updateAttendanceSession(same.id, t.rows)
+          : await api.saveAttendanceSession({ allotment_id: subjectId, session_date: date, num_periods: t.n, period_start: t.period, records: t.rows });
+      }
+      return last;
     },
     onSuccess:()=>{
       qc.invalidateQueries({queryKey:['sessions']});
@@ -357,6 +433,7 @@ export const FacultyAttendancePage: React.FC = () => {
     {id:'not_posted',label:'Attendance Not Posted',icon:<Calendar className="w-4 h-4 text-amber-400"/>},
     {id:'reports',label:'My Reports',icon:<FileText className="w-4 h-4 text-cyan-400"/>},
     {id:'timetable',label:'View Timetable',icon:<Clock className="w-4 h-4 text-purple-400"/>},
+    {id:'students',label:'My Students',icon:<Users className="w-4 h-4 text-sky-400"/>},
   ];
 
   return (
@@ -391,10 +468,21 @@ export const FacultyAttendancePage: React.FC = () => {
               {nav==='not_posted'&&'Attendance Not Posted'}
               {nav==='reports'&&'Attendance Reports & Daywise Register'}
               {nav==='timetable'&&'Weekly Timetable Schedule'}
+              {nav==='students'&&'My Students'}
             </h1>
           </div>
           <span className="text-xs text-textSecondary font-bold">{user?.name} ({user?.department})</span>
         </header>
+
+        {/* Mobile: the side menu is hidden below md, so show the sections as a scrollable tab bar */}
+        <div className="md:hidden flex gap-1.5 overflow-x-auto px-3 py-2 border-b border-borderLine bg-surface">
+          {NAV_ITEMS.map(item => (
+            <button key={item.id} onClick={() => setNav(item.id)}
+              className={`shrink-0 px-3 py-1.5 rounded-lg text-[11px] font-bold ${nav === item.id ? 'bg-brand-primary text-white' : 'text-textSecondary bg-surface-2'}`}>
+              {item.label}{item.id === 'not_posted' && notPosted.length > 0 ? ` (${notPosted.length})` : ''}
+            </button>
+          ))}
+        </div>
 
         {feedback&&(
           <div className={`m-4 p-3 rounded-xl text-xs font-bold flex items-center gap-2 ${feedback.type==='success'?'bg-emerald-100 text-emerald-800 border border-emerald-300':'bg-rose-100 text-rose-800 border border-rose-300'}`}>
@@ -542,6 +630,7 @@ export const FacultyAttendancePage: React.FC = () => {
                     onChange={e => {
                       const chosenId = e.target.value;
                       setSubjectId(chosenId);
+                      setPreferredPeriod(null);
                       setIsLoaded(false);
                       const chosen = mySubjects.find(s => s.id === chosenId);
                       if (chosen) {
@@ -688,11 +777,36 @@ export const FacultyAttendancePage: React.FC = () => {
                         </tbody>
                       </table>
                     </div>
+                    {postingWindow?.locked && (
+                      <div className="p-4 border-t border-borderLine bg-amber-500/10 space-y-2">
+                        <p className="text-xs font-bold text-amber-800 dark:text-amber-300 flex items-start gap-2">
+                          <Lock className="w-4 h-4 shrink-0 mt-0.5" />
+                          <span>{postingWindow.message}</span>
+                        </p>
+                        {lateRequest?.status === 'Approved' ? (
+                          <p className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400">Admin approved posting for this class on {date}. You can submit now.</p>
+                        ) : lateRequest?.status === 'Pending' ? (
+                          <p className="text-[11px] font-bold text-amber-700 dark:text-amber-300">Your request is waiting for admin approval.</p>
+                        ) : (
+                          <div className="flex flex-wrap gap-2">
+                            {lateRequest?.status === 'Rejected' && (
+                              <p className="w-full text-[11px] font-bold text-rose-700">Previous request rejected{lateRequest.reject_reason ? `: ${lateRequest.reject_reason}` : ''}. You can ask again.</p>
+                            )}
+                            <input value={lateReason} onChange={e => setLateReason(e.target.value)} placeholder="Reason (e.g. extra class after semester end)"
+                              className="flex-1 min-w-[200px] px-3 py-2 text-xs rounded-xl border border-borderLine bg-background" />
+                            <button disabled={!subjectId || lateMutation.isPending} onClick={() => lateMutation.mutate()}
+                              className="px-3 py-2 text-xs font-bold rounded-xl bg-amber-600 text-white disabled:opacity-50">
+                              {lateMutation.isPending ? 'Sending…' : 'Request admin approval'}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="p-4 bg-surface-2 border-t border-borderLine flex items-center justify-between flex-wrap gap-2">
                       <span className="text-xs font-bold text-textSecondary">Total: {records.length} | Present: {presentCount} {odCount>0&&`(${odCount} on OD)`} | Absentees: {absentList.length}</span>
                       <button
                         onClick={()=>setShowAbsentModal(true)}
-                        disabled={isNonWorkingDay && !allowOverrideExtraClass}
+                        disabled={(isNonWorkingDay && !allowOverrideExtraClass) || postingLocked}
                         className={`px-5 py-2.5 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-sm ${isPosted ? 'bg-amber-600 hover:bg-amber-500' : 'bg-[#007bff] hover:bg-blue-600'}`}
                       >
                         {isPosted ? `✏️ Review & Update Attendance (${totalActiveHours} Hr${totalActiveHours>1?'s':''})` : `Review & Submit Attendance (${totalActiveHours} Hr${totalActiveHours>1?'s':''})`}
@@ -724,7 +838,7 @@ export const FacultyAttendancePage: React.FC = () => {
                           <td className="px-4 py-3">Period {slot.period_start}</td>
                           <td className="px-4 py-3 font-bold text-brand-primary">{slot.subject_name}</td>
                           <td className="px-4 py-3 text-center">
-                            <button onClick={()=>{setSem(slot.semester_label);setSection(slot.section);setDate(slot.date);const m=mySubjects.find(s=>s.subject_name===slot.subject_name&&s.section===slot.section);if(m)setSubjectId(m.id);setIsLoaded(true);setNav('mark');}} className="px-3 py-1.5 bg-[#007bff] text-white text-[10px] font-bold rounded-lg hover:bg-blue-600">Mark Now</button>
+                            <button onClick={()=>{setPreferredPeriod(Number(slot.period_start)||null);setSem(slot.semester_label);setSection(slot.section);setDate(slot.date);const m=mySubjects.find(s=>s.subject_name===slot.subject_name&&s.section===slot.section&&(!slot.semester_label||s.semester_label===slot.semester_label));if(m)setSubjectId(m.id);setIsLoaded(true);setNav('mark');}} className="px-3 py-1.5 bg-[#007bff] text-white text-[10px] font-bold rounded-lg hover:bg-blue-600">Mark Now</button>
                           </td>
                         </tr>
                       ))}
@@ -980,6 +1094,9 @@ export const FacultyAttendancePage: React.FC = () => {
             </div>
           )}
 
+          {/* ── MY STUDENTS ── */}
+          {nav==='students' && <MyStudentsPanel subjects={mySubjects} />}
+
           {/* ── TIMETABLE ── */}
           {nav==='timetable' && (
             <div className="space-y-4">
@@ -1076,3 +1193,58 @@ export const FacultyAttendancePage: React.FC = () => {
     </div>
   );
 };
+
+// Students on the rolls of each subject/section allotted to the faculty member
+function MyStudentsPanel({ subjects }: { subjects: SubjectAllotment[] }) {
+  const [selected, setSelected] = useState<string>('');
+  const [q, setQ] = useState('');
+  const active = subjects.find(s => s.id === selected) || subjects[0] || null;
+  const { data: rawRoster = [], isLoading } = useQuery({
+    queryKey: ['myStudentsRoster', active?.id],
+    queryFn: () => (active ? api.getRoster(active.id).catch(() => []) : Promise.resolve([])),
+    enabled: Boolean(active),
+  });
+  const roster: any[] = Array.isArray(rawRoster) ? rawRoster : [];
+  const shown = roster.filter(r => !q || String(r.roll_number).toLowerCase().includes(q.toLowerCase()) || String(r.student_name || '').toLowerCase().includes(q.toLowerCase()));
+
+  if (subjects.length === 0) {
+    return <div className="p-8 text-center text-xs text-textMuted bg-surface border border-borderLine rounded-2xl">No subjects are allotted to you yet. Ask your HOD or admin to assign subjects.</div>;
+  }
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2">
+        {subjects.map(s => (
+          <button key={s.id} onClick={() => setSelected(s.id)}
+            className={`px-3 py-2 rounded-xl text-xs font-bold border ${active?.id === s.id ? 'bg-brand-primary text-white border-brand-primary' : 'bg-surface border-borderLine text-textSecondary'}`}>
+            {s.subject_name} · {s.semester_label} {s.section}
+          </button>
+        ))}
+      </div>
+      <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden">
+        <div className="p-3 flex flex-wrap items-center gap-2 border-b border-borderLine">
+          <span className="text-xs font-black text-textPrimary mr-auto">{active?.subject_name} · {active?.semester_label} Section {active?.section} — {roster.length} students</span>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search roll no. or name" className="px-3 py-1.5 text-xs rounded-lg border border-borderLine bg-background" />
+        </div>
+        <div className="overflow-x-auto max-h-[60vh] overflow-y-auto">
+          <table className="w-full text-xs text-left">
+            <thead className="bg-surface-2 text-textSecondary font-bold text-[10px] uppercase border-b border-borderLine sticky top-0">
+              <tr><th className="px-4 py-2.5">#</th><th className="px-4 py-2.5">Roll No.</th><th className="px-4 py-2.5">Name</th><th className="px-4 py-2.5">On roll from</th></tr>
+            </thead>
+            <tbody className="divide-y divide-borderLine">
+              {isLoading ? <tr><td colSpan={4} className="p-8 text-center text-textMuted">Loading students…</td></tr>
+                : shown.length === 0 ? <tr><td colSpan={4} className="p-8 text-center text-textMuted">{roster.length === 0 ? 'No students on this roll yet. Ask the admin to assign students.' : 'No match.'}</td></tr>
+                : shown.map((r, i) => (
+                  <tr key={r.roll_number} className="hover:bg-surface-2">
+                    <td className="px-4 py-2 text-textMuted">{i + 1}</td>
+                    <td className="px-4 py-2 font-mono font-bold text-textPrimary">{r.roll_number}</td>
+                    <td className="px-4 py-2 text-textSecondary">{r.student_name || '—'}</td>
+                    <td className="px-4 py-2 text-textMuted">{r.joining_date ? String(r.joining_date).slice(0, 10) : 'Semester start'}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1072,9 +1072,11 @@ export const api = {
     });
   },
 
-  getNotPostedAttendance: async (params?: { date?: string; semester?: string; department?: string; section?: string; faculty_email?: string }) => {
+  getNotPostedAttendance: async (params?: { date?: string; from?: string; to?: string; semester?: string; department?: string; section?: string; faculty_email?: string }) => {
     const qs = new URLSearchParams();
     if (params?.date) qs.append('date', params.date);
+    if (params?.from) qs.append('from', params.from);
+    if (params?.to) qs.append('to', params.to);
     if (params?.semester) qs.append('semester', params.semester);
     if (params?.department) qs.append('department', params.department);
     if (params?.section) qs.append('section', params.section);

@@ -132,7 +132,7 @@
         "frontend/src/lib/api.ts"
       ],
       "acceptance_criteria": "tsc + build pass; posting flow verified against mocked API.",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "commit_msg": "fix(attendance): faculty posting accuracy, not-posted list, My Students, late-post requests"
     },
