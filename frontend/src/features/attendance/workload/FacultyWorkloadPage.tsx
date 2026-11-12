@@ -87,6 +87,7 @@ export const FacultyWorkloadPage: React.FC = () => {
       'Total Sections': w.section_count,
       'Theory Hrs/Week': w.theory_hours_week,
       'Lab Hrs/Week': w.lab_hours_week,
+      'Lab Hrs as Co-Faculty': w.co_lab_hours_week || 0,
       'Total Hrs/Week': w.total_hours_week,
       'Mentees': w.mentee_count,
       'Status': STATUS_CONFIG[w.status]?.label || w.status,
@@ -293,7 +294,10 @@ export const FacultyWorkloadPage: React.FC = () => {
                       <td className="py-3 px-3 text-center font-bold text-textPrimary">{w.subject_count}</td>
                       <td className="py-3 px-3 text-center font-bold text-textPrimary">{w.section_count}</td>
                       <td className="py-3 px-3 text-center text-textPrimary">{w.theory_hours_week}</td>
-                      <td className="py-3 px-3 text-center text-textPrimary">{w.lab_hours_week}</td>
+                      <td className="py-3 px-3 text-center text-textPrimary">
+                        {w.lab_hours_week}
+                        {w.co_lab_hours_week > 0 && <div className="text-[9px] font-bold text-purple-600 dark:text-purple-400" title="Lab hours as co-faculty">incl. {w.co_lab_hours_week}h co-faculty</div>}
+                      </td>
                       <td className="py-3 px-3 text-center font-black text-textPrimary text-sm">{w.total_hours_week}</td>
                       <td className="py-3 px-3 text-center text-textSecondary">{w.mentee_count}</td>
                       <td className="py-3 px-3 text-center">
@@ -329,7 +333,7 @@ export const FacultyWorkloadPage: React.FC = () => {
                                     <td className="py-2 px-3 text-textPrimary font-mono">{s.semester_label}</td>
                                     <td className="py-2 px-3 text-textSecondary">{s.department}</td>
                                     <td className="py-2 px-3 text-textSecondary">{s.section}</td>
-                                    <td className="py-2 px-3 text-textPrimary font-semibold">{s.subject_name}</td>
+                                    <td className="py-2 px-3 text-textPrimary font-semibold">{s.subject_name}{s.co_faculty && <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-purple-500/10 text-purple-700 dark:text-purple-300">co-faculty</span>}</td>
                                     <td className="py-2 px-3">
                                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${s.subject_type === 'Lab' ? 'bg-purple-50 text-purple-600 border border-purple-200' : 'bg-blue-50 text-blue-600 border border-blue-200'}`}>
                                         {s.subject_type}
@@ -349,7 +353,7 @@ export const FacultyWorkloadPage: React.FC = () => {
                           <div className="mt-2 flex gap-4 text-xs text-textSecondary">
                             <span>📚 {w.subject_count} subjects · {w.section_count} sections</span>
                             <span>👨‍🎓 {w.mentee_count} mentees</span>
-                            <span>📅 {w.theory_hours_week}h theory + {w.lab_hours_week}h lab = <strong>{w.total_hours_week}h/week</strong></span>
+                            <span>📅 {w.theory_hours_week}h theory + {w.lab_hours_week}h lab{w.co_lab_hours_week > 0 ? ` (${w.co_lab_hours_week}h as co-faculty)` : ''} = <strong>{w.total_hours_week}h/week</strong></span>
                             <span>Threshold: {w.threshold?.min}–{w.threshold?.max}h</span>
                           </div>
                         </td>

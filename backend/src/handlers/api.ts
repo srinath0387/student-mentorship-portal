@@ -9019,6 +9019,7 @@ app.get('/notices/broadcast', requireRole('hod', 'admin', 'principal', 'director
 // 1. Upload/Sync Faculty-Subject Allotments (Admin / HOD / Coordinator)
 app.post('/attendance/allotments/upload', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
   try {
+    await ensureCoFacultyColumns();
     const { semester, allotments } = req.body;
     if (!semester || !Array.isArray(allotments) || allotments.length === 0) {
       return res.status(400).json({ error: 'Semester and non-empty allotments array are required' });
@@ -9036,6 +9037,8 @@ app.post('/attendance/allotments/upload', requireRole('admin', 'hod', 'coordinat
       const facultyName = (row.faculty_name || row.facultyName || row['Faculty Name'] || '').trim();
       const facultyEmail = (row.faculty_email || row.facultyEmail || row['Faculty Email'] || '').trim().toLowerCase();
       const subjectName = (row.subject_name || row.subjectName || row['Subject Allotted'] || row['Subject Name'] || '').trim();
+      const coFacultyEmail = String(row.co_faculty_email || row['Co-Faculty Email'] || row['Co Faculty Email'] || row['Co-faculty Email'] || '').trim().toLowerCase();
+      const coFacultyName = String(row.co_faculty_name || row['Co-Faculty Name'] || row['Co Faculty Name'] || row['Co-faculty Name'] || '').trim() || (coFacultyEmail ? coFacultyEmail.split('@')[0] : '');
       const section = (row.section || row['Section'] || 'A').trim().toUpperCase();
       const subjectTypeRaw = (row.subject_type || row.subjectType || row['Subject Type'] || 'Theory').trim();
       const subjectType = subjectTypeRaw.toLowerCase().includes('lab') ? 'Lab' : 'Theory';
@@ -9081,16 +9084,16 @@ app.post('/attendance/allotments/upload', requireRole('admin', 'hod', 'coordinat
         if (existing.rows.length > 0) {
           await db.query(
             `UPDATE subject_allotments
-             SET subject_type = $1, faculty_name = $2, department = $3
+             SET subject_type = $1, faculty_name = $2, department = $3, co_faculty_email = $5, co_faculty_name = $6
              WHERE id = $4`,
-            [subjectType, facultyName, department || 'General', existing.rows[0].id]
+            [subjectType, facultyName, department || 'General', existing.rows[0].id, coFacultyEmail || null, coFacultyEmail ? coFacultyName : null]
           );
           updatedCount++;
         } else {
           await db.query(
-            `INSERT INTO subject_allotments (semester_label, subject_name, subject_type, section, faculty_email, faculty_name, department)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [semester, subjectName, subjectType, section, facultyEmail, facultyName, department || 'General']
+            `INSERT INTO subject_allotments (semester_label, subject_name, subject_type, section, faculty_email, faculty_name, department, co_faculty_email, co_faculty_name)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            [semester, subjectName, subjectType, section, facultyEmail, facultyName, department || 'General', coFacultyEmail || null, coFacultyEmail ? coFacultyName : null]
           );
           addedCount++;
         }
@@ -9112,9 +9115,64 @@ app.post('/attendance/allotments/upload', requireRole('admin', 'hod', 'coordinat
 });
 
 // 1b. Add Single Allotment Entry (Admin / HOD / Coordinator)
+// ============================================================================
+// Lab co-faculty
+// A lab allotment can carry a co-faculty member. The co-faculty is credited with the lab hours in
+// workload (Faculty Workload, API score) and sees the lab in their timetable, but attendance is
+// posted only by the main faculty (subject_allotments.faculty_email).
+// ============================================================================
+let coFacultyColumnsReady: Promise<void> | null = null;
+function ensureCoFacultyColumns(): Promise<void> {
+  if (!coFacultyColumnsReady) {
+    coFacultyColumnsReady = db.query(`
+      ALTER TABLE subject_allotments ADD COLUMN IF NOT EXISTS co_faculty_email VARCHAR(100);
+      ALTER TABLE subject_allotments ADD COLUMN IF NOT EXISTS co_faculty_name VARCHAR(100);
+    `).then(() => undefined).catch((err: any) => {
+      coFacultyColumnsReady = null;
+      console.warn('[co-faculty] could not add columns:', err.message);
+    });
+  }
+  return coFacultyColumnsReady;
+}
+
+/**
+ * Timetable rows credited to each faculty member: every timetable entry for its own faculty,
+ * plus each lab entry again for the lab's co-faculty (credit_role = 'co').
+ * Use as: FROM (${CREDITED_TIMETABLE_SQL}) t
+ */
+const CREDITED_TIMETABLE_SQL = `
+  SELECT t.id, t.semester_label, t.department, t.section, t.day_of_week, t.period_start, t.num_periods,
+         t.subject_name, t.subject_type, t.room_no, t.faculty_email, t.faculty_name, 'main'::text AS credit_role
+  FROM timetable_entries t
+  UNION ALL
+  SELECT t.id, t.semester_label, t.department, t.section, t.day_of_week, t.period_start, t.num_periods,
+         t.subject_name, t.subject_type, t.room_no, a.co_faculty_email AS faculty_email,
+         COALESCE(NULLIF(a.co_faculty_name, ''), a.co_faculty_email) AS faculty_name, 'co'::text AS credit_role
+  FROM timetable_entries t
+  JOIN subject_allotments a
+    ON a.subject_type = 'Lab'
+   AND COALESCE(a.co_faculty_email, '') <> ''
+   AND LOWER(a.co_faculty_email) <> LOWER(COALESCE(t.faculty_email, ''))
+   AND a.semester_label = t.semester_label
+   AND UPPER(a.section) = UPPER(t.section)
+   AND LOWER(TRIM(a.subject_name)) = LOWER(TRIM(t.subject_name))
+   AND (COALESCE(a.department, '') = '' OR COALESCE(t.department, '') = '' OR LOWER(a.department) = LOWER(t.department))
+  WHERE t.subject_type = 'Lab'
+`;
+
+/** Validate an optional co-faculty email for an allotment. Returns an error message or null. */
+function coFacultyError(coEmail: string, mainEmail: string, subjectType: string): string | null {
+  if (!coEmail) return null;
+  if (subjectType !== 'Lab') return 'A co-faculty can only be added to a Lab subject.';
+  if (!coEmail.endsWith('@rgmcet.edu.in')) return 'Co-faculty email must be an @rgmcet.edu.in address.';
+  if (coEmail === mainEmail.toLowerCase()) return 'Co-faculty must be different from the main faculty.';
+  return null;
+}
+
 app.post('/attendance/allotments/single', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
   try {
-    const { semester, department, section, subject_name, subject_type, faculty_name, faculty_email } = req.body;
+    const { semester, department, section, subject_name, subject_type, faculty_name, faculty_email, co_faculty_email, co_faculty_name } = req.body;
+    await ensureCoFacultyColumns();
     if (!semester || !department || !section || !subject_name || !faculty_email) {
       return res.status(400).json({ error: 'Semester, Department, Section, Subject Name, and Faculty Email are required' });
     }
@@ -9125,6 +9183,10 @@ app.post('/attendance/allotments/single', requireRole('admin', 'hod', 'coordinat
     const cleanType = (subject_type || 'Theory').toLowerCase().includes('lab') ? 'Lab' : 'Theory';
     const cleanFacName = (faculty_name || cleanEmail.split('@')[0]).trim();
     const cleanDept = department.trim();
+    const cleanCoEmail = String(co_faculty_email || '').trim().toLowerCase();
+    const cleanCoName = cleanCoEmail ? String(co_faculty_name || cleanCoEmail.split('@')[0]).trim() : null;
+    const coErr = coFacultyError(cleanCoEmail, cleanEmail, cleanType);
+    if (coErr) return res.status(400).json({ error: coErr });
 
     // MED-6: Validate semester_label format (must be like 1-1, 2-2, 3-1, 4-2)
     if (!/^\d-\d$/.test(semester.trim())) {
@@ -9166,16 +9228,16 @@ app.post('/attendance/allotments/single', requireRole('admin', 'hod', 'coordinat
       allotmentId = existing.rows[0].id;
       await db.query(
         `UPDATE subject_allotments
-         SET subject_type = $1, faculty_name = $2, department = $3
+         SET subject_type = $1, faculty_name = $2, department = $3, co_faculty_email = $5, co_faculty_name = $6
          WHERE id = $4`,
-        [cleanType, cleanFacName, cleanDept, allotmentId]
+        [cleanType, cleanFacName, cleanDept, allotmentId, cleanCoEmail || null, cleanCoName]
       );
     } else {
       const insertRes = await db.query(
-        `INSERT INTO subject_allotments (semester_label, subject_name, subject_type, section, faculty_email, faculty_name, department)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO subject_allotments (semester_label, subject_name, subject_type, section, faculty_email, faculty_name, department, co_faculty_email, co_faculty_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING id`,
-        [semester, cleanSubj, cleanType, cleanSection, cleanEmail, cleanFacName, cleanDept]
+        [semester, cleanSubj, cleanType, cleanSection, cleanEmail, cleanFacName, cleanDept, cleanCoEmail || null, cleanCoName]
       );
       allotmentId = insertRes.rows[0].id;
     }
@@ -9191,9 +9253,42 @@ app.post('/attendance/allotments/single', requireRole('admin', 'hod', 'coordinat
   }
 });
 
+// PATCH /attendance/allotments/:id/co-faculty — set or clear the lab co-faculty
+app.patch('/attendance/allotments/:id/co-faculty', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
+  try {
+    await ensureCoFacultyColumns();
+    const r = await db.query('SELECT * FROM subject_allotments WHERE id = $1', [req.params.id]);
+    const allot = r.rows[0];
+    if (!allot) return res.status(404).json({ error: 'Allotment not found' });
+    if (req.auth!.role === 'hod' && req.auth!.department && req.auth!.department !== '*'
+        && String(allot.department || '').toLowerCase() !== req.auth!.department.toLowerCase()) {
+      return res.status(403).json({ error: 'You can only edit allotments in your own department.' });
+    }
+    const coEmail = String(req.body?.co_faculty_email || '').trim().toLowerCase();
+    const err = coFacultyError(coEmail, allot.faculty_email, allot.subject_type);
+    if (err) return res.status(400).json({ error: err });
+    let coName: string | null = null;
+    if (coEmail) {
+      coName = String(req.body?.co_faculty_name || '').trim() || null;
+      if (!coName) {
+        const f = await db.query('SELECT name FROM faculty WHERE LOWER(email) = $1 LIMIT 1', [coEmail]).catch(() => ({ rows: [] as any[] }));
+        coName = f.rows[0]?.name || coEmail.split('@')[0];
+      }
+    }
+    const u = await db.query(
+      'UPDATE subject_allotments SET co_faculty_email = $1, co_faculty_name = $2 WHERE id = $3 RETURNING *',
+      [coEmail || null, coName, req.params.id]
+    );
+    res.json({ success: true, allotment: u.rows[0] });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 2. Get Allotments (Admin, HOD, Coordinator, Faculty)
 app.get('/attendance/allotments', requireRole('admin', 'hod', 'coordinator', 'faculty', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
+    await ensureCoFacultyColumns();
     const semester = (req.query.semester as string) || '';
     const department = (req.query.department as string) || '';
     const callerRole = req.auth?.role;
@@ -10126,10 +10221,11 @@ app.get('/faculty/api-scores', requireRole('hod', 'admin', 'director', 'principa
       GROUP BY LOWER(faculty_email), duty_type
     `, [emails]);
 
+    await ensureCoFacultyColumns();
     const workloadRes = await db.query(`
-      SELECT LOWER(faculty_email) AS email, COALESCE(SUM(num_periods),0)::int AS total_periods
-      FROM timetable_entries WHERE LOWER(faculty_email) = ANY($1)
-      GROUP BY LOWER(faculty_email)
+      SELECT LOWER(t.faculty_email) AS email, COALESCE(SUM(t.num_periods),0)::int AS total_periods
+      FROM (${CREDITED_TIMETABLE_SQL}) t WHERE LOWER(t.faculty_email) = ANY($1)
+      GROUP BY LOWER(t.faculty_email)
     `, [emails]);
 
     const meetingsRes = await db.query(`
@@ -10254,9 +10350,11 @@ app.get('/faculty/:email/api-score', requireRole('faculty', 'hod', 'admin', 'dir
 
     // ── Pillar 1: Teaching & Learning (40 pts) ────────────────────
     // 1a. Workload compliance (10 pts)
+    await ensureCoFacultyColumns();
+    // Workload includes lab hours where this faculty member is the co-faculty
     const workloadRows = await safeQuery(
-      `SELECT COALESCE(SUM(num_periods), 0)::int AS total_periods
-       FROM timetable_entries WHERE LOWER(faculty_email) = $1`, [targetEmail]);
+      `SELECT COALESCE(SUM(t.num_periods), 0)::int AS total_periods
+       FROM (${CREDITED_TIMETABLE_SQL}) t WHERE LOWER(t.faculty_email) = $1`, [targetEmail]);
     const totalPeriods = workloadRows[0]?.total_periods || 0;
     const workloadScore = totalPeriods === 0 ? 0 : totalPeriods < 12 ? 6 : totalPeriods > 20 ? 7 : 10;
 
@@ -12137,7 +12235,8 @@ app.get('/attendance/timetable', requireAuth, async (req: Request, res: Response
     const dayOfWeek = (req.query.day as string) || '';
     const facultyEmail = (req.query.faculty_email as string) || '';
 
-    let query = `SELECT * FROM timetable_entries WHERE 1=1`;
+    await ensureCoFacultyColumns();
+    let query = `SELECT timetable_entries.*, false AS is_co_faculty FROM timetable_entries WHERE 1=1`;
     const params: any[] = [];
 
     if (semester) {
@@ -12179,6 +12278,23 @@ app.get('/attendance/timetable', requireAuth, async (req: Request, res: Response
             AND LOWER(sa.subject_name) = LOWER(timetable_entries.subject_name)
         )
       )`;
+
+      // Lab slots where this faculty member is the co-faculty (view only — attendance stays with the main faculty)
+      const coParams: any[] = [email];
+      let coWhere = '';
+      if (semester) { coParams.push(semester); coWhere += ` AND t.semester_label = $${coParams.length}`; }
+      if (section && section !== 'All') { coParams.push(section.toUpperCase()); coWhere += ` AND t.section = $${coParams.length}`; }
+      if (dayOfWeek && dayOfWeek !== 'All') { coParams.push(dayOfWeek); coWhere += ` AND t.day_of_week = $${coParams.length}`; }
+      const coRes = await db.query(
+        `SELECT t.*, true AS is_co_faculty, a.faculty_name AS main_faculty_name, a.faculty_email AS main_faculty_email
+         FROM timetable_entries t
+         JOIN subject_allotments a ON a.subject_type = 'Lab' AND LOWER(COALESCE(a.co_faculty_email, '')) = $1
+          AND a.semester_label = t.semester_label AND UPPER(a.section) = UPPER(t.section)
+          AND LOWER(TRIM(a.subject_name)) = LOWER(TRIM(t.subject_name))
+         WHERE t.subject_type = 'Lab' AND LOWER(COALESCE(t.faculty_email, '')) <> $1 ${coWhere}`,
+        coParams
+      ).catch(() => ({ rows: [] as any[] }));
+      (req as any)._coFacultySlots = coRes.rows;
     }
 
     query += ` ORDER BY 
@@ -12193,7 +12309,9 @@ app.get('/attendance/timetable', requireAuth, async (req: Request, res: Response
       END, period_start ASC`;
 
     const result = await db.query(query, params);
-    res.json(result.rows);
+    const coSlots: any[] = (req as any)._coFacultySlots || [];
+    const seen = new Set(result.rows.map((r: any) => r.id));
+    res.json([...result.rows, ...coSlots.filter((r: any) => !seen.has(r.id))]);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -12321,6 +12439,7 @@ app.delete('/attendance/timetable/clear/section', requireRole('admin', 'hod', 'c
 // GET /attendance/workload?department=CSE&semester=3-1&section=A&search=&status=
 app.get('/attendance/workload', requireRole('admin', 'hod', 'faculty', 'director', 'principal', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
+    await ensureCoFacultyColumns();
     const callerRole = req.auth?.role;
     const callerEmail = req.auth?.email?.toLowerCase();
     const callerDept = req.auth?.department;
@@ -12381,6 +12500,7 @@ app.get('/attendance/workload', requireRole('admin', 'hod', 'faculty', 'director
         COALESCE(SUM(CASE WHEN t.subject_type = 'Lab' THEN t.num_periods ELSE 0 END), 0)::int AS lab_periods_week,
         COALESCE(SUM(t.num_periods), 0)::int AS total_periods_week,
         COALESCE(mc.mentee_count, 0)::int AS mentee_count,
+        COALESCE(SUM(CASE WHEN t.credit_role = 'co' THEN t.num_periods ELSE 0 END), 0)::int AS co_lab_periods_week,
         json_agg(json_build_object(
           'semester_label', t.semester_label,
           'department', t.department,
@@ -12390,9 +12510,10 @@ app.get('/attendance/workload', requireRole('admin', 'hod', 'faculty', 'director
           'day_of_week', t.day_of_week,
           'period_start', t.period_start,
           'num_periods', t.num_periods,
-          'room_no', t.room_no
+          'room_no', t.room_no,
+          'co_faculty', t.credit_role = 'co'
         ) ORDER BY t.semester_label, t.subject_name) AS slots
-      FROM timetable_entries t
+      FROM (${CREDITED_TIMETABLE_SQL}) t
       LEFT JOIN faculty f ON LOWER(f.email) = LOWER(t.faculty_email)
       LEFT JOIN faculty_full_profiles fp ON LOWER(fp.email) = LOWER(t.faculty_email)
       LEFT JOIN (
@@ -12419,6 +12540,7 @@ app.get('/attendance/workload', requireRole('admin', 'hod', 'faculty', 'director
         subject_count: parseInt(r.subject_count) || 0,
         theory_hours_week: parseInt(r.theory_periods_week) || 0,
         lab_hours_week: parseInt(r.lab_periods_week) || 0,
+        co_lab_hours_week: parseInt(r.co_lab_periods_week) || 0,
         total_hours_week: totalHrs,
         mentee_count: parseInt(r.mentee_count) || 0,
         status,

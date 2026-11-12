@@ -949,12 +949,18 @@ export const api = {
     subject_type: 'Theory' | 'Lab';
     faculty_name: string;
     faculty_email: string;
+    co_faculty_email?: string;
+    co_faculty_name?: string;
   }) => {
     return fetchWithAuth('/attendance/allotments/single', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   },
+
+  // Lab co-faculty: credited in workload, cannot post attendance
+  setAllotmentCoFaculty: async (id: string, co_faculty_email: string | null, co_faculty_name?: string) =>
+    fetchWithAuth(`/attendance/allotments/${id}/co-faculty`, { method: 'PATCH', body: JSON.stringify({ co_faculty_email, co_faculty_name }) }),
 
   deleteAllotment: async (id: string) => {
     return fetchWithAuth(`/attendance/allotments/${id}`, {

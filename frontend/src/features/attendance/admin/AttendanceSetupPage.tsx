@@ -120,6 +120,7 @@ export const AttendanceSetupPage: React.FC = () => {
   const [allotSection, setAllotSection] = useState('A');
   const [allotSubjectId, setAllotSubjectId] = useState('');
   const [allotFaculty, setAllotFaculty] = useState('');
+  const [allotCoFaculty, setAllotCoFaculty] = useState('');
   const [allotStatus, setAllotStatus] = useState<{type:string;message:string}|null>(null);
 
   const {data:rawAllotments=[]} = useQuery({ queryKey:['attendanceAllotments',allotSem,allotDept], queryFn:()=>api.getAllotments(allotSem||undefined,allotDept||undefined).catch(()=>[]) });
@@ -133,11 +134,15 @@ export const AttendanceSetupPage: React.FC = () => {
     const sub = masterSubjects.find((s:any)=>s.id===allotSubjectId);
     if(!sub||!allotFaculty) { setAllotStatus({type:'error',message:'Select a subject and faculty.'}); return; }
     const faculty = facultyList.find((f:any)=>f.email===allotFaculty);
+    const isLab = sub.subject_type === 'Lab';
+    const coFaculty = isLab && allotCoFaculty ? facultyList.find((f:any)=>f.email===allotCoFaculty) : null;
+    if (coFaculty && coFaculty.email === allotFaculty) { setAllotStatus({type:'error',message:'Co-faculty must be different from the main faculty.'}); return; }
     try {
-      await api.createSingleAllotment({ semester:allotSem||sub.semester_label, department:allotDept, section:allotSection, subject_name:sub.subject_name, subject_type:sub.subject_type, faculty_name:faculty?.name||allotFaculty, faculty_email:allotFaculty });
+      await api.createSingleAllotment({ semester:allotSem||sub.semester_label, department:allotDept, section:allotSection, subject_name:sub.subject_name, subject_type:sub.subject_type, faculty_name:faculty?.name||allotFaculty, faculty_email:allotFaculty,
+        ...(coFaculty ? { co_faculty_email: coFaculty.email, co_faculty_name: coFaculty.name || coFaculty.email } : {}) });
       qc.invalidateQueries({queryKey:['attendanceAllotments']});
-      setAllotStatus({type:'success',message:'Allotment created.'});
-      setAllotSubjectId(''); setAllotFaculty('');
+      setAllotStatus({type:'success',message: coFaculty ? 'Lab allotted with co-faculty. Only the main faculty posts attendance; both get the lab hours in workload.' : 'Allotment created.'});
+      setAllotSubjectId(''); setAllotFaculty(''); setAllotCoFaculty('');
     } catch(err:any) { setAllotStatus({type:'error',message:err.message||'Failed.'}); }
   };
 
@@ -158,7 +163,8 @@ export const AttendanceSetupPage: React.FC = () => {
         const wb = XLSX.read(evt.target?.result,{type:'binary'});
         const rows:any[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
         if(rows.length===0){setAllotStatus({type:'error',message:'No rows found in the uploaded file.'});return;}
-        const result = await api.uploadAllotments(allotSem, rows.map(r=>({ subject_name:r['Subject Name']||r['subject_name']||'', subject_type:(r['Subject Type']||'Theory').toLowerCase().includes('lab')?'Lab':'Theory', faculty_email:r['Faculty Email']||r['faculty_email']||'', faculty_name:r['Faculty Name']||r['faculty_name']||'', section:r['Section']||allotSection, department:allotDept })));
+        const result = await api.uploadAllotments(allotSem, rows.map(r=>({ subject_name:r['Subject Name']||r['subject_name']||'', subject_type:(r['Subject Type']||'Theory').toLowerCase().includes('lab')?'Lab':'Theory', faculty_email:r['Faculty Email']||r['faculty_email']||'', faculty_name:r['Faculty Name']||r['faculty_name']||'', section:r['Section']||allotSection, department:allotDept,
+          co_faculty_email:r['Co-Faculty Email']||r['Co Faculty Email']||r['co_faculty_email']||'', co_faculty_name:r['Co-Faculty Name']||r['Co Faculty Name']||r['co_faculty_name']||'' })));
         qc.invalidateQueries({queryKey:['attendanceAllotments']});
         // BUG-14 fix: show real imported/error counts from backend response
         const imported = result?.importedCount ?? result?.addedCount ?? rows.length;
@@ -438,12 +444,22 @@ export const AttendanceSetupPage: React.FC = () => {
               </select>
               <button type="submit" className="px-4 py-2 bg-brand-primary text-white font-bold text-xs rounded-xl hover:opacity-90">Allot</button>
             </div>
+            {masterSubjects.find((s:any)=>s.id===allotSubjectId)?.subject_type === 'Lab' && (
+              <div className="flex flex-wrap items-center gap-2 p-3 rounded-xl bg-purple-500/5 border border-purple-500/20">
+                <span className="text-xs font-bold text-purple-700 dark:text-purple-300">Lab co-faculty (optional)</span>
+                <select value={allotCoFaculty} onChange={e=>setAllotCoFaculty(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none min-w-[220px]">
+                  <option value="">No co-faculty</option>
+                  {facultyList.filter((f:any)=>f.email!==allotFaculty).map((f:any)=><option key={f.email} value={f.email}>{f.name||f.email} {f.department ? `(${f.department})` : ''}</option>)}
+                </select>
+                <span className="text-[10px] text-textMuted">Co-faculty gets the lab hours in workload. Attendance is posted only by the main faculty.</span>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <label className="flex items-center gap-2 px-3 py-2 border border-dashed border-borderLine rounded-xl cursor-pointer hover:bg-surface-2 text-xs font-bold text-textSecondary">
                 <Upload className="w-3.5 h-3.5"/>Bulk Excel Upload
                 <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleBulkAllotUpload}/>
               </label>
-              <span className="text-[10px] text-textMuted">Columns: Subject Name, Subject Type, Faculty Email, Faculty Name, Section</span>
+              <span className="text-[10px] text-textMuted">Columns: Subject Name, Subject Type, Faculty Email, Faculty Name, Section, and optionally Co-Faculty Email, Co-Faculty Name (labs)</span>
             </div>
             <StatusMsg msg={allotStatus}/>
           </form>
@@ -453,10 +469,10 @@ export const AttendanceSetupPage: React.FC = () => {
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-left">
                 <thead className="bg-surface-2 border-b border-borderLine font-bold text-textSecondary uppercase text-[10px]">
-                  <tr><th className="px-4 py-2.5">Class</th><th className="px-4 py-2.5">Dept</th><th className="px-4 py-2.5">Section</th><th className="px-4 py-2.5">Subject</th><th className="px-4 py-2.5">Type</th><th className="px-4 py-2.5">Faculty</th><th className="px-4 py-2.5 text-center">Remove</th></tr>
+                  <tr><th className="px-4 py-2.5">Class</th><th className="px-4 py-2.5">Dept</th><th className="px-4 py-2.5">Section</th><th className="px-4 py-2.5">Subject</th><th className="px-4 py-2.5">Type</th><th className="px-4 py-2.5">Faculty (posts attendance)</th><th className="px-4 py-2.5">Lab Co-Faculty</th><th className="px-4 py-2.5 text-center">Remove</th></tr>
                 </thead>
                 <tbody className="divide-y divide-borderLine">
-                  {allotments.length===0?<tr><td colSpan={7} className="p-8 text-center text-textMuted">No allotments yet.</td></tr>:allotments.map((a:any)=>(
+                  {allotments.length===0?<tr><td colSpan={8} className="p-8 text-center text-textMuted">No allotments yet.</td></tr>:allotments.map((a:any)=>(
                     <tr key={a.id} className="hover:bg-surface-2">
                       <td className="px-4 py-2.5 font-bold">{a.semester_label}</td>
                       <td className="px-4 py-2.5">{a.department}</td>
@@ -464,6 +480,27 @@ export const AttendanceSetupPage: React.FC = () => {
                       <td className="px-4 py-2.5 font-bold">{a.subject_name}</td>
                       <td className="px-4 py-2.5"><span className={`px-2 py-0.5 rounded text-[10px] font-bold ${a.subject_type==='Lab'?'bg-purple-100 text-purple-700':'bg-blue-100 text-blue-700'}`}>{a.subject_type}</span></td>
                       <td className="px-4 py-2.5">{a.faculty_name}<br/><span className="text-textMuted text-[10px]">{a.faculty_email}</span></td>
+                      <td className="px-4 py-2.5">
+                        {a.subject_type==='Lab' ? (
+                          <select
+                            value={a.co_faculty_email||''}
+                            onChange={async e=>{
+                              const email = e.target.value;
+                              const f = facultyList.find((x:any)=>x.email===email);
+                              try {
+                                await api.setAllotmentCoFaculty(a.id, email || null, f?.name);
+                                qc.invalidateQueries({queryKey:['attendanceAllotments']});
+                                setAllotStatus({type:'success',message: email ? `Co-faculty ${f?.name||email} added to ${a.subject_name} (${a.section}).` : `Co-faculty removed from ${a.subject_name} (${a.section}).`});
+                              } catch(err:any) { setAllotStatus({type:'error',message:err.message||'Could not update co-faculty.'}); }
+                            }}
+                            className="px-2 py-1 text-[11px] rounded-lg border border-borderLine bg-background focus:outline-none max-w-[200px]"
+                          >
+                            <option value="">— None —</option>
+                            {a.co_faculty_email && !facultyList.some((f:any)=>f.email===a.co_faculty_email) && <option value={a.co_faculty_email}>{a.co_faculty_name||a.co_faculty_email}</option>}
+                            {facultyList.filter((f:any)=>f.email!==a.faculty_email).map((f:any)=><option key={f.email} value={f.email}>{f.name||f.email}</option>)}
+                          </select>
+                        ) : <span className="text-textMuted">—</span>}
+                      </td>
                       <td className="px-4 py-2.5 text-center"><button onClick={()=>handleDeleteAllotment(a.id)} className="text-rose-500 hover:opacity-70"><Trash2 className="w-3.5 h-3.5"/></button></td>
                     </tr>
                   ))}

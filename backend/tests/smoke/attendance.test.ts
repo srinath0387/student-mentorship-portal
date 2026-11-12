@@ -237,3 +237,54 @@ describe('Student / parent attendance view', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('Lab co-faculty', () => {
+  const lab = { id: 'AL9', faculty_email: 'main@rgmcet.edu.in', faculty_name: 'Dr. Main', co_faculty_email: 'ramesh@rgmcet.edu.in', co_faculty_name: 'Dr. Ramesh',
+    department: 'CSE (Data Science)', semester_label: '3-1', section: 'A', subject_name: 'DBMS Lab', subject_type: 'Lab' };
+  const allot = (body: any) => request(app).post('/attendance/allotments/single').set('Authorization', ADMIN())
+    .send({ semester: '3-1', department: 'CSE (Data Science)', section: 'A', faculty_email: 'main@rgmcet.edu.in', faculty_name: 'Dr. Main', ...body });
+
+  it('rejects a co-faculty on a theory subject or equal to the main faculty', async () => {
+    routeDb([]);
+    expect((await allot({ subject_name: 'DBMS', subject_type: 'Theory', co_faculty_email: 'ramesh@rgmcet.edu.in' })).status).toBe(400);
+    expect((await allot({ subject_name: 'DBMS Lab', subject_type: 'Lab', co_faculty_email: 'MAIN@rgmcet.edu.in' })).status).toBe(400);
+  });
+
+  it('saves the co-faculty on a lab allotment', async () => {
+    const calls = routeDb([['INSERT INTO subject_allotments', [{ id: 'AL9' }]], ['SELECT * FROM subject_allotments WHERE id', [lab]]]);
+    const res = await allot({ subject_name: 'DBMS Lab', subject_type: 'Lab', co_faculty_email: 'Ramesh@rgmcet.edu.in', co_faculty_name: 'Dr. Ramesh' });
+    expect(res.status).toBe(200);
+    const ins = calls.find(c => c.sql.includes('INSERT INTO subject_allotments'))!;
+    expect(ins.params.slice(7)).toEqual(['ramesh@rgmcet.edu.in', 'Dr. Ramesh']);
+  });
+
+  it('does not let the co-faculty post attendance for the lab', async () => {
+    routeDb([['FROM subject_allotments WHERE id', [lab]]]);
+    const res = await request(app).post('/attendance/sessions').set('Authorization', FACULTY())
+      .send({ allotment_id: 'AL9', session_date: '2026-11-09', num_periods: 3, period_start: 5, records: [{ roll_number: '23091A3201', is_present: true }] });
+    expect(res.status).toBe(403);
+  });
+
+  it('credits co-faculty lab hours in workload', async () => {
+    const calls = routeDb([['FROM timetable_entries t', (sql: string) => sql.includes('credit_role') ? [{
+      faculty_email: 'ramesh@rgmcet.edu.in', faculty_name: 'Dr. Ramesh', department: 'CSE (Data Science)', designation: 'Assistant Professor',
+      section_count: '2', subject_count: '2', theory_periods_week: '9', lab_periods_week: '6', total_periods_week: '15', co_lab_periods_week: '3', mentee_count: 0,
+      slots: [{ subject_name: 'DBMS Lab', subject_type: 'Lab', num_periods: 3, co_faculty: true }],
+    }] : []]]);
+    const res = await request(app).get('/attendance/workload').set('Authorization', FACULTY());
+    expect(res.status).toBe(200);
+    expect(calls.find(c => c.sql.includes('credit_role'))!.sql).toContain("a.co_faculty_email AS faculty_email");
+    expect(res.body.workload[0]).toMatchObject({ total_hours_week: 15, lab_hours_week: 6, co_lab_hours_week: 3 });
+  });
+
+  it('lets admin set or clear the co-faculty on an existing lab allotment', async () => {
+    const calls = routeDb([
+      ['SELECT * FROM subject_allotments WHERE id', [{ ...lab, co_faculty_email: null }]],
+      ['SELECT name FROM faculty', [{ name: 'Dr. Ramesh' }]],
+      ['UPDATE subject_allotments SET co_faculty_email', [lab]],
+    ]);
+    const res = await request(app).patch('/attendance/allotments/AL9/co-faculty').set('Authorization', ADMIN()).send({ co_faculty_email: 'ramesh@rgmcet.edu.in' });
+    expect(res.status).toBe(200);
+    expect(calls.find(c => c.sql.includes('UPDATE subject_allotments SET co_faculty_email'))!.params).toEqual(['ramesh@rgmcet.edu.in', 'Dr. Ramesh', 'AL9']);
+  });
+});

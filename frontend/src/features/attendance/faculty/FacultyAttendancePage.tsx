@@ -116,7 +116,8 @@ export const FacultyAttendancePage: React.FC = () => {
           t.faculty_email.toLowerCase().trim() === (user?.email || '').toLowerCase().trim()
         )
       : [];
-    const combined = [...emailMatched];
+    // Co-faculty lab slots are shown in the timetable but never used for taking attendance
+    const combined = [...emailMatched.filter((t: any) => !t.is_co_faculty)];
     for (const t of subjectMatched) {
       if (!combined.find((m: any) => m.id === t.id)) combined.push(t);
     }
@@ -149,6 +150,9 @@ export const FacultyAttendancePage: React.FC = () => {
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     return dayNames[new Date().getDay()] || 'Monday';
   }, []);
+
+  // Labs where I am the co-faculty (view only — the main faculty posts attendance)
+  const coFacultySlots = useMemo(() => (Array.isArray(rawTT) ? rawTT : []).filter((t: any) => t.is_co_faculty), [rawTT]);
 
   const todaySlots = useMemo(() => {
     return myTimetable.filter((t: TimetableEntry) => t.day_of_week === todayDay);
@@ -1116,9 +1120,17 @@ export const FacultyAttendancePage: React.FC = () => {
                               t.day_of_week === day && 
                               t.period_start === p
                             );
+                            const coSlot = !slot ? coFacultySlots.find((t: any) => t.day_of_week === day && t.period_start === p) : null;
                             return (
                               <td key={p} className="px-2 py-2 border-r border-borderLine text-center">
-                                {slot ? (
+                                {coSlot ? (
+                                  <div className="w-full text-left rounded-xl p-2 border border-dashed border-purple-400/50 bg-purple-500/5"
+                                    title={`Co-faculty for ${coSlot.subject_name}. Attendance is posted by ${coSlot.main_faculty_name || 'the main faculty'}.`}>
+                                    <div className="text-[10px] font-bold text-purple-700 dark:text-purple-300">{coSlot.subject_name}</div>
+                                    <div className="text-[9px] text-textMuted mt-0.5">Sec {coSlot.section} • P{coSlot.period_start}{coSlot.num_periods > 1 ? `–${coSlot.period_start + coSlot.num_periods - 1}` : ''}</div>
+                                    <div className="text-[9px] font-bold text-purple-600 dark:text-purple-400 mt-0.5">Co-faculty</div>
+                                  </div>
+                                ) : slot ? (
                                   <button
                                     onClick={() => {
                                       if (slot.semester_label) setSem(slot.semester_label as any);
@@ -1133,9 +1145,7 @@ export const FacultyAttendancePage: React.FC = () => {
                                           slot.subject_name?.toLowerCase().includes(s.subject_name?.toLowerCase())
                                         );
                                       }
-                                      if (!m && mySubjects.length > 0) {
-                                        m = mySubjects.find(s => s.section === slot.section) || mySubjects[0];
-                                      }
+                                      // No fallback to an unrelated subject — that opened attendance for the wrong class
                                       if (m) setSubjectId(m.id);
                                       setIsLoaded(true);
                                       setNav('mark');

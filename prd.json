@@ -149,6 +149,23 @@
       "status": "done",
       "priority": "medium",
       "commit_msg": "test(attendance): posted sessions reflected in student and HOD views"
+    },
+    {
+      "id": "AT007",
+      "title": "Lab co-faculty: credited in workload, attendance only by main faculty",
+      "description": "Departments run labs with a main faculty and a co-faculty. Add optional co_faculty_email/co_faculty_name to lab subject_allotments (single form, bulk upload columns, inline edit). Co-faculty is credited with the lab's timetable hours in Faculty Workload and the API-score workload; sees the lab in their timetable marked Co-faculty; cannot post attendance (posting stays with subject_allotments.faculty_email) and is never flagged as not-posted.",
+      "files_affected": [
+        "backend/src/handlers/api.ts",
+        "backend/tests/smoke/attendance.test.ts",
+        "frontend/src/features/attendance/admin/AttendanceSetupPage.tsx",
+        "frontend/src/features/attendance/faculty/FacultyAttendancePage.tsx",
+        "frontend/src/features/attendance/workload/FacultyWorkloadPage.tsx",
+        "frontend/src/lib/api.ts"
+      ],
+      "acceptance_criteria": "Co-faculty only on Lab and different from main; workload credits co lab hours; co-faculty POST /attendance/sessions → 403. Tests + builds pass.",
+      "status": "done",
+      "priority": "high",
+      "commit_msg": "feat(attendance): lab co-faculty credited in workload; attendance stays with main faculty"
     }
   ]
 }
