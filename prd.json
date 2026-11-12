@@ -347,7 +347,7 @@
         "frontend/src/App.tsx"
       ],
       "acceptance_criteria": "Allocation and clash avoidance tested.",
-      "status": "pending",
+      "status": "done",
       "priority": "low",
       "commit_msg": "feat(exams): seating and invigilation planner"
     }

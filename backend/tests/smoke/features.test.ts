@@ -431,3 +431,37 @@ describe('FT010 alumni', () => {
     expect((await request(app).post('/alumni').set('Authorization', ADMIN()).send({ batch: '2020-2024' })).status).toBe(400);
   });
 });
+
+describe('FT011 exam seating & invigilation', () => {
+  const rooms = [{ id: 1, name: 'A101', capacity: 3 }, { id: 2, name: 'A102', capacity: 3 }];
+  const cse = [{ roll_number: 'C1' }, { roll_number: 'C2' }, { roll_number: 'C3' }];
+  const ece = [{ roll_number: 'E1' }, { roll_number: 'E2' }];
+  const body = { title: 'Mid-1', exam_date: '2026-12-01', slot: 'FN', groups: [{ department: 'CSE', year: '3rd Year' }, { department: 'ECE', year: '3rd Year' }], room_ids: [1, 2], invigilators_per_room: 1 };
+
+  it('interleaves groups across seats and assigns balanced invigilators, skipping leave', async () => {
+    const calls = routeDb([
+      ['SELECT * FROM exam_rooms WHERE id', rooms],
+      ['FROM students WHERE department = $1', (_sql: string, params: any[]) => params[0] === 'CSE' ? cse : ece],
+      ['INSERT INTO exam_sessions', [{ id: 9 }]],
+      ['FROM faculty f', [{ email: 'busy@rgmcet.edu.in', name: 'Busy', duties: 5 }, { email: 'leave@rgmcet.edu.in', name: 'OnLeave', duties: 0 }, { email: 'free@rgmcet.edu.in', name: 'Free', duties: 1 }]],
+      ['FROM faculty_leaves', [{ e: 'leave@rgmcet.edu.in' }]],
+    ]);
+    const res = await request(app).post('/exams/sessions').set('Authorization', ADMIN()).send(body);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ students: 5, rooms_used: 2, invigilators_assigned: 2, invigilators_short: 0 });
+    const seatRows = JSON.parse(calls.find(c => c.sql.includes('INSERT INTO exam_seating'))!.params[1]);
+    expect(seatRows.map((x: any) => `${x.roll}@${x.room}:${x.seat}`)).toEqual(['C1@1:1', 'E1@1:2', 'C2@1:3', 'E2@2:1', 'C3@2:2']);
+    const inv = calls.filter(c => c.sql.includes('INSERT INTO exam_invigilation')).map(c => [c.params[1], c.params[2]]);
+    expect(inv).toEqual([[1, 'free@rgmcet.edu.in'], [2, 'busy@rgmcet.edu.in']]);
+  });
+
+  it('refuses when there are not enough seats', async () => {
+    routeDb([
+      ['SELECT * FROM exam_rooms WHERE id', [{ id: 1, name: 'A101', capacity: 2 }]],
+      ['FROM students WHERE department = $1', cse],
+    ]);
+    const res = await request(app).post('/exams/sessions').set('Authorization', ADMIN()).send({ ...body, groups: [body.groups[0]], room_ids: [1] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('1 short');
+  });
+});

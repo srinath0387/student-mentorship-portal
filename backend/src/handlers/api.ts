@@ -9874,6 +9874,198 @@ app.put('/alumni/self/:token', async (req: Request, res: Response) => {
   }
 });
 
+// ============================================================================
+// Exam seating & invigilation planner
+// Seats: students of the chosen groups (department + year) are interleaved round-robin across
+// groups (so neighbours are from different classes) and filled into rooms in order.
+// Invigilators: per room, the faculty with the fewest invigilation duties so far, skipping anyone
+// already on duty in the same date+slot or on approved leave that day.
+// ============================================================================
+let examTablesReady: Promise<void> | null = null;
+function ensureExamTables(): Promise<void> {
+  if (!examTablesReady) {
+    examTablesReady = db.query(`
+      CREATE TABLE IF NOT EXISTS exam_rooms (
+        id SERIAL PRIMARY KEY, name TEXT UNIQUE NOT NULL, block TEXT, capacity INT NOT NULL CHECK (capacity > 0)
+      );
+      CREATE TABLE IF NOT EXISTS exam_sessions (
+        id SERIAL PRIMARY KEY, title TEXT NOT NULL, exam_date DATE NOT NULL, slot TEXT NOT NULL DEFAULT 'FN',
+        groups JSONB NOT NULL DEFAULT '[]', room_ids INT[] NOT NULL DEFAULT '{}', invigilators_per_room INT NOT NULL DEFAULT 1,
+        created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS exam_seating (
+        session_id INT NOT NULL REFERENCES exam_sessions(id) ON DELETE CASCADE,
+        roll_number TEXT NOT NULL, room_id INT NOT NULL, seat_no INT NOT NULL,
+        PRIMARY KEY (session_id, roll_number)
+      );
+      CREATE TABLE IF NOT EXISTS exam_invigilation (
+        session_id INT NOT NULL REFERENCES exam_sessions(id) ON DELETE CASCADE,
+        room_id INT NOT NULL, faculty_email TEXT NOT NULL, faculty_name TEXT,
+        PRIMARY KEY (session_id, room_id, faculty_email)
+      );
+    `).then(() => undefined).catch((err: any) => { examTablesReady = null; throw err; });
+  }
+  return examTablesReady;
+}
+
+/** Round-robin interleave of several ordered lists. */
+function interleave<T>(lists: T[][]): T[] {
+  const out: T[] = []; const max = Math.max(0, ...lists.map(l => l.length));
+  for (let i = 0; i < max; i++) for (const l of lists) if (i < l.length) out.push(l[i]);
+  return out;
+}
+
+// Rooms
+app.get('/exams/rooms', requireRole('admin', 'hod', 'principal', 'director'), async (_req: Request, res: Response) => {
+  try { await ensureExamTables(); res.json((await db.query('SELECT * FROM exam_rooms ORDER BY block NULLS LAST, name')).rows); }
+  catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+app.post('/exams/rooms', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureExamTables();
+    const name = String(req.body?.name || '').trim(); const capacity = Number(req.body?.capacity);
+    if (!name || !Number.isInteger(capacity) || capacity < 1) return res.status(400).json({ error: 'Room name and a positive capacity are required' });
+    const r = await db.query(
+      `INSERT INTO exam_rooms (name, block, capacity) VALUES ($1,$2,$3)
+       ON CONFLICT (name) DO UPDATE SET block = EXCLUDED.block, capacity = EXCLUDED.capacity RETURNING *`,
+      [name, req.body?.block ? String(req.body.block).trim() : null, capacity]);
+    res.json({ success: true, room: r.rows[0] });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+app.delete('/exams/rooms/:id', requireRole('admin'), async (req: Request, res: Response) => {
+  try { await ensureExamTables(); await db.query('DELETE FROM exam_rooms WHERE id = $1', [req.params.id]); res.json({ success: true }); }
+  catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /exams/sessions — { title, exam_date, slot: FN|AN, groups: [{department, year}], room_ids, invigilators_per_room }
+app.post('/exams/sessions', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureExamTables();
+    const b = req.body || {};
+    const title = String(b.title || '').trim(); const date = String(b.exam_date || '').slice(0, 10); const slot = b.slot === 'AN' ? 'AN' : 'FN';
+    const groups: { department: string; year: string }[] = (Array.isArray(b.groups) ? b.groups : []).filter((g: any) => g?.department && g?.year);
+    const roomIds: number[] = (Array.isArray(b.room_ids) ? b.room_ids : []).map(Number).filter(Number.isInteger);
+    const perRoom = Math.min(4, Math.max(1, Number(b.invigilators_per_room) || 1));
+    if (!title || !/^\d{4}-\d{2}-\d{2}$/.test(date) || groups.length === 0 || roomIds.length === 0) {
+      return res.status(400).json({ error: 'Title, date, at least one student group and at least one room are required' });
+    }
+    const rooms = (await db.query('SELECT * FROM exam_rooms WHERE id = ANY($1)', [roomIds])).rows
+      .sort((a: any, b2: any) => roomIds.indexOf(a.id) - roomIds.indexOf(b2.id));
+    const lists: any[][] = [];
+    for (const g of groups) {
+      lists.push((await db.query(`SELECT roll_number, name, department, year, section FROM students WHERE department = $1 AND year = $2 ORDER BY roll_number`,
+        [g.department, g.year])).rows);
+    }
+    const students = interleave(lists);
+    const capacity = rooms.reduce((t: number, r: any) => t + Number(r.capacity), 0);
+    if (students.length === 0) return res.status(400).json({ error: 'No students found for the selected groups' });
+    if (students.length > capacity) return res.status(400).json({ error: `Not enough seats: ${students.length} students but ${capacity} seats in the selected rooms (${students.length - capacity} short).` });
+
+    const sess = (await db.query(
+      `INSERT INTO exam_sessions (title, exam_date, slot, groups, room_ids, invigilators_per_room, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [title, date, slot, JSON.stringify(groups), roomIds, perRoom, req.auth!.email])).rows[0];
+
+    // Seats
+    const seating: { roll: string; room: number; seat: number }[] = [];
+    let idx = 0;
+    const usedRooms: any[] = [];
+    for (const room of rooms) {
+      if (idx >= students.length) break;
+      usedRooms.push(room);
+      for (let seat = 1; seat <= Number(room.capacity) && idx < students.length; seat++) seating.push({ roll: students[idx++].roll_number, room: room.id, seat });
+    }
+    for (let i = 0; i < seating.length; i += 500) {
+      const chunk = seating.slice(i, i + 500);
+      await db.query(
+        `INSERT INTO exam_seating (session_id, roll_number, room_id, seat_no) SELECT $1, x.roll, x.room, x.seat
+         FROM json_to_recordset($2::json) AS x(roll text, room int, seat int)`, [sess.id, JSON.stringify(chunk)]);
+    }
+
+    // Invigilators — balanced, no clash in the same date+slot, not on approved leave
+    const fac = (await db.query(
+      `SELECT f.email, f.name,
+              (SELECT COUNT(*) FROM exam_invigilation ei WHERE LOWER(ei.faculty_email) = LOWER(f.email))::int AS duties
+       FROM faculty f
+       WHERE f.email NOT LIKE 'pending_%' AND COALESCE(f.role, '') NOT IN ('admin')
+         AND NOT EXISTS (SELECT 1 FROM exam_invigilation ei JOIN exam_sessions es ON es.id = ei.session_id
+                         WHERE LOWER(ei.faculty_email) = LOWER(f.email) AND es.exam_date = $1 AND es.slot = $2 AND es.id <> $3)`,
+      [date, slot, sess.id])).rows;
+    let onLeave = new Set<string>();
+    try {
+      const lv = await db.query(`SELECT LOWER(faculty_email) AS e FROM faculty_leaves WHERE LOWER(status) = 'approved' AND $1::date BETWEEN from_date AND to_date`, [date]);
+      onLeave = new Set(lv.rows.map((x: any) => x.e));
+    } catch { /* leave table not created yet */ }
+    const pool = fac.filter((f: any) => !onLeave.has(String(f.email).toLowerCase()))
+      .sort((a: any, b2: any) => a.duties - b2.duties || String(a.name).localeCompare(String(b2.name)));
+    const assigned: { room: number; email: string; name: string }[] = [];
+    let p = 0;
+    for (const room of usedRooms) {
+      for (let k = 0; k < perRoom && p < pool.length; k++, p++) assigned.push({ room: room.id, email: String(pool[p].email).toLowerCase(), name: pool[p].name });
+    }
+    for (const a of assigned) {
+      await db.query(`INSERT INTO exam_invigilation (session_id, room_id, faculty_email, faculty_name) VALUES ($1,$2,$3,$4)`, [sess.id, a.room, a.email, a.name]);
+    }
+    const needed = usedRooms.length * perRoom;
+    res.json({ success: true, session: sess, students: students.length, rooms_used: usedRooms.length, seats_available: capacity,
+      invigilators_assigned: assigned.length, invigilators_short: Math.max(0, needed - assigned.length) });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/exams/sessions', requireRole('admin', 'hod', 'principal', 'director'), async (_req: Request, res: Response) => {
+  try {
+    await ensureExamTables();
+    const r = await db.query(
+      `SELECT es.*, (SELECT COUNT(*) FROM exam_seating x WHERE x.session_id = es.id)::int AS students,
+              (SELECT COUNT(DISTINCT room_id) FROM exam_seating x WHERE x.session_id = es.id)::int AS rooms_used,
+              (SELECT COUNT(*) FROM exam_invigilation x WHERE x.session_id = es.id)::int AS invigilators
+       FROM exam_sessions es ORDER BY es.exam_date DESC, es.slot, es.id DESC LIMIT 200`);
+    res.json(r.rows);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /exams/sessions/:id — rooms with seating and invigilators
+app.get('/exams/sessions/:id', requireRole('admin', 'hod', 'principal', 'director'), async (req: Request, res: Response) => {
+  try {
+    await ensureExamTables();
+    const sess = (await db.query('SELECT * FROM exam_sessions WHERE id = $1', [req.params.id])).rows[0];
+    if (!sess) return res.status(404).json({ error: 'Not found' });
+    const seats = (await db.query(
+      `SELECT x.room_id, x.seat_no, x.roll_number, st.name, st.department, st.year, st.section
+       FROM exam_seating x LEFT JOIN students st ON UPPER(st.roll_number) = UPPER(x.roll_number)
+       WHERE x.session_id = $1 ORDER BY x.room_id, x.seat_no`, [sess.id])).rows;
+    const inv = (await db.query('SELECT room_id, faculty_email, faculty_name FROM exam_invigilation WHERE session_id = $1', [sess.id])).rows;
+    const rooms = (await db.query('SELECT * FROM exam_rooms WHERE id = ANY($1)', [sess.room_ids])).rows;
+    const byRoom = rooms.map((r: any) => ({ ...r, seats: seats.filter((x: any) => x.room_id === r.id), invigilators: inv.filter((x: any) => x.room_id === r.id) }))
+      .filter((r: any) => r.seats.length > 0);
+    res.json({ session: sess, rooms: byRoom });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/exams/sessions/:id', requireRole('admin'), async (req: Request, res: Response) => {
+  try { await ensureExamTables(); await db.query('DELETE FROM exam_sessions WHERE id = $1', [req.params.id]); res.json({ success: true }); }
+  catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /exams/my — faculty: invigilation duties; student: seats (upcoming first)
+app.get('/exams/my', requireRole('faculty', 'hod', 'student'), async (req: Request, res: Response) => {
+  try {
+    await ensureExamTables();
+    if (req.auth!.role === 'student') {
+      const r = await db.query(
+        `SELECT es.title, es.exam_date, es.slot, er.name AS room, er.block, x.seat_no FROM exam_seating x
+         JOIN exam_sessions es ON es.id = x.session_id JOIN exam_rooms er ON er.id = x.room_id
+         WHERE UPPER(x.roll_number) = $1 AND es.exam_date >= CURRENT_DATE - 1 ORDER BY es.exam_date, es.slot`, [req.auth!.regNo.toUpperCase()]);
+      return res.json({ seats: r.rows });
+    }
+    const r = await db.query(
+      `SELECT es.title, es.exam_date, es.slot, er.name AS room, er.block,
+              (SELECT COUNT(*) FROM exam_seating x WHERE x.session_id = es.id AND x.room_id = ei.room_id)::int AS students
+       FROM exam_invigilation ei JOIN exam_sessions es ON es.id = ei.session_id JOIN exam_rooms er ON er.id = ei.room_id
+       WHERE LOWER(ei.faculty_email) = $1 AND es.exam_date >= CURRENT_DATE - 1 ORDER BY es.exam_date, es.slot`, [req.auth!.email.toLowerCase()]);
+    res.json({ duties: r.rows });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 // GET /oversight/faculty-by-cadre?department=CSE&cadre=associate
 // ============================================================================
 app.get('/oversight/faculty-by-cadre', requireRole('director', 'principal', 'management', 'program_chair', 'admin', 'hod'), async (req: Request, res: Response) => {

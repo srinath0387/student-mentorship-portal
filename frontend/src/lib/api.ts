@@ -1041,6 +1041,16 @@ export const api = {
     return fetchWithAuth(`/attendance/sessions${query}`);
   },
 
+  // ── Exam seating & invigilation ──
+  getExamRooms: async () => fetchWithAuth('/exams/rooms'),
+  saveExamRoom: async (data: { name: string; block?: string; capacity: number }) => fetchWithAuth('/exams/rooms', { method: 'POST', body: JSON.stringify(data) }),
+  deleteExamRoom: async (id: number) => fetchWithAuth(`/exams/rooms/${id}`, { method: 'DELETE' }),
+  getExamSessions: async () => fetchWithAuth('/exams/sessions'),
+  getExamSession: async (id: number) => fetchWithAuth(`/exams/sessions/${id}`),
+  createExamSession: async (data: any) => fetchWithAuth('/exams/sessions', { method: 'POST', body: JSON.stringify(data) }),
+  deleteExamSession: async (id: number) => fetchWithAuth(`/exams/sessions/${id}`, { method: 'DELETE' }),
+  getMyExams: async () => fetchWithAuth('/exams/my'),
+
   // ── Alumni ──
   getAlumni: async (p: { department?: string; batch?: string; status?: string; search?: string }) => {
     const q = new URLSearchParams(); Object.entries(p).forEach(([k, v]) => { if (v && v !== 'All') q.set(k, v); });
