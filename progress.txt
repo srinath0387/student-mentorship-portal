@@ -33,3 +33,4 @@
 [2026-11-12 09:38] RB005 → done: Integrated LeetCode, GitHub, HackerRank, CodeChef, and GFG profile stats into ResumeBuilderPage. Auto-populates contact links, adds dedicated 'Competitive Programming & Technical Profiles' section with problem breakdown (Easy/Med/Hard), rating, and repos in Classic, Modern, and Minimal ATS templates. Both backend and frontend builds exit 0.
 
 [2026-11-12 14:00] GSD SESSION START — Attendance (faculty posting, admin control, academic calendar lock). Tasks AT001–AT006 added to prd.json.
+[2026-11-12 12:55] AT001 → done: not-posted holiday column + department matching, no-class faculty name, delete-session HOD scope. 103 tests pass, build ✓. Committed 5636234.
