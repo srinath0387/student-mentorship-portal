@@ -36,3 +36,4 @@
 [2026-11-12 12:55] AT001 → done: not-posted holiday column + department matching, no-class faculty name, delete-session HOD scope. 103 tests pass, build ✓. Committed 5636234.
 [2026-11-12 12:57] AT002 → done: academic-calendar posting lock + late-post request/approve endpoints. 109 tests pass, build ✓. Committed e82b9fb.
 [2026-11-12 12:58] AT003 → done: admin day-status, cancel-class, undo endpoints. 113 tests pass, build ✓. Committed 7767550.
+[2026-11-12 13:02] AT004 → done: AttendanceControlPage (posted/not-posted/edit/remove/approvals) + admin sidebar Main/Attendance/Assign. tsc + build ✓, screenshots checked. Committed 64557b5.
