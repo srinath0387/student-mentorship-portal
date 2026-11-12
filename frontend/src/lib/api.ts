@@ -529,6 +529,19 @@ export const api = {
   },
 
   // Parse Conference / FDP Document (Image or PDF)
+  /**
+   * Upload a faculty profile document straight to S3 (pre-signed PUT).
+   * Returns the view URL to show now; the profile stores the S3 key on save.
+   */
+  uploadFacultyDocument: async (file: File, kind: 'activities' | 'certifications'): Promise<{ viewUrl: string; fileKey: string }> => {
+    const contentType = file.type || 'application/octet-stream';
+    const q = `fileName=${encodeURIComponent(file.name)}&contentType=${encodeURIComponent(contentType)}&kind=${kind}`;
+    const { uploadUrl, viewUrl, fileKey } = await fetchWithAuth(`/faculty/upload-url?${q}`);
+    const put = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': contentType }, body: file });
+    if (!put.ok) throw new Error(`Upload failed (HTTP ${put.status})`);
+    return { viewUrl, fileKey };
+  },
+
   parseActivityDocument: async (payload: { file_data: string; file_name: string; file_type?: string; ocr_text?: string }): Promise<any> => {
     return fetchWithAuth('/faculty/parse-activity-document', {
       method: 'POST',

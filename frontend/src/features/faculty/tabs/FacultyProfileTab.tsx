@@ -53,6 +53,8 @@ import {
 import {
   calculateDaysBetween,
   parseUploadedActivityFile,
+  parseUploadedCertificationFile,
+  MAX_DOCUMENT_BYTES,
 } from '../../../lib/activityDocumentParser';
 import { PillButton } from '../../../components/common/PillButton';
 import { formatExternalUrl } from '../../../lib/urlUtils';
@@ -132,6 +134,8 @@ export const FacultyProfileTab: React.FC = () => {
     completion_date: string;
     academic_year: string;
     file_name?: string;
+    certificate_file_url?: string;
+    date_found?: boolean;
   }>({
     title: '',
     issuing_body: '',
@@ -145,6 +149,7 @@ export const FacultyProfileTab: React.FC = () => {
   const [isParsingActivity, setIsParsingActivity] = useState(false);
   const [activityParsingProgress, setActivityParsingProgress] = useState(0);
   const [activityParsingStatus, setActivityParsingStatus] = useState('Analyzing document...');
+  const [activityDateFound, setActivityDateFound] = useState(true);
   const [inspectingActivityDoc, setInspectingActivityDoc] = useState<{
     title: string;
     url: string;
@@ -354,67 +359,62 @@ export const FacultyProfileTab: React.FC = () => {
     updateMutation.mutate(currentProfileState);
   };
 
-  // OCR Document Parser Simulation for Certificate Upload
-  const handleCertFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  // Certificate upload: extract text (PDF text layer / OCR) and upload the file to S3 in parallel
+  const handleCertFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target;
+    const file = input.files?.[0];
+    input.value = ''; // allow re-selecting the same file
     if (!file) return;
+    if (file.size > MAX_DOCUMENT_BYTES) {
+      alert('File is larger than 10 MB. Please upload a smaller PDF or image.');
+      return;
+    }
 
     setIsParsingCert(true);
-    setParsingProgress(15);
-
-    const stepInterval = setInterval(() => {
-      setParsingProgress((prev) => {
-        if (prev >= 90) {
-          clearInterval(stepInterval);
-          return 90;
-        }
-        return prev + 25;
-      });
-    }, 250);
-
-    setTimeout(() => {
-      clearInterval(stepInterval);
-      setIsParsingCert(false);
+    setParsingProgress(10);
+    try {
+      const [parsed, uploaded] = await Promise.all([
+        parseUploadedCertificationFile(file, (pct) => setParsingProgress(pct)),
+        api.uploadFacultyDocument(file, 'certifications').catch((err) => {
+          console.warn('[Certificate upload]', err);
+          return null;
+        }),
+      ]);
+      if (!uploaded) {
+        alert('The certificate details were read, but the file could not be uploaded. You can still save the details, or try uploading again.');
+      }
       setParsingProgress(100);
-
-      // Intelligent heuristic extraction based on file name or smart defaults
-      const rawName = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
-      const isNptel = /nptel|swayam/i.test(rawName);
-      const isAws = /aws|amazon/i.test(rawName);
-      const isCoursera = /coursera|deeplearning/i.test(rawName);
-
-      const title = rawName.length > 5 ? rawName : 'Advanced Machine Learning & Data Analytics';
-      const issuingBody = isNptel
-        ? 'NPTEL (IIT Madras)'
-        : isAws
-        ? 'Amazon Web Services (AWS)'
-        : isCoursera
-        ? 'Coursera / Stanford Online'
-        : 'National Institute of Technical Teachers Training & Research (NITTTR)';
-
-      const todayIso = new Date().toISOString().split('T')[0];
-      const compDate = '2024-10-14'; // Default parsed date for demonstration
-      const academicYr = calculateAcademicYear(compDate);
-
       setPendingCert({
-        title,
-        issuing_body: issuingBody,
-        completion_date: compDate,
-        academic_year: academicYr,
+        title: parsed.title,
+        issuing_body: parsed.issuing_body,
+        completion_date: parsed.completion_date,
+        academic_year: parsed.academic_year,
         file_name: file.name,
+        certificate_file_url: uploaded?.viewUrl,
+        date_found: parsed.date_found,
       });
       setShowCertConfirmModal(true);
-    }, 1200);
+    } catch (err) {
+      console.error('Error parsing certificate:', err);
+      alert('Could not read this document. Please enter the details manually.');
+    } finally {
+      setIsParsingCert(false);
+      setParsingProgress(0);
+    }
   };
 
   const handleConfirmCert = () => {
-    if (!pendingCert.title || !pendingCert.issuing_body) return;
+    if (!pendingCert.title.trim() || !pendingCert.issuing_body.trim()) {
+      alert('Please provide the certificate title and issuing body.');
+      return;
+    }
     const newRecord: FacultyCertificationRecord = {
       id: `CERT_${Date.now()}`,
       title: pendingCert.title,
       issuing_body: pendingCert.issuing_body,
       completion_date: pendingCert.completion_date || new Date().toISOString().split('T')[0],
       academic_year: pendingCert.academic_year || calculateAcademicYear(pendingCert.completion_date),
+      certificate_file_url: pendingCert.certificate_file_url,
       created_at: new Date().toISOString(),
     };
 
@@ -427,76 +427,65 @@ export const FacultyProfileTab: React.FC = () => {
     setCertifications((prev) => prev.filter((c) => c.id !== id));
   };
 
-  // Activity Document Auto-Parser (Image or PDF)
+  // Activity Document Auto-Parser (Image or PDF): text extraction + S3 upload in parallel
   const handleActivityFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const input = e.target;
+    const file = input.files?.[0];
+    input.value = ''; // allow re-selecting the same file
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-      alert('File size exceeds 5MB limit. Please select a smaller PDF or image.');
+    if (file.size > MAX_DOCUMENT_BYTES) {
+      alert('File is larger than 10 MB. Please upload a smaller PDF or image.');
       return;
     }
 
     setIsParsingActivity(true);
-    setActivityParsingProgress(15);
+    setActivityParsingProgress(10);
     setActivityParsingStatus('Reading uploaded file...');
 
     try {
-      // 1. Client-side rapid document parsing (with Tesseract OCR for images)
-      const parsedClient = await parseUploadedActivityFile(file, (pct, stage) => {
-        setActivityParsingProgress(pct);
-        setActivityParsingStatus(stage);
-      });
+      const [parsed, uploaded] = await Promise.all([
+        parseUploadedActivityFile(file, (pct, stage) => {
+          setActivityParsingProgress(pct);
+          setActivityParsingStatus(stage);
+        }),
+        api.uploadFacultyDocument(file, 'activities').catch((err) => {
+          console.warn('[Activity document upload]', err);
+          return null;
+        }),
+      ]);
 
-      // 2. Backend refinement call (decompressing PDF streams or refining OCR text)
-      try {
-        setActivityParsingStatus('Extracting details with backend engine...');
-        const backendRes = await api.parseActivityDocument({
-          file_data: parsedClient.document_url,
-          file_name: file.name,
-          file_type: file.type,
-          ocr_text: parsedClient.raw_ocr_text,
-        });
-        if (backendRes?.parsed) {
-          const bp = backendRes.parsed;
-          parsedClient.title = bp.title || parsedClient.title;
-          parsedClient.type = bp.type || parsedClient.type;
-          parsedClient.role_type = bp.role_type || parsedClient.role_type;
-          parsedClient.level = bp.level || parsedClient.level;
-          parsedClient.organizer = bp.organizer || parsedClient.organizer;
-          parsedClient.from_date = bp.from_date || parsedClient.from_date;
-          parsedClient.to_date = bp.to_date || parsedClient.to_date;
-          parsedClient.no_of_days = bp.no_of_days || parsedClient.no_of_days;
-          parsedClient.academic_year = bp.academic_year || parsedClient.academic_year;
-        }
-      } catch {
-        // Client parser result is already complete
+      if (!uploaded) {
+        alert('The details were read, but the document could not be uploaded. Please try "Replace" to upload it again.');
       }
 
       setActivityParsingProgress(100);
       setActivityParsingStatus('Extraction complete!');
+      setActivityDateFound(parsed.date_found);
 
-      setNewActivity({
-        title: parsedClient.title,
-        type: parsedClient.type,
-        role_type: parsedClient.role_type,
-        organizer: parsedClient.organizer,
-        from_date: parsedClient.from_date,
-        to_date: parsedClient.to_date,
-        no_of_days: parsedClient.no_of_days,
-        level: parsedClient.level,
-        academic_year: parsedClient.academic_year,
-        document_url: parsedClient.document_url,
-        file_name: parsedClient.file_name,
-      });
+      setNewActivity((prev) => ({
+        ...prev,
+        title: parsed.title,
+        type: parsed.type,
+        role_type: parsed.role_type,
+        organizer: parsed.organizer || prev.organizer,
+        from_date: parsed.from_date,
+        to_date: parsed.to_date,
+        no_of_days: parsed.no_of_days,
+        level: parsed.level,
+        academic_year: parsed.academic_year,
+        document_url: uploaded?.viewUrl || prev.document_url,
+        file_name: uploaded ? parsed.file_name : prev.file_name,
+      }));
     } catch (err: any) {
       console.error('Error parsing activity file:', err);
+      alert('Could not read this document. Please enter the details manually.');
     } finally {
       setTimeout(() => {
         setIsParsingActivity(false);
         setActivityParsingProgress(0);
         setActivityParsingStatus('Analyzing document...');
-      }, 500);
+      }, 300);
     }
   };
 
@@ -518,6 +507,7 @@ export const FacultyProfileTab: React.FC = () => {
 
   const handleOpenAddActivity = () => {
     setEditingActivityId(null);
+    setActivityDateFound(true);
     const today = new Date().toISOString().split('T')[0];
     setNewActivity({
       title: '',
@@ -1252,7 +1242,7 @@ export const FacultyProfileTab: React.FC = () => {
             <div>
               <h3 className="text-sm font-bold text-textPrimary">Certifications (Industry / NPTEL)</h3>
               <p className="text-xs text-textSecondary mt-0.5">
-                Upload PDF/image $\to$ OCR text extraction $\to$ Academic Year auto-tagging
+                Upload PDF/image → text extraction → Academic Year auto-tagging
               </p>
             </div>
           </div>
@@ -1327,6 +1317,15 @@ export const FacultyProfileTab: React.FC = () => {
                         <span>Completed: {c.completion_date}</span>
                         <span className="font-semibold text-indigo-600 dark:text-indigo-400">{c.academic_year}</span>
                       </div>
+                      {c.certificate_file_url && (
+                        <button
+                          type="button"
+                          onClick={() => setInspectingActivityDoc({ title: c.title, url: c.certificate_file_url!, fileName: c.title })}
+                          className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold text-brand-primary hover:underline self-start"
+                        >
+                          <Eye className="w-3 h-3" /> View Certificate
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1830,7 +1829,12 @@ export const FacultyProfileTab: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-textPrimary mb-1">Completion Date *</label>
+                  <label className="block font-semibold text-textPrimary mb-1">
+                    Completion Date *
+                    {pendingCert.date_found === false && (
+                      <span className="ml-1 text-[10px] font-bold text-amber-600">not found — please check</span>
+                    )}
+                  </label>
                   <input
                     type="date"
                     value={pendingCert.completion_date}
@@ -1925,6 +1929,11 @@ export const FacultyProfileTab: React.FC = () => {
                       <p className="text-[10px] text-emerald-700 dark:text-emerald-400">
                         Details auto-extracted. You can edit any field below.
                       </p>
+                      {!activityDateFound && (
+                        <p className="text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                          No date found in the document — please set the dates.
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
@@ -1957,7 +1966,7 @@ export const FacultyProfileTab: React.FC = () => {
                     Click to browse or drag &amp; drop certificate
                   </p>
                   <p className="text-[10px] text-textMuted">
-                    Supports PDF, PNG, JPG, WEBP (Max 5MB)
+                    Supports PDF, PNG, JPG, WEBP (Max 10MB)
                   </p>
                   <input
                     type="file"
@@ -2130,6 +2139,7 @@ export const FacultyProfileTab: React.FC = () => {
 
             <div className="flex-1 p-4 overflow-auto flex items-center justify-center bg-black/5 dark:bg-black/30">
               {inspectingActivityDoc.url.startsWith('data:application/pdf') ||
+              /\.pdf$/i.test(inspectingActivityDoc.url.split('?')[0]) ||
               inspectingActivityDoc.fileName?.toLowerCase().endsWith('.pdf') ? (
                 <iframe
                   src={inspectingActivityDoc.url}

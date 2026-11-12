@@ -119,3 +119,47 @@ describe('Oversight attendance overview', () => {
     expect(res.body.at_risk_students.map((s: any) => s.roll_number)).toEqual(['23091A3201', '23011A0101']);
   });
 });
+
+describe('Faculty profile documents', () => {
+  const facultyToken = () => signSessionToken({ role: 'faculty', email: 'ramesh@rgmcet.edu.in' });
+
+  it('only lets a faculty member edit their own profile', async () => {
+    const res = await request(app)
+      .put('/faculty/full-profile/someone.else%40rgmcet.edu.in')
+      .set('Authorization', `Bearer ${facultyToken()}`)
+      .send({ personal: {}, activities: [] });
+    expect(res.status).toBe(403);
+  });
+
+  it('requires a staff role for upload URLs', async () => {
+    const anon = await request(app).get('/faculty/upload-url?fileName=a.pdf');
+    expect(anon.status).toBe(401);
+    const student = signSessionToken({ role: 'student', email: '23091a3251@rgmcet.edu.in' });
+    const asStudent = await request(app).get('/faculty/upload-url?fileName=a.pdf').set('Authorization', `Bearer ${student}`);
+    expect(asStudent.status).toBe(403);
+  });
+
+  it('stores S3 keys (not expiring signed URLs) for uploaded documents', async () => {
+    process.env.UPLOADS_BUCKET_NAME = 'test-uploads-bucket';
+    db.query.mockClear();
+    const signed = 'https://test-uploads-bucket.s3.ap-south-1.amazonaws.com/faculty/ramesh%40rgmcet.edu.in/activities/1700000000000_fdp.pdf?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=abc';
+    const res = await request(app)
+      .put('/faculty/full-profile/ramesh%40rgmcet.edu.in')
+      .set('Authorization', `Bearer ${facultyToken()}`)
+      .send({
+        personal: {},
+        activities: [{ id: 'A1', title: 'FDP', document_url: signed }, { id: 'A2', title: 'Old', document_url: 'data:application/pdf;base64,AAAA' }],
+        certifications: [{ id: 'C1', title: 'AWS', certificate_file_url: signed.replace('activities', 'certifications') }],
+      });
+    delete process.env.UPLOADS_BUCKET_NAME;
+    expect(res.status).toBe(200);
+
+    const insert = db.query.mock.calls.find((c: any[]) => String(c[0]).includes('INSERT INTO faculty_full_profiles'));
+    expect(insert).toBeDefined();
+    const certs = JSON.parse(insert[1][4]);
+    const acts = JSON.parse(insert[1][5]);
+    expect(acts[0].document_url).toBe('faculty/ramesh@rgmcet.edu.in/activities/1700000000000_fdp.pdf');
+    expect(acts[1].document_url).toBe('data:application/pdf;base64,AAAA'); // legacy inline docs are migrated on load
+    expect(certs[0].certificate_file_url).toBe('faculty/ramesh@rgmcet.edu.in/certifications/1700000000000_fdp.pdf');
+  });
+});

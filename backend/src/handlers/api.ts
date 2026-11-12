@@ -5325,6 +5325,129 @@ const ensureFacultyProfileTable = async () => {
   `).catch(() => {});
 };
 
+// ============================================================================
+// Faculty profile documents (FDP / workshop / conference certificates, industry certifications)
+// Files are uploaded straight to S3 with a pre-signed PUT URL; the profile JSON stores only the
+// S3 key. Previously the whole file was embedded as base64 in the profile, so after ~10-12
+// documents every profile save exceeded the 6 MB Lambda request limit and failed.
+// ============================================================================
+const FACULTY_DOC_PREFIX = 'faculty/';
+const FACULTY_DOC_FIELDS = ['document_url', 'certificate_file_url'];
+
+function facultyDocKeyFromUrl(value: any): any {
+  if (typeof value !== 'string' || !value) return value;
+  if (value.startsWith('data:')) return value; // legacy inline document (migrated by the client on next save)
+  if (value.startsWith(FACULTY_DOC_PREFIX)) return value;
+  const bucket = process.env.UPLOADS_BUCKET_NAME;
+  if (bucket && /^https?:\/\//i.test(value) && value.includes(bucket)) {
+    const key = extractS3Key(value);
+    if (key && key.startsWith(FACULTY_DOC_PREFIX)) return key;
+  }
+  return value;
+}
+
+/** Replace pre-signed view URLs with S3 keys before storing. */
+function stripFacultyDocUrls(list: any): any {
+  if (!Array.isArray(list)) return list;
+  return list.map((item) => {
+    if (!item || typeof item !== 'object') return item;
+    const out = { ...item };
+    for (const f of FACULTY_DOC_FIELDS) if (f in out) out[f] = facultyDocKeyFromUrl(out[f]);
+    return out;
+  });
+}
+
+/** Turn stored S3 keys into short-lived view URLs for the client. */
+async function signFacultyDocUrls(list: any): Promise<any> {
+  const bucket = process.env.UPLOADS_BUCKET_NAME;
+  if (!bucket || !Array.isArray(list) || list.length === 0) return list;
+  const needsSigning = list.some((it: any) => it && FACULTY_DOC_FIELDS.some(f => typeof it[f] === 'string' && it[f].startsWith(FACULTY_DOC_PREFIX)));
+  if (!needsSigning) return list;
+  try {
+    const { S3Client, GetObjectCommand } = await import('@aws-sdk/client-s3');
+    const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
+    const s3Client = new S3Client({});
+    return await Promise.all(list.map(async (item: any) => {
+      if (!item || typeof item !== 'object') return item;
+      const out = { ...item };
+      for (const f of FACULTY_DOC_FIELDS) {
+        if (typeof out[f] === 'string' && out[f].startsWith(FACULTY_DOC_PREFIX)) {
+          out[f] = await getSignedUrl(s3Client, new GetObjectCommand({ Bucket: bucket, Key: out[f] }), { expiresIn: 6 * 3600 });
+        }
+      }
+      return out;
+    }));
+  } catch (err: any) {
+    console.warn('[faculty docs] signing failed:', err.message);
+    return list;
+  }
+}
+
+/**
+ * One-time migration: move documents embedded as base64 data URLs into S3 and keep only the key.
+ * Returns the updated list and whether anything changed.
+ */
+async function externalizeInlineFacultyDocs(list: any, ownerEmail: string, kind: string): Promise<{ list: any; changed: boolean }> {
+  const bucket = process.env.UPLOADS_BUCKET_NAME;
+  if (!bucket || !Array.isArray(list)) return { list, changed: false };
+  const hasInline = list.some((it: any) => it && FACULTY_DOC_FIELDS.some(f => typeof it[f] === 'string' && it[f].startsWith('data:')));
+  if (!hasInline) return { list, changed: false };
+
+  const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3');
+  const s3Client = new S3Client({});
+  const owner = ownerEmail.toLowerCase().replace(/[^a-z0-9._@-]+/g, '_');
+  let changed = false;
+  const out = [];
+  for (const item of list) {
+    if (!item || typeof item !== 'object') { out.push(item); continue; }
+    const next = { ...item };
+    for (const f of FACULTY_DOC_FIELDS) {
+      const v = next[f];
+      if (typeof v !== 'string' || !v.startsWith('data:')) continue;
+      const m = v.match(/^data:([^;,]+)?(;base64)?,(.*)$/s);
+      if (!m) continue;
+      try {
+        const contentType = m[1] || 'application/octet-stream';
+        const body = m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3]), 'utf8');
+        const ext = contentType.includes('pdf') ? 'pdf' : (contentType.split('/')[1] || 'bin').replace(/[^a-z0-9]/gi, '');
+        const base = String(next.file_name || `${kind}-document`).replace(/[^A-Za-z0-9._-]+/g, '_').replace(/\.[^.]*$/, '').slice(-80);
+        const key = `${FACULTY_DOC_PREFIX}${owner}/${kind}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${base}.${ext}`;
+        await s3Client.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType }));
+        next[f] = key;
+        changed = true;
+      } catch (err: any) {
+        console.warn('[faculty docs] could not move inline document to S3:', err.message);
+      }
+    }
+    out.push(next);
+  }
+  return { list: out, changed };
+}
+
+// GET /faculty/upload-url?fileName=&contentType=&kind=activities|certifications
+app.get('/faculty/upload-url', requireRole('faculty', 'hod', 'admin', 'coordinator', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    const bucket = process.env.UPLOADS_BUCKET_NAME;
+    if (!bucket) return res.status(503).json({ error: 'File storage is not configured' });
+
+    const kind = req.query.kind === 'certifications' ? 'certifications' : 'activities';
+    const rawName = String(req.query.fileName || 'document');
+    const safeName = rawName.replace(/[^A-Za-z0-9._-]+/g, '_').slice(-100) || 'document';
+    const contentType = /^[\w.+-]+\/[\w.+-]+$/.test(String(req.query.contentType || '')) ? String(req.query.contentType) : 'application/octet-stream';
+    const owner = (req.auth!.email || 'unknown').toLowerCase().replace(/[^a-z0-9._@-]+/g, '_');
+    const fileKey = `${FACULTY_DOC_PREFIX}${owner}/${kind}/${Date.now()}_${safeName}`;
+
+    const { S3Client, PutObjectCommand, GetObjectCommand } = await import('@aws-sdk/client-s3');
+    const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
+    const s3Client = new S3Client({});
+    const uploadUrl = await getSignedUrl(s3Client, new PutObjectCommand({ Bucket: bucket, Key: fileKey, ContentType: contentType }), { expiresIn: 600 });
+    const viewUrl = await getSignedUrl(s3Client, new GetObjectCommand({ Bucket: bucket, Key: fileKey }), { expiresIn: 6 * 3600 });
+    res.json({ uploadUrl, viewUrl, fileKey, contentType, expiresInSeconds: 600 });
+  } catch (err: any) {
+    res.status(500).json({ error: `Failed to prepare upload: ${err.message}` });
+  }
+});
+
 app.get('/faculty/full-profile/:email', requireAuth, async (req: Request, res: Response) => {
   try {
     const email = req.params.email.toLowerCase().trim();
@@ -5350,6 +5473,19 @@ app.get('/faculty/full-profile/:email', requireAuth, async (req: Request, res: R
     const profileRes = await db.query('SELECT * FROM faculty_full_profiles WHERE LOWER(email) = $1', [email]);
     if (profileRes.rows.length > 0) {
       const p = profileRes.rows[0];
+
+      // Move any legacy base64-embedded documents to S3 (once), so the profile stays small
+      const actMig = await externalizeInlineFacultyDocs(p.activities || [], email, 'activities');
+      const certMig = await externalizeInlineFacultyDocs(p.certifications || [], email, 'certifications');
+      if (actMig.changed || certMig.changed) {
+        p.activities = actMig.list;
+        p.certifications = certMig.list;
+        await db.query(
+          'UPDATE faculty_full_profiles SET activities = $1, certifications = $2 WHERE LOWER(email) = $3',
+          [JSON.stringify(p.activities), JSON.stringify(p.certifications), email]
+        ).catch((e: any) => console.warn('[faculty docs] migration save failed:', e.message));
+      }
+
       return res.json({
         personal: {
           ...p.personal,
@@ -5359,8 +5495,8 @@ app.get('/faculty/full-profile/:email', requireAuth, async (req: Request, res: R
           faculty_id: fac.faculty_id,
         },
         education: p.education || {},
-        certifications: p.certifications || [],
-        activities: p.activities || [],
+        certifications: await signFacultyDocUrls(p.certifications || []),
+        activities: await signFacultyDocUrls(p.activities || []),
         publications: p.publications || [],
         domains: p.domains || [],
       });
@@ -5389,6 +5525,16 @@ app.put('/faculty/full-profile/:email', requireAuth, async (req: Request, res: R
   try {
     const email = req.params.email.toLowerCase().trim();
     const data = req.body;
+
+    // Only the faculty member themselves, or an HOD/admin, may edit a faculty profile
+    const caller = req.auth!;
+    if (caller.email.toLowerCase() !== email && !['admin', 'hod'].includes(caller.role)) {
+      return res.status(403).json({ error: 'You can only edit your own profile.' });
+    }
+    if (data && typeof data === 'object') {
+      data.certifications = stripFacultyDocUrls(data.certifications);
+      data.activities = stripFacultyDocUrls(data.activities);
+    }
 
     if (db.isMock) {
       if (!(db.mockStore as any).facultyFullProfiles) {
