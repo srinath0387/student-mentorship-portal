@@ -8860,6 +8860,246 @@ app.post('/placement/drives/:id/apply', requireRole('student'), async (req: Requ
   }
 });
 
+// ============================================================================
+// Faculty appraisal — Draft → Submitted (faculty) → Reviewed (HOD) → Approved (principal/director/admin)
+// The snapshot is pre-filled from live data for the academic year (June–May).
+// ============================================================================
+const APPRAISAL_RATINGS = ['Outstanding', 'Very Good', 'Good', 'Satisfactory', 'Needs Improvement'];
+
+let appraisalTableReady: Promise<void> | null = null;
+function ensureAppraisalTable(): Promise<void> {
+  if (!appraisalTableReady) {
+    appraisalTableReady = db.query(`
+      CREATE TABLE IF NOT EXISTS faculty_appraisals (
+        id SERIAL PRIMARY KEY,
+        faculty_email TEXT NOT NULL,
+        faculty_name TEXT,
+        department TEXT,
+        designation TEXT,
+        academic_year TEXT NOT NULL,
+        snapshot JSONB,
+        self_remarks TEXT,
+        self_achievements TEXT,
+        hod_rating TEXT,
+        hod_remarks TEXT,
+        hod_by TEXT,
+        final_rating TEXT,
+        principal_remarks TEXT,
+        approved_by TEXT,
+        return_note TEXT,
+        status TEXT NOT NULL DEFAULT 'Draft',
+        submitted_at TIMESTAMPTZ,
+        reviewed_at TIMESTAMPTZ,
+        approved_at TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (faculty_email, academic_year)
+      )
+    `).then(() => undefined).catch((err: any) => { appraisalTableReady = null; throw err; });
+  }
+  return appraisalTableReady;
+}
+
+/** "2026–27" style (en dash, as used in faculty profile records). */
+function currentAcademicYear(d = new Date()): string {
+  const y = d.getUTCFullYear(); const start = d.getUTCMonth() + 1 >= 6 ? y : y - 1;
+  return `${start}–${String(start + 1).slice(-2)}`;
+}
+function academicYearRange(ay: string): { from: string; to: string } | null {
+  const m = /^(\d{4})[–-](\d{2})$/.exec(ay.trim());
+  if (!m) return null;
+  const start = Number(m[1]);
+  return { from: `${start}-06-01`, to: `${start + 1}-05-31` };
+}
+const normAY = (ay: string) => ay.replace('-', '–');
+
+async function buildAppraisalSnapshot(email: string, ay: string): Promise<any> {
+  const range = academicYearRange(ay)!;
+  const api = await computeFacultyApiScore(email).catch(() => null);
+  const prof = await db.query('SELECT activities, publications, certifications, personal FROM faculty_full_profiles WHERE LOWER(email) = $1 LIMIT 1', [email])
+    .catch(() => ({ rows: [] as any[] }));
+  const p = prof.rows[0] || {};
+  const inYear = (x: any) => {
+    const tag = String(x?.academic_year || '').replace('-', '–');
+    if (tag) return tag === ay;
+    const d = String(x?.from_date || x?.date || x?.completion_date || x?.year || '').slice(0, 10);
+    return d ? d >= range.from && d <= range.to : false;
+  };
+  const acts: any[] = Array.isArray(p.activities) ? p.activities : [];
+  const pubs: any[] = Array.isArray(p.publications) ? p.publications : [];
+  const certs: any[] = Array.isArray(p.certifications) ? p.certifications : [];
+  const fb = await db.query(
+    `SELECT COUNT(*)::int AS n, ratings FROM feedback_responses fr JOIN feedback_cycles fc ON fc.id = fr.cycle_id
+     WHERE LOWER(fr.faculty_email) = $1 AND fc.start_date BETWEEN $2 AND $3 GROUP BY ratings`, [email, range.from, range.to]
+  ).catch(() => ({ rows: [] as any[] }));
+  let fbSum = 0, fbN = 0;
+  for (const r of fb.rows) {
+    const ratings = typeof r.ratings === 'string' ? JSON.parse(r.ratings) : r.ratings || {};
+    const vals = Object.values(ratings).map(Number).filter(v => v > 0);
+    if (vals.length) { fbSum += (vals.reduce((a, b) => a + b, 0) / vals.length) * Number(r.n); fbN += Number(r.n); }
+  }
+  const meetings = await db.query(
+    `SELECT COUNT(*)::int AS n FROM mentor_meetings WHERE LOWER(faculty_email) = $1 AND meeting_date BETWEEN $2 AND $3`, [email, range.from, range.to]
+  ).catch(() => ({ rows: [{ n: 0 }] as any[] }));
+  return {
+    generated_at: new Date().toISOString(),
+    academic_year: ay,
+    api_score: api ? { total: api.total_score, grade: api.grade, pillars: api.pillars } : null,
+    teaching: api ? {
+      weekly_hours: api.metrics?.weekly_hours ?? null,
+      posting_pct_90d: api.metrics?.posting_pct_90d ?? null,
+      student_attendance_avg_90d: api.metrics?.student_attendance_avg_90d ?? null,
+    } : null,
+    mentoring: { mentees: api?.metrics?.mentees ?? null, meetings_in_year: Number(meetings.rows[0]?.n || 0) },
+    development: {
+      fdps: acts.filter(a => inYear(a) && /fdp|faculty development/i.test(`${a.type} ${a.title}`)).length,
+      workshops_conferences: acts.filter(a => inYear(a) && /workshop|conference|seminar|symposium/i.test(`${a.type} ${a.title}`)).length,
+      publications: pubs.filter(inYear).length,
+      certifications: certs.filter(inYear).length,
+    },
+    feedback: { responses: fbN, average: fbN ? Math.round((fbSum / fbN) * 100) / 100 : null },
+  };
+}
+
+async function loadOrCreateAppraisal(email: string, ay: string): Promise<any> {
+  await ensureAppraisalTable();
+  const ex = await db.query('SELECT * FROM faculty_appraisals WHERE LOWER(faculty_email) = $1 AND academic_year = $2', [email, ay]);
+  if (ex.rows[0]) return ex.rows[0];
+  const f = await db.query(`SELECT f.name, f.department, COALESCE(fp.personal->>'designation', '') AS designation
+                            FROM faculty f LEFT JOIN faculty_full_profiles fp ON LOWER(fp.email) = LOWER(f.email)
+                            WHERE LOWER(f.email) = $1 LIMIT 1`, [email]).catch(() => ({ rows: [] as any[] }));
+  const fac = f.rows[0] || {};
+  const snapshot = await buildAppraisalSnapshot(email, ay);
+  const ins = await db.query(
+    `INSERT INTO faculty_appraisals (faculty_email, faculty_name, department, designation, academic_year, snapshot)
+     VALUES ($1,$2,$3,$4,$5,$6)
+     ON CONFLICT (faculty_email, academic_year) DO UPDATE SET updated_at = NOW() RETURNING *`,
+    [email, fac.name || email, fac.department || null, fac.designation || null, ay, JSON.stringify(snapshot)]);
+  return ins.rows[0];
+}
+
+/** Can the caller act on this faculty member's appraisal? */
+async function appraisalAccess(req: Request, email: string): Promise<'self' | 'hod' | 'approver' | 'viewer' | null> {
+  const role = req.auth?.role;
+  const me = (req.auth?.email || '').toLowerCase();
+  if (role === 'faculty') return me === email ? 'self' : null;
+  if (role === 'hod') {
+    if (me === email) return 'self';
+    const f = await db.query('SELECT department FROM faculty WHERE LOWER(email) = $1 LIMIT 1', [email]).catch(() => ({ rows: [] as any[] }));
+    const dept = f.rows[0]?.department;
+    return dept && req.auth?.department && dept === req.auth.department ? 'hod' : null;
+  }
+  if (['admin', 'principal', 'director'].includes(role || '')) return 'approver';
+  if (['management', 'program_chair'].includes(role || '')) return 'viewer';
+  return null;
+}
+
+// GET /appraisals?academic_year= — list (faculty: own; HOD: department; approvers/viewers: all)
+app.get('/appraisals', requireRole('faculty', 'hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    await ensureAppraisalTable();
+    const ay = normAY(String(req.query.academic_year || currentAcademicYear()));
+    if (!academicYearRange(ay)) return res.status(400).json({ error: 'academic_year must look like 2026–27' });
+    const role = req.auth!.role;
+    if (role === 'faculty') return res.json({ academic_year: ay, appraisals: [await loadOrCreateAppraisal(req.auth!.email.toLowerCase(), ay)] });
+
+    const params: any[] = [ay];
+    let deptFilter = '';
+    if (role === 'hod' && req.auth!.department && req.auth!.department !== '*') { params.push(req.auth!.department); deptFilter = ` AND f.department = $${params.length}`; }
+    else if (role === 'program_chair') { params.push(CSE_ALLIED_DEPTS); deptFilter = ` AND f.department = ANY($${params.length})`; }
+    const r = await db.query(
+      `SELECT f.email AS faculty_email, f.name AS faculty_name, f.department,
+              a.id, a.status, a.hod_rating, a.final_rating, a.snapshot, a.submitted_at, a.reviewed_at, a.approved_at
+       FROM faculty f LEFT JOIN faculty_appraisals a ON LOWER(a.faculty_email) = LOWER(f.email) AND a.academic_year = $1
+       WHERE COALESCE(f.role, '') NOT IN ('admin') AND f.email NOT LIKE 'pending_%' ${deptFilter}
+       ORDER BY f.department, f.name`, params);
+    const rows = r.rows.map((x: any) => ({ ...x, status: x.status || 'Not started' }));
+    const count = (st: string) => rows.filter((x: any) => x.status === st).length;
+    res.json({ academic_year: ay, summary: { total: rows.length, not_started: count('Not started'), draft: count('Draft'), submitted: count('Submitted'), reviewed: count('Reviewed'), approved: count('Approved') }, appraisals: rows });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /appraisals/:email?academic_year= — one appraisal (created as a draft if missing)
+app.get('/appraisals/:email', requireRole('faculty', 'hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    const email = req.params.email.toLowerCase();
+    const access = await appraisalAccess(req, email);
+    if (!access) return res.status(403).json({ error: 'You cannot view this appraisal.' });
+    const ay = normAY(String(req.query.academic_year || currentAcademicYear()));
+    if (!academicYearRange(ay)) return res.status(400).json({ error: 'academic_year must look like 2026–27' });
+    res.json({ appraisal: await loadOrCreateAppraisal(email, ay), access, ratings: APPRAISAL_RATINGS });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /appraisals/:email/action — { academic_year, action, ... }
+//   refresh          (self while Draft, hod, approver) re-pull live data
+//   save_self/submit (self, while Draft)               self_remarks, self_achievements
+//   review           (hod/approver, while Submitted)   hod_rating, hod_remarks
+//   approve          (approver, while Reviewed)        final_rating, principal_remarks
+//   return           (hod while Submitted, approver while Submitted/Reviewed)  return_note → back to Draft
+app.post('/appraisals/:email/action', requireRole('faculty', 'hod', 'admin', 'principal', 'director'), async (req: Request, res: Response) => {
+  try {
+    const email = req.params.email.toLowerCase();
+    const access = await appraisalAccess(req, email);
+    if (!access || access === 'viewer') return res.status(403).json({ error: 'You cannot change this appraisal.' });
+    const b = req.body || {};
+    const ay = normAY(String(b.academic_year || currentAcademicYear()));
+    if (!academicYearRange(ay)) return res.status(400).json({ error: 'academic_year must look like 2026–27' });
+    const a = await loadOrCreateAppraisal(email, ay);
+    const me = req.auth!.email.toLowerCase();
+    const fail = (msg: string, code = 400) => res.status(code).json({ error: msg });
+    let sql = ''; let params: any[] = [];
+
+    switch (b.action) {
+      case 'refresh':
+        if (access === 'self' && a.status !== 'Draft') return fail('Only a draft can be refreshed.');
+        sql = 'UPDATE faculty_appraisals SET snapshot = $1, updated_at = NOW() WHERE id = $2 RETURNING *';
+        params = [JSON.stringify(await buildAppraisalSnapshot(email, ay)), a.id];
+        break;
+      case 'save_self':
+      case 'submit':
+        if (access !== 'self') return fail('Only the faculty member can fill in the self-appraisal.', 403);
+        if (a.status !== 'Draft') return fail('This appraisal has already been submitted.');
+        if (b.action === 'submit' && !String(b.self_remarks ?? a.self_remarks ?? '').trim()) return fail('Please add your self-appraisal remarks before submitting.');
+        sql = `UPDATE faculty_appraisals SET self_remarks = COALESCE($1, self_remarks), self_achievements = COALESCE($2, self_achievements),
+               status = $3, submitted_at = CASE WHEN $3 = 'Submitted' THEN NOW() ELSE submitted_at END, return_note = CASE WHEN $3 = 'Submitted' THEN NULL ELSE return_note END,
+               updated_at = NOW() WHERE id = $4 RETURNING *`;
+        params = [b.self_remarks ?? null, b.self_achievements ?? null, b.action === 'submit' ? 'Submitted' : 'Draft', a.id];
+        break;
+      case 'review':
+        if (access !== 'hod' && access !== 'approver') return fail('Only the HOD reviews this appraisal.', 403);
+        if (a.status !== 'Submitted') return fail('The faculty member has not submitted this appraisal yet.');
+        if (!APPRAISAL_RATINGS.includes(b.hod_rating)) return fail(`Rating must be one of: ${APPRAISAL_RATINGS.join(', ')}`);
+        sql = `UPDATE faculty_appraisals SET hod_rating = $1, hod_remarks = $2, hod_by = $3, status = 'Reviewed', reviewed_at = NOW(), updated_at = NOW() WHERE id = $4 RETURNING *`;
+        params = [b.hod_rating, String(b.hod_remarks || ''), me, a.id];
+        break;
+      case 'approve':
+        if (access !== 'approver') return fail('Only the principal, director or admin can approve.', 403);
+        if (a.status !== 'Reviewed') return fail('The HOD has not reviewed this appraisal yet.');
+        if (!APPRAISAL_RATINGS.includes(b.final_rating)) return fail(`Rating must be one of: ${APPRAISAL_RATINGS.join(', ')}`);
+        sql = `UPDATE faculty_appraisals SET final_rating = $1, principal_remarks = $2, approved_by = $3, status = 'Approved', approved_at = NOW(), updated_at = NOW() WHERE id = $4 RETURNING *`;
+        params = [b.final_rating, String(b.principal_remarks || ''), me, a.id];
+        break;
+      case 'return':
+        if (access === 'self') return fail('You cannot return your own appraisal.', 403);
+        if (!(a.status === 'Submitted' || (access === 'approver' && a.status === 'Reviewed'))) return fail('Nothing to return at this stage.');
+        if (!String(b.return_note || '').trim()) return fail('Please say what needs to change.');
+        sql = `UPDATE faculty_appraisals SET status = 'Draft', return_note = $1, updated_at = NOW() WHERE id = $2 RETURNING *`;
+        params = [String(b.return_note).trim(), a.id];
+        break;
+      default:
+        return fail('Unknown action');
+    }
+    const u = await db.query(sql, params);
+    res.json({ success: true, appraisal: u.rows[0] });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /oversight/faculty-by-cadre?department=CSE&cadre=associate
 // ============================================================================
 app.get('/oversight/faculty-by-cadre', requireRole('director', 'principal', 'management', 'program_chair', 'admin', 'hod'), async (req: Request, res: Response) => {
@@ -11125,17 +11365,8 @@ app.get('/faculty/api-scores', requireRole('hod', 'admin', 'director', 'principa
 
 
 // GET /faculty/:email/api-score
-app.get('/faculty/:email/api-score', requireRole('faculty', 'hod', 'admin', 'director', 'principal', 'management', 'program_chair'), async (req: Request, res: Response) => {
-  try {
-    const callerRole = req.auth?.role;
-    const callerEmail = req.auth?.email?.toLowerCase();
-    const targetEmail = req.params.email.toLowerCase();
-
-    // Faculty can only see their own score
-    if (callerRole === 'faculty' && callerEmail !== targetEmail) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-
+/** Faculty Academic Performance Index (API) — shared by the API-score endpoint and the appraisal. */
+async function computeFacultyApiScore(targetEmail: string): Promise<any> {
     // Auto-create duties table if missing
     await db.query(`
       CREATE TABLE IF NOT EXISTS faculty_api_duties (
@@ -11285,7 +11516,7 @@ app.get('/faculty/:email/api-score', requireRole('faculty', 'hod', 'admin', 'dir
       `SELECT * FROM faculty_api_duties WHERE LOWER(faculty_email) = $1 ORDER BY created_at DESC LIMIT 50`,
       [targetEmail]);
 
-    res.json({
+    return {
       faculty_email: targetEmail,
       total_score: parseFloat(totalScore.toFixed(1)),
       grade,
@@ -11306,7 +11537,36 @@ app.get('/faculty/:email/api-score', requireRole('faculty', 'hod', 'admin', 'dir
         industry: { score: industryScore, max: 20 },
       },
       duties: allDutiesRows,
-    });
+      // Raw figures (used by the appraisal)
+      metrics: {
+        weekly_hours: totalPeriods,
+        scheduled_slots_per_week: scheduledSlots,
+        sessions_posted_90d: postedSessions,
+        posting_pct_90d: Math.round(postingPct * 1000) / 10,
+        student_attendance_avg_90d: avgStudentAtt,
+        mentees: menteeCount,
+        mentor_meetings_180d: sessionCount,
+        at_risk_students: totalAtRisk,
+        at_risk_followed_up: followedUp,
+        fdps: fdps.length,
+        publications: publications.length,
+        certifications: certs.length,
+      },
+    };
+}
+
+app.get('/faculty/:email/api-score', requireRole('faculty', 'hod', 'admin', 'director', 'principal', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    const callerRole = req.auth?.role;
+    const callerEmail = req.auth?.email?.toLowerCase();
+    const targetEmail = req.params.email.toLowerCase();
+
+    // Faculty can only see their own score
+    if (callerRole === 'faculty' && callerEmail !== targetEmail) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    res.json(await computeFacultyApiScore(targetEmail));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

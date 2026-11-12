@@ -211,3 +211,48 @@ describe('FT004 placement drives', () => {
     expect(calls.some(c => c.sql.includes('INSERT INTO placement_drive_applications'))).toBe(true);
   });
 });
+
+describe('FT005 faculty appraisal workflow', () => {
+  const base = { id: 11, faculty_email: 'ramesh@rgmcet.edu.in', academic_year: '2026–27', department: 'CSE (Data Science)', snapshot: {} };
+  const routes = (status: string, facultyDept = 'CSE (Data Science)'): Route[] => [
+    ['FROM faculty_appraisals WHERE LOWER(faculty_email)', [{ ...base, status }]],
+    ['UPDATE faculty_appraisals', (_sql: string, params: any[]) => [{ ...base, status: params.includes('Submitted') ? 'Submitted' : status, params }]],
+    ['SELECT department FROM faculty WHERE LOWER(email) = $1 LIMIT 1', [{ department: facultyDept }]],
+    ['FROM hod_credentials', [{ department: 'CSE (Data Science)' }]],
+  ];
+  const act = (who: string, body: any) => request(app).post('/appraisals/ramesh%40rgmcet.edu.in/action').set('Authorization', who).send({ academic_year: '2026-27', ...body });
+  const FACULTY = () => bearer('faculty', 'ramesh@rgmcet.edu.in');
+  const HOD = () => bearer('hod', 'hcseds@rgmcet.edu.in');
+
+  it('faculty must add remarks to submit; the draft then becomes Submitted', async () => {
+    routeDb(routes('Draft'));
+    expect((await act(FACULTY(), { action: 'submit' })).status).toBe(400);
+    const calls = routeDb(routes('Draft'));
+    const ok = await act(FACULTY(), { action: 'submit', self_remarks: 'Completed 2 FDPs and an NPTEL course' });
+    expect(ok.status).toBe(200);
+    expect(calls.find(c => c.sql.includes('UPDATE faculty_appraisals'))!.params[2]).toBe('Submitted');
+  });
+
+  it('enforces roles and order: faculty cannot review, HOD only own department, approval needs a review first', async () => {
+    routeDb(routes('Submitted'));
+    expect((await act(FACULTY(), { action: 'review', hod_rating: 'Good' })).status).toBe(403);
+    routeDb(routes('Submitted', 'ECE'));
+    expect((await act(HOD(), { action: 'review', hod_rating: 'Good' })).status).toBe(403);
+    routeDb(routes('Submitted'));
+    expect((await act(HOD(), { action: 'review', hod_rating: 'Excellent!!' })).status).toBe(400);
+    expect((await act(HOD(), { action: 'review', hod_rating: 'Very Good', hod_remarks: 'Strong mentoring' })).status).toBe(200);
+    routeDb(routes('Submitted'));
+    expect((await act(ADMIN(), { action: 'approve', final_rating: 'Very Good' })).status).toBe(400);
+    routeDb(routes('Reviewed'));
+    expect((await act(HOD(), { action: 'approve', final_rating: 'Very Good' })).status).toBe(403);
+    expect((await act(bearer('principal', 'principal@rgmcet.edu.in'), { action: 'approve', final_rating: 'Very Good' })).status).toBe(200);
+  });
+
+  it('a return needs a note and sends the appraisal back to Draft', async () => {
+    routeDb(routes('Submitted'));
+    expect((await act(HOD(), { action: 'return' })).status).toBe(400);
+    const calls = routeDb(routes('Submitted'));
+    expect((await act(HOD(), { action: 'return', return_note: 'Add publication details' })).status).toBe(200);
+    expect(calls.find(c => c.sql.includes('UPDATE faculty_appraisals'))!.sql).toContain("status = 'Draft'");
+  });
+});

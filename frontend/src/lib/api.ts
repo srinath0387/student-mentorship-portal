@@ -1041,6 +1041,13 @@ export const api = {
     return fetchWithAuth(`/attendance/sessions${query}`);
   },
 
+  // ── Faculty appraisal ──
+  getAppraisals: async (academicYear: string) => fetchWithAuth(`/appraisals?academic_year=${encodeURIComponent(academicYear)}`),
+  getAppraisal: async (email: string, academicYear: string) =>
+    fetchWithAuth(`/appraisals/${encodeURIComponent(email)}?academic_year=${encodeURIComponent(academicYear)}`),
+  appraisalAction: async (email: string, body: any) =>
+    fetchWithAuth(`/appraisals/${encodeURIComponent(email)}/action`, { method: 'POST', body: JSON.stringify(body) }),
+
   // ── Placement drives ──
   getPlacementDrives: async () => fetchWithAuth('/placement/drives'),
   createPlacementDrive: async (data: any) => fetchWithAuth('/placement/drives', { method: 'POST', body: JSON.stringify(data) }),

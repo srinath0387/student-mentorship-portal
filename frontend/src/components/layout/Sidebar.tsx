@@ -128,6 +128,7 @@ const facultyNav: NavGroup[] = [
     items: [
       { label: 'My Faculty Profile', path: '/faculty/dashboard?tab=profile', icon: User },
       { label: 'My Student Feedback', path: '/feedback', icon: Star },
+      { label: 'My Appraisal', path: '/appraisal', icon: ClipboardCheck },
     ],
   },
   {
@@ -202,6 +203,7 @@ const adminNav: NavGroup[] = [
       { label: 'Faculty & Mentors', path: '/admin/dashboard?tab=faculty', icon: ShieldCheck },
       { label: 'Faculty Management', path: '/admin/faculty', icon: Users },
       { label: 'Faculty API Score', path: '/faculty/api', icon: Star },
+      { label: 'Faculty Appraisal', path: '/appraisal', icon: ClipboardCheck },
     ],
   },
   {
@@ -227,6 +229,7 @@ const hodNav: NavGroup[] = [
       { label: 'Monthly Report', path: '/reports/monthly', icon: FileBarChart },
       { label: 'Student Feedback', path: '/feedback', icon: Star },
       { label: 'Placement Drives', path: '/placement/drives', icon: Award },
+      { label: 'Faculty Appraisal', path: '/appraisal', icon: ClipboardCheck },
       { label: 'Unregistered Students', path: '/hod/dashboard?tab=unregistered', icon: FileBarChart },
     ],
   },
@@ -331,6 +334,7 @@ const oversightNav: NavGroup[] = [
     items: [
       { label: 'Monthly Principal\'s Report', path: '/reports/monthly', icon: FileBarChart },
       { label: 'Student Feedback', path: '/feedback', icon: Star },
+      { label: 'Faculty Appraisal', path: '/appraisal', icon: ClipboardCheck },
       { label: 'Student Analytics', path: '/oversight/dashboard?tab=students', icon: Users },
       { label: 'At-Risk Students', path: '/risk', icon: ShieldCheck },
       { label: 'Faculty Analytics', path: '/oversight/dashboard?tab=faculty', icon: User },

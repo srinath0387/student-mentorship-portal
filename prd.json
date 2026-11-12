@@ -248,7 +248,7 @@
         "frontend/src/App.tsx"
       ],
       "acceptance_criteria": "Workflow states and permissions tested.",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "commit_msg": "feat(appraisal): faculty appraisal workflow"
     },
