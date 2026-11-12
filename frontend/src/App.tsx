@@ -130,7 +130,7 @@ const ProtectedRoute: React.FC<{ allowedRoles: string[] }> = ({ allowedRoles }) 
 
 const MainLayout: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);  // mobile overlay
-  const [collapsed, setCollapsed] = useState(false);           // desktop icon-rail
+  const [collapsed, setCollapsed] = useState(true);            // desktop icon-rail — starts collapsed after login; toggle in TopBar expands it
   const { user, role, isAuthenticated, isLoading } = useAuth();
   const location = useLocation();
   const mainRef = useRef<HTMLElement>(null);
