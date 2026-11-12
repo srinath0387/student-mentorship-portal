@@ -38,3 +38,5 @@
 [2026-11-12 12:58] AT003 → done: admin day-status, cancel-class, undo endpoints. 113 tests pass, build ✓. Committed 7767550.
 [2026-11-12 13:02] AT004 → done: AttendanceControlPage (posted/not-posted/edit/remove/approvals) + admin sidebar Main/Attendance/Assign. tsc + build ✓, screenshots checked. Committed 64557b5.
 [2026-11-12 13:27] AT005 → done: faculty slot matching, period-aware posted check, per-hour multi-hour save, not-posted list, My Students, mobile nav, late-post request UI. tsc + build ✓, screenshots checked. Committed 0266d51.
+[2026-11-12 13:42] AT006 → done: case-insensitive roster/record joins (6 queries), parent scoping on student attendance. 115 tests pass, build ✓. Committed 18cb278.
+[2026-11-12 13:42] GSD SESSION END — AT001–AT006 done.
