@@ -73,7 +73,7 @@ export const api = {
     }
   },
   // Admin, HOD, Coordinator & Oversight Login — credentials validated server-side (never stored in frontend)
-  adminLogin: async (email: string, password: string, department?: string): Promise<{ valid: boolean; role?: string; isSuperAdmin?: boolean; department?: string; name?: string; email?: string; faculty_id?: string; error?: string }> => {
+  adminLogin: async (email: string, password: string, department?: string): Promise<{ valid: boolean; role?: string; isSuperAdmin?: boolean; department?: string; name?: string; email?: string; faculty_id?: string; error?: string; token?: string }> => {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s max
@@ -576,6 +576,18 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
+  },
+
+  // View-only parent login — verified server-side; returns the ward's basic record and a signed session token
+  parentLogin: async (email: string, password: string): Promise<{ valid: boolean; student?: { roll_number: string; name?: string; department?: string }; token?: string; error?: string }> => {
+    try {
+      return await fetchWithAuth('/auth/parent-login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      });
+    } catch (err: any) {
+      return { valid: false, error: err?.message || 'Incorrect password.' };
+    }
   },
 
   // Server-side Cognito sign-in via AdminInitiateAuth.

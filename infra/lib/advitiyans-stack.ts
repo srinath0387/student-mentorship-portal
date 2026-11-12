@@ -227,6 +227,14 @@ export class AdvitiyansStack extends cdk.Stack {
     // ========================================================================
     // 10. Backend API Lambda Function (in VPC, connects via RDS Proxy)
     // ========================================================================
+    // HMAC key for server-signed session tokens (admin/HOD/oversight/parent/DB-password logins).
+    // Generated once by Secrets Manager; never stored in the repo or in GitHub Secrets.
+    const sessionSigningSecret = new secretsmanager.Secret(this, 'AdvitiyansSessionSigningSecret', {
+      description: 'HMAC key for Advitiyans server-signed session tokens',
+      generateSecretString: { passwordLength: 64, excludePunctuation: true },
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
     const apiLambda = new lambda.Function(this, 'AdvitiyansApiHandler', {
       runtime: lambda.Runtime.NODEJS_22_X,
       handler: 'handlers/api.handler',
@@ -260,6 +268,8 @@ export class AdvitiyansStack extends cdk.Stack {
         // Faculty registration security key — required for faculty/HOD self-registration
         FACULTY_SECRET_KEY: process.env.FACULTY_SECRET_KEY || '',
         GITHUB_PAT: process.env.GITHUB_PAT || '',
+        // Resolved by CloudFormation at deploy time (dynamic reference) — value never appears in the template
+        SESSION_SIGNING_SECRET: sessionSigningSecret.secretValue.unsafeUnwrap(),
         BUILD_TIMESTAMP: new Date().toISOString(),
       },
     });

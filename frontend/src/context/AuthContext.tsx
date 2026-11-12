@@ -157,10 +157,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
 
             // Ensure JWT token exists for admin/HOD/coordinator, or silently refresh Cognito JWT for student/faculty.
-            if (['admin', 'hod', 'coordinator', 'director', 'principal', 'management', 'program_chair'].includes(savedUser.role)) {
-              if (!sessionStorage.getItem(JWT_TOKEN_KEY)) {
-                sessionStorage.setItem(JWT_TOKEN_KEY, `demo_token_${savedUser.role}_${encodeURIComponent(savedUser.email)}_${Date.now()}`);
-              }
+            if (['admin', 'hod', 'coordinator', 'director', 'principal', 'management', 'program_chair', 'parent'].includes(savedUser.role)) {
+              // Server-issued session token lives in sessionStorage; if it is gone the next API call
+              // returns 401 and the user is asked to log in again.
             } else {
               getCurrentSession().then((cognitoSession) => {
                 if (cognitoSession) {
@@ -236,10 +235,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(newUser);
 
     // Store JWT in this tab's sessionStorage (isolated from other tabs)
+    // Tokens are always issued by the server (Cognito ID token or signed session token).
     if (jwtToken) {
       sessionStorage.setItem(JWT_TOKEN_KEY, jwtToken);
     } else {
-      sessionStorage.setItem(JWT_TOKEN_KEY, `demo_token_${userRole}_${encodeURIComponent(email)}_${Date.now()}`);
+      sessionStorage.removeItem(JWT_TOKEN_KEY);
     }
   };
 

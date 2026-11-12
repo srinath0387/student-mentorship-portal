@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import { db } from '../db';
 import { getDeptFromRollNumber, DEPARTMENT_CODE_MAP } from './validation';
+import { verifySessionToken, SESSION_TOKEN_PREFIX } from './sessionToken';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Auth Middleware for Advitiyans API
@@ -75,7 +76,7 @@ function decodeJwtPayload(token: string): Record<string, any> | null {
  * Returns verified claims or null if invalid/expired.
  */
 async function verifyJwt(token: string): Promise<Record<string, any> | null> {
-  if (!token || token.startsWith('demo_token_')) return null;
+  if (!token || token.startsWith('demo_token_') || token.startsWith(SESSION_TOKEN_PREFIX)) return null;
   const parts = token.split('.');
   if (parts.length !== 3) return null;
 
@@ -198,37 +199,24 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
       return next();
     }
 
-    // ── Attempt 2: Admin, HOD, and Coordinator session tokens ──
-    // Admin, HOD, and Coordinator accounts are maintained directly in RDS and verified against DB tables.
-    if (token.startsWith('demo_token_')) {
-      let demoRole = '';
-      let email = '';
+    // ── Attempt 2: Server-signed session tokens ──
+    // Issued by the backend only after a successful credential check (admin, HOD, coordinator,
+    // oversight roles, parent, DB-password students). Role and email come exclusively from the
+    // HMAC-verified token — never from headers, query strings, or request bodies.
+    const session = verifySessionToken(token);
+    if (session) {
+      const demoRole = session.role;
+      const email = session.email;
 
-      if (token.startsWith('demo_token_program_chair_')) {
-        demoRole = 'program_chair';
-        const remainder = token.slice('demo_token_program_chair_'.length);
-        const lastUnderscore = remainder.lastIndexOf('_');
-        const encodedEmail = lastUnderscore !== -1 ? remainder.slice(0, lastUnderscore) : remainder;
-        try {
-          email = decodeURIComponent(encodedEmail).toLowerCase().trim();
-        } catch {
-          email = encodedEmail.toLowerCase().trim();
-        }
-      } else {
-        const parts = token.split('_');
-        // Format: demo_token_<role>_<encodedEmail>_<timestamp>
-        demoRole = (parts.length >= 3 ? parts[2] : '').toLowerCase();
-
-        if (parts.length >= 5) {
-          try {
-            email = decodeURIComponent(parts[3]).toLowerCase().trim();
-          } catch { /* ignore */ }
-        }
+      if (demoRole === 'parent' && email && session.reg) {
+        req.auth = {
+          email,
+          role: 'parent',
+          regNo: session.reg,
+          department: getDeptFromRollNumber(session.reg) || undefined,
+        };
+        return next();
       }
-
-      if (!email && req.headers['x-caller-email']) email = String(req.headers['x-caller-email']).toLowerCase().trim();
-      if (!email && req.query.caller_email) email = String(req.query.caller_email).toLowerCase().trim();
-      if (!email && req.body?.caller_email) email = String(req.body.caller_email).toLowerCase().trim();
 
       if (demoRole === 'admin' && email) {
         let adminDept: string | undefined;

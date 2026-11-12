@@ -611,43 +611,19 @@ export const AuthPage: React.FC = () => {
       // ── PARENT LOGIN (VIEW ONLY) ──────────────────────────────────────────
       if (activeTab === 'parent') {
         const cleanEmail = data.email.trim().toLowerCase();
-        const enteredPass = data.password.trim();
-
-        // The registration number is always the email prefix (before @)
-        // e.g. 23091a3251@rgmcet.edu.in → 23091A3251
-        const expectedRollNo = cleanEmail.includes('@')
-          ? cleanEmail.split('@')[0].toUpperCase()
-          : '';
-
-        // Strict check: entered password must exactly match the registration number
-        if (!expectedRollNo || enteredPass.toUpperCase() !== expectedRollNo) {
-          throw new Error('Incorrect password.');
+        const parentRes = await api.parentLogin(cleanEmail, data.password.trim());
+        if (!parentRes.valid || !parentRes.student || !parentRes.token) {
+          throw new Error(parentRes.error || 'Incorrect password.');
         }
+        const ward = parentRes.student;
+        const roll = ward.roll_number;
+        const wardName = ward.name || `Student (${roll})`;
+        const wardDept = ward.department || getDeptFromRollNumber(roll) || 'CSE (Data Science)';
 
-        let wardStudent: any = null;
-        try {
-          wardStudent = await api.getStudentProfile(expectedRollNo);
-        } catch {
-          wardStudent = null;
-        }
-        if (!wardStudent) {
-          try {
-            wardStudent = await api.getStudentByEmail(cleanEmail);
-          } catch {
-            wardStudent = null;
-          }
-        }
-
-        if (!wardStudent) {
-          throw new Error('Incorrect password.');
-        }
-
-        const wardName = wardStudent.name || `Student (${expectedRollNo})`;
-        const wardDept = wardStudent.department || getDeptFromRollNumber(expectedRollNo) || 'CSE (Data Science)';
-        const roll = wardStudent.roll_number || expectedRollNo;
-
-        login(cleanEmail, 'parent', roll, `Parent of ${wardName}`, undefined, wardDept);
-        registerSession(cleanEmail, 'parent');
+        // Parent identity is separate from the student's account so their sessions never collide
+        const parentEmail = `parent_${roll.toLowerCase()}@rgmcet.edu.in`;
+        login(parentEmail, 'parent', roll, `Parent of ${wardName}`, parentRes.token, wardDept);
+        registerSession(parentEmail, 'parent');
         navigate('/dashboard');
         return;
       }
@@ -660,7 +636,7 @@ export const AuthPage: React.FC = () => {
         }
 
         cognitoSignOut();
-        login(data.email, 'coordinator', 'COORDINATOR_1ST_YEAR', '1st Year Coordinator', undefined, 'All');
+        login(data.email, 'coordinator', 'COORDINATOR_1ST_YEAR', '1st Year Coordinator', coordAuthResult.token, 'All');
         registerSession(data.email, 'coordinator');
         navigate('/coordinator/dashboard');
         return;
@@ -677,7 +653,7 @@ export const AuthPage: React.FC = () => {
         // Sign out any lingering student Cognito session so it doesn't pollute the admin token
         cognitoSignOut();
         const effectiveDept = authResult.department || loginDept || 'CSE (Data Science)';
-        login(data.email, 'admin', 'ADMIN_MASTER', 'System Administrator', undefined, effectiveDept, authResult.isSuperAdmin);
+        login(data.email, 'admin', 'ADMIN_MASTER', 'System Administrator', authResult.token, effectiveDept, authResult.isSuperAdmin);
         registerSession(data.email, 'admin');
         navigate('/admin/dashboard');
         return;
@@ -695,7 +671,7 @@ export const AuthPage: React.FC = () => {
         }
         cognitoSignOut();
         const displayName = assignedRole.charAt(0).toUpperCase() + assignedRole.slice(1).replace('_', ' ');
-        login(data.email, assignedRole, `OVERSIGHT_${assignedRole.toUpperCase()}`, displayName, undefined, oversightResult.department || '*');
+        login(data.email, assignedRole, `OVERSIGHT_${assignedRole.toUpperCase()}`, displayName, oversightResult.token, oversightResult.department || '*');
         registerSession(data.email, assignedRole);
         navigate('/oversight/dashboard');
         return;
@@ -718,6 +694,9 @@ export const AuthPage: React.FC = () => {
         } catch (cognitoErr: any) {
           console.warn('[HOD Cognito Notice]:', cognitoErr.message);
         }
+
+        jwtToken = jwtToken || hodAuthResult.token;
+        if (jwtToken) sessionStorage.setItem('advitiyans_jwt_token', jwtToken);
 
         const hodLoginEmail = data.email;
         let hod = await api.getFacultyByEmail(hodLoginEmail).catch(() => null);
@@ -769,7 +748,7 @@ export const AuthPage: React.FC = () => {
               rollNo = stu.roll_number;
               displayName = stu.name;
               const studentDept = stu.department || (rollNo ? getDeptFromRollNumber(rollNo) : 'CSE (Data Science)');
-              login(data.email, 'student', rollNo, displayName, undefined, studentDept);
+              login(data.email, 'student', rollNo, displayName, serverAuth.token, studentDept);
               registerSession(data.email, 'student');
               navigate('/dashboard');
               return;
@@ -862,7 +841,7 @@ export const AuthPage: React.FC = () => {
                     rollNo = stu.roll_number;
                     displayName = stu.name;
                     const studentDept = stu.department || (rollNo ? getDeptFromRollNumber(rollNo) : 'CSE (Data Science)');
-                    login(data.email, 'student', rollNo, displayName, undefined, studentDept);
+                    login(data.email, 'student', rollNo, displayName, serverAuth.token, studentDept);
                     registerSession(data.email, 'student');
                     navigate('/dashboard');
                     return;
@@ -884,7 +863,7 @@ export const AuthPage: React.FC = () => {
                   rollNo = stu.roll_number;
                   displayName = stu.name;
                   const studentDept = stu.department || (rollNo ? getDeptFromRollNumber(rollNo) : 'CSE (Data Science)');
-                  login(data.email, 'student', rollNo, displayName, undefined, studentDept);
+                  login(data.email, 'student', rollNo, displayName, serverAuth.token, studentDept);
                   registerSession(data.email, 'student');
                   navigate('/dashboard');
                   return;
@@ -899,22 +878,20 @@ export const AuthPage: React.FC = () => {
             console.warn('[Cognito Config Notice]:', msg);
             throw new Error('Authentication service is temporarily unavailable. Please try again in a moment or contact support.');
           }
-          let dbUser: any = preFetchedDbUser;
-          if (!dbUser) {
-            if (activeTab === 'student') {
-              dbUser = await api.getStudentByEmail(data.email).catch(() => null);
-            } else if (activeTab === 'faculty') {
-              dbUser = await api.getFacultyByEmail(data.email).catch(() => null);
+          // Never log a user in without a verified credential. For students, fall back to the
+          // server-side DB password check, which issues a signed session token.
+          if (activeTab === 'student') {
+            const serverAuth = await api.verifyStudentPassword(data.email, data.password).catch(() => null);
+            if (serverAuth?.valid && serverAuth?.student && serverAuth?.token) {
+              const stu = serverAuth.student;
+              rollNo = stu.roll_number;
+              displayName = stu.name;
+              const studentDept = stu.department || (rollNo ? getDeptFromRollNumber(rollNo) : 'CSE (Data Science)');
+              login(data.email, 'student', rollNo, displayName, serverAuth.token, studentDept);
+              registerSession(data.email, 'student');
+              navigate('/dashboard');
+              return;
             }
-          }
-          if (dbUser) {
-            rollNo = dbUser.roll_number || dbUser.faculty_id || data.email.split('@')[0].toUpperCase();
-            displayName = dbUser.name || (activeTab === 'faculty' ? 'Faculty Member' : 'Student');
-            const userDept = dbUser.department || (activeTab === 'faculty' ? (loginDept || 'CSE (Data Science)') : (rollNo ? getDeptFromRollNumber(rollNo) : 'CSE (Data Science)'));
-            login(data.email, activeTab, rollNo, displayName, undefined, userDept);
-            registerSession(data.email, activeTab);
-            navigate(activeTab === 'faculty' ? '/faculty/dashboard' : '/dashboard');
-            return;
           }
           throw new Error(msg || 'Authentication failed');
         }

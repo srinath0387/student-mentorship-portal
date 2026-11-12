@@ -32,6 +32,7 @@ import {
   inferDepartmentFromEmail,
 } from '../lib/validation';
 import { extractAuth, requireAuth, requireRole, requireOwnerOrRole } from '../lib/authMiddleware';
+import { signSessionToken } from '../lib/sessionToken';
 import { compareAndUpgradePassword, hashPassword, BCRYPT_ROUNDS } from '../services/passwordService';
 import bcrypt from 'bcryptjs';
 
@@ -427,6 +428,21 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
 
     const emailLower = email.toLowerCase();
 
+    // Every successful branch below responds with { valid: true, role, email, ... }.
+    // Attach a server-signed session token so the browser never has to mint its own identity.
+    const sendJson = res.json.bind(res);
+    res.json = ((body: any) => {
+      if (body && body.valid === true && body.role && body.email) {
+        const token = signSessionToken({ role: body.role, email: body.email });
+        if (!token) {
+          res.status(500);
+          return sendJson({ valid: false, error: 'Login is temporarily unavailable. Please contact the administrator.' });
+        }
+        return sendJson({ ...body, token });
+      }
+      return sendJson(body);
+    }) as typeof res.json;
+
     // Rate limiting: 10 attempts per minute per email/IP
     const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
     const rateCheck = checkRateLimit(`admin_login_${emailLower}_${clientIp}`, 10, 60000);
@@ -509,18 +525,32 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
           return res.status(401).json({ valid: false, error: 'Invalid email or password.' });
         }
 
-        // Direct pattern fallback for oversight accounts
-        if (emailLower === 'director@rgmcet.edu.in' && password === 'director@2026') {
-          return res.json({ valid: true, role: 'director', department: '*', email: emailLower });
-        }
-        if (emailLower === 'principal@rgmcet.edu.in' && password === 'principal@2026') {
-          return res.json({ valid: true, role: 'principal', department: '*', email: emailLower });
-        }
-        if (emailLower === 'management@rgmcet.edu.in' && password === 'management@2026') {
-          return res.json({ valid: true, role: 'management', department: '*', email: emailLower });
-        }
-        if ((emailLower === 'programchair@rgmcet.edu.in' || emailLower === 'chaircse@rgmcet.edu.in') && (password === 'chair@2026' || password === 'hod@2026')) {
-          return res.json({ valid: true, role: 'program_chair', department: 'CSE_ALLIED', email: emailLower });
+        // One-time bootstrap for oversight accounts that are not yet in admin_accounts.
+        // On first successful login with the initial password, the account is saved to
+        // admin_accounts (bcrypt). From then on the DB row above is authoritative, so a
+        // super admin can change the password via PUT /super-admin/admins/:email/password
+        // and this initial password stops working.
+        const OVERSIGHT_BOOTSTRAP: Record<string, { role: string; dept: string; initial: string[] }> = {
+          'director@rgmcet.edu.in':    { role: 'director',      dept: '*',          initial: ['director@2026'] },
+          'principal@rgmcet.edu.in':   { role: 'principal',     dept: '*',          initial: ['principal@2026'] },
+          'management@rgmcet.edu.in':  { role: 'management',    dept: '*',          initial: ['management@2026'] },
+          'programchair@rgmcet.edu.in': { role: 'program_chair', dept: 'CSE_ALLIED', initial: ['chair@2026', 'hod@2026'] },
+          'chaircse@rgmcet.edu.in':    { role: 'program_chair', dept: 'CSE_ALLIED', initial: ['chair@2026', 'hod@2026'] },
+        };
+        const bootstrap = OVERSIGHT_BOOTSTRAP[emailLower];
+        if (bootstrap && bootstrap.initial.includes(password)) {
+          try {
+            const hashed = await bcrypt.hash(String(password), BCRYPT_ROUNDS);
+            await db.query(
+              `INSERT INTO admin_accounts (email, name, password, department, created_by, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, 'system-bootstrap', NOW(), NOW())
+               ON CONFLICT (email) DO NOTHING`,
+              [emailLower, bootstrap.role.replace('_', ' ').toUpperCase(), hashed, bootstrap.dept]
+            );
+          } catch (seedErr: any) {
+            console.warn('[Oversight bootstrap] could not save account:', seedErr.message);
+          }
+          return res.json({ valid: true, role: bootstrap.role, department: bootstrap.dept, email: emailLower });
         }
       } catch {
         // Table may not exist on first cold-start; fall through
@@ -774,7 +804,7 @@ function isTier1ACaller(callerEmail: string): boolean {
 // GET /super-admin/tier1b — list all Tier 1B super-admin accounts (Tier 1A only)
 app.get('/super-admin/tier1b', requireRole('admin'), async (req: Request, res: Response) => {
   try {
-    const callerEmail = String(req.query.caller_email || '');
+    const callerEmail = req.auth?.email || '';
     if (!isTier1ACaller(callerEmail)) {
       return res.status(403).json({ error: 'Tier 1A super-admin access required' });
     }
@@ -790,7 +820,8 @@ app.get('/super-admin/tier1b', requireRole('admin'), async (req: Request, res: R
 // POST /super-admin/tier1b — add a new Tier 1B super-admin (Tier 1A only)
 app.post('/super-admin/tier1b', requireRole('admin'), async (req: Request, res: Response) => {
   try {
-    const { caller_email, email, password } = req.body;
+    const { email, password } = req.body;
+    const caller_email = req.auth?.email || '';
     if (!isTier1ACaller(caller_email)) {
       return res.status(403).json({ error: 'Tier 1A super-admin access required' });
     }
@@ -820,7 +851,7 @@ app.post('/super-admin/tier1b', requireRole('admin'), async (req: Request, res: 
 // DELETE /super-admin/tier1b/:email — remove a Tier 1B super-admin (Tier 1A only)
 app.delete('/super-admin/tier1b/:email', requireRole('admin'), async (req: Request, res: Response) => {
   try {
-    const { caller_email } = req.body;
+    const caller_email = req.auth?.email || '';
     if (!isTier1ACaller(caller_email)) {
       return res.status(403).json({ error: 'Tier 1A super-admin access required' });
     }
@@ -846,7 +877,7 @@ const SUPER_ADMIN_EMAILS_LOWER = [
 // GET /super-admin/admins — list all regular admins (email, name, department, created_at)
 app.get('/super-admin/admins', requireRole('admin'), async (req: Request, res: Response) => {
   try {
-    const callerEmail = String(req.query.caller_email || '');
+    const callerEmail = req.auth?.email || '';
     if (!await isSuperAdminCaller(callerEmail)) {
       return res.status(403).json({ error: 'Super admin access required' });
     }
@@ -862,7 +893,8 @@ app.get('/super-admin/admins', requireRole('admin'), async (req: Request, res: R
 // POST /super-admin/admins — create a regular admin
 app.post('/super-admin/admins', requireRole('admin'), async (req: Request, res: Response) => {
   try {
-    const { caller_email, name, email, password, department } = req.body;
+    const { name, email, password, department } = req.body;
+    const caller_email = req.auth?.email || '';
     if (!await isSuperAdminCaller(caller_email)) {
       return res.status(403).json({ error: 'Super admin access required' });
     }
@@ -892,7 +924,7 @@ app.post('/super-admin/admins', requireRole('admin'), async (req: Request, res: 
 // DELETE /super-admin/admins/:email — delete a regular admin
 app.delete('/super-admin/admins/:email', requireRole('admin'), async (req: Request, res: Response) => {
   try {
-    const { caller_email } = req.body;
+    const caller_email = req.auth?.email || '';
     if (!await isSuperAdminCaller(caller_email)) {
       return res.status(403).json({ error: 'Super admin access required' });
     }
@@ -911,7 +943,8 @@ app.delete('/super-admin/admins/:email', requireRole('admin'), async (req: Reque
 // PUT /super-admin/admins/:email/password — change a regular admin's password
 app.put('/super-admin/admins/:email/password', requireRole('admin'), async (req: Request, res: Response) => {
   try {
-    const { caller_email, password } = req.body;
+    const { password } = req.body;
+    const caller_email = req.auth?.email || '';
     if (!await isSuperAdminCaller(caller_email)) {
       return res.status(403).json({ error: 'Super admin access required' });
     }
@@ -936,7 +969,9 @@ app.put('/super-admin/admins/:email/password', requireRole('admin'), async (req:
 // PUT /super-admin/my-password — super admin changes ONLY their own password
 app.put('/super-admin/my-password', requireRole('admin'), async (req: Request, res: Response) => {
   try {
-    const { my_email, new_password } = req.body;
+    const { new_password } = req.body;
+    // Identity comes from the verified session — a body-supplied email is ignored
+    const my_email = req.auth?.email || '';
     if (!await isSuperAdminCaller(my_email)) {
       return res.status(403).json({ error: 'Super admin access required' });
     }
@@ -1321,13 +1356,19 @@ app.post('/auth/verify-student-password', async (req: Request, res: Response) =>
     const cleanEmail = String(email).toLowerCase().trim();
     const rollNo = cleanEmail.includes('@') ? cleanEmail.split('@')[0].toUpperCase() : cleanEmail.toUpperCase();
 
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+    const rateCheck = checkRateLimit(`student_login_${cleanEmail}_${clientIp}`, 10, 60000);
+    if (!rateCheck.allowed) {
+      return res.status(429).json({ valid: false, error: `Too many login attempts. Please try again in ${rateCheck.retryAfterSeconds} seconds.` });
+    }
+
     if (db.isMock) {
-      return res.json({ valid: true, student: { roll_number: rollNo, name: 'Student', department: 'CSE (Data Science)' } });
+      return res.json({ valid: true, student: { roll_number: rollNo, name: 'Student', department: 'CSE (Data Science)' }, token: signSessionToken({ role: 'student', email: cleanEmail }) });
     }
 
     // ── TIER 1: Check student_passwords table (bcrypt) ─────────────────────────
     const pwdResult = await db.query(
-      `SELECT sp.password, s.name, s.roll_number, s.department, s.year
+      `SELECT sp.password, s.name, s.roll_number, s.email, s.department, s.year
        FROM student_passwords sp
        JOIN students s ON UPPER(s.roll_number) = UPPER(sp.roll_number)
        WHERE LOWER(s.email) = $1 OR UPPER(s.roll_number) = $2`,
@@ -1339,7 +1380,10 @@ app.post('/auth/verify-student-password', async (req: Request, res: Response) =>
       if (match) {
         // Asynchronously sync to Cognito to heal any Cognito mismatch
         updateCognitoUserPassword(cleanEmail, String(password)).catch(() => {});
-        return res.json({ valid: true, student: pwdResult.rows[0] });
+        const { password: _hash, ...student } = pwdResult.rows[0];
+        const token = signSessionToken({ role: 'student', email: student.email || cleanEmail });
+        if (!token) return res.status(500).json({ valid: false, error: 'Login is temporarily unavailable. Please contact the administrator.' });
+        return res.json({ valid: true, student, token });
       }
       // Password exists in DB but doesn't match — definitive wrong password
       return res.json({ valid: false });
@@ -1366,6 +1410,56 @@ app.post('/auth/verify-student-password', async (req: Request, res: Response) =>
     return res.json({ valid: false });
   } catch (err: any) {
     res.status(500).json({ valid: false, error: err.message });
+  }
+});
+
+// ============================================================================
+// POST /auth/parent-login — View-only parent access to their ward's data.
+// Same rule the UI always used (password = ward's registration number), but now
+// verified server-side, rate-limited, and issued a signed session token.
+// ============================================================================
+app.post('/auth/parent-login', async (req: Request, res: Response) => {
+  try {
+    // Accepts the ward's roll number, roll@rgmcet.edu.in, or parent_roll@rgmcet.edu.in
+    const rawId = String(req.body?.email || '').toLowerCase().trim();
+    const enteredPass = String(req.body?.password || '').trim().toUpperCase();
+    const expectedRoll = (rawId.includes('@') ? rawId.split('@')[0] : rawId).replace(/^parent_/, '').toUpperCase();
+    const cleanEmail = `${expectedRoll.toLowerCase()}@rgmcet.edu.in`;
+
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+    const rateCheck = checkRateLimit(`parent_login_${cleanEmail}_${clientIp}`, 10, 60000);
+    if (!rateCheck.allowed) {
+      return res.status(429).json({ valid: false, error: `Too many login attempts. Please try again in ${rateCheck.retryAfterSeconds} seconds.` });
+    }
+
+    if (!expectedRoll || enteredPass !== expectedRoll) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      return res.status(401).json({ valid: false, error: 'Incorrect password.' });
+    }
+
+    let ward: any = null;
+    if (db.isMock) {
+      ward = { roll_number: expectedRoll, name: `Student (${expectedRoll})`, department: getDeptFromRollNumber(expectedRoll) };
+    } else {
+      const r = await db.query(
+        `SELECT roll_number, name, department FROM students
+         WHERE UPPER(roll_number) = $1 OR LOWER(email) = $2 LIMIT 1`,
+        [expectedRoll, cleanEmail]
+      );
+      ward = r.rows[0] || null;
+    }
+    if (!ward) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      return res.status(401).json({ valid: false, error: 'Incorrect password.' });
+    }
+
+    // Parent identity is distinct from the student's own account email
+    const token = signSessionToken({ role: 'parent', email: `parent_${cleanEmail}`, reg: ward.roll_number });
+    if (!token) return res.status(500).json({ valid: false, error: 'Login is temporarily unavailable. Please contact the administrator.' });
+    return res.json({ valid: true, student: ward, token });
+  } catch (err: any) {
+    console.error('[Auth] /auth/parent-login error:', err.message);
+    return res.status(500).json({ valid: false, error: 'Login failed. Please try again.' });
   }
 });
 
@@ -1649,11 +1743,15 @@ app.get('/auth/check-availability', async (req: Request, res: Response) => {
 
 // POST /auth/session — Register a new session (overwrites any existing one for this email)
 // Called by the frontend immediately after a successful Cognito sign-in.
-app.post('/auth/session', async (req: Request, res: Response) => {
+app.post('/auth/session', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { email, session_token, role } = req.body;
-    if (!email || !session_token || !role) {
-      return res.status(400).json({ error: 'email, session_token, and role are required' });
+    const { session_token } = req.body;
+    // Identity comes from the verified login token — a caller can only (re)register their own
+    // session, never replace someone else's (which would force-logout that user).
+    const email = req.auth!.email;
+    const role = req.auth!.role;
+    if (!email || !session_token) {
+      return res.status(400).json({ error: 'session_token is required' });
     }
 
     const emailLower = email.toLowerCase();
@@ -2428,39 +2526,21 @@ app.post('/reports/cron-sync', requireRole('admin', 'hod'), async (_req: Request
 });
 
 // GET /student/mentor — Returns the student's or ward's assigned mentor details + remarks
-app.get('/student/mentor', async (req: Request, res: Response) => {
+app.get('/student/mentor', requireAuth, async (req: Request, res: Response) => {
   try {
-    // Identify the student from query, header, or Authorization token
-    const authHeader = req.headers.authorization || '';
-    const token = authHeader.replace('Bearer ', '').trim();
-    if (!token) return res.status(401).json({ error: 'Unauthorized' });
-
     if (db.isMock) return res.json({ assigned: false });
 
-    let queryRoll = (req.query.rollNumber as string || req.query.roll_number as string || '').trim().toLowerCase();
-    let queryEmail = (req.query.email as string || '').trim().toLowerCase();
-    const callerEmail = (req.headers['x-caller-email'] as string || '').trim().toLowerCase();
-
-    let studentEmail = queryEmail || callerEmail;
-    let studentRoll = queryRoll;
-
-    // Decode JWT sub claim if it is a standard 3-part JWT
-    try {
-      if (token.includes('.')) {
-        const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-        if (payload.email) studentEmail = payload.email.toLowerCase();
-        if (payload['custom:reg_no'] || payload['cognito:username']) {
-          studentRoll = (payload['custom:reg_no'] || payload['cognito:username']).toLowerCase();
-        }
-      }
-    } catch (_) { /* ignore decode errors */ }
-
-    // If demo_token, extract email if not already present
-    if (!studentEmail && token.startsWith('demo_token_')) {
-      const parts = token.split('_');
-      if (parts.length >= 4) {
-        studentEmail = decodeURIComponent(parts[3]).toLowerCase();
-      }
+    // Identity comes from the verified session. Students and parents can only look up
+    // their own (ward's) mentor; staff roles may look up any student via query params.
+    const auth = req.auth!;
+    let studentEmail = '';
+    let studentRoll = '';
+    if (auth.role === 'student' || auth.role === 'parent') {
+      studentRoll = (auth.regNo || '').trim().toLowerCase();
+      if (auth.role === 'student') studentEmail = (auth.email || '').trim().toLowerCase();
+    } else {
+      studentRoll = (req.query.rollNumber as string || req.query.roll_number as string || '').trim().toLowerCase();
+      studentEmail = (req.query.email as string || '').trim().toLowerCase();
     }
 
     // Find student record
@@ -2571,6 +2651,14 @@ app.get('/students/by-email/:email', async (req: Request, res: Response) => {
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Student not found with this email' });
+    }
+    if (!req.auth) {
+      // Called before login (sign-in / registration flows) — expose only basic identity fields
+      const r = result.rows[0];
+      return res.json({
+        roll_number: r.roll_number, name: r.name, email: r.email, department: r.department,
+        year: r.year, section: r.section, batch: r.batch,
+      });
     }
     res.json(result.rows[0]);
   } catch (err: any) {
@@ -3849,7 +3937,7 @@ app.get('/proxy/eduskills/:handle', async (req: Request, res: Response) => {
 });
 
 // POST /proxy/eduskills/sync-student/:rollNumber — Syncs earned EduSkills badges into student certifications table
-app.post('/proxy/eduskills/sync-student/:rollNumber', async (req: Request, res: Response) => {
+app.post('/proxy/eduskills/sync-student/:rollNumber', requireOwnerOrRole('rollNumber', 'faculty', 'hod', 'admin', 'coordinator', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const rollNumber = String(req.params.rollNumber || '').toUpperCase().trim();
     const { handle } = req.body;
@@ -4925,16 +5013,30 @@ app.post('/faculty', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Cannot register student email as faculty.' });
     }
 
+    // Self-registration runs before login, so this endpoint stays open — but anonymous callers
+    // may only CREATE a plain mentor record. Overwriting an existing faculty record or assigning
+    // an elevated role (e.g. 'hod') requires an authenticated staff session.
+    const STAFF_ROLES = ['admin', 'hod', 'coordinator', 'principal', 'director', 'management', 'program_chair'];
+    const callerIsStaff = !!req.auth && STAFF_ROLES.includes(req.auth.role);
+    const requestedRole = String(role || 'mentor');
+    const effectiveRole = callerIsStaff || ['mentor', 'faculty'].includes(requestedRole) ? requestedRole : 'mentor';
+    if (!callerIsStaff) {
+      const existing = await db.query('SELECT * FROM faculty WHERE LOWER(email) = $1 LIMIT 1', [cleanEmail]);
+      if (existing.rows.length > 0) {
+        return res.status(200).json({ message: 'Faculty already registered', faculty: existing.rows[0] });
+      }
+    }
+
     // If faculty is being registered or updated, ensure email is removed from blocked_emails
     await db.query('DELETE FROM blocked_emails WHERE LOWER(email) = $1', [cleanEmail]).catch(() => {});
 
-    // Upsert the new faculty record (on email conflict, update name/dept/role)
+    // Upsert the new faculty record (on email conflict, update name/dept/role — staff callers only reach a conflict)
     const result = await db.query(
       `INSERT INTO faculty (faculty_id, name, email, department, role)
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (email) DO UPDATE SET name=$2, department=$4, role=$5
        RETURNING *`,
-      [facId, name, cleanEmail, department || 'CSE', role || 'mentor']
+      [facId, name, cleanEmail, department || 'CSE', effectiveRole]
     );
     const newFac = result.rows[0];
     const finalId = newFac.faculty_id.toUpperCase();
@@ -5449,7 +5551,7 @@ function extractTextFromPdfBuffer(pdfBuffer: Buffer): string {
 }
 
 // POST /faculty/parse-activity-document — Auto-parses uploaded Conference/FDP/Workshop documents (Images/PDFs)
-app.post('/faculty/parse-activity-document', async (req: Request, res: Response) => {
+app.post('/faculty/parse-activity-document', requireAuth, async (req: Request, res: Response) => {
   try {
     const { file_data, file_name, file_type, ocr_text } = req.body || {};
     const fileName = String(file_name || 'document.pdf');
@@ -5700,7 +5802,7 @@ app.post('/faculty/parse-activity-document', async (req: Request, res: Response)
 
 // GET /faculty/mentees/by-email/:email — Returns ALL mentees across ALL faculty records for this person
 // Solves the multi-record problem (e.g., HOD_CSEDS + FAC_BBHASKARARAO both belong to Bhaskara Rao)
-app.get('/faculty/mentees/by-email/:email', async (req: Request, res: Response) => {
+app.get('/faculty/mentees/by-email/:email', requireAuth, async (req: Request, res: Response) => {
   try {
     const email = req.params.email.toLowerCase().trim();
     if (db.isMock) return res.json([]);
@@ -6907,7 +7009,7 @@ app.post('/mentor-assignments/upload', requireRole('admin'), async (req: Request
   }
 });
 
-app.get('/faculty/:id/mentees', async (req: Request, res: Response) => {
+app.get('/faculty/:id/mentees', requireAuth, async (req: Request, res: Response) => {
   try {
     const facultyId = req.params.id.toUpperCase();
 
@@ -6981,7 +7083,7 @@ app.get('/faculty/:id/mentees', async (req: Request, res: Response) => {
 // ============================================================================
 // Reports: HOD Analytics
 // ============================================================================
-app.get('/reports/hod-analytics', async (req: Request, res: Response) => {
+app.get('/reports/hod-analytics', requireAuth, async (req: Request, res: Response) => {
   try {
     const targetDept = (req.query.department as string) || req.auth?.department || 'CSE (Data Science)';
 
@@ -7772,7 +7874,7 @@ app.get('/oversight/publications', requireRole('director', 'principal', 'managem
 // ============================================================================
 // Reports: Department
 // ============================================================================
-app.get('/reports/department/:dept', async (req: Request, res: Response) => {
+app.get('/reports/department/:dept', requireAuth, async (req: Request, res: Response) => {
   try {
     const dept = req.params.dept.toUpperCase();
     const { year, section } = req.query;
@@ -7845,7 +7947,7 @@ app.get('/reports/department/:dept', async (req: Request, res: Response) => {
 // ============================================================================
 // Reports: Placement Summary
 // ============================================================================
-app.get('/reports/placement-summary', async (_req: Request, res: Response) => {
+app.get('/reports/placement-summary', requireAuth, async (_req: Request, res: Response) => {
   try {
     if (db.isMock) {
       const students = Array.from(db.mockStore.students.values());
@@ -12624,7 +12726,8 @@ app.post('/auth/fresher-login', async (req: Request, res: Response) => {
         return res.status(401).json({ valid: false, error: 'Invalid username or password (use your registered Mobile Number and DOB).' });
       }
 
-      const token = `demo_token_student_${encodeURIComponent(stu.email || stu.admission_id)}_${Date.now()}`;
+      const token = signSessionToken({ role: 'student', email: String(stu.email || stu.admission_id) });
+    if (!token) return res.status(500).json({ error: 'Login is temporarily unavailable. Please contact the administrator.' });
       return res.json({
         valid: true,
         token,
@@ -12698,7 +12801,8 @@ app.post('/auth/fresher-login', async (req: Request, res: Response) => {
       }
     }
 
-    const token = `demo_token_student_${encodeURIComponent(stu.email || stu.admission_id)}_${Date.now()}`;
+    const token = signSessionToken({ role: 'student', email: String(stu.email || stu.admission_id) });
+    if (!token) return res.status(500).json({ error: 'Login is temporarily unavailable. Please contact the administrator.' });
     return res.json({
       valid: true,
       token,
@@ -12773,7 +12877,8 @@ app.post('/auth/fresher-setup-password', async (req: Request, res: Response) => 
       [cleanUsername, hashed, stu.roll_number]
     );
 
-    const token = `demo_token_student_${encodeURIComponent(stu.email || stu.admission_id)}_${Date.now()}`;
+    const token = signSessionToken({ role: 'student', email: String(stu.email || stu.admission_id) });
+    if (!token) return res.status(500).json({ error: 'Login is temporarily unavailable. Please contact the administrator.' });
 
     res.json({
       success: true,
@@ -14170,8 +14275,8 @@ const LEAVE_QUOTAS: Record<string, number> = {
 app.get('/faculty/leaves/my-summary', requireRole('faculty', 'hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     await ensureLeaveAndSubjectsHandledTables();
-    // Prefer explicit caller_email query param (sent by frontend per-tab) over token-derived email
-    const email = ((req.query.caller_email as string) || req.auth?.email || '').toLowerCase().trim();
+    // Identity comes from the verified session token only (tokens are already per-tab)
+    const email = (req.auth?.email || '').toLowerCase().trim();
     if (!email) return res.status(401).json({ error: 'Unauthorized' });
 
     const currentYear = new Date().getFullYear();
@@ -14290,8 +14395,8 @@ app.get('/faculty/leaves/my-summary', requireRole('faculty', 'hod', 'admin', 'pr
 app.get('/faculty/leaves/reassigned-duties', requireRole('faculty', 'hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     await ensureLeaveAndSubjectsHandledTables();
-    // Prefer explicit caller_email query param (sent by frontend per-tab) over token-derived email
-    const email = ((req.query.caller_email as string) || req.auth?.email || '').toLowerCase().trim();
+    // Identity comes from the verified session token only (tokens are already per-tab)
+    const email = (req.auth?.email || '').toLowerCase().trim();
     if (!email) return res.status(401).json({ error: 'Unauthorized' });
 
     const result = await db.query(
@@ -14321,8 +14426,8 @@ app.get('/faculty/leaves/reassigned-duties', requireRole('faculty', 'hod', 'admi
 app.post('/faculty/leaves/adjustments/:adjId/respond', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
   try {
     await ensureLeaveAndSubjectsHandledTables();
-    // Prefer explicit caller_email from body over token-derived email
-    const email = ((req.body.caller_email as string) || req.auth?.email || '').toLowerCase().trim();
+    // Identity comes from the verified session token only (tokens are already per-tab)
+    const email = (req.auth?.email || '').toLowerCase().trim();
     const { adjId } = req.params;
     const { status, rejected_reason } = req.body; // 'Accepted' | 'Rejected'
 
@@ -16659,7 +16764,7 @@ app.get('/notifications/pending-popup', requireAuth, async (req: Request, res: R
 });
 
 // GET /notifications/debug — Diagnostics endpoint to verify stored notices and auth
-app.get('/notifications/debug', async (req: Request, res: Response) => {
+app.get('/notifications/debug', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     await ensureBroadcastTables();
     const countRes = await db.query('SELECT COUNT(*) as total FROM broadcast_notifications');

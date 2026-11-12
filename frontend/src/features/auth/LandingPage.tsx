@@ -335,7 +335,7 @@ export const LandingPage: React.FC = () => {
 
           const res = await api.fresherLogin(payload);
           if (res.valid && res.student) {
-            login(res.student.email || `${res.student.roll_number.toLowerCase()}@rgmcet.edu.in`, 'student', res.student.roll_number, res.student.name, undefined, res.student.department);
+            login(res.student.email || `${res.student.roll_number.toLowerCase()}@rgmcet.edu.in`, 'student', res.student.roll_number, res.student.name, res.token, res.student.department);
             await registerSession(res.student.email || res.student.roll_number, 'student');
             navigate('/dashboard');
             return;
@@ -403,28 +403,21 @@ export const LandingPage: React.FC = () => {
           throw new Error('Please enter a valid student roll number (e.g. 23091A3252).');
         }
 
-        // Parent password must match student roll number (case-insensitive)
-        if (trimmedPass.toUpperCase() !== rollUpper) {
-          throw new Error('Incorrect password. For parent access, enter the student roll number.');
+        // Verified server-side (password = ward's roll number); returns a signed session token
+        const parentRes = await api.parentLogin(rollUpper, trimmedPass);
+        if (!parentRes.valid || !parentRes.student || !parentRes.token) {
+          throw new Error(parentRes.error === 'Incorrect password.' || !parentRes.error
+            ? 'Incorrect password. For parent access, enter the student roll number.'
+            : parentRes.error);
         }
-
-        // Verify student exists in institutional database
-        let student: any = null;
-        try { student = await api.getStudentProfile(rollUpper); } catch { /* silent */ }
-        if (!student) {
-          try { student = await api.getStudentByEmail(`${rollUpper.toLowerCase()}@rgmcet.edu.in`); } catch { /* silent */ }
-        }
-
-        if (!student) {
-          throw new Error(`Student record (${rollUpper}) not found. Please verify the roll number.`);
-        }
+        const student: any = parentRes.student;
 
         const wardName = student.name || `Student (${rollUpper})`;
         const wardDept = student.department || getDeptFromRollNumber(rollUpper) || 'CSE (Data Science)';
         const roll = student.roll_number || rollUpper;
 
-        login(`parent_${roll.toLowerCase()}@rgmcet.edu.in`, 'parent', roll, `Parent of ${wardName}`, undefined, wardDept);
-        await registerSession(`parent_${roll.toLowerCase()}`, 'parent');
+        login(`parent_${roll.toLowerCase()}@rgmcet.edu.in`, 'parent', roll, `Parent of ${wardName}`, parentRes.token, wardDept);
+        await registerSession(`parent_${roll.toLowerCase()}@rgmcet.edu.in`, 'parent');
         navigate('/dashboard');
         return;
       }
@@ -545,7 +538,7 @@ export const LandingPage: React.FC = () => {
           throw new Error(`Access denied. This account does not have ${selectedRole.title} privileges.`);
         }
 
-        login(adminRes.email || trimmedId, assignedRole, adminRes.faculty_id, adminRes.name || assignedRole.toUpperCase(), undefined, assignedDept, isSuperAdmin);
+        login(adminRes.email || trimmedId, assignedRole, adminRes.faculty_id, adminRes.name || assignedRole.toUpperCase(), adminRes.token, assignedDept, isSuperAdmin);
         await registerSession(adminRes.email || trimmedId, assignedRole);
 
         if (['director', 'principal', 'management', 'program_chair'].includes(assignedRole)) {

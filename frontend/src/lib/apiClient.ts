@@ -48,26 +48,19 @@ export async function fetchWithAuth(
     /* ignore */
   }
 
-  if (!token) {
-    if (
-      ['hod', 'admin', 'coordinator', 'director', 'principal', 'management', 'program_chair'].includes(userRole) &&
-      userEmail
-    ) {
-      token = `demo_token_${userRole}_${encodeURIComponent(userEmail)}_${Date.now()}`;
-      sessionStorage.setItem('advitiyans_jwt_token', token);
-    } else {
-      try {
-        token = await getIdToken();
-      } catch {
-        /* ignore */
-      }
+  // Session tokens for admin/HOD/oversight/parent roles are issued by the server at login.
+  // Only Cognito users can recover a missing token (via the Cognito session).
+  if (!token && !['hod', 'admin', 'coordinator', 'director', 'principal', 'management', 'program_chair', 'parent'].includes(userRole)) {
+    try {
+      token = await getIdToken();
+    } catch {
+      /* ignore */
     }
   }
 
   const headers = {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(userEmail ? { 'X-Caller-Email': userEmail } : {}),
     ...options.headers,
   };
 
