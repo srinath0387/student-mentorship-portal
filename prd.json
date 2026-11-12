@@ -330,7 +330,7 @@
         "frontend/src/App.tsx"
       ],
       "acceptance_criteria": "CRUD + analytics tested.",
-      "status": "pending",
+      "status": "done",
       "priority": "low",
       "commit_msg": "feat(alumni): alumni tracking"
     },

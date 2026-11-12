@@ -31,6 +31,8 @@ const OversightDashboardPage = lazy(() => import('./features/oversight/Oversight
 const FacultyWorkloadPage = lazy(() => import('./features/attendance/workload/FacultyWorkloadPage').then(m => ({ default: m.FacultyWorkloadPage })));
 const AttendanceReportsPage = lazy(() => import('./features/attendance/reports/AttendanceReportsPage').then(m => ({ default: m.AttendanceReportsPage })));
 const DocumentsManagementPage = lazy(() => import('./features/documents/DocumentsManagementPage').then(m => ({ default: m.DocumentsManagementPage })));
+const AlumniPage = lazy(() => import('./features/alumni/AlumniPage'));
+const AlumniSelfUpdatePage = lazy(() => import('./features/alumni/AlumniSelfUpdatePage'));
 const ObePage = lazy(() => import('./features/obe/ObePage'));
 const AccreditationPage = lazy(() => import('./features/accreditation/AccreditationPage'));
 const AppraisalPage = lazy(() => import('./features/appraisal/AppraisalPage'));
@@ -319,6 +321,7 @@ export const App: React.FC = () => {
           <Routes>
             <Route path="/" element={<RootRedirect />} />
             <Route path="/landing" element={<LandingPage />} />
+            <Route path="/alumni-update/:token" element={<Suspense fallback={null}><AlumniSelfUpdatePage /></Suspense>} />
             <Route path="/login" element={<AuthPage />} />
             <Route path="/login/:role" element={<AuthPage />} />
             <Route path="/student-login" element={<AuthPage />} />
@@ -352,6 +355,7 @@ export const App: React.FC = () => {
               <Route element={<ProtectedRoute allowedRoles={['hod', 'admin', 'director', 'principal', 'management', 'program_chair']} />}>
                 <Route path="/reports/monthly" element={<MonthlyReportPage />} />
                 <Route path="/accreditation" element={<AccreditationPage />} />
+                <Route path="/alumni" element={<AlumniPage />} />
               </Route>
               <Route path="/attendance/workload" element={<FacultyWorkloadPage />} />
               <Route path="/attendance/reports" element={<AttendanceReportsPage />} />

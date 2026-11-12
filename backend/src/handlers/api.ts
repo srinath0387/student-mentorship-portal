@@ -9650,6 +9650,230 @@ app.put('/obe/course/:allotmentId', requireRole('faculty', 'hod', 'admin'), asyn
   }
 });
 
+// ============================================================================
+// Alumni tracking
+// Admin/HOD maintain alumni; a passed-out batch can be imported (pre-filled from placements).
+// Each record has a private self-update token so alumni can update their own details without an
+// account (GET/PUT /alumni/self/:token — public, limited fields, token = 24 random bytes).
+// ============================================================================
+const ALUMNI_STATUSES = ['Employed', 'Higher Studies', 'Entrepreneur', 'Preparing', 'Other'];
+const ALUMNI_SELF_FIELDS = ['email', 'phone', 'status', 'organization', 'role_title', 'location', 'package_lpa', 'institute', 'course', 'country', 'linkedin_url'];
+
+let alumniTableReady: Promise<void> | null = null;
+function ensureAlumniTable(): Promise<void> {
+  if (!alumniTableReady) {
+    alumniTableReady = db.query(`
+      CREATE TABLE IF NOT EXISTS alumni (
+        id SERIAL PRIMARY KEY,
+        roll_number TEXT UNIQUE,
+        name TEXT NOT NULL,
+        email TEXT,
+        phone TEXT,
+        department TEXT,
+        batch TEXT,
+        status TEXT NOT NULL DEFAULT 'Other',
+        organization TEXT,
+        role_title TEXT,
+        location TEXT,
+        package_lpa NUMERIC(6,2),
+        institute TEXT,
+        course TEXT,
+        country TEXT,
+        linkedin_url TEXT,
+        self_token TEXT UNIQUE,
+        source TEXT DEFAULT 'admin',
+        updated_by TEXT,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `).then(() => undefined).catch((err: any) => { alumniTableReady = null; throw err; });
+  }
+  return alumniTableReady;
+}
+
+function alumniScope(req: Request): string[] | null {
+  if (req.auth?.role === 'hod' && req.auth.department && req.auth.department !== '*') return [req.auth.department];
+  if (req.auth?.role === 'program_chair') return CSE_ALLIED_DEPTS;
+  return null;
+}
+const cleanAlumni = (b: any) => {
+  const out: any = {};
+  for (const k of ['name', 'email', 'phone', 'department', 'batch', 'status', 'organization', 'role_title', 'location', 'institute', 'course', 'country', 'linkedin_url']) {
+    if (b[k] !== undefined) out[k] = b[k] === null ? null : String(b[k]).trim().slice(0, 300) || null;
+  }
+  if (b.package_lpa !== undefined) out.package_lpa = b.package_lpa === '' || b.package_lpa === null ? null : Number(b.package_lpa);
+  if (out.status && !ALUMNI_STATUSES.includes(out.status)) out.status = 'Other';
+  if (out.linkedin_url && !/^https?:\/\//i.test(out.linkedin_url)) out.linkedin_url = `https://${out.linkedin_url}`;
+  return out;
+};
+
+// GET /alumni?department=&batch=&status=&search= — list + analytics
+app.get('/alumni', requireRole('admin', 'hod', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    await ensureAlumniTable();
+    const scope = alumniScope(req); const params: any[] = []; let where = 'TRUE';
+    if (scope) { params.push(scope); where += ` AND department = ANY($${params.length})`; }
+    if (req.query.department && req.query.department !== 'All') { params.push(String(req.query.department)); where += ` AND department = $${params.length}`; }
+    if (req.query.batch && req.query.batch !== 'All') { params.push(String(req.query.batch)); where += ` AND batch = $${params.length}`; }
+    const all = await db.query(`SELECT * FROM alumni WHERE ${where} ORDER BY batch DESC NULLS LAST, name`, params);
+    const q = String(req.query.search || '').toLowerCase();
+    const status = String(req.query.status || 'All');
+    const rows = all.rows.filter((a: any) => (status === 'All' || a.status === status) &&
+      (!q || [a.name, a.roll_number, a.organization, a.institute, a.location].some(v => String(v || '').toLowerCase().includes(q))));
+    const byStatus: Record<string, number> = {}; const byBatch: Record<string, Record<string, number>> = {}; const employers: Record<string, number> = {};
+    for (const a of all.rows) {
+      byStatus[a.status] = (byStatus[a.status] || 0) + 1;
+      const b = a.batch || 'Unknown'; byBatch[b] = byBatch[b] || {}; byBatch[b][a.status] = (byBatch[b][a.status] || 0) + 1;
+      if (a.status === 'Employed' && a.organization) employers[a.organization] = (employers[a.organization] || 0) + 1;
+    }
+    const updated = all.rows.filter((a: any) => a.source === 'self').length;
+    res.json({
+      summary: { total: all.rows.length, by_status: byStatus, self_updated: updated,
+        top_employers: Object.entries(employers).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, n]) => ({ name, n })),
+        by_batch: Object.entries(byBatch).sort((a, b) => b[0].localeCompare(a[0])).map(([batch, s]) => ({ batch, ...s })) },
+      alumni: rows.map((a: any) => ({ ...a, self_token: undefined, has_self_link: Boolean(a.self_token) })),
+      batches: Array.from(new Set(all.rows.map((a: any) => a.batch).filter(Boolean))).sort().reverse(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /alumni — create; PUT /alumni/:id — update (admin/HOD)
+app.post('/alumni', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+  try {
+    await ensureAlumniTable();
+    const v = cleanAlumni(req.body || {});
+    if (!v.name) return res.status(400).json({ error: 'Name is required' });
+    const scope = alumniScope(req);
+    if (scope && v.department && !scope.includes(v.department)) return res.status(403).json({ error: 'Department outside your scope' });
+    if (scope && !v.department) v.department = scope[0];
+    const roll = req.body?.roll_number ? String(req.body.roll_number).toUpperCase().trim() : null;
+    const cols = ['roll_number', ...Object.keys(v), 'updated_by'];
+    const vals = [roll, ...Object.values(v), req.auth!.email];
+    const r = await db.query(
+      `INSERT INTO alumni (${cols.join(', ')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING *`, vals);
+    res.json({ success: true, alumni: r.rows[0] });
+  } catch (err: any) {
+    if (String(err.message).includes('duplicate')) return res.status(409).json({ error: 'An alumni record already exists for this roll number.' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/alumni/:id', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+  try {
+    await ensureAlumniTable();
+    const cur = (await db.query('SELECT * FROM alumni WHERE id = $1', [req.params.id])).rows[0];
+    if (!cur) return res.status(404).json({ error: 'Not found' });
+    const scope = alumniScope(req);
+    if (scope && !scope.includes(cur.department)) return res.status(403).json({ error: 'Department outside your scope' });
+    const v = cleanAlumni(req.body || {});
+    const keys = Object.keys(v);
+    if (keys.length === 0) return res.json({ success: true, alumni: cur });
+    const r = await db.query(
+      `UPDATE alumni SET ${keys.map((k, i) => `${k} = $${i + 1}`).join(', ')}, updated_by = $${keys.length + 1}, source = 'admin', updated_at = NOW()
+       WHERE id = $${keys.length + 2} RETURNING *`, [...Object.values(v), req.auth!.email, req.params.id]);
+    res.json({ success: true, alumni: r.rows[0] });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/alumni/:id', requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureAlumniTable();
+    await db.query('DELETE FROM alumni WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /alumni/import-batch — { batch, department? } copy a passed-out batch, pre-filled from placements
+app.post('/alumni/import-batch', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+  try {
+    await ensureAlumniTable();
+    const batch = String(req.body?.batch || '').trim();
+    if (!batch) return res.status(400).json({ error: 'batch is required (e.g. 2022-2026)' });
+    const scope = alumniScope(req); const params: any[] = [batch]; let where = 'st.batch = $1';
+    const dept = req.body?.department && req.body.department !== 'All' ? String(req.body.department) : null;
+    if (scope) { params.push(dept && scope.includes(dept) ? [dept] : scope); where += ` AND st.department = ANY($${params.length})`; }
+    else if (dept) { params.push(dept); where += ` AND st.department = $${params.length}`; }
+    const r = await db.query(
+      `INSERT INTO alumni (roll_number, name, email, phone, department, batch, status, organization, role_title, package_lpa, linkedin_url, updated_by)
+       SELECT st.roll_number, st.name, st.email, st.phone, st.department, st.batch,
+              CASE WHEN p.company_name IS NOT NULL THEN 'Employed' ELSE 'Other' END,
+              p.company_name, p.role_title, p.package_lpa, st.linkedin_url, $${params.length + 1}
+       FROM students st
+       LEFT JOIN LATERAL (SELECT company_name, role_title, package_lpa FROM student_placements sp
+                          WHERE UPPER(sp.roll_number) = UPPER(st.roll_number) ORDER BY package_lpa DESC NULLS LAST LIMIT 1) p ON TRUE
+       WHERE ${where}
+       ON CONFLICT (roll_number) DO NOTHING
+       RETURNING id`, [...params, req.auth!.email]);
+    res.json({ success: true, imported: r.rows.length, message: `${r.rows.length} alumni added from batch ${batch}.` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /alumni/:id/self-link — create (or return) the private self-update token
+app.post('/alumni/:id/self-link', requireRole('admin', 'hod'), async (req: Request, res: Response) => {
+  try {
+    await ensureAlumniTable();
+    const cur = (await db.query('SELECT id, department, self_token FROM alumni WHERE id = $1', [req.params.id])).rows[0];
+    if (!cur) return res.status(404).json({ error: 'Not found' });
+    const scope = alumniScope(req);
+    if (scope && !scope.includes(cur.department)) return res.status(403).json({ error: 'Department outside your scope' });
+    let token = cur.self_token;
+    if (!token || req.body?.regenerate) {
+      token = crypto.randomBytes(24).toString('base64url');
+      await db.query('UPDATE alumni SET self_token = $1 WHERE id = $2', [token, cur.id]);
+    }
+    res.json({ token });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Public self-update (no login): GET / PUT /alumni/self/:token
+app.get('/alumni/self/:token', async (req: Request, res: Response) => {
+  try {
+    await ensureAlumniTable();
+    const t = String(req.params.token || '');
+    if (t.length < 20) return res.status(404).json({ error: 'Link not valid' });
+    const r = await db.query('SELECT * FROM alumni WHERE self_token = $1', [t]);
+    const a = r.rows[0];
+    if (!a) return res.status(404).json({ error: 'This link is not valid or has been replaced.' });
+    const out: any = { name: a.name, department: a.department, batch: a.batch };
+    for (const k of ALUMNI_SELF_FIELDS) out[k] = a[k];
+    res.json({ alumni: out, statuses: ALUMNI_STATUSES });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/alumni/self/:token', async (req: Request, res: Response) => {
+  try {
+    await ensureAlumniTable();
+    const t = String(req.params.token || '');
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || 'unknown';
+    if (!checkRateLimit(`alumni_self_${ip}`, 20, 60000).allowed) return res.status(429).json({ error: 'Too many requests. Try again in a minute.' });
+    const cur = t.length >= 20 ? (await db.query('SELECT id FROM alumni WHERE self_token = $1', [t])).rows[0] : null;
+    if (!cur) return res.status(404).json({ error: 'This link is not valid or has been replaced.' });
+    const all = cleanAlumni(req.body || {});
+    const v: any = {};
+    for (const k of ALUMNI_SELF_FIELDS) if (k in all) v[k] = all[k];
+    const keys = Object.keys(v);
+    if (keys.length) {
+      await db.query(
+        `UPDATE alumni SET ${keys.map((k, i) => `${k} = $${i + 1}`).join(', ')}, source = 'self', updated_by = 'self', updated_at = NOW() WHERE id = $${keys.length + 1}`,
+        [...Object.values(v), cur.id]);
+    }
+    res.json({ success: true, message: 'Thank you — your details have been updated.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /oversight/faculty-by-cadre?department=CSE&cadre=associate
 // ============================================================================
 app.get('/oversight/faculty-by-cadre', requireRole('director', 'principal', 'management', 'program_chair', 'admin', 'hod'), async (req: Request, res: Response) => {

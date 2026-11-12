@@ -1041,6 +1041,18 @@ export const api = {
     return fetchWithAuth(`/attendance/sessions${query}`);
   },
 
+  // ── Alumni ──
+  getAlumni: async (p: { department?: string; batch?: string; status?: string; search?: string }) => {
+    const q = new URLSearchParams(); Object.entries(p).forEach(([k, v]) => { if (v && v !== 'All') q.set(k, v); });
+    return fetchWithAuth(`/alumni?${q.toString()}`);
+  },
+  createAlumni: async (data: any) => fetchWithAuth('/alumni', { method: 'POST', body: JSON.stringify(data) }),
+  updateAlumni: async (id: number, data: any) => fetchWithAuth(`/alumni/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  importAlumniBatch: async (batch: string, department?: string) => fetchWithAuth('/alumni/import-batch', { method: 'POST', body: JSON.stringify({ batch, department }) }),
+  getAlumniSelfLink: async (id: number) => fetchWithAuth(`/alumni/${id}/self-link`, { method: 'POST' }),
+  getAlumniSelf: async (token: string) => fetchWithAuth(`/alumni/self/${encodeURIComponent(token)}`),
+  updateAlumniSelf: async (token: string, data: any) => fetchWithAuth(`/alumni/self/${encodeURIComponent(token)}`, { method: 'PUT', body: JSON.stringify(data) }),
+
   // ── CO-PO attainment ──
   getObeCourses: async () => fetchWithAuth('/obe/courses'),
   getObeCourse: async (allotmentId: string) => fetchWithAuth(`/obe/course/${encodeURIComponent(allotmentId)}`),

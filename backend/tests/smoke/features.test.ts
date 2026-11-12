@@ -394,3 +394,40 @@ describe('FT009 CO-PO attainment', () => {
     expect(JSON.parse(saved.params[3])).toEqual({ CO1: { PO1: 3 }, CO2: {} });
   });
 });
+
+describe('FT010 alumni', () => {
+  const rows = [
+    { id: 1, name: 'A', batch: '2021-2025', department: 'CSE', status: 'Employed', organization: 'Infosys', source: 'self', self_token: 'x'.repeat(32) },
+    { id: 2, name: 'B', batch: '2021-2025', department: 'CSE', status: 'Employed', organization: 'Infosys', source: 'admin', self_token: null },
+    { id: 3, name: 'C', batch: '2020-2024', department: 'CSE', status: 'Higher Studies', institute: 'IIT Madras', source: 'admin', self_token: null },
+  ];
+
+  it('lists with analytics and never exposes self-update tokens', async () => {
+    routeDb([['SELECT * FROM alumni WHERE', rows]]);
+    const res = await request(app).get('/alumni').set('Authorization', ADMIN());
+    expect(res.status).toBe(200);
+    expect(res.body.summary).toMatchObject({ total: 3, by_status: { Employed: 2, 'Higher Studies': 1 }, self_updated: 1, top_employers: [{ name: 'Infosys', n: 2 }] });
+    expect(JSON.stringify(res.body.alumni)).not.toContain('x'.repeat(32));
+    expect(res.body.alumni[0].has_self_link).toBe(true);
+  });
+
+  it('self-update link edits only allowed fields of that record', async () => {
+    const calls = routeDb([['SELECT id FROM alumni WHERE self_token', [{ id: 7 }]]]);
+    const res = await request(app).put(`/alumni/self/${'t'.repeat(32)}`).send({ organization: 'TCS', status: 'Employed', name: 'Hacker', department: 'ECE' });
+    expect(res.status).toBe(200);
+    const upd = calls.find(c => c.sql.startsWith('UPDATE alumni SET'))!;
+    expect(upd.sql).toContain('status = $1');
+    expect(upd.sql).toContain('organization = $2');
+    expect(upd.sql).not.toMatch(/\bname =|department =/);
+    expect(upd.params[upd.params.length - 1]).toBe(7);
+
+    routeDb([]);
+    expect((await request(app).put('/alumni/self/short').send({ organization: 'X' })).status).toBe(404);
+  });
+
+  it('only admin/HOD can create; name is required', async () => {
+    routeDb([]);
+    expect((await request(app).post('/alumni').set('Authorization', bearer('faculty', 'x@rgmcet.edu.in')).send({ name: 'Z' })).status).toBe(403);
+    expect((await request(app).post('/alumni').set('Authorization', ADMIN()).send({ batch: '2020-2024' })).status).toBe(400);
+  });
+});
