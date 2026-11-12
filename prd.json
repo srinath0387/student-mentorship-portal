@@ -313,7 +313,7 @@
         "frontend/src/App.tsx"
       ],
       "acceptance_criteria": "Attainment calculations tested.",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "commit_msg": "feat(obe): CO-PO mapping and attainment"
     },

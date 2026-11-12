@@ -9497,6 +9497,159 @@ app.post('/attendance/live/checkin', requireRole('student'), async (req: Request
   }
 });
 
+// ============================================================================
+// Outcome-based education: CO–PO mapping and attainment (NBA method)
+//   CO direct level from % of students reaching the target mark: >= L3 → 3, >= L2 → 2, >= L1 → 1
+//   CO attainment = direct_weight% × direct level + (100 − direct_weight)% × indirect level (0–3)
+//   PO attainment = Σ(CO attainment × mapping) / Σ mapping, over COs mapped to that PO
+// ============================================================================
+const OBE_OUTCOMES = [...Array.from({ length: 12 }, (_, i) => `PO${i + 1}`), 'PSO1', 'PSO2', 'PSO3'];
+const OBE_DEFAULTS = { target_pct: 60, l1: 50, l2: 60, l3: 70, direct_weight: 80 };
+
+let obeTableReady: Promise<void> | null = null;
+function ensureObeTable(): Promise<void> {
+  if (!obeTableReady) {
+    obeTableReady = db.query(`
+      CREATE TABLE IF NOT EXISTS obe_courses (
+        allotment_id TEXT PRIMARY KEY,
+        settings JSONB NOT NULL DEFAULT '{}',
+        cos JSONB NOT NULL DEFAULT '[]',
+        mapping JSONB NOT NULL DEFAULT '{}',
+        attainment JSONB NOT NULL DEFAULT '{}',
+        updated_by TEXT,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `).then(() => undefined).catch((err: any) => { obeTableReady = null; throw err; });
+  }
+  return obeTableReady;
+}
+
+function computeObe(cfg: { settings?: any; cos?: any[]; mapping?: any; attainment?: any }) {
+  const st = { ...OBE_DEFAULTS, ...(cfg.settings || {}) };
+  const cos: any[] = Array.isArray(cfg.cos) ? cfg.cos : [];
+  const mapping = cfg.mapping || {}; const att = cfg.attainment || {};
+  const round2 = (v: number) => Math.round(v * 100) / 100;
+  const coResults = cos.map(co => {
+    const a = att[co.id] || {};
+    const pct = a.direct_pct === null || a.direct_pct === undefined || a.direct_pct === '' ? null : Number(a.direct_pct);
+    const direct = pct === null ? null : pct >= st.l3 ? 3 : pct >= st.l2 ? 2 : pct >= st.l1 ? 1 : 0;
+    const ind = a.indirect === null || a.indirect === undefined || a.indirect === '' ? null : Math.max(0, Math.min(3, Number(a.indirect)));
+    const w = Math.max(0, Math.min(100, Number(st.direct_weight))) / 100;
+    const attainment = direct === null ? null : round2(ind === null ? direct : w * direct + (1 - w) * ind);
+    return { id: co.id, text: co.text, direct_pct: pct, direct_level: direct, indirect_level: ind, attainment };
+  });
+  const po: Record<string, number | null> = {};
+  for (const o of OBE_OUTCOMES) {
+    let num = 0, den = 0;
+    for (const c of coResults) {
+      const m = Number(mapping?.[c.id]?.[o]) || 0;
+      if (m > 0 && c.attainment !== null) { num += c.attainment * m; den += m; }
+    }
+    po[o] = den > 0 ? round2(num / den) : null;
+  }
+  return { settings: st, cos: coResults, po_attainment: po };
+}
+
+async function obeAccess(req: Request, allotmentId: string): Promise<{ allot: any; canEdit: boolean } | null> {
+  const r = await db.query('SELECT * FROM subject_allotments WHERE id::text = $1', [allotmentId]);
+  const allot = r.rows[0];
+  if (!allot) return null;
+  const role = req.auth!.role; const me = req.auth!.email.toLowerCase();
+  const own = String(allot.faculty_email || '').toLowerCase() === me;
+  const sameDept = req.auth!.department && String(allot.department || '').toLowerCase() === String(req.auth!.department).toLowerCase();
+  if (role === 'faculty') return own ? { allot, canEdit: true } : null;
+  if (role === 'hod') return (own || sameDept) ? { allot, canEdit: true } : null;
+  if (role === 'admin') return { allot, canEdit: true };
+  if (role === 'program_chair') return CSE_ALLIED_DEPTS.includes(allot.department) ? { allot, canEdit: false } : null;
+  if (['principal', 'director', 'management'].includes(role)) return { allot, canEdit: false };
+  return null;
+}
+
+// GET /obe/courses — courses the caller can see, with configuration status
+app.get('/obe/courses', requireRole('faculty', 'hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    await ensureObeTable();
+    const role = req.auth!.role; const params: any[] = []; let where = 'TRUE';
+    if (role === 'faculty') { params.push(req.auth!.email.toLowerCase()); where = `LOWER(a.faculty_email) = $1`; }
+    else if (role === 'hod' && req.auth!.department && req.auth!.department !== '*') { params.push(req.auth!.department); where = `a.department = $1`; }
+    else if (role === 'program_chair') { params.push(CSE_ALLIED_DEPTS); where = `a.department = ANY($1)`; }
+    if (req.query.department && req.query.department !== 'All' && role !== 'faculty' && role !== 'hod') { params.push(String(req.query.department)); where += ` AND a.department = $${params.length}`; }
+    const r = await db.query(
+      `SELECT a.id AS allotment_id, a.subject_name, a.subject_type, a.semester_label, a.section, a.department, a.faculty_name, a.faculty_email,
+              o.cos, o.mapping, o.attainment, o.settings, o.updated_at
+       FROM subject_allotments a LEFT JOIN obe_courses o ON o.allotment_id = a.id::text
+       WHERE ${where} ORDER BY a.department, a.semester_label, a.subject_name, a.section`, params);
+    res.json(r.rows.map((x: any) => {
+      const configured = Array.isArray(x.cos) && x.cos.length > 0;
+      const computed = configured ? computeObe(x) : null;
+      return {
+        allotment_id: x.allotment_id, subject_name: x.subject_name, subject_type: x.subject_type, semester_label: x.semester_label,
+        section: x.section, department: x.department, faculty_name: x.faculty_name, configured,
+        cos_count: configured ? x.cos.length : 0,
+        attainment_entered: computed ? computed.cos.filter((c: any) => c.attainment !== null).length : 0,
+        po_attainment: computed?.po_attainment || null, updated_at: x.updated_at,
+      };
+    }));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /obe/course/:allotmentId — configuration + computed attainment
+app.get('/obe/course/:allotmentId', requireRole('faculty', 'hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    await ensureObeTable();
+    const acc = await obeAccess(req, req.params.allotmentId);
+    if (!acc) return res.status(403).json({ error: 'You cannot view this course.' });
+    const r = await db.query('SELECT * FROM obe_courses WHERE allotment_id = $1', [req.params.allotmentId]);
+    const cfg = r.rows[0] || { settings: {}, cos: [], mapping: {}, attainment: {} };
+    res.json({
+      course: { allotment_id: req.params.allotmentId, subject_name: acc.allot.subject_name, semester_label: acc.allot.semester_label, section: acc.allot.section, department: acc.allot.department, faculty_name: acc.allot.faculty_name },
+      can_edit: acc.canEdit, outcomes: OBE_OUTCOMES,
+      config: { settings: { ...OBE_DEFAULTS, ...(cfg.settings || {}) }, cos: cfg.cos || [], mapping: cfg.mapping || {}, attainment: cfg.attainment || {} },
+      computed: computeObe(cfg),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /obe/course/:allotmentId — save COs, mapping, attainment inputs, settings
+app.put('/obe/course/:allotmentId', requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureObeTable();
+    const acc = await obeAccess(req, req.params.allotmentId);
+    if (!acc || !acc.canEdit) return res.status(403).json({ error: 'You cannot edit this course.' });
+    const b = req.body || {};
+    const cos = (Array.isArray(b.cos) ? b.cos : []).slice(0, 12).map((c: any, i: number) => ({ id: `CO${i + 1}`, text: String(c.text || '').trim().slice(0, 500) })).filter((c: any) => c.text);
+    const ids = new Set<string>(cos.map((c: any) => String(c.id)));
+    const mapping: any = {}; const attainment: any = {};
+    for (const id of ids) {
+      const m = b.mapping?.[id] || {}; mapping[id] = {};
+      for (const o of OBE_OUTCOMES) { const v = Number(m[o]); if ([1, 2, 3].includes(v)) mapping[id][o] = v; }
+      const a = b.attainment?.[id] || {};
+      const pct = a.direct_pct === '' || a.direct_pct === null || a.direct_pct === undefined ? null : Math.max(0, Math.min(100, Number(a.direct_pct)));
+      const ind = a.indirect === '' || a.indirect === null || a.indirect === undefined ? null : Math.max(0, Math.min(3, Number(a.indirect)));
+      attainment[id] = { direct_pct: Number.isFinite(pct as number) ? pct : null, indirect: Number.isFinite(ind as number) ? ind : null };
+    }
+    const sIn = b.settings || {};
+    const settings = {
+      target_pct: Math.max(0, Math.min(100, Number(sIn.target_pct ?? OBE_DEFAULTS.target_pct))),
+      l1: Number(sIn.l1 ?? OBE_DEFAULTS.l1), l2: Number(sIn.l2 ?? OBE_DEFAULTS.l2), l3: Number(sIn.l3 ?? OBE_DEFAULTS.l3),
+      direct_weight: Math.max(0, Math.min(100, Number(sIn.direct_weight ?? OBE_DEFAULTS.direct_weight))),
+    };
+    if (!(settings.l1 <= settings.l2 && settings.l2 <= settings.l3)) return res.status(400).json({ error: 'Level thresholds must be L1 ≤ L2 ≤ L3.' });
+    await db.query(
+      `INSERT INTO obe_courses (allotment_id, settings, cos, mapping, attainment, updated_by, updated_at) VALUES ($1,$2,$3,$4,$5,$6,NOW())
+       ON CONFLICT (allotment_id) DO UPDATE SET settings = EXCLUDED.settings, cos = EXCLUDED.cos, mapping = EXCLUDED.mapping,
+         attainment = EXCLUDED.attainment, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+      [req.params.allotmentId, JSON.stringify(settings), JSON.stringify(cos), JSON.stringify(mapping), JSON.stringify(attainment), req.auth!.email]);
+    res.json({ success: true, computed: computeObe({ settings, cos, mapping, attainment }) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /oversight/faculty-by-cadre?department=CSE&cadre=associate
 // ============================================================================
 app.get('/oversight/faculty-by-cadre', requireRole('director', 'principal', 'management', 'program_chair', 'admin', 'hod'), async (req: Request, res: Response) => {

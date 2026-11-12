@@ -129,6 +129,7 @@ const facultyNav: NavGroup[] = [
       { label: 'My Faculty Profile', path: '/faculty/dashboard?tab=profile', icon: User },
       { label: 'My Student Feedback', path: '/feedback', icon: Star },
       { label: 'My Appraisal', path: '/appraisal', icon: ClipboardCheck },
+      { label: 'CO–PO Attainment', path: '/obe', icon: CheckSquare },
     ],
   },
   {
@@ -148,6 +149,7 @@ const adminNav: NavGroup[] = [
       { label: 'Admin Dashboard', path: '/admin/dashboard?tab=home', icon: LayoutDashboard },
       { label: 'Monthly Report', path: '/reports/monthly', icon: FileBarChart },
       { label: 'NAAC / NBA Data Pack', path: '/accreditation', icon: FileCheck },
+      { label: 'CO–PO Attainment', path: '/obe', icon: CheckSquare },
       { label: 'Student Feedback', path: '/feedback', icon: Star },
     ],
   },
@@ -230,6 +232,7 @@ const hodNav: NavGroup[] = [
       { label: 'At-Risk Students', path: '/risk', icon: ShieldCheck },
       { label: 'Monthly Report', path: '/reports/monthly', icon: FileBarChart },
       { label: 'NAAC / NBA Data Pack', path: '/accreditation', icon: FileCheck },
+      { label: 'CO–PO Attainment', path: '/obe', icon: CheckSquare },
       { label: 'Student Feedback', path: '/feedback', icon: Star },
       { label: 'Placement Drives', path: '/placement/drives', icon: Award },
       { label: 'Faculty Appraisal', path: '/appraisal', icon: ClipboardCheck },
@@ -337,6 +340,7 @@ const oversightNav: NavGroup[] = [
     items: [
       { label: 'Monthly Principal\'s Report', path: '/reports/monthly', icon: FileBarChart },
       { label: 'NAAC / NBA Data Pack', path: '/accreditation', icon: FileCheck },
+      { label: 'CO–PO Attainment', path: '/obe', icon: CheckSquare },
       { label: 'Student Feedback', path: '/feedback', icon: Star },
       { label: 'Faculty Appraisal', path: '/appraisal', icon: ClipboardCheck },
       { label: 'Student Analytics', path: '/oversight/dashboard?tab=students', icon: Users },

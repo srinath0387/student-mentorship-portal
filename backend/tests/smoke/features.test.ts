@@ -364,3 +364,33 @@ describe('FT008 live-code attendance', () => {
     expect(other.status).toBe(404);
   });
 });
+
+describe('FT009 CO-PO attainment', () => {
+  const allot = { id: 'AL1', faculty_email: 'ramesh@rgmcet.edu.in', department: 'CSE (Data Science)', subject_name: 'DBMS', semester_label: '3-1', section: 'A', faculty_name: 'Dr. Ramesh' };
+  const cfg = {
+    settings: {}, cos: [{ id: 'CO1', text: 'Design ER models' }, { id: 'CO2', text: 'Write SQL queries' }],
+    mapping: { CO1: { PO1: 3 }, CO2: { PO1: 1, PO2: 2 } },
+    attainment: { CO1: { direct_pct: 75, indirect: 2 }, CO2: { direct_pct: 62, indirect: null } },
+  };
+
+  it('computes CO levels and weighted PO attainment', async () => {
+    routeDb([['FROM subject_allotments WHERE id::text', [allot]], ['SELECT * FROM obe_courses WHERE allotment_id', [cfg]]]);
+    const res = await request(app).get('/obe/course/AL1').set('Authorization', bearer('faculty', 'ramesh@rgmcet.edu.in'));
+    expect(res.status).toBe(200);
+    expect(res.body.computed.cos.map((c: any) => [c.id, c.direct_level, c.attainment])).toEqual([['CO1', 3, 2.8], ['CO2', 2, 2]]);
+    expect(res.body.computed.po_attainment).toMatchObject({ PO1: 2.6, PO2: 2, PO3: null });
+    expect(res.body.can_edit).toBe(true);
+  });
+
+  it('only the course faculty (or HOD/admin) can edit, and thresholds must be ordered', async () => {
+    routeDb([['FROM subject_allotments WHERE id::text', [allot]]]);
+    expect((await request(app).put('/obe/course/AL1').set('Authorization', bearer('faculty', 'other@rgmcet.edu.in')).send(cfg)).status).toBe(403);
+    expect((await request(app).put('/obe/course/AL1').set('Authorization', bearer('faculty', 'ramesh@rgmcet.edu.in')).send({ ...cfg, settings: { l1: 70, l2: 60, l3: 50 } })).status).toBe(400);
+    const calls = routeDb([['FROM subject_allotments WHERE id::text', [allot]]]);
+    const ok = await request(app).put('/obe/course/AL1').set('Authorization', bearer('faculty', 'ramesh@rgmcet.edu.in'))
+      .send({ ...cfg, mapping: { CO1: { PO1: 3, PO5: 9 } } });
+    expect(ok.status).toBe(200);
+    const saved = calls.find(c => c.sql.includes('INSERT INTO obe_courses'))!;
+    expect(JSON.parse(saved.params[3])).toEqual({ CO1: { PO1: 3 }, CO2: {} });
+  });
+});

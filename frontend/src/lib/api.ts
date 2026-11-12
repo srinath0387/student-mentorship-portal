@@ -1041,6 +1041,12 @@ export const api = {
     return fetchWithAuth(`/attendance/sessions${query}`);
   },
 
+  // ── CO-PO attainment ──
+  getObeCourses: async () => fetchWithAuth('/obe/courses'),
+  getObeCourse: async (allotmentId: string) => fetchWithAuth(`/obe/course/${encodeURIComponent(allotmentId)}`),
+  saveObeCourse: async (allotmentId: string, cfg: any) =>
+    fetchWithAuth(`/obe/course/${encodeURIComponent(allotmentId)}`, { method: 'PUT', body: JSON.stringify(cfg) }),
+
   // ── Live-code attendance ──
   startLiveAttendance: async (data: { allotment_id: string; session_date: string; period_start: number; num_periods: number; minutes?: number }) =>
     fetchWithAuth('/attendance/live/start', { method: 'POST', body: JSON.stringify(data) }),
