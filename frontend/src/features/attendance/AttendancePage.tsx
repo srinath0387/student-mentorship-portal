@@ -6,6 +6,7 @@ import { FacultyAttendancePage } from './faculty/FacultyAttendancePage';
 import { HodAttendancePage } from './hod/HodAttendancePage';
 import { CoordinatorAttendancePage } from './coordinator/CoordinatorAttendancePage';
 import { AttendanceSetupPage } from './admin/AttendanceSetupPage';
+import { OversightAttendanceView } from '../oversight/OversightAttendanceView';
 
 export const AttendancePage: React.FC = () => {
   const { user } = useAuth();
@@ -35,12 +36,18 @@ export const AttendancePage: React.FC = () => {
     return <CoordinatorAttendancePage />;
   }
 
-  // 5. Admin / Superadmin View
+  // 5. Oversight roles — read-only department attendance & at-risk students
+  //    (no roster / timetable / subject allocation tools)
+  if (['director', 'principal', 'management', 'program_chair'].includes(role)) {
+    return <OversightAttendanceView />;
+  }
+
+  // 6. Admin / Superadmin View
   if (role === 'admin' || role === 'superadmin') {
     return <AttendanceSetupPage />;
   }
 
-  // 6. Default: Faculty View (for taking / managing attendance)
+  // 7. Default: Faculty View (for taking / managing attendance)
   return <FacultyAttendancePage />;
 };
 

@@ -7181,6 +7181,121 @@ app.get('/reports/hod-analytics', requireAuth, async (req: Request, res: Respons
 // Institutional Oversight: Executive Intelligence Command Center Metrics
 // Real-time departmental metrics for Director, Principal, Management & Program Chair
 // ============================================================================
+// ============================================================================
+// Oversight attendance helpers
+// Each student's attendance is computed for their CURRENT semester only — the latest
+// semester_label they are rostered in — counting periods from their roster joining date.
+// Same counting rules as /attendance/analytics/semester-summary.
+// ============================================================================
+const CSE_ALLIED_DEPTS = ['CSE', 'CSE (AI & ML)', 'CSE (Data Science)', 'CSE (BS)', 'CSE (CS)'];
+const ATTENDANCE_RISK_THRESHOLD = 75;
+const ATTENDANCE_CRITICAL_THRESHOLD = 65;
+
+interface StudentAttendanceRow {
+  roll_number: string;
+  name: string;
+  department: string;
+  year: string;
+  section: string;
+  semester: string;
+  held: number;
+  attended: number;
+  percentage: number;
+}
+
+async function fetchCurrentSemesterAttendance(depts: string[] | null): Promise<StudentAttendanceRow[]> {
+  const params: any[] = [];
+  let deptFilter = '';
+  if (depts && depts.length > 0) {
+    params.push(depts);
+    deptFilter = `AND st.department = ANY($1)`;
+  }
+  const result = await db.query(`
+    WITH cur AS (
+      SELECT r.roll_number, MAX(a.semester_label) AS semester
+      FROM subject_rosters r
+      JOIN subject_allotments a ON a.id = r.allotment_id
+      GROUP BY r.roll_number
+    ),
+    agg AS (
+      SELECT r.roll_number,
+             COALESCE(SUM(CASE WHEN s.session_date >= COALESCE(r.joining_date, '1970-01-01'::date) THEN s.num_periods ELSE 0 END), 0) AS held,
+             COALESCE(SUM(CASE WHEN s.session_date >= COALESCE(r.joining_date, '1970-01-01'::date) AND ar.is_present = true THEN s.num_periods ELSE 0 END), 0) AS attended
+      FROM subject_rosters r
+      JOIN subject_allotments a ON a.id = r.allotment_id
+      JOIN cur ON cur.roll_number = r.roll_number AND cur.semester = a.semester_label
+      LEFT JOIN attendance_sessions s ON s.allotment_id = a.id
+      LEFT JOIN attendance_records ar ON ar.session_id = s.id AND ar.roll_number = r.roll_number
+      GROUP BY r.roll_number
+    )
+    SELECT st.roll_number, st.name, st.department, st.year, st.section, cur.semester,
+           agg.held, agg.attended
+    FROM agg
+    JOIN cur ON cur.roll_number = agg.roll_number
+    JOIN students st ON st.roll_number = agg.roll_number
+    WHERE agg.held > 0 ${deptFilter}
+  `, params);
+
+  return result.rows.map((r: any) => {
+    const held = parseInt(r.held || '0', 10);
+    const attended = parseInt(r.attended || '0', 10);
+    return {
+      roll_number: r.roll_number,
+      name: r.name || r.roll_number,
+      department: r.department || 'Unassigned',
+      year: r.year || '',
+      section: r.section || '',
+      semester: r.semester || '',
+      held,
+      attended,
+      percentage: held > 0 ? Math.round((attended / held) * 1000) / 10 : 0,
+    };
+  });
+}
+
+interface DeptAttendanceSummary {
+  department: string;
+  students_tracked: number;
+  periods_held: number;
+  periods_attended: number;
+  overall_percentage: number;
+  at_risk_count: number;
+  critical_count: number;
+  by_year: { year: string; students_tracked: number; overall_percentage: number; at_risk_count: number }[];
+}
+
+function summariseAttendanceByDept(rows: StudentAttendanceRow[]): Map<string, DeptAttendanceSummary> {
+  const map = new Map<string, DeptAttendanceSummary & { _years: Map<string, { n: number; held: number; att: number; risk: number }> }>();
+  for (const r of rows) {
+    let d = map.get(r.department);
+    if (!d) {
+      d = { department: r.department, students_tracked: 0, periods_held: 0, periods_attended: 0, overall_percentage: 0,
+            at_risk_count: 0, critical_count: 0, by_year: [], _years: new Map() };
+      map.set(r.department, d);
+    }
+    d.students_tracked += 1;
+    d.periods_held += r.held;
+    d.periods_attended += r.attended;
+    const risky = r.percentage < ATTENDANCE_RISK_THRESHOLD;
+    if (risky) d.at_risk_count += 1;
+    if (r.percentage < ATTENDANCE_CRITICAL_THRESHOLD) d.critical_count += 1;
+    const yk = r.year || 'Unknown';
+    const y = d._years.get(yk) || { n: 0, held: 0, att: 0, risk: 0 };
+    y.n += 1; y.held += r.held; y.att += r.attended; if (risky) y.risk += 1;
+    d._years.set(yk, y);
+  }
+  const out = new Map<string, DeptAttendanceSummary>();
+  for (const [k, d] of map) {
+    const { _years, ...rest } = d;
+    rest.overall_percentage = d.periods_held > 0 ? Math.round((d.periods_attended / d.periods_held) * 1000) / 10 : 0;
+    rest.by_year = Array.from(_years.entries())
+      .map(([year, y]) => ({ year, students_tracked: y.n, overall_percentage: y.held > 0 ? Math.round((y.att / y.held) * 1000) / 10 : 0, at_risk_count: y.risk }))
+      .sort((a, b) => a.year.localeCompare(b.year));
+    out.set(k, rest);
+  }
+  return out;
+}
+
 app.get('/oversight/executive-metrics', requireRole('director', 'principal', 'management', 'program_chair', 'admin', 'hod'), async (req: Request, res: Response) => {
   try {
     const userRole = req.auth?.role;
@@ -7221,7 +7336,7 @@ app.get('/oversight/executive-metrics', requireRole('director', 'principal', 'ma
     const requestedDept = req.query.department ? String(req.query.department).trim() : 'All';
     const activeDepts = (isHod && hodDept)
       ? [hodDept]
-      : (requestedDept !== 'All' && (allowedDepts.includes(requestedDept) || dbDepts.includes(requestedDept)))
+      : (requestedDept !== 'All' && (allowedDepts.includes(requestedDept) || (!isProgramChair && dbDepts.includes(requestedDept))))
       ? [requestedDept]
       : allowedDepts;
 
@@ -7464,21 +7579,52 @@ app.get('/oversight/executive-metrics', requireRole('director', 'principal', 'ma
       entry.fdpCount += fdpList.length;
     }
 
-    // 4. Student Certifications — full provider breakdown including Cisco & others
-    const certRes = await db.query(`
+    // 4. Student Certifications — both the catalog-based student_certifications table (current
+    //    certification module) and the legacy certifications table, de-duplicated per student+title.
+    const certAggSelect = `
       SELECT s.department,
-             COUNT(c.id) as total_certs,
-             COUNT(DISTINCT c.student_id) as certified_students,
-             COUNT(c.id) FILTER (WHERE LOWER(c.provider) LIKE '%aws%' OR LOWER(c.provider) LIKE '%amazon%') as aws_certs,
-             COUNT(c.id) FILTER (WHERE LOWER(c.provider) LIKE '%nptel%' OR LOWER(c.provider) LIKE '%swayam%') as nptel_certs,
-             COUNT(c.id) FILTER (WHERE LOWER(c.provider) LIKE '%azure%' OR LOWER(c.provider) LIKE '%microsoft%') as azure_certs,
-             COUNT(c.id) FILTER (WHERE LOWER(c.provider) LIKE '%oracle%') as oracle_certs,
-             COUNT(c.id) FILTER (WHERE LOWER(c.provider) LIKE '%google%' OR LOWER(c.provider) LIKE '%gcp%') as gcp_certs,
-             COUNT(c.id) FILTER (WHERE LOWER(c.provider) LIKE '%cisco%') as cisco_certs
-      FROM students s
-      JOIN certifications c ON s.roll_number = c.student_id
-      GROUP BY s.department
-    `).catch(() => ({ rows: [] }));
+             COUNT(*) as total_certs,
+             COUNT(DISTINCT uc.roll_number) as certified_students,
+             COUNT(*) FILTER (WHERE LOWER(uc.issuer) LIKE '%aws%' OR LOWER(uc.issuer) LIKE '%amazon%') as aws_certs,
+             COUNT(*) FILTER (WHERE LOWER(uc.issuer) LIKE '%nptel%' OR LOWER(uc.issuer) LIKE '%swayam%') as nptel_certs,
+             COUNT(*) FILTER (WHERE LOWER(uc.issuer) LIKE '%azure%' OR LOWER(uc.issuer) LIKE '%microsoft%') as azure_certs,
+             COUNT(*) FILTER (WHERE LOWER(uc.issuer) LIKE '%oracle%') as oracle_certs,
+             COUNT(*) FILTER (WHERE LOWER(uc.issuer) LIKE '%google%' OR LOWER(uc.issuer) LIKE '%gcp%') as gcp_certs,
+             COUNT(*) FILTER (WHERE LOWER(uc.issuer) LIKE '%cisco%') as cisco_certs
+      FROM unified_certs uc
+      JOIN students s ON UPPER(TRIM(s.roll_number)) = uc.roll_number
+      GROUP BY s.department`;
+    const certRes = await db.query(`
+      WITH unified_certs AS (
+        SELECT UPPER(TRIM(sc.roll_number)) AS roll_number,
+               TRIM(sc.certificate_name) AS title,
+               COALESCE(sc.issuer, '') AS issuer
+        FROM student_certifications sc
+        WHERE sc.certificate_name IS NOT NULL AND TRIM(sc.certificate_name) <> ''
+          AND COALESCE(LOWER(sc.status), '') <> 'rejected'
+        UNION ALL
+        SELECT UPPER(TRIM(c.student_id)) AS roll_number,
+               TRIM(c.title) AS title,
+               COALESCE(c.provider, '') AS issuer
+        FROM certifications c
+        WHERE c.title IS NOT NULL AND TRIM(c.title) <> ''
+          AND NOT EXISTS (
+            SELECT 1 FROM student_certifications sc2
+            WHERE UPPER(TRIM(sc2.roll_number)) = UPPER(TRIM(c.student_id))
+              AND LOWER(TRIM(sc2.certificate_name)) = LOWER(TRIM(c.title))
+          )
+      )
+      ${certAggSelect}
+    `).catch(() =>
+      // student_certifications not created yet on this database — legacy table only
+      db.query(`
+        WITH unified_certs AS (
+          SELECT UPPER(TRIM(c.student_id)) AS roll_number, TRIM(c.title) AS title, COALESCE(c.provider, '') AS issuer
+          FROM certifications c
+        )
+        ${certAggSelect}
+      `).catch(() => ({ rows: [] }))
+    );
 
     const certMap = new Map<string, any>();
     for (const r of certRes.rows) {
@@ -7515,6 +7661,14 @@ app.get('/oversight/executive-metrics', requireRole('director', 'principal', 'ma
         maxLpa: parseFloat(r.max_lpa || '0'),
         avgLpa: parseFloat(r.avg_lpa || '0'),
       });
+    }
+
+    // 6. Attendance — current-semester attendance per student, rolled up by department
+    let attendanceByDept = new Map<string, DeptAttendanceSummary>();
+    try {
+      attendanceByDept = summariseAttendanceByDept(await fetchCurrentSemesterAttendance(activeDepts));
+    } catch (attErr: any) {
+      console.warn('[executive-metrics] attendance aggregation skipped:', attErr.message);
     }
 
     // Construct the finalized department-wise response
@@ -7562,8 +7716,9 @@ app.get('/oversight/executive-metrics', requireRole('director', 'principal', 'ma
         doctorate_percentage: facultyCount > 0 ? Math.round((doctorates / facultyCount) * 100) : 0,
         sfr,
         sfr_status,
-        avg_attendance: 0,
-        below_75_attendance_count: 0,
+        avg_attendance: attendanceByDept.get(dept)?.overall_percentage ?? 0,
+        below_75_attendance_count: attendanceByDept.get(dept)?.at_risk_count ?? 0,
+        attendance_students_tracked: attendanceByDept.get(dept)?.students_tracked ?? 0,
         total_publications: pub.total,
         publications_by_year: pub.byYear,
         publications_by_category: pub.byCat,
@@ -7667,8 +7822,12 @@ app.get('/oversight/executive-metrics', requireRole('director', 'principal', 'ma
           ? Math.round(deptResults.reduce((a, b) => a + b.student_certifications.penetration_rate, 0) / deptResults.length)
           : 0,
         total_faculty_fdps: deptResults.reduce((a, b) => a + b.faculty_fdp_count, 0),
-        overall_attendance_rate: 0,
-        students_at_risk_attendance: 0,
+        overall_attendance_rate: (() => {
+          let held = 0, att = 0;
+          for (const a of attendanceByDept.values()) { held += a.periods_held; att += a.periods_attended; }
+          return held > 0 ? Math.round((att / held) * 1000) / 10 : 0;
+        })(),
+        students_at_risk_attendance: Array.from(attendanceByDept.values()).reduce((acc, a) => acc + a.at_risk_count, 0),
         overall_placement_rate: totalStudents > 0 ? Math.round((totalPlaced / totalStudents) * 100) : 0,
         highest_package_lpa: allLpas.length > 0 ? Math.max(...allLpas) : 0,
         avg_package_lpa: allAvgLpas.length > 0
@@ -7690,6 +7849,62 @@ app.get('/oversight/executive-metrics', requireRole('director', 'principal', 'ma
 
 // ============================================================================
 // Institutional Oversight: Faculty by Cadre — Real profile drill-down
+// GET /oversight/attendance-overview?department=All
+// Read-only, institution-wide attendance for oversight roles: department-wise current-semester
+// attendance %, year breakdown, and the list of students below the 75% threshold.
+app.get('/oversight/attendance-overview', requireRole('director', 'principal', 'management', 'program_chair', 'admin', 'hod'), async (req: Request, res: Response) => {
+  try {
+    const role = req.auth?.role;
+    const requested = req.query.department ? String(req.query.department).trim() : 'All';
+    let scope: string[] | null = null; // null = all departments
+    if (role === 'hod' && req.auth?.department && req.auth.department !== '*') scope = [req.auth.department];
+    else if (role === 'program_chair') scope = CSE_ALLIED_DEPTS;
+    else if (role === 'admin' && req.auth?.department && !['*', 'All'].includes(req.auth.department) && !req.auth.isSuperAdmin) scope = [req.auth.department];
+
+    let depts = scope;
+    if (requested !== 'All') {
+      if (scope && !scope.includes(requested)) return res.status(403).json({ error: 'Department outside your scope' });
+      depts = [requested];
+    }
+
+    if (db.isMock) {
+      return res.json({ threshold: ATTENDANCE_RISK_THRESHOLD, critical_threshold: ATTENDANCE_CRITICAL_THRESHOLD,
+        allowed_departments: scope || [], totals: { students_tracked: 0, overall_percentage: 0, at_risk_count: 0, critical_count: 0 },
+        departments: [], at_risk_students: [] });
+    }
+
+    const rows = await fetchCurrentSemesterAttendance(depts);
+    const byDept = summariseAttendanceByDept(rows);
+    const departments = Array.from(byDept.values()).sort((a, b) => a.overall_percentage - b.overall_percentage);
+
+    let held = 0, att = 0;
+    for (const d of departments) { held += d.periods_held; att += d.periods_attended; }
+    const atRisk = rows
+      .filter(r => r.percentage < ATTENDANCE_RISK_THRESHOLD)
+      .sort((a, b) => a.percentage - b.percentage);
+
+    const allDeptsRes = scope ? { rows: scope.map(d => ({ department: d })) }
+      : await db.query(`SELECT DISTINCT department FROM students WHERE department IS NOT NULL AND department <> '' ORDER BY department`);
+
+    return res.json({
+      threshold: ATTENDANCE_RISK_THRESHOLD,
+      critical_threshold: ATTENDANCE_CRITICAL_THRESHOLD,
+      allowed_departments: allDeptsRes.rows.map((r: any) => r.department),
+      totals: {
+        students_tracked: rows.length,
+        overall_percentage: held > 0 ? Math.round((att / held) * 1000) / 10 : 0,
+        at_risk_count: atRisk.length,
+        critical_count: atRisk.filter(r => r.percentage < ATTENDANCE_CRITICAL_THRESHOLD).length,
+      },
+      departments,
+      at_risk_students: atRisk,
+    });
+  } catch (err: any) {
+    console.error('[oversight/attendance-overview]', err.message);
+    return res.status(500).json({ error: 'Failed to load attendance overview' });
+  }
+});
+
 // GET /oversight/faculty-by-cadre?department=CSE&cadre=associate
 // ============================================================================
 app.get('/oversight/faculty-by-cadre', requireRole('director', 'principal', 'management', 'program_chair', 'admin', 'hod'), async (req: Request, res: Response) => {

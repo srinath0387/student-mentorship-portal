@@ -77,3 +77,45 @@ describe('Session authentication', () => {
     expect([401, 403]).not.toContain(mentor.status);
   });
 });
+
+describe('Oversight attendance overview', () => {
+  it('requires an oversight/admin/hod session', async () => {
+    const anon = await request(app).get('/oversight/attendance-overview');
+    expect(anon.status).toBe(401);
+
+    const student = signSessionToken({ role: 'student', email: '23091a3251@rgmcet.edu.in' });
+    const asStudent = await request(app).get('/oversight/attendance-overview').set('Authorization', `Bearer ${student}`);
+    expect(asStudent.status).toBe(403);
+  });
+
+  it('keeps the program chair inside CSE-allied departments', async () => {
+    const chair = signSessionToken({ role: 'program_chair', email: 'chaircse@rgmcet.edu.in' });
+    const res = await request(app).get('/oversight/attendance-overview?department=Civil').set('Authorization', `Bearer ${chair}`);
+    expect(res.status).toBe(403);
+  });
+
+  it('returns department-wise attendance with at-risk students for a principal', async () => {
+    db.query.mockReset();
+    db.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH cur AS')) {
+        return { rows: [
+          { roll_number: '23091A3201', name: 'A', department: 'CSE (Data Science)', year: '3rd Year', section: 'A', semester: '3-1', held: '100', attended: '60' },
+          { roll_number: '23091A3202', name: 'B', department: 'CSE (Data Science)', year: '3rd Year', section: 'A', semester: '3-1', held: '100', attended: '90' },
+          { roll_number: '23011A0101', name: 'C', department: 'Civil', year: '2nd Year', section: 'B', semester: '2-1', held: '50', attended: '35' },
+        ] };
+      }
+      if (sql.includes('SELECT DISTINCT department')) return { rows: [{ department: 'CSE (Data Science)' }, { department: 'Civil' }] };
+      return { rows: [], rowCount: 0 };
+    });
+    const principal = signSessionToken({ role: 'principal', email: 'principal@rgmcet.edu.in' });
+    const res = await request(app).get('/oversight/attendance-overview').set('Authorization', `Bearer ${principal}`);
+    db.query.mockReset();
+    db.query.mockResolvedValue({ rows: [], rowCount: 0 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.totals).toEqual({ students_tracked: 3, overall_percentage: 74, at_risk_count: 2, critical_count: 1 });
+    const ds = res.body.departments.find((d: any) => d.department === 'CSE (Data Science)');
+    expect(ds).toMatchObject({ students_tracked: 2, overall_percentage: 75, at_risk_count: 1, critical_count: 1 });
+    expect(res.body.at_risk_students.map((s: any) => s.roll_number)).toEqual(['23091A3201', '23011A0101']);
+  });
+});

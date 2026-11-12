@@ -51,6 +51,7 @@ import { BulkImportModal } from './components/BulkImportModal';
 import { FacultyRecordsTable } from './components/FacultyRecordsTable';
 import { PlacementEligibilitySection } from '../hod/components/PlacementEligibilitySection';
 import { AttendanceSetupPage } from '../attendance/admin/AttendanceSetupPage';
+import { OversightAttendanceView } from '../oversight/OversightAttendanceView';
 import { HodLeaveApprovalTab } from '../leave/HodLeaveApprovalTab';
 import { HolidayCalendarTab } from './tabs/HolidayCalendarTab';
 import { LeaveCreditManagementTab } from './tabs/LeaveCreditManagementTab';
@@ -733,7 +734,7 @@ export const AdminDashboardPage: React.FC = () => {
       {/* ── TAB: Attendance Setup & Management ── */}
       {activeTab === 'attendance' && (
         <div className="space-y-6">
-          <AttendanceSetupPage />
+          {isOversight ? <OversightAttendanceView /> : <AttendanceSetupPage />}
         </div>
       )}
 

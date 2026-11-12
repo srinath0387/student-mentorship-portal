@@ -305,7 +305,7 @@ const oversightNav: NavGroup[] = [
     title: 'Attendance',
     icon: CalendarCheck,
     items: [
-      { label: 'Attendance Analytics', path: '/admin/dashboard?tab=attendance', icon: CalendarCheck },
+      { label: 'Attendance Overview', path: '/attendance', icon: CalendarCheck },
       { label: 'Faculty Workload', path: '/attendance/workload', icon: BarChart2 },
       { label: 'Attendance Reports', path: '/attendance/reports', icon: FileBarChart },
     ],

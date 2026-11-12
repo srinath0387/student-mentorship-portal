@@ -771,6 +771,12 @@ export const api = {
   },
 
   // Institutional Oversight: Real-time Executive Intelligence Metrics
+  // Read-only department-wise attendance + at-risk students for oversight roles
+  getOversightAttendanceOverview: async (dept?: string): Promise<import('../features/oversight/OversightAttendanceView').AttendanceOverview> => {
+    const q = dept && dept !== 'All' ? `?department=${encodeURIComponent(dept)}` : '';
+    return fetchWithAuth(`/oversight/attendance-overview${q}`);
+  },
+
   getExecutiveMetrics: async (dept?: string): Promise<import('../types').ExecutiveMetricsResponse> => {
     const q = dept ? `?department=${encodeURIComponent(dept)}` : '';
     return fetchWithAuth(`/oversight/executive-metrics${q}`);
