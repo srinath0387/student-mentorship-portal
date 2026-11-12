@@ -44,3 +44,6 @@
 [2026-11-12 14:17] GSD SESSION START — Lab co-faculty
 [2026-11-12 14:17] AT007 → done: lab co-faculty (allotment field, workload + API score credit, view-only timetable, attendance main-only). 120 tests pass, builds ✓. Committed a18a318.
 [2026-11-12 14:17] GSD SESSION END — AT007 done.
+
+[2026-11-12 18:00] GSD SESSION START — Management features FT001–FT011 added to prd.json.
+[2026-11-12 14:30] FT001 → done: risk alerts (scoring, scoped API, page, student/parent card). 123 tests pass, builds ✓, screenshot checked. Committed 49b1f65.
