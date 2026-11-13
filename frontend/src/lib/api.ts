@@ -967,6 +967,8 @@ export const api = {
       method: 'DELETE',
     });
   },
+  /** Timetable slots whose subject/faculty no longer has an allotment for that class */
+  getOrphanTimetableSlots: async (): Promise<any[]> => fetchWithAuth('/attendance/timetable/orphans'),
 
   uploadRoster: async (allotmentId: string, roster: any[]) => {
     return fetchWithAuth('/attendance/rosters/upload', {

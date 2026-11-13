@@ -124,7 +124,24 @@ export const AttendanceSetupPage: React.FC = () => {
   const [allotStatus, setAllotStatus] = useState<{type:string;message:string}|null>(null);
 
   const {data:rawAllotments=[]} = useQuery({ queryKey:['attendanceAllotments',allotSem,allotDept], queryFn:()=>api.getAllotments(allotSem||undefined,allotDept||undefined).catch(()=>[]) });
-  const allotments = Array.isArray(rawAllotments)?rawAllotments:[];
+  const allAllotments = Array.isArray(rawAllotments)?rawAllotments:[];
+  const [allotSearch, setAllotSearch] = useState('');
+  const allotments = allotSearch.trim()
+    ? allAllotments.filter((a:any)=>`${a.faculty_name} ${a.faculty_email} ${a.subject_name} ${a.section} ${a.semester_label} ${a.co_faculty_name||''}`.toLowerCase().includes(allotSearch.trim().toLowerCase()))
+    : allAllotments;
+  // Timetable slots left behind by allotments deleted earlier (subject keeps showing for the faculty)
+  const {data:orphanSlots=[], refetch:refetchOrphans} = useQuery<any[]>({ queryKey:['orphanTimetableSlots'], queryFn:()=>api.getOrphanTimetableSlots().catch(()=>[]) });
+  const [orphanBusy, setOrphanBusy] = useState(false);
+  const removeOrphans = async (ids:string[]) => {
+    if(!ids.length) return;
+    if(!window.confirm(`Remove ${ids.length} leftover timetable slot${ids.length===1?'':'s'}? The subject will stop showing in that faculty's timetable and not-posted list.`)) return;
+    setOrphanBusy(true);
+    try {
+      for (const id of ids) await api.deleteTimetableEntry(id);
+      setAllotStatus({type:'success',message:`Removed ${ids.length} leftover timetable slot${ids.length===1?'':'s'}.`});
+    } catch(err:any) { setAllotStatus({type:'error',message:err.message||'Could not remove the slots.'}); }
+    finally { setOrphanBusy(false); refetchOrphans(); qc.invalidateQueries({queryKey:['attendanceTimetable']}); }
+  };
   const {data:rawFacultyList=[]} = useQuery({ queryKey:['allFaculty'], queryFn:()=>api.getAllFaculty().catch(()=>[]) });
   const facultyList = Array.isArray(rawFacultyList)?rawFacultyList:[];
   const subjectsForAllot = masterSubjects.filter((s:any)=>!allotSem||s.semester_label===allotSem);
@@ -147,11 +164,13 @@ export const AttendanceSetupPage: React.FC = () => {
   };
 
   const handleDeleteAllotment = async (id:string) => {
-    if(!window.confirm('Remove this allotment?')) return;
+    if(!window.confirm('Remove this allotment? Its timetable slots for this class are removed too.')) return;
     try {
-      await api.deleteAllotment(id);
+      const r:any = await api.deleteAllotment(id);
       qc.invalidateQueries({queryKey:['attendanceAllotments']});
-      setAllotStatus({type:'success',message:'Allotment removed.'});
+      qc.invalidateQueries({queryKey:['orphanTimetableSlots']});
+      qc.invalidateQueries({queryKey:['attendanceTimetable']});
+      setAllotStatus({type:'success',message:r?.message||'Allotment removed.'});
     } catch(err:any) { setAllotStatus({type:'error',message:err.message||'Failed to delete allotment.'}); }
   };
 
@@ -465,14 +484,18 @@ export const AttendanceSetupPage: React.FC = () => {
           </form>
 
           <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden">
-            <div className="p-3 border-b border-borderLine font-bold text-xs text-textPrimary">Active Allotments ({allotments.length})</div>
+            <div className="p-3 border-b border-borderLine flex flex-wrap items-center justify-between gap-2">
+              <span className="font-bold text-xs text-textPrimary">Active Allotments ({allotments.length}{allotSearch.trim() ? ` of ${allAllotments.length}` : ''})</span>
+              <input value={allotSearch} onChange={e=>setAllotSearch(e.target.value)} placeholder="Search faculty, subject, section…"
+                className="px-3 py-1.5 text-xs rounded-lg border border-borderLine bg-background focus:outline-none w-60"/>
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-left">
                 <thead className="bg-surface-2 border-b border-borderLine font-bold text-textSecondary uppercase text-[10px]">
                   <tr><th className="px-4 py-2.5">Class</th><th className="px-4 py-2.5">Dept</th><th className="px-4 py-2.5">Section</th><th className="px-4 py-2.5">Subject</th><th className="px-4 py-2.5">Type</th><th className="px-4 py-2.5">Faculty (posts attendance)</th><th className="px-4 py-2.5">Lab Co-Faculty</th><th className="px-4 py-2.5 text-center">Remove</th></tr>
                 </thead>
                 <tbody className="divide-y divide-borderLine">
-                  {allotments.length===0?<tr><td colSpan={8} className="p-8 text-center text-textMuted">No allotments yet.</td></tr>:allotments.map((a:any)=>(
+                  {allotments.length===0?<tr><td colSpan={8} className="p-8 text-center text-textMuted">{allotSearch.trim() ? 'No allotment matches this search for the selected semester / department.' : 'No allotments yet.'}</td></tr>:allotments.map((a:any)=>(
                     <tr key={a.id} className="hover:bg-surface-2">
                       <td className="px-4 py-2.5 font-bold">{a.semester_label}</td>
                       <td className="px-4 py-2.5">{a.department}</td>
@@ -508,6 +531,37 @@ export const AttendanceSetupPage: React.FC = () => {
               </table>
             </div>
           </div>
+
+          {orphanSlots.length > 0 && (
+            <div className="bg-surface border border-amber-300 rounded-2xl overflow-hidden">
+              <div className="p-3 border-b border-amber-200 bg-amber-50 dark:bg-amber-950/30 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="font-bold text-xs text-amber-900 dark:text-amber-200">Leftover timetable slots ({orphanSlots.length})</p>
+                  <p className="text-[11px] text-amber-800 dark:text-amber-300">These subjects have no allotment for that class any more, but still show in the faculty's timetable, not-posted list and workload.</p>
+                </div>
+                <button disabled={orphanBusy} onClick={()=>removeOrphans(orphanSlots.map((o:any)=>o.id))}
+                  className="px-3 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-bold disabled:opacity-50">Remove all</button>
+              </div>
+              <div className="overflow-x-auto max-h-72">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-surface-2 border-b border-borderLine font-bold text-textSecondary uppercase text-[10px]">
+                    <tr><th className="px-4 py-2">Faculty</th><th className="px-4 py-2">Subject</th><th className="px-4 py-2">Class</th><th className="px-4 py-2">Slot</th><th className="px-4 py-2 text-center">Remove</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-borderLine">
+                    {orphanSlots.map((o:any)=>(
+                      <tr key={o.id} className="hover:bg-surface-2">
+                        <td className="px-4 py-2">{o.faculty_name||o.faculty_email}<br/><span className="text-textMuted text-[10px]">{o.faculty_email}</span></td>
+                        <td className="px-4 py-2 font-bold">{o.subject_name} <span className="font-normal text-textMuted">({o.subject_type})</span></td>
+                        <td className="px-4 py-2">{o.semester_label} · {o.department} · {o.section}</td>
+                        <td className="px-4 py-2">{o.day_of_week}, P{o.period_start}{o.num_periods>1?`–${o.period_start+o.num_periods-1}`:''}</td>
+                        <td className="px-4 py-2 text-center"><button disabled={orphanBusy} onClick={()=>removeOrphans([o.id])} className="text-rose-500 hover:opacity-70 disabled:opacity-40"><Trash2 className="w-3.5 h-3.5"/></button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

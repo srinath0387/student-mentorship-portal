@@ -587,3 +587,43 @@ describe('Program chair scoping', () => {
     expect(calls.find(c => c.sql.includes('FROM student_documents sd'))!.sql).toContain('ANY(');
   });
 });
+
+describe('Subject allotment removal', () => {
+  const allot = { id: 'a1', semester_label: '3-1', department: 'CSE (Data Science)', section: 'A', subject_name: 'Database Management Systems', faculty_email: 'srinath@rgmcet.edu.in' };
+  it('deleting an allotment also removes its timetable slots', async () => {
+    const calls = routeDb([
+      ['SELECT * FROM subject_allotments WHERE id', [allot]],
+      ['DELETE FROM timetable_entries', () => [{}, {}]],
+    ]);
+    const res = await request(app).delete('/attendance/allotments/a1').set('Authorization', ADMIN());
+    expect(res.status).toBe(200);
+    expect(res.body.slots_removed).toBe(2);
+    const del = calls.find(c => c.sql.includes('DELETE FROM timetable_entries'))!;
+    expect(del.params).toEqual(['3-1', 'CSE (Data Science)', 'A', 'Database Management Systems', 'srinath@rgmcet.edu.in']);
+  });
+  it('keeps the slots when another allotment still covers the class', async () => {
+    const calls = routeDb([
+      ['SELECT * FROM subject_allotments WHERE id', [allot]],
+      ['SELECT 1 FROM subject_allotments', [{ '?column?': 1 }]],
+    ]);
+    const res = await request(app).delete('/attendance/allotments/a1').set('Authorization', ADMIN());
+    expect(res.status).toBe(200);
+    expect(calls.some(c => c.sql.includes('DELETE FROM timetable_entries'))).toBe(false);
+  });
+  it('HOD cannot delete another department’s allotment', async () => {
+    const calls = routeDb([
+      ['SELECT * FROM subject_allotments WHERE id', [{ ...allot, department: 'ECE' }]],
+      ['FROM hod_credentials', [{ department: 'CSE (Data Science)' }]],
+    ]);
+    const res = await request(app).delete('/attendance/allotments/a1').set('Authorization', bearer('hod', 'hcseds@rgmcet.edu.in'));
+    expect(res.status).toBe(403);
+    expect(calls.some(c => c.sql.includes('DELETE FROM subject_allotments'))).toBe(false);
+  });
+  it('lists leftover timetable slots with no allotment', async () => {
+    const calls = routeDb([['FROM timetable_entries t', [{ id: 't1', subject_name: 'DBMS', faculty_email: 'srinath@rgmcet.edu.in' }]]]);
+    const res = await request(app).get('/attendance/timetable/orphans').set('Authorization', ADMIN());
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(calls.find(c => c.sql.includes('FROM timetable_entries t'))!.sql).toContain('NOT EXISTS');
+  });
+});

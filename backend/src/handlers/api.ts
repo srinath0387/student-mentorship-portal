@@ -11517,14 +11517,13 @@ app.get('/attendance/allotments', requireRole('admin', 'hod', 'coordinator', 'fa
 app.delete('/attendance/allotments/:id', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const allotRes = await db.query('SELECT * FROM subject_allotments WHERE id = $1', [id]);
+    const allot = allotRes.rows[0];
+    if (!allot) return res.status(404).json({ error: 'Allotment not found.' });
 
     // HIGH-5: Verify department ownership for HOD and Coordinator
     if (req.auth?.role === 'hod' || req.auth?.role === 'coordinator') {
-      const allotRes = await db.query('SELECT department FROM subject_allotments WHERE id = $1', [id]);
-      if (allotRes.rows.length === 0) {
-        return res.status(404).json({ error: 'Allotment not found.' });
-      }
-      const allotDept = (allotRes.rows[0].department || '').toLowerCase().replace(/\s/g, '');
+      const allotDept = (allot.department || '').toLowerCase().replace(/\s/g, '');
       const callerDept = (req.auth.department || '').toLowerCase().replace(/\s/g, '');
       if (callerDept && allotDept && allotDept !== callerDept) {
         return res.status(403).json({ error: 'You can only delete allotments for your own department.' });
@@ -11532,7 +11531,23 @@ app.delete('/attendance/allotments/:id', requireRole('admin', 'hod', 'coordinato
     }
 
     await db.query('DELETE FROM subject_allotments WHERE id = $1', [id]);
-    res.json({ success: true, message: 'Subject allotment deleted successfully' });
+
+    // Timetable slots are not linked to the allotment by id — remove this class's slots for the
+    // subject + faculty too, unless another allotment still covers the same class/subject/faculty.
+    // Otherwise the subject keeps showing in the faculty timetable, not-posted tracker and workload.
+    let slotsRemoved = 0;
+    const key = [allot.semester_label, allot.department || '', allot.section || '', allot.subject_name, allot.faculty_email || ''];
+    const still = await db.query(
+      `SELECT 1 FROM subject_allotments WHERE semester_label = $1 AND COALESCE(department,'') = $2 AND COALESCE(section,'') = $3
+         AND LOWER(subject_name) = LOWER($4) AND LOWER(faculty_email) = LOWER($5) LIMIT 1`, key);
+    if (!still.rows.length) {
+      const del = await db.query(
+        `DELETE FROM timetable_entries WHERE semester_label = $1 AND COALESCE(department,'') = $2 AND COALESCE(section,'') = $3
+           AND LOWER(subject_name) = LOWER($4) AND LOWER(faculty_email) = LOWER($5)`, key).catch(() => ({ rowCount: 0 }));
+      slotsRemoved = Number((del as any).rowCount || 0);
+    }
+    res.json({ success: true, slots_removed: slotsRemoved,
+      message: `Subject allotment deleted${slotsRemoved ? ` along with ${slotsRemoved} timetable slot${slotsRemoved === 1 ? '' : 's'}` : ''}.` });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -14523,9 +14538,48 @@ app.get('/attendance/timetable', requireAuth, async (req: Request, res: Response
 });
 
 // 16. Timetable: Delete Timetable Entry
+// GET /attendance/timetable/orphans — timetable slots whose subject/faculty has no allotment for that class
+// (left behind by allotments deleted before slots were cleaned up). HOD/coordinator: own department.
+app.get('/attendance/timetable/orphans', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
+  try {
+    const params: any[] = [];
+    let deptClause = '';
+    const dept = req.auth?.department;
+    if (dept && dept !== '*' && dept !== 'All' && !req.auth?.isSuperAdmin) {
+      params.push(dept);
+      deptClause = ` AND LOWER(REPLACE(t.department, ' ', '')) = LOWER(REPLACE($1, ' ', ''))`;
+    }
+    await ensureCoFacultyColumns();
+    const r = await db.query(
+      `SELECT t.id, t.semester_label, t.department, t.section, t.day_of_week, t.period_start, t.num_periods,
+              t.subject_name, t.subject_type, t.faculty_email, t.faculty_name
+       FROM timetable_entries t
+       WHERE COALESCE(t.faculty_email, '') <> ''${deptClause}
+         AND NOT EXISTS (
+           SELECT 1 FROM subject_allotments a
+           WHERE a.semester_label = t.semester_label AND COALESCE(a.department,'') = COALESCE(t.department,'')
+             AND COALESCE(a.section,'') = COALESCE(t.section,'') AND LOWER(a.subject_name) = LOWER(t.subject_name)
+             AND (LOWER(a.faculty_email) = LOWER(t.faculty_email) OR LOWER(COALESCE(a.co_faculty_email,'')) = LOWER(t.faculty_email)))
+       ORDER BY t.faculty_name, t.semester_label, t.section, t.day_of_week, t.period_start
+       LIMIT 500`, params);
+    res.json(r.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.delete('/attendance/timetable/:id', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    if (req.auth?.role === 'hod' || req.auth?.role === 'coordinator') {
+      const t = await db.query('SELECT department FROM timetable_entries WHERE id = $1', [id]);
+      if (!t.rows[0]) return res.status(404).json({ error: 'Timetable slot not found.' });
+      const slotDept = (t.rows[0].department || '').toLowerCase().replace(/\s/g, '');
+      const callerDept = (req.auth.department || '').toLowerCase().replace(/\s/g, '');
+      if (req.auth.role === 'hod' && callerDept && slotDept && slotDept !== callerDept) {
+        return res.status(403).json({ error: 'You can only delete timetable slots for your own department.' });
+      }
+    }
     await db.query('DELETE FROM timetable_entries WHERE id = $1', [id]);
     res.json({ success: true, message: 'Timetable slot deleted.' });
   } catch (err: any) {
