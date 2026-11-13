@@ -2465,8 +2465,8 @@ app.post('/students/bulk-import', requireRole('admin'), async (req: Request, res
       // Save academic entry if CGPA provided
       if (cgpa > 0) {
         await db.query(
-          `INSERT INTO academics (student_id, semester, semester_gpa, attendance_pct)
-           VALUES ($1, 1, $2, 95.0)
+          `INSERT INTO academics (student_id, semester, semester_gpa)
+           VALUES ($1, 1, $2)
            ON CONFLICT (student_id, semester) DO UPDATE SET semester_gpa = EXCLUDED.semester_gpa`,
           [rawRoll, cgpa]
         ).catch(() => {});
@@ -3381,12 +3381,12 @@ app.post('/students/:id/academics', requireOwnerOrRole('id', 'faculty', 'hod', '
          semester_gpa = EXCLUDED.semester_gpa,
          backlogs = EXCLUDED.backlogs,
          programming_grade = EXCLUDED.programming_grade,
-         attendance_pct = EXCLUDED.attendance_pct,
+         attendance_pct = COALESCE(EXCLUDED.attendance_pct, academics.attendance_pct),
          theory_grade = EXCLUDED.theory_grade,
          remarks = EXCLUDED.remarks,
          updated_at = CURRENT_TIMESTAMP`,
       [studentId, validated.semester, validated.semester_gpa, validated.backlogs ?? 0, validated.programming_grade || null,
-       validated.attendance_pct ?? 95, validated.theory_grade || null, validated.remarks || null]
+       validated.attendance_pct ?? null, validated.theory_grade || null, validated.remarks || null]
     );
 
     const result = await db.query(

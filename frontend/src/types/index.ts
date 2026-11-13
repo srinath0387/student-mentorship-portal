@@ -121,7 +121,7 @@ export interface AcademicRecord {
   semester_gpa: number;
   backlogs?: number;
   programming_grade?: string;
-  attendance_pct?: number;
+  attendance_pct?: number | null;
   theory_grade?: string;
   remarks?: string;
 }

@@ -49,7 +49,6 @@ export const AcademicsTab: React.FC<AcademicsTabProps> = ({ academics, readOnly 
       semester: (sortedAcademics.length || 0) + 1,
       semester_gpa: 8.5,
       backlogs: 0,
-      attendance_pct: 95.0,
     },
   });
 
@@ -64,7 +63,7 @@ export const AcademicsTab: React.FC<AcademicsTabProps> = ({ academics, readOnly 
       semester: a.semester,
       gpa: currGpa,
       delta,
-      attendance: Number(a.attendance_pct || 95),
+      attendance: a.attendance_pct != null ? Number(a.attendance_pct) : null,
       backlogs: Number(a.backlogs || 0),
     };
   });
@@ -93,7 +92,6 @@ export const AcademicsTab: React.FC<AcademicsTabProps> = ({ academics, readOnly 
         semester: Number(data.semester),
         semester_gpa: Number(data.semester_gpa),
         backlogs: Number(data.backlogs || 0),
-        attendance_pct: Number(data.attendance_pct || 95),
       });
       setShowAddModal(false);
       setEditingSemester(null);
@@ -246,7 +244,7 @@ export const AcademicsTab: React.FC<AcademicsTabProps> = ({ academics, readOnly 
                               {data.delta >= 0 ? `+${data.delta}` : data.delta} change vs previous sem
                             </p>
                           )}
-                          <p className="text-textSecondary/70 text-[10px]">Attendance: {data.attendance}%</p>
+                          {data.attendance != null && <p className="text-textSecondary/70 text-[10px]">Attendance: {data.attendance}%</p>}
                         </div>
                       );
                     }

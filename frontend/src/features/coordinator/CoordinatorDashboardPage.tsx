@@ -787,10 +787,10 @@ export const CoordinatorDashboardPage: React.FC = () => {
                         <td className="py-3 px-4 text-center">
                           <span
                             className={`font-bold ${
-                              Number(st.attendance_pct || 100) < 75 ? 'text-red-400' : 'text-emerald-400'
+                              st.attendance_pct == null ? 'text-textMuted' : Number(st.attendance_pct) < 75 ? 'text-red-400' : 'text-emerald-400'
                             }`}
                           >
-                            {st.attendance_pct !== undefined ? `${st.attendance_pct}%` : '100%'}
+                            {st.attendance_pct != null ? `${st.attendance_pct}%` : '—'}
                           </span>
                         </td>
                         <td className="py-3 px-4 text-right">

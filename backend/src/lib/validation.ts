@@ -174,7 +174,8 @@ export const academicSchema = z.object({
   semester_gpa: z.union([z.number(), z.string().transform((v) => parseFloat(v) || 0)]).pipe(z.number().min(0).max(10)),
   backlogs: z.union([z.number(), z.string().transform((v) => parseInt(v) || 0)]).optional().default(0),
   programming_grade: z.string().optional().nullable(),
-  attendance_pct: z.union([z.number(), z.string().transform((v) => parseFloat(v) || 95)]).optional().default(95),
+  // No made-up default: attendance comes from posted sessions, not the semester GPA form
+  attendance_pct: z.union([z.number(), z.string().transform((v) => (v.trim() === '' ? null : parseFloat(v)))]).nullable().optional(),
   theory_grade: z.string().optional().nullable(),
   remarks: z.string().optional().nullable(),
 });

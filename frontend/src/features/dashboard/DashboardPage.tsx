@@ -73,22 +73,8 @@ export const DashboardPage: React.FC = () => {
     ? (validAcademics.reduce((sum, a) => sum + Number(a.semester_gpa), 0) / validAcademics.length).toFixed(2)
     : null;
 
-  const avgAttendance = attendanceSummary?.overall_percentage != null
-    ? attendanceSummary.overall_percentage
-    : validAcademics.length > 0
-    ? Math.round(
-        validAcademics.reduce(
-          (sum, a) => sum + (a.attendance_pct != null && !isNaN(Number(a.attendance_pct)) ? Number(a.attendance_pct) : 0),
-          0
-        ) / validAcademics.length
-      )
-    : null;
-
-  const liveOverallPct = attendanceSummary?.overall_percentage != null
-    ? attendanceSummary.overall_percentage
-    : avgAttendance != null
-    ? avgAttendance
-    : null;
+  // Only real, posted attendance — never the semester-form value (it used to default to 95%)
+  const liveOverallPct: number | null = attendanceSummary?.overall_percentage ?? null;
 
   const latestSemGpa = validAcademics.length > 0
     ? Number(validAcademics[validAcademics.length - 1].semester_gpa).toFixed(2)
@@ -159,7 +145,7 @@ export const DashboardPage: React.FC = () => {
                 liveOverallPct == null ? 'brand' : liveOverallPct >= 75 ? 'emerald' : liveOverallPct >= 65 ? 'amber' : 'alert'
               }
               label="Overall Attendance"
-              value={liveOverallPct != null ? `${liveOverallPct}%` : '0.0%'}
+              value={liveOverallPct != null ? `${liveOverallPct}%` : '—'}
               subtext={
                 attendanceSummary?.total_periods_held
                   ? `${attendanceSummary.total_periods_attended} / ${attendanceSummary.total_periods_held} Periods Held`
@@ -263,7 +249,7 @@ export const DashboardPage: React.FC = () => {
                 <div>
                   <p className="text-[11px] font-bold text-textMuted uppercase tracking-wider">Overall Aggregate</p>
                   <p className="text-2xl font-black font-mono text-textPrimary mt-0.5">
-                    {liveOverallPct != null ? `${liveOverallPct}%` : '0.0%'}
+                    {liveOverallPct != null ? `${liveOverallPct}%` : '—'}
                   </p>
                 </div>
 
@@ -409,7 +395,7 @@ export const DashboardPage: React.FC = () => {
                     <span className="text-[10px] font-bold text-textMuted uppercase tracking-wider">Semester {sem.semester}</span>
                     <p className="text-xl font-black text-brand-primary mt-1">{Number(sem.semester_gpa).toFixed(2)}</p>
                     <span className="text-[11px] text-textSecondary font-medium block mt-0.5">
-                      {sem.attendance_pct ? `${sem.attendance_pct}% Attendance` : 'SGPA'}
+                      SGPA
                     </span>
                   </div>
                 ))}

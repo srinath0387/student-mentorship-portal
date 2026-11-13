@@ -68,3 +68,4 @@
 [2026-11-13 10:26] HD001 → done: HOD dashboard = department KPI board + scorecard; principal analytics (students/faculty/research/placements) locked to HOD dept; Power BI canvas + quick-nav removed
 [2026-11-13 10:34] AT006 → fix: deleting an allotment removes its timetable slots; leftover-slot list with remove; allotment search; HOD dept check on slot delete
 [2026-11-13 10:52] PF001 → done: throttling fix — per-tab request limiter (6) + quick retry of API-Gateway throttles; minified Lambda bundle 4.5MB→2.6MB; 5-min keep-warm ping
+[2026-11-13 15:10] ATT-FAKE → done: removed made-up 95%/100% attendance defaults; student dashboard shows only posted attendance (— when none)

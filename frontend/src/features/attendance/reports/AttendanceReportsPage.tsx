@@ -404,7 +404,7 @@ export const AttendanceReportsPage: React.FC = () => {
                         <td className="px-3 py-2.5 text-muted">{s.semester_label}</td>
                         <td className="px-3 py-2.5 text-right">{s.scheduled_periods}</td>
                         <td className="px-3 py-2.5 text-right">{s.attended_periods}</td>
-                        <td className={`px-3 py-2.5 text-right font-bold ${statusColor(s.status)}`}>{s.attendance_pct}%</td>
+                        <td className={`px-3 py-2.5 text-right font-bold ${statusColor(s.status)}`}>{s.status === 'No Data' ? '—' : `${s.attendance_pct}%`}</td>
                         <td className="px-3 py-2.5">{statusBadge(s.status)}</td>
                       </tr>
                     ))}
