@@ -353,7 +353,6 @@ export const OversightDashboardPage: React.FC = () => {
   // ── Derived Data ───────────────────────────────────────────────────────────
   const totals = metricsData?.totals;
   const rawDepts = metricsData?.departments || [];
-  const anomalies = metricsData?.anomalies || [];
   const allowedDepts = metricsData?.allowed_departments || [];
   const pubTrend = metricsData?.publications_trend || {};
 
@@ -1349,26 +1348,6 @@ export const OversightDashboardPage: React.FC = () => {
           </div>
         </div>
       </div>
-
-      {/* ── Anomaly Alerts ── */}
-      {anomalies.length > 0 && (
-        <div className="space-y-2">
-          {anomalies.slice(0, 3).map(a => (
-            <div key={a.id} className={`flex items-start gap-3 px-4 py-3 rounded-2xl border text-xs ${
-              a.level === 'warning' ? 'bg-amber-50 border-amber-200 text-amber-800' :
-              a.level === 'critical' ? 'bg-red-50 border-red-200 text-red-800' :
-              'bg-indigo-50 border-indigo-200 text-indigo-800'
-            }`}>
-              <span className="text-base">{a.level === 'warning' ? '⚠️' : a.level === 'critical' ? '🔴' : 'ℹ️'}</span>
-              <div>
-                <span className="font-black">{a.title}</span>
-                <span className="ml-2">{a.message}</span>
-                <span className="ml-2 font-bold">Metric: {a.metric} | Benchmark: {a.benchmark}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* ── Power BI Canvas mode ── */}
       {viewMode === 'powerbi' ? (
