@@ -63,7 +63,10 @@ export function DocumentsManagementPage() {
   const isAdmin = role === 'admin'; // kept for UI conditionals (approve button etc.)
   // Oversight (principal / director / management / program chair) observes; it does not verify documents.
   const canVerify = !['principal', 'director', 'management', 'program_chair'].includes(role);
-  const userDept = isSuperAdmin ? '' : (user?.department || '');
+  // Program chair covers the CSE-allied branches and picks one (or all) of them
+  const isProgramChair = role === 'program_chair';
+  const CHAIR_DEPTS = ['CSE', 'CSE (AI & ML)', 'CSE (Data Science)', 'CSE (BS)', 'CSE (CS)'];
+  const userDept = isSuperAdmin || isProgramChair ? '' : (user?.department || '');
 
   // Filters
   const [search, setSearch] = useState('');
@@ -89,7 +92,7 @@ export function DocumentsManagementPage() {
     queryFn: () => api.getDocumentZipUrls({
       academic_year: filterYear || undefined,
       // Super-admin can filter by any dept; everyone else is locked to their own dept
-      department: isSuperAdmin ? (filterDept || undefined) : (userDept || undefined),
+      department: isSuperAdmin || isProgramChair ? (filterDept || undefined) : (userDept || undefined),
       doc_type: filterDocType || undefined,
     }),
     staleTime: 30000,
@@ -262,7 +265,13 @@ export function DocumentsManagementPage() {
           </select>
 
           {/* Dept (Super-Admin: free-text filter; dept-scoped roles: show locked badge) */}
-          {isSuperAdmin ? (
+          {isProgramChair ? (
+            <select value={filterDept} onChange={e => setFilterDept(e.target.value)}
+              className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
+              <option value="">All CSE &amp; allied</option>
+              {CHAIR_DEPTS.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          ) : isSuperAdmin ? (
             <input
               type="text"
               placeholder="Department…"

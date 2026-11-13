@@ -566,3 +566,24 @@ describe('Oversight is read-only', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('Program chair scoping', () => {
+  const CHAIR = () => `Bearer ${signSessionToken({ role: 'program_chair', email: 'programchair@rgmcet.edu.in', department: 'CSE_ALLIED' })}`;
+  it('documents: all CSE-allied branches by default, not the literal CSE_ALLIED', async () => {
+    const calls = routeDb([['FROM student_documents sd', []]]);
+    const res = await request(app).get('/documents/download-zip-urls').set('Authorization', CHAIR());
+    expect(res.status).toBe(200);
+    const q = calls.find(c => c.sql.includes('FROM student_documents sd'))!;
+    expect(q.sql).toContain('s.department = ANY(');
+    expect(q.params[0]).toEqual(expect.arrayContaining(['CSE', 'CSE (Data Science)']));
+    expect(q.params).not.toContain('CSE_ALLIED');
+  });
+  it('documents: one branch when picked; non-allied departments are ignored', async () => {
+    let calls = routeDb([['FROM student_documents sd', []]]);
+    await request(app).get('/documents/download-zip-urls?department=CSE%20(Data%20Science)').set('Authorization', CHAIR());
+    expect(calls.find(c => c.sql.includes('FROM student_documents sd'))!.params[0]).toBe('CSE (Data Science)');
+    calls = routeDb([['FROM student_documents sd', []]]);
+    await request(app).get('/documents/download-zip-urls?department=MECH').set('Authorization', CHAIR());
+    expect(calls.find(c => c.sql.includes('FROM student_documents sd'))!.sql).toContain('ANY(');
+  });
+});

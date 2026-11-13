@@ -4830,7 +4830,11 @@ app.get('/documents/download-zip-urls', requireRole('hod', 'admin', 'principal',
 
     // Dept scoping: only super-admin (dept='*') sees all depts; dept-admins and HOD are locked to their own dept
     const isSuperUser = req.auth?.isSuperAdmin === true || callerDept === '*' || callerDept === 'All';
-    const targetDept = isSuperUser
+    // Program chair (dept 'CSE_ALLIED'): any one CSE-allied branch, or all of them
+    const isChair = callerRole === 'program_chair';
+    const chairPick = isChair && CSE_ALLIED_DEPTS.includes(department) ? department : '';
+    const targetDept = isChair ? chairPick
+      : isSuperUser
       ? (department && department !== 'All' ? department : '')
       : (callerDept && callerDept !== '*' ? callerDept : (department && department !== 'All' ? department : ''));
 
@@ -4847,6 +4851,9 @@ app.get('/documents/download-zip-urls', requireRole('hod', 'admin', 'principal',
     if (targetDept) {
       params.push(targetDept);
       query += ` AND LOWER(TRIM(s.department)) = LOWER(TRIM($${params.length}))`;
+    } else if (isChair) {
+      params.push(CSE_ALLIED_DEPTS);
+      query += ` AND s.department = ANY($${params.length}::text[])`;
     }
     if (academicYear) {
       params.push(academicYear);

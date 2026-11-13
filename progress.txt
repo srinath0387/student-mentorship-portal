@@ -63,3 +63,4 @@
 [2026-11-13 09:10] OV003 → done: interactive executive KPI board with cross-filtering
 [2026-11-13 09:21] OV002 → done: designation printed on office orders (from faculty profile, editable when issuing)
 [2026-11-13 09:34] OV003 → done: command-center banner replaced by department chip toolbar; dept filter drives KPI board, faculty drawer and Faculty Directory
+[2026-11-13 09:46] OV001 → fix: program chair Documents + Coding Leaderboard scoped to CSE-allied branches (was filtering on literal CSE_ALLIED); oversight leaderboard dept picker

@@ -59,8 +59,14 @@ export const CodingAnalyticsPage: React.FC = () => {
   );
 
   const [activeTab, setActiveTab] = useState<'leetcode' | 'github' | 'cgpa'>('leetcode');
+  // Oversight (principal / director / management / program chair) can pick a department;
+  // their stored department is '*' or 'CSE_ALLIED', which is not a real department filter.
+  const isProgramChair = user?.role === 'program_chair';
+  const canPickDept = isSuperAdmin || ['principal', 'director', 'management', 'program_chair'].includes(user?.role || '');
+  const deptOptions = isProgramChair ? ['CSE', 'CSE (AI & ML)', 'CSE (Data Science)', 'CSE (BS)', 'CSE (CS)'] : VALID_DEPARTMENT_NAMES;
+  const allLabel = isProgramChair ? 'CSE & Allied' : 'Program';
   const [deptFilter, setDeptFilter] = useState<string>(
-    isSuperAdmin ? 'All' : (user?.department || 'All')
+    canPickDept ? 'All' : (user?.department || 'All')
   );
   const [yearFilter, setYearFilter] = useState('');
   const [sectionFilter, setSectionFilter] = useState('');
@@ -198,9 +204,9 @@ export const CodingAnalyticsPage: React.FC = () => {
         <div>
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-soft text-brand-primary text-xs font-semibold mb-2">
             <BarChart2 className="w-3.5 h-3.5" />
-            <span>{deptFilter === 'All' ? 'Program' : deptFilter}-Wide Student Analytics</span>
+            <span>{deptFilter === 'All' ? allLabel : deptFilter}-Wide Student Analytics</span>
           </div>
-          <h1 className="text-2xl font-extrabold text-textPrimary">{deptFilter === 'All' ? 'Program' : deptFilter} Leaderboard</h1>
+          <h1 className="text-2xl font-extrabold text-textPrimary">{deptFilter === 'All' ? allLabel : deptFilter} Leaderboard</h1>
           <p className="text-xs text-textSecondary mt-1">
             Real-time verified student rankings by CGPA, LeetCode competitive metrics, and GitHub open-source activity
           </p>
@@ -223,7 +229,7 @@ export const CodingAnalyticsPage: React.FC = () => {
           accentColor="brand"
           label="Average CGPA"
           value={`${avgCgpa} / 10`}
-          subtext={`${deptFilter === 'All' ? 'Program' : deptFilter} Average`}
+          subtext={`${deptFilter === 'All' ? allLabel : deptFilter} Average`}
         />
         <StatCard
           icon={<Trophy className="w-5 h-5" />}
@@ -291,14 +297,14 @@ export const CodingAnalyticsPage: React.FC = () => {
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3">
-        {isSuperAdmin && (
+        {canPickDept && (
           <select
             value={deptFilter}
             onChange={(e) => setDeptFilter(e.target.value)}
             className="px-3 py-1.5 text-xs rounded-lg border border-borderLine bg-surface text-textPrimary font-semibold text-brand-primary"
           >
-            <option value="All">All Departments</option>
-            {VALID_DEPARTMENT_NAMES.map((d) => (
+            <option value="All">{isProgramChair ? 'All CSE & allied' : 'All Departments'}</option>
+            {deptOptions.map((d) => (
               <option key={d} value={d}>{d}</option>
             ))}
           </select>
