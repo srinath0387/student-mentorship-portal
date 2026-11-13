@@ -36,6 +36,10 @@ const DutiesPage = lazy(() => import('./features/duties/DutiesPage'));
 const MyOfficeOrdersPage = lazy(() => import('./features/duties/MyOfficeOrdersPage'));
 const ClubsPage = lazy(() => import('./features/clubs/ClubsPage'));
 const NotificationsPage = lazy(() => import('./features/notifications/NotificationsPage'));
+const LessonPlansPage = lazy(() => import('./features/lessonplans/LessonPlansPage'));
+const LessonPlanReviewPage = lazy(() => import('./features/lessonplans/LessonPlansPage').then(m => ({ default: m.LessonPlanReviewPage })));
+const MeetingsPage = lazy(() => import('./features/meetings/MeetingsPage'));
+const EventsPage = lazy(() => import('./features/events/EventsPage'));
 const ClubManagePage = lazy(() => import('./features/clubs/ClubManagePage'));
 const ClubStudentsPage = lazy(() => import('./features/clubs/ClubStudentsPage'));
 const AlumniPage = lazy(() => import('./features/alumni/AlumniPage'));
@@ -384,6 +388,16 @@ export const App: React.FC = () => {
               </Route>
               <Route element={<ProtectedRoute allowedRoles={['faculty', 'hod', 'coordinator', 'admin', 'principal', 'director']} />}>
                 <Route path="/office-orders" element={<MyOfficeOrdersPage />} />
+              </Route>
+              <Route element={<ProtectedRoute allowedRoles={['faculty', 'hod', 'coordinator', 'admin']} />}>
+                <Route path="/lesson-plans" element={<LessonPlansPage />} />
+              </Route>
+              <Route element={<ProtectedRoute allowedRoles={['hod', 'admin', 'principal', 'director', 'management', 'program_chair']} />}>
+                <Route path="/lesson-plans/review" element={<LessonPlanReviewPage />} />
+              </Route>
+              <Route element={<ProtectedRoute allowedRoles={['faculty', 'hod', 'coordinator', 'admin', 'principal', 'director', 'management', 'program_chair']} />}>
+                <Route path="/meetings" element={<MeetingsPage />} />
+                <Route path="/events" element={<EventsPage />} />
               </Route>
               <Route element={<ProtectedRoute allowedRoles={['student']} />}>
                 <Route path="/clubs" element={<ClubsPage />} />

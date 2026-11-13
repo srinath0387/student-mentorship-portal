@@ -10976,6 +10976,705 @@ async function clubScoreData(roll: string): Promise<{ role: string; sessions_att
   } catch { return []; }
 }
 
+// ============================================================================
+// Academic quality records — lesson plans, department meetings (minutes), events
+// (workshops / FDPs / guest lectures / industrial visits …). PDFs are generated in the browser.
+// ============================================================================
+const QUALITY_STAFF = ['faculty', 'hod', 'admin', 'coordinator', 'principal', 'director', 'management', 'program_chair'];
+const QUALITY_OVERSIGHT = ['admin', 'principal', 'director', 'management', 'program_chair'];
+const isYmd = (s: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+const clip = (v: any, n: number) => { const s = String(v ?? '').trim(); return s ? s.slice(0, n) : null; };
+const DEPT_ABBR: Record<string, string> = {
+  cse: 'CSE', csedatascience: 'CSD', cseaiml: 'CSM', csebs: 'CSB', csecs: 'CSC', ece: 'ECE', eee: 'EEE',
+  mechanical: 'ME', mech: 'ME', civil: 'CE', mca: 'MCA', mba: 'MBA',
+};
+const deptAbbr = (d: string) => DEPT_ABBR[normDept(d)] || String(d || 'GEN').replace(/[^A-Za-z]/g, '').slice(0, 4).toUpperCase();
+
+/** The caller's department (HOD / faculty), or null for institution-wide roles. */
+async function qualityDept(req: Request): Promise<string | null> {
+  const a = req.auth!;
+  if (QUALITY_OVERSIGHT.includes(a.role) && (a.isSuperAdmin || !a.department || ['*', 'All', 'CSE_ALLIED'].includes(a.department))) return null;
+  if (a.department && !['*', 'All', 'CSE_ALLIED'].includes(a.department)) return a.department;
+  const f = await db.query('SELECT department FROM faculty WHERE LOWER(email) = LOWER($1) LIMIT 1', [a.email || '']).catch(() => ({ rows: [] }));
+  return f.rows[0]?.department || null;
+}
+async function hodKeysFor(dept: string): Promise<string[]> {
+  const r = await db.query(`SELECT email FROM hod_credentials WHERE LOWER(REGEXP_REPLACE(COALESCE(department, ''), '[^a-zA-Z0-9]', '', 'g')) = $1`, [normDept(dept)])
+    .catch(() => ({ rows: [] }));
+  return r.rows.map((x: any) => staffKey(x.email));
+}
+async function staffName(email: string): Promise<string> {
+  const r = await db.query('SELECT name FROM faculty WHERE LOWER(email) = LOWER($1) LIMIT 1', [email]).catch(() => ({ rows: [] }));
+  return r.rows[0]?.name || email;
+}
+async function nextRefNo(table: 'dept_meetings' | 'dept_events', prefix: string, ay: string): Promise<string> {
+  const r = await db.query(`SELECT COUNT(*)::int AS n FROM ${table} WHERE ref_no LIKE $1`, [`${prefix}/%`]);
+  return `${prefix}/${String(Number(r.rows[0]?.n || 0) + 1).padStart(3, '0')}`;
+}
+
+let qualityTablesReady: Promise<void> | null = null;
+function ensureQualityTables(): Promise<void> {
+  if (!qualityTablesReady) {
+    qualityTablesReady = db.query(`
+      CREATE TABLE IF NOT EXISTS lesson_plans (
+        id SERIAL PRIMARY KEY,
+        allotment_id UUID UNIQUE NOT NULL,
+        faculty_email TEXT NOT NULL, faculty_name TEXT, department TEXT, semester_label TEXT, section TEXT, subject_name TEXT,
+        academic_year TEXT,
+        objectives TEXT, outcomes JSONB NOT NULL DEFAULT '[]', topics JSONB NOT NULL DEFAULT '[]',
+        text_books TEXT, references_text TEXT, file_key TEXT,
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','submitted','approved','returned')),
+        hod_remarks TEXT, submitted_at TIMESTAMPTZ, reviewed_at TIMESTAMPTZ, reviewed_by TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS dept_meetings (
+        id SERIAL PRIMARY KEY,
+        department TEXT NOT NULL, ref_no TEXT, academic_year TEXT,
+        title TEXT NOT NULL, meeting_type TEXT, meeting_date DATE NOT NULL, start_time TEXT, end_time TEXT, venue TEXT,
+        chair_name TEXT, convened_by TEXT,
+        agenda JSONB NOT NULL DEFAULT '[]', attendees JSONB NOT NULL DEFAULT '[]', special_invitees TEXT,
+        action_items JSONB NOT NULL DEFAULT '[]', notes TEXT,
+        status TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled','published','cancelled')),
+        published_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_dept_meetings_dept ON dept_meetings (department, meeting_date DESC);
+      CREATE TABLE IF NOT EXISTS dept_events (
+        id SERIAL PRIMARY KEY,
+        ref_no TEXT, academic_year TEXT, department TEXT NOT NULL,
+        event_type TEXT NOT NULL, title TEXT NOT NULL, organized_by TEXT,
+        start_date DATE NOT NULL, end_date DATE NOT NULL, duration_hours NUMERIC(6,1), mode TEXT, venue TEXT,
+        coordinators JSONB NOT NULL DEFAULT '[]', resource_persons JSONB NOT NULL DEFAULT '[]', visit JSONB,
+        student_count INT, faculty_count INT, external_count INT, target_audience TEXT,
+        objectives TEXT, summary TEXT, outcomes TEXT, feedback TEXT, budget NUMERIC(12,2),
+        photos JSONB NOT NULL DEFAULT '[]', attachments JSONB NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','submitted','approved','returned')),
+        hod_remarks TEXT, submitted_by TEXT, submitted_by_name TEXT, submitted_at TIMESTAMPTZ,
+        reviewed_by TEXT, reviewed_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_dept_events_dept ON dept_events (department, start_date DESC);
+    `).then(() => undefined).catch((err: any) => { qualityTablesReady = null; throw err; });
+  }
+  return qualityTablesReady;
+}
+
+// ── Files (photos, attendance sheets, plan documents) — direct browser ⇄ S3 with presigned URLs ──
+const QUALITY_FILE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+app.get('/academic-files/upload-url', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    const kind = String(req.query.kind || '');
+    const contentType = String(req.query.contentType || '');
+    if (!['events', 'lesson-plans', 'meetings'].includes(kind)) return res.status(400).json({ error: 'Invalid kind' });
+    if (!QUALITY_FILE_TYPES.includes(contentType)) return res.status(400).json({ error: 'Only images, PDF, Excel or Word files' });
+    const bucket = process.env.UPLOADS_BUCKET_NAME;
+    if (!bucket) return res.status(503).json({ error: 'File storage is not configured' });
+    const safe = String(req.query.fileName || 'file').replace(/[^A-Za-z0-9._-]+/g, '_').slice(-80);
+    const fileKey = `academic/${kind}/${todayIST().slice(0, 7)}/${crypto.randomBytes(8).toString('hex')}_${safe}`;
+    const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3');
+    const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
+    const uploadUrl = await getSignedUrl(new S3Client({}), new PutObjectCommand({ Bucket: bucket, Key: fileKey, ContentType: contentType }), { expiresIn: 600 });
+    res.json({ uploadUrl, fileKey });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+async function academicViewUrls(keys: string[]): Promise<Record<string, string>> {
+  const bucket = process.env.UPLOADS_BUCKET_NAME;
+  const valid = Array.from(new Set(keys.filter(k => typeof k === 'string' && k.startsWith('academic/')))).slice(0, 40);
+  if (!bucket || !valid.length) return {};
+  const { S3Client, GetObjectCommand } = await import('@aws-sdk/client-s3');
+  const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
+  const s3 = new S3Client({});
+  const out: Record<string, string> = {};
+  for (const k of valid) out[k] = await getSignedUrl(s3, new GetObjectCommand({ Bucket: bucket, Key: k }), { expiresIn: 3600 });
+  return out;
+}
+app.post('/academic-files/view-urls', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try { res.json(await academicViewUrls(Array.isArray(req.body?.keys) ? req.body.keys : [])); }
+  catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Lesson plans ────────────────────────────────────────────────────────────
+const LP_METHODS = ['Chalk & Talk', 'PPT', 'Demonstration', 'Hands-on / Lab', 'Flipped Class', 'Case Study', 'Group Discussion', 'Quiz / Activity', 'Video', 'Other'];
+
+function lpSummary(topics: any[], today = todayIST()) {
+  const total = topics.length;
+  const covered = topics.filter(t => t.covered_on).length;
+  const due = topics.filter(t => t.planned_date && t.planned_date <= today).length;
+  const dueCovered = topics.filter(t => t.planned_date && t.planned_date <= today && t.covered_on).length;
+  return { total, covered, due, behind: Math.max(0, due - dueCovered), coverage_pct: total ? Math.round((covered / total) * 100) : 0 };
+}
+async function lpAllotment(aid: string) {
+  if (!/^[0-9a-f-]{36}$/i.test(aid)) return null;
+  await ensureCoFacultyColumns().catch(() => undefined);
+  const r = await db.query('SELECT * FROM subject_allotments WHERE id = $1', [aid]);
+  return r.rows[0] || null;
+}
+const lpIsOwner = (req: Request, a: any) => {
+  const e = String(req.auth!.email || '').toLowerCase();
+  return !!e && (String(a.faculty_email || '').toLowerCase() === e || String(a.co_faculty_email || '').toLowerCase() === e);
+};
+async function lpCanView(req: Request, a: any) {
+  if (lpIsOwner(req, a)) return true;
+  const dept = await qualityDept(req);
+  if (req.auth!.role === 'hod') return !!dept && normDept(dept) === normDept(a.department);
+  return QUALITY_OVERSIGHT.includes(req.auth!.role) && (!dept || normDept(dept) === normDept(a.department));
+}
+
+app.get('/lesson-plans/meta', requireAuth, (_req: Request, res: Response) => res.json({ methods: LP_METHODS }));
+
+// GET /lesson-plans/my — the signed-in faculty member's allotted subjects with plan status & coverage
+app.get('/lesson-plans/my', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    await ensureCoFacultyColumns().catch(() => undefined);
+    const r = await db.query(
+      `SELECT a.id AS allotment_id, a.subject_name, a.subject_type, a.semester_label, a.department, a.section, a.faculty_email, a.faculty_name,
+              (LOWER(COALESCE(a.co_faculty_email, '')) = $1) AS is_co_faculty,
+              p.id AS plan_id, p.status, p.hod_remarks, p.topics, p.updated_at
+       FROM subject_allotments a LEFT JOIN lesson_plans p ON p.allotment_id = a.id
+       WHERE LOWER(a.faculty_email) = $1 OR LOWER(COALESCE(a.co_faculty_email, '')) = $1
+       ORDER BY a.semester_label, a.subject_name, a.section`, [String(req.auth!.email || '').toLowerCase()]);
+    res.json(r.rows.map((x: any) => { const { topics, ...rest } = x; return { ...rest, status: x.status || 'not_started', ...lpSummary(Array.isArray(topics) ? topics : []) }; }));
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /lesson-plans/department?department=&semester= — HOD / oversight register
+app.get('/lesson-plans/department', requireRole('hod', ...QUALITY_OVERSIGHT), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const own = await qualityDept(req);
+    const dept = own || (req.query.department && req.query.department !== 'All' ? String(req.query.department) : null);
+    const params: any[] = []; const where: string[] = [];
+    if (dept) { params.push(normDept(dept)); where.push(`LOWER(REGEXP_REPLACE(a.department, '[^a-zA-Z0-9]', '', 'g')) = $${params.length}`); }
+    if (req.query.semester) { params.push(String(req.query.semester)); where.push(`a.semester_label = $${params.length}`); }
+    const r = await db.query(
+      `SELECT a.id AS allotment_id, a.subject_name, a.subject_type, a.semester_label, a.department, a.section, a.faculty_email, a.faculty_name,
+              p.id AS plan_id, p.status, p.hod_remarks, p.topics, p.submitted_at, p.updated_at
+       FROM subject_allotments a LEFT JOIN lesson_plans p ON p.allotment_id = a.id
+       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+       ORDER BY a.semester_label, a.section, a.subject_name LIMIT 3000`, params);
+    res.json({ department: dept || 'All', rows: r.rows.map((x: any) => { const { topics, ...rest } = x; return { ...rest, status: x.status || 'not_started', ...lpSummary(Array.isArray(topics) ? topics : []) }; }) });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /lesson-plans/allotment/:aid — plan + what's needed to schedule it (class days, semester dates, holidays)
+app.get('/lesson-plans/allotment/:aid', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const a = await lpAllotment(req.params.aid);
+    if (!a) return res.status(404).json({ error: 'Subject allotment not found' });
+    if (!(await lpCanView(req, a))) return res.status(403).json({ error: 'Not your subject' });
+    const [plan, days, cal, hol] = await Promise.all([
+      db.query('SELECT * FROM lesson_plans WHERE allotment_id = $1', [a.id]),
+      db.query(`SELECT day_of_week, SUM(num_periods)::int AS periods FROM timetable_entries
+                WHERE semester_label = $1 AND COALESCE(department,'') = COALESCE($2,'') AND COALESCE(section,'') = COALESCE($3,'')
+                  AND LOWER(subject_name) = LOWER($4) GROUP BY day_of_week`, [a.semester_label, a.department, a.section, a.subject_name]).catch(() => ({ rows: [] })),
+      db.query(`SELECT academic_year, semester, start_date::text AS start_date, end_date::text AS end_date FROM academic_calendar
+                WHERE end_date >= CURRENT_DATE - 30 ORDER BY start_date LIMIT 1`).catch(() => ({ rows: [] })),
+      db.query(`SELECT date::text AS date FROM holiday_calendar WHERE date >= CURRENT_DATE - 200`).catch(() => ({ rows: [] })),
+    ]);
+    const p = plan.rows[0] || null;
+    const files = p?.file_key ? await academicViewUrls([p.file_key]).catch(() => ({})) : {};
+    res.json({
+      allotment: { id: a.id, subject_name: a.subject_name, subject_type: a.subject_type, semester_label: a.semester_label, department: a.department,
+        section: a.section, faculty_email: a.faculty_email, faculty_name: a.faculty_name, co_faculty_name: a.co_faculty_name || null },
+      plan: p ? { ...p, file_url: p.file_key ? (files as any)[p.file_key] || null : null } : null,
+      can_edit: lpIsOwner(req, a),
+      can_review: !lpIsOwner(req, a) && (req.auth!.role === 'hod' || req.auth!.role === 'admin'),
+      class_days: days.rows, semester: cal.rows[0] || null, holidays: hol.rows.map((h: any) => h.date),
+      methods: LP_METHODS,
+    });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+function cleanTopics(raw: any, existing: any[]): any[] {
+  const prev = new Map((existing || []).map((t: any) => [t.id, t]));
+  const list = Array.isArray(raw) ? raw.slice(0, 400) : [];
+  return list.map((t: any, i: number) => {
+    const id = /^[A-Za-z0-9_-]{4,40}$/.test(String(t?.id || '')) ? String(t.id) : `t${Date.now().toString(36)}${i}`;
+    const old: any = prev.get(id) || {};
+    return {
+      id,
+      unit: Math.max(1, Math.min(20, parseInt(t?.unit, 10) || 1)),
+      unit_title: clip(t?.unit_title, 160),
+      topic: clip(t?.topic, 300) || '',
+      planned_date: isYmd(t?.planned_date) ? String(t.planned_date) : null,
+      periods: Math.max(1, Math.min(10, parseInt(t?.periods, 10) || 1)),
+      co: clip(t?.co, 20),
+      method: LP_METHODS.includes(t?.method) ? t.method : null,
+      // coverage is recorded through /coverage — never overwritten by a plan edit
+      covered_on: old.covered_on || null,
+      coverage_remarks: old.coverage_remarks || null,
+    };
+  }).filter((t: any) => t.topic);
+}
+
+// PUT /lesson-plans/allotment/:aid — save the plan (faculty of the subject)
+app.put('/lesson-plans/allotment/:aid', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const a = await lpAllotment(req.params.aid);
+    if (!a) return res.status(404).json({ error: 'Subject allotment not found' });
+    if (!lpIsOwner(req, a)) return res.status(403).json({ error: 'Only the faculty of this subject can edit its lesson plan' });
+    const b = req.body || {};
+    const cur = (await db.query('SELECT * FROM lesson_plans WHERE allotment_id = $1', [a.id])).rows[0];
+    const topics = cleanTopics(b.topics, cur?.topics || []);
+    const outcomes = (Array.isArray(b.outcomes) ? b.outcomes : []).slice(0, 12)
+      .map((o: any, i: number) => ({ code: clip(o?.code, 10) || `CO${i + 1}`, text: clip(o?.text, 500) || '' })).filter((o: any) => o.text);
+    if (b.file_key && !String(b.file_key).startsWith('academic/lesson-plans/')) return res.status(400).json({ error: 'Invalid file' });
+    // Editing an approved plan sends it back for approval
+    const status = cur?.status === 'approved' || cur?.status === 'submitted' ? 'submitted' : cur?.status || 'draft';
+    const r = await db.query(
+      `INSERT INTO lesson_plans (allotment_id, faculty_email, faculty_name, department, semester_label, section, subject_name, academic_year,
+         objectives, outcomes, topics, text_books, references_text, file_key, status, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NOW())
+       ON CONFLICT (allotment_id) DO UPDATE SET objectives = EXCLUDED.objectives, outcomes = EXCLUDED.outcomes, topics = EXCLUDED.topics,
+         text_books = EXCLUDED.text_books, references_text = EXCLUDED.references_text, file_key = EXCLUDED.file_key,
+         status = EXCLUDED.status, updated_at = NOW()
+       RETURNING *`,
+      [a.id, String(a.faculty_email).toLowerCase(), a.faculty_name, a.department, a.semester_label, a.section, a.subject_name, currentAcademicYear(),
+        clip(b.objectives, 3000), JSON.stringify(outcomes), JSON.stringify(topics), clip(b.text_books, 2000), clip(b.references_text, 2000),
+        b.file_key || null, status]);
+    res.json({ ...r.rows[0], resubmitted: cur?.status === 'approved' });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /lesson-plans/allotment/:aid/submit — send to the HOD
+app.post('/lesson-plans/allotment/:aid/submit', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const a = await lpAllotment(req.params.aid);
+    if (!a) return res.status(404).json({ error: 'Subject allotment not found' });
+    if (!lpIsOwner(req, a)) return res.status(403).json({ error: 'Not your subject' });
+    const p = (await db.query('SELECT * FROM lesson_plans WHERE allotment_id = $1', [a.id])).rows[0];
+    const topics = Array.isArray(p?.topics) ? p.topics : [];
+    if (!topics.length) return res.status(400).json({ error: 'Add the topics first' });
+    const undated = topics.filter((t: any) => !t.planned_date).length;
+    if (undated) return res.status(400).json({ error: `${undated} topic(s) have no planned date — use "Auto-fill dates" or enter them` });
+    if (p.status === 'approved') return res.status(400).json({ error: 'Already approved' });
+    await db.query(`UPDATE lesson_plans SET status = 'submitted', submitted_at = NOW(), hod_remarks = NULL WHERE id = $1`, [p.id]);
+    await notifyUsers(await hodKeysFor(a.department), {
+      title: 'Lesson plan to approve', url: '/lesson-plans/review', tag: `lp-${p.id}`,
+      body: `${a.faculty_name}: ${a.subject_name} (${a.semester_label} ${a.section}) — ${topics.length} topics.`,
+    });
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// PATCH /lesson-plans/:id/review — HOD approves / returns
+app.patch('/lesson-plans/:id/review', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const status = req.body?.status;
+    const remarks = clip(req.body?.remarks, 1000);
+    if (!['approved', 'returned'].includes(status)) return res.status(400).json({ error: 'Status must be approved or returned' });
+    if (status === 'returned' && !remarks) return res.status(400).json({ error: 'Tell the faculty what to change' });
+    const p = (await db.query('SELECT * FROM lesson_plans WHERE id = $1', [Number(req.params.id)])).rows[0];
+    if (!p) return res.status(404).json({ error: 'Lesson plan not found' });
+    const dept = await qualityDept(req);
+    if (req.auth!.role === 'hod' && (!dept || normDept(dept) !== normDept(p.department))) return res.status(403).json({ error: 'Not your department' });
+    if (p.status !== 'submitted') return res.status(400).json({ error: 'Only submitted plans can be reviewed' });
+    await db.query('UPDATE lesson_plans SET status = $1, hod_remarks = $2, reviewed_at = NOW(), reviewed_by = $3 WHERE id = $4',
+      [status, remarks, req.auth!.email, p.id]);
+    await notifyUsers([staffKey(p.faculty_email)], {
+      title: status === 'approved' ? 'Lesson plan approved ✅' : 'Lesson plan returned', url: '/lesson-plans', tag: `lp-${p.id}`,
+      body: `${p.subject_name} (${p.semester_label} ${p.section})${remarks ? ` — ${remarks}` : ''}`,
+    });
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// PATCH /lesson-plans/allotment/:aid/coverage — { topic_id, covered_on (null = not yet), remarks }
+app.patch('/lesson-plans/allotment/:aid/coverage', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const a = await lpAllotment(req.params.aid);
+    if (!a) return res.status(404).json({ error: 'Subject allotment not found' });
+    if (!lpIsOwner(req, a)) return res.status(403).json({ error: 'Not your subject' });
+    const on = req.body?.covered_on == null ? null : String(req.body.covered_on);
+    if (on && (!isYmd(on) || on > todayIST())) return res.status(400).json({ error: 'Covered date must be today or earlier' });
+    const p = (await db.query('SELECT id, topics FROM lesson_plans WHERE allotment_id = $1', [a.id])).rows[0];
+    if (!p) return res.status(404).json({ error: 'Save the lesson plan first' });
+    let found = false;
+    const topics = (p.topics || []).map((t: any) => {
+      if (t.id !== req.body?.topic_id) return t;
+      found = true;
+      return { ...t, covered_on: on, coverage_remarks: clip(req.body?.remarks, 300) };
+    });
+    if (!found) return res.status(404).json({ error: 'Topic not found' });
+    await db.query('UPDATE lesson_plans SET topics = $1, updated_at = NOW() WHERE id = $2', [JSON.stringify(topics), p.id]);
+    res.json({ success: true, ...lpSummary(topics) });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Department meetings & minutes ───────────────────────────────────────────
+const MEETING_TYPES = ['Department Meeting', 'Department Advisory Committee (DAC)', 'Board of Studies (BoS)', 'Programme Assessment Committee (PAC)',
+  'Class Review Committee', 'Staff Meeting', 'IQAC Meeting', 'Other'];
+const MEETING_EDITORS = ['hod', 'admin', 'principal', 'director'];
+
+function cleanMeeting(b: any) {
+  const id = (v: any, p: string, i: number) => (/^[A-Za-z0-9_-]{3,40}$/.test(String(v || '')) ? String(v) : `${p}${Date.now().toString(36)}${i}`);
+  return {
+    title: clip(b.title, 200), meeting_type: MEETING_TYPES.includes(b.meeting_type) ? b.meeting_type : 'Department Meeting',
+    meeting_date: isYmd(b.meeting_date) ? b.meeting_date : null,
+    start_time: /^\d{2}:\d{2}$/.test(String(b.start_time || '')) ? b.start_time : null,
+    end_time: /^\d{2}:\d{2}$/.test(String(b.end_time || '')) ? b.end_time : null,
+    venue: clip(b.venue, 160), chair_name: clip(b.chair_name, 120), special_invitees: clip(b.special_invitees, 1000), notes: clip(b.notes, 3000),
+    agenda: (Array.isArray(b.agenda) ? b.agenda : []).slice(0, 40).map((x: any, i: number) => ({
+      id: id(x?.id, 'g', i), item: clip(x?.item, 400) || '', discussion: clip(x?.discussion, 4000), resolution: clip(x?.resolution, 2000),
+    })).filter((x: any) => x.item),
+    attendees: (Array.isArray(b.attendees) ? b.attendees : []).slice(0, 150).map((x: any) => ({
+      email: String(x?.email || '').toLowerCase().trim() || null, name: clip(x?.name, 120) || '', designation: clip(x?.designation, 80),
+      present: x?.present === true ? true : x?.present === false ? false : null,
+    })).filter((x: any) => x.name),
+    action_items: (Array.isArray(b.action_items) ? b.action_items : []).slice(0, 60).map((x: any, i: number) => ({
+      id: id(x?.id, 'a', i), task: clip(x?.task, 500) || '', owner_email: String(x?.owner_email || '').toLowerCase().trim() || null,
+      owner_name: clip(x?.owner_name, 120), due_date: isYmd(x?.due_date) ? x.due_date : null,
+      status: x?.status === 'done' ? 'done' : 'open', done_on: isYmd(x?.done_on) ? x.done_on : null,
+    })).filter((x: any) => x.task),
+  };
+}
+
+app.get('/meetings/meta', requireAuth, (_req: Request, res: Response) => res.json({ types: MEETING_TYPES }));
+
+// GET /meetings?department= — HOD: own dept; faculty: meetings they are invited to; oversight: all
+app.get('/meetings', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const a = req.auth!;
+    const params: any[] = []; const where: string[] = [];
+    if (MEETING_EDITORS.includes(a.role) || QUALITY_OVERSIGHT.includes(a.role)) {
+      const own = await qualityDept(req);
+      const dept = own || (req.query.department && req.query.department !== 'All' ? String(req.query.department) : null);
+      if (dept) { params.push(normDept(dept)); where.push(`LOWER(REGEXP_REPLACE(department, '[^a-zA-Z0-9]', '', 'g')) = $${params.length}`); }
+    } else {
+      params.push(JSON.stringify([{ email: String(a.email || '').toLowerCase() }]));
+      where.push(`attendees @> $${params.length}::jsonb AND status <> 'cancelled'`);
+    }
+    const r = await db.query(`SELECT * FROM dept_meetings ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY meeting_date DESC, id DESC LIMIT 500`, params);
+    res.json(r.rows);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /meetings/my-actions — open action items assigned to me
+app.get('/meetings/my-actions', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const me = String(req.auth!.email || '').toLowerCase();
+    const r = await db.query(
+      `SELECT m.id AS meeting_id, m.title, m.ref_no, m.meeting_date, x AS action
+       FROM dept_meetings m, jsonb_array_elements(m.action_items) x
+       WHERE m.status = 'published' AND LOWER(x->>'owner_email') = $1
+       ORDER BY (x->>'status') = 'done', x->>'due_date' NULLS LAST`, [me]);
+    res.json(r.rows);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+async function meetingForEdit(req: Request, id: number) {
+  const m = (await db.query('SELECT * FROM dept_meetings WHERE id = $1', [id])).rows[0];
+  if (!m) return { error: 404 as const };
+  const dept = await qualityDept(req);
+  if (dept && normDept(dept) !== normDept(m.department)) return { error: 403 as const };
+  return { m };
+}
+
+// POST /meetings — schedule (HOD for own department; principal / admin pick a department)
+app.post('/meetings', requireRole(...MEETING_EDITORS), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const dept = (await qualityDept(req)) || clip(req.body?.department, 80);
+    if (!dept) return res.status(400).json({ error: 'Choose the department' });
+    const v = cleanMeeting(req.body || {});
+    if (!v.title || !v.meeting_date) return res.status(400).json({ error: 'Title and date are required' });
+    const r = await db.query(
+      `INSERT INTO dept_meetings (department, academic_year, title, meeting_type, meeting_date, start_time, end_time, venue, chair_name, convened_by,
+         agenda, attendees, special_invitees, action_items, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+      [dept, currentAcademicYear(new Date(v.meeting_date + 'T00:00:00Z')), v.title, v.meeting_type, v.meeting_date, v.start_time, v.end_time, v.venue,
+        v.chair_name, req.auth!.email, JSON.stringify(v.agenda), JSON.stringify(v.attendees), v.special_invitees, JSON.stringify(v.action_items), v.notes]);
+    const m = r.rows[0];
+    if (req.body?.notify !== false) {
+      await notifyUsers(v.attendees.filter((x: any) => x.email).map((x: any) => staffKey(x.email!)), {
+        title: `Meeting: ${v.title}`, url: '/meetings', tag: `meeting-${m.id}`,
+        body: `${v.meeting_date}${v.start_time ? ` at ${v.start_time}` : ''}${v.venue ? ` · ${v.venue}` : ''}${v.agenda.length ? `\nAgenda: ${v.agenda.map((x: any) => x.item).slice(0, 4).join('; ')}` : ''}`,
+      });
+    }
+    res.status(201).json(m);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /meetings/:id — agenda, attendance, minutes, action items
+app.put('/meetings/:id', requireRole(...MEETING_EDITORS), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const f = await meetingForEdit(req, Number(req.params.id));
+    if (f.error) return res.status(f.error).json({ error: f.error === 404 ? 'Meeting not found' : 'Not your department' });
+    const v = cleanMeeting(req.body || {});
+    if (!v.title || !v.meeting_date) return res.status(400).json({ error: 'Title and date are required' });
+    const r = await db.query(
+      `UPDATE dept_meetings SET title=$1, meeting_type=$2, meeting_date=$3, start_time=$4, end_time=$5, venue=$6, chair_name=$7, agenda=$8,
+         attendees=$9, special_invitees=$10, action_items=$11, notes=$12, updated_at=NOW() WHERE id=$13 RETURNING *`,
+      [v.title, v.meeting_type, v.meeting_date, v.start_time, v.end_time, v.venue, v.chair_name, JSON.stringify(v.agenda), JSON.stringify(v.attendees),
+        v.special_invitees, JSON.stringify(v.action_items), v.notes, f.m.id]);
+    res.json(r.rows[0]);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /meetings/:id/publish — numbered minutes; attendees and action owners are told
+app.post('/meetings/:id/publish', requireRole(...MEETING_EDITORS), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const f = await meetingForEdit(req, Number(req.params.id));
+    if (f.error) return res.status(f.error).json({ error: f.error === 404 ? 'Meeting not found' : 'Not your department' });
+    const m = f.m;
+    if (m.status === 'cancelled') return res.status(400).json({ error: 'Meeting was cancelled' });
+    if (!(m.attendees || []).some((x: any) => x.present === true)) return res.status(400).json({ error: 'Mark who was present first' });
+    if (!(m.agenda || []).some((x: any) => x.discussion || x.resolution)) return res.status(400).json({ error: 'Record the discussion / resolution for the agenda first' });
+    let ref = m.ref_no;
+    if (!ref) ref = await nextRefNo('dept_meetings', `RGMCET/${deptAbbr(m.department)}/MoM/${String(m.academic_year || currentAcademicYear()).replace(/[–—]/g, '-')}`, m.academic_year);
+    const r = await db.query(`UPDATE dept_meetings SET status = 'published', ref_no = $1, published_at = COALESCE(published_at, NOW()), updated_at = NOW() WHERE id = $2 RETURNING *`, [ref, m.id]);
+    const md = String(m.meeting_date instanceof Date ? m.meeting_date.toISOString() : m.meeting_date).slice(0, 10);
+    await notifyUsers((m.attendees || []).filter((x: any) => x.email).map((x: any) => staffKey(x.email)), {
+      title: `Minutes published: ${m.title}`, url: '/meetings', tag: `meeting-${m.id}`, body: `${ref} · meeting held on ${md}.`,
+    });
+    for (const ai of (m.action_items || []).filter((x: any) => x.owner_email && x.status !== 'done')) {
+      await notifyUsers([staffKey(ai.owner_email)], {
+        title: 'Action item assigned to you', url: '/meetings', tag: `action-${m.id}-${ai.id}`,
+        body: `${ai.task}${ai.due_date ? ` — due ${ai.due_date}` : ''} (${m.title})`,
+      });
+    }
+    res.json(r.rows[0]);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// PATCH /meetings/:id/status — cancel a scheduled meeting
+app.patch('/meetings/:id/status', requireRole(...MEETING_EDITORS), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const f = await meetingForEdit(req, Number(req.params.id));
+    if (f.error) return res.status(f.error).json({ error: f.error === 404 ? 'Meeting not found' : 'Not your department' });
+    if (req.body?.status !== 'cancelled' || f.m.status !== 'scheduled') return res.status(400).json({ error: 'Only a scheduled meeting can be cancelled' });
+    await db.query(`UPDATE dept_meetings SET status = 'cancelled', updated_at = NOW() WHERE id = $1`, [f.m.id]);
+    await notifyUsers((f.m.attendees || []).filter((x: any) => x.email).map((x: any) => staffKey(x.email)), {
+      title: `Meeting cancelled: ${f.m.title}`, url: '/meetings', tag: `meeting-${f.m.id}`, body: 'The meeting has been cancelled.',
+    });
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// PATCH /meetings/:id/actions/:actionId — owner (or HOD) marks an action item done / open
+app.patch('/meetings/:id/actions/:actionId', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const m = (await db.query('SELECT * FROM dept_meetings WHERE id = $1', [Number(req.params.id)])).rows[0];
+    if (!m) return res.status(404).json({ error: 'Meeting not found' });
+    const me = String(req.auth!.email || '').toLowerCase();
+    const dept = await qualityDept(req);
+    const isEditor = MEETING_EDITORS.includes(req.auth!.role) && (!dept || normDept(dept) === normDept(m.department));
+    const done = req.body?.status === 'done';
+    let found = false;
+    const items = (m.action_items || []).map((x: any) => {
+      if (x.id !== req.params.actionId) return x;
+      if (!isEditor && String(x.owner_email || '').toLowerCase() !== me) return x;
+      found = true;
+      return { ...x, status: done ? 'done' : 'open', done_on: done ? todayIST() : null };
+    });
+    if (!found) return res.status(403).json({ error: 'Only the person responsible (or the HOD) can update this' });
+    await db.query('UPDATE dept_meetings SET action_items = $1, updated_at = NOW() WHERE id = $2', [JSON.stringify(items), m.id]);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Events: workshops, FDPs, guest lectures, industrial visits … ────────────
+const EVENT_TYPES: Record<string, string> = {
+  'Workshop': 'WS', 'Faculty Development Programme (FDP)': 'FDP', 'Guest Lecture': 'GL', 'Industrial Visit': 'IV', 'Seminar': 'SEM',
+  'Webinar': 'WEB', 'Conference': 'CONF', 'Hackathon': 'HACK', 'Training Programme': 'TRG', 'Student Activity': 'SA', 'Outreach / Extension': 'EXT', 'Other': 'OTH',
+};
+
+function cleanEvent(b: any) {
+  const people = (arr: any, n: number) => (Array.isArray(arr) ? arr : []).slice(0, n).map((x: any) => ({
+    name: clip(x?.name, 120) || '', designation: clip(x?.designation, 120), organization: clip(x?.organization, 200),
+    email: String(x?.email || '').toLowerCase().trim() || null, topic: clip(x?.topic, 300),
+  })).filter((x: any) => x.name);
+  const num = (v: any, max: number) => { const n = parseInt(v, 10); return Number.isFinite(n) && n >= 0 ? Math.min(n, max) : null; };
+  const files = (arr: any, n: number) => (Array.isArray(arr) ? arr : []).slice(0, n)
+    .filter((x: any) => String(x?.key || '').startsWith('academic/events/'))
+    .map((x: any) => ({ key: String(x.key), caption: clip(x?.caption, 200), name: clip(x?.name, 120) }));
+  return {
+    event_type: EVENT_TYPES[b.event_type] ? b.event_type : 'Other',
+    title: clip(b.title, 250), organized_by: clip(b.organized_by, 200),
+    start_date: isYmd(b.start_date) ? b.start_date : null, end_date: isYmd(b.end_date) ? b.end_date : (isYmd(b.start_date) ? b.start_date : null),
+    duration_hours: Number.isFinite(Number(b.duration_hours)) && Number(b.duration_hours) > 0 ? Math.min(Number(b.duration_hours), 1000) : null,
+    mode: ['Offline', 'Online', 'Hybrid'].includes(b.mode) ? b.mode : 'Offline', venue: clip(b.venue, 200),
+    coordinators: people(b.coordinators, 10), resource_persons: people(b.resource_persons, 15),
+    visit: b.event_type === 'Industrial Visit' ? {
+      company: clip(b.visit?.company, 200), location: clip(b.visit?.location, 200), contact_person: clip(b.visit?.contact_person, 160),
+      faculty_accompanied: clip(b.visit?.faculty_accompanied, 500),
+    } : null,
+    student_count: num(b.student_count, 100000), faculty_count: num(b.faculty_count, 10000), external_count: num(b.external_count, 100000),
+    target_audience: clip(b.target_audience, 300), objectives: clip(b.objectives, 4000), summary: clip(b.summary, 8000),
+    outcomes: clip(b.outcomes, 4000), feedback: clip(b.feedback, 3000),
+    budget: Number.isFinite(Number(b.budget)) && Number(b.budget) >= 0 && b.budget !== '' && b.budget != null ? Number(b.budget) : null,
+    photos: files(b.photos, 12), attachments: files(b.attachments, 6),
+  };
+}
+async function eventForEdit(req: Request, id: number) {
+  const e = (await db.query('SELECT * FROM dept_events WHERE id = $1', [id])).rows[0];
+  if (!e) return { error: 404 as const };
+  const me = String(req.auth!.email || '').toLowerCase();
+  const dept = await qualityDept(req);
+  const isHod = (req.auth!.role === 'hod' || req.auth!.role === 'admin') && (!dept || normDept(dept) === normDept(e.department));
+  const isOwner = String(e.submitted_by || '').toLowerCase() === me;
+  return { e, isHod, isOwner };
+}
+
+app.get('/events/meta', requireAuth, (_req: Request, res: Response) => res.json({ types: Object.keys(EVENT_TYPES) }));
+
+// GET /events?department=&type=&year=&status=
+app.get('/events', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const a = req.auth!;
+    const params: any[] = []; const where: string[] = [];
+    const own = await qualityDept(req);
+    const dept = own || (req.query.department && req.query.department !== 'All' ? String(req.query.department) : null);
+    if (dept) { params.push(normDept(dept)); where.push(`LOWER(REGEXP_REPLACE(department, '[^a-zA-Z0-9]', '', 'g')) = $${params.length}`); }
+    if (a.role === 'faculty' || a.role === 'coordinator') {
+      params.push(String(a.email || '').toLowerCase());
+      where.push(`(status = 'approved' OR LOWER(submitted_by) = $${params.length})`);
+    } else if (QUALITY_OVERSIGHT.includes(a.role) && a.role !== 'admin') {
+      where.push(`status = 'approved'`);
+    }
+    if (req.query.type && EVENT_TYPES[String(req.query.type)]) { params.push(String(req.query.type)); where.push(`event_type = $${params.length}`); }
+    if (req.query.year && /^\d{4}/.test(String(req.query.year))) { params.push(String(req.query.year).replace(/-/g, '–')); where.push(`academic_year = $${params.length}`); }
+    if (req.query.status) { params.push(String(req.query.status)); where.push(`status = $${params.length}`); }
+    const r = await db.query(`SELECT * FROM dept_events ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY start_date DESC, id DESC LIMIT 2000`, params);
+    res.json(r.rows);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /events/:id — with view URLs for photos / attachments
+app.get('/events/:id', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const f = await eventForEdit(req, Number(req.params.id));
+    if (f.error) return res.status(404).json({ error: 'Report not found' });
+    const e = f.e;
+    const dept = await qualityDept(req);
+    const visible = e.status === 'approved' ? (!dept || normDept(dept) === normDept(e.department) || QUALITY_OVERSIGHT.includes(req.auth!.role)) : (f.isOwner || f.isHod);
+    if (!visible) return res.status(403).json({ error: 'Not allowed' });
+    const urls = await academicViewUrls([...(e.photos || []), ...(e.attachments || [])].map((p: any) => p.key)).catch(() => ({}));
+    res.json({ ...e, urls, can_edit: (f.isOwner && ['draft', 'returned'].includes(e.status)) || f.isHod, can_review: f.isHod && e.status === 'submitted' });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /events — new report (draft)
+app.post('/events', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const dept = (await qualityDept(req)) || clip(req.body?.department, 80);
+    if (!dept) return res.status(400).json({ error: 'Choose the department' });
+    const v = cleanEvent(req.body || {});
+    if (!v.title || !v.start_date) return res.status(400).json({ error: 'Title and date are required' });
+    if (v.end_date! < v.start_date) return res.status(400).json({ error: 'End date is before the start date' });
+    const name = await staffName(req.auth!.email || '');
+    const r = await db.query(
+      `INSERT INTO dept_events (academic_year, department, event_type, title, organized_by, start_date, end_date, duration_hours, mode, venue,
+         coordinators, resource_persons, visit, student_count, faculty_count, external_count, target_audience, objectives, summary, outcomes, feedback,
+         budget, photos, attachments, submitted_by, submitted_by_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26) RETURNING *`,
+      [currentAcademicYear(new Date(v.start_date + 'T00:00:00Z')), dept, v.event_type, v.title, v.organized_by, v.start_date, v.end_date, v.duration_hours, v.mode, v.venue,
+        JSON.stringify(v.coordinators), JSON.stringify(v.resource_persons), v.visit ? JSON.stringify(v.visit) : null, v.student_count, v.faculty_count, v.external_count,
+        v.target_audience, v.objectives, v.summary, v.outcomes, v.feedback, v.budget, JSON.stringify(v.photos), JSON.stringify(v.attachments),
+        String(req.auth!.email || '').toLowerCase(), name]);
+    res.status(201).json(r.rows[0]);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /events/:id — edit (submitter while draft / returned; HOD any time)
+app.put('/events/:id', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const f = await eventForEdit(req, Number(req.params.id));
+    if (f.error) return res.status(404).json({ error: 'Report not found' });
+    if (!f.isHod && !(f.isOwner && ['draft', 'returned'].includes(f.e.status))) return res.status(403).json({ error: 'This report can no longer be edited' });
+    const v = cleanEvent(req.body || {});
+    if (!v.title || !v.start_date) return res.status(400).json({ error: 'Title and date are required' });
+    if (v.end_date! < v.start_date) return res.status(400).json({ error: 'End date is before the start date' });
+    const r = await db.query(
+      `UPDATE dept_events SET academic_year=$1, event_type=$2, title=$3, organized_by=$4, start_date=$5, end_date=$6, duration_hours=$7, mode=$8, venue=$9,
+         coordinators=$10, resource_persons=$11, visit=$12, student_count=$13, faculty_count=$14, external_count=$15, target_audience=$16, objectives=$17,
+         summary=$18, outcomes=$19, feedback=$20, budget=$21, photos=$22, attachments=$23, updated_at=NOW() WHERE id=$24 RETURNING *`,
+      [currentAcademicYear(new Date(v.start_date + 'T00:00:00Z')), v.event_type, v.title, v.organized_by, v.start_date, v.end_date, v.duration_hours, v.mode, v.venue,
+        JSON.stringify(v.coordinators), JSON.stringify(v.resource_persons), v.visit ? JSON.stringify(v.visit) : null, v.student_count, v.faculty_count,
+        v.external_count, v.target_audience, v.objectives, v.summary, v.outcomes, v.feedback, v.budget, JSON.stringify(v.photos), JSON.stringify(v.attachments), f.e.id]);
+    res.json(r.rows[0]);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /events/:id/submit — to the HOD
+app.post('/events/:id/submit', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const f = await eventForEdit(req, Number(req.params.id));
+    if (f.error) return res.status(404).json({ error: 'Report not found' });
+    const e = f.e;
+    if (!f.isOwner && !f.isHod) return res.status(403).json({ error: 'Not your report' });
+    if (!['draft', 'returned'].includes(e.status)) return res.status(400).json({ error: 'Already submitted' });
+    const missing: string[] = [];
+    if (!e.summary) missing.push('a summary of the event');
+    if (!(e.photos || []).length) missing.push('at least one photo');
+    if (e.event_type === 'Industrial Visit' ? !e.visit?.company : ['Guest Lecture', 'Workshop', 'Faculty Development Programme (FDP)', 'Seminar', 'Webinar'].includes(e.event_type) && !(e.resource_persons || []).length) {
+      missing.push(e.event_type === 'Industrial Visit' ? 'the company / place visited' : 'the resource person / speaker');
+    }
+    if (e.student_count == null && e.faculty_count == null && e.external_count == null) missing.push('the number of participants');
+    if (missing.length) return res.status(400).json({ error: `Add ${missing.join(', ')} before submitting` });
+    await db.query(`UPDATE dept_events SET status = 'submitted', submitted_at = NOW(), hod_remarks = NULL WHERE id = $1`, [e.id]);
+    await notifyUsers(await hodKeysFor(e.department), {
+      title: `${e.event_type} report to approve`, url: '/events', tag: `event-${e.id}`, body: `${e.title} — by ${e.submitted_by_name}`,
+    });
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// PATCH /events/:id/review — HOD approves (numbered) / returns
+app.patch('/events/:id/review', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const f = await eventForEdit(req, Number(req.params.id));
+    if (f.error) return res.status(404).json({ error: 'Report not found' });
+    if (!f.isHod) return res.status(403).json({ error: 'Not your department' });
+    const e = f.e;
+    const status = req.body?.status; const remarks = clip(req.body?.remarks, 1000);
+    if (!['approved', 'returned'].includes(status)) return res.status(400).json({ error: 'Status must be approved or returned' });
+    if (status === 'returned' && !remarks) return res.status(400).json({ error: 'Tell the faculty what to change' });
+    if (e.status !== 'submitted') return res.status(400).json({ error: 'Only submitted reports can be reviewed' });
+    let ref = e.ref_no;
+    if (status === 'approved' && !ref) {
+      ref = await nextRefNo('dept_events', `RGMCET/${deptAbbr(e.department)}/${EVENT_TYPES[e.event_type] || 'OTH'}/${String(e.academic_year).replace(/[–—]/g, '-')}`, e.academic_year);
+    }
+    await db.query('UPDATE dept_events SET status = $1, hod_remarks = $2, ref_no = $3, reviewed_by = $4, reviewed_at = NOW() WHERE id = $5',
+      [status, remarks, ref, req.auth!.email, e.id]);
+    await notifyUsers([staffKey(e.submitted_by)], {
+      title: status === 'approved' ? 'Event report approved ✅' : 'Event report returned', url: '/events', tag: `event-${e.id}`,
+      body: `${e.title}${remarks ? ` — ${remarks}` : ''}`,
+    });
+    res.json({ success: true, ref_no: ref });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /events/:id — submitter's draft / returned report
+app.delete('/events/:id', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const f = await eventForEdit(req, Number(req.params.id));
+    if (f.error) return res.status(404).json({ error: 'Report not found' });
+    if (!(f.isOwner || f.isHod) || f.e.status === 'approved') return res.status(403).json({ error: 'Approved reports cannot be deleted' });
+    await db.query('DELETE FROM dept_events WHERE id = $1', [f.e.id]);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 let examTablesReady: Promise<void> | null = null;
 function ensureExamTables(): Promise<void> {
   if (!examTablesReady) {

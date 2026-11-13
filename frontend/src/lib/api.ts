@@ -1067,6 +1067,47 @@ export const api = {
   setDutyStatus: async (id: number, status: 'Relieved' | 'Cancelled' | 'Active', relieved_on?: string) =>
     fetchWithAuth(`/duties/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status, relieved_on }) }),
 
+  // ── Academic quality: files, lesson plans, meetings, events ──
+  getAcademicUploadUrl: async (kind: string, fileName: string, contentType: string): Promise<{ uploadUrl: string; fileKey: string }> =>
+    fetchWithAuth(`/academic-files/upload-url?kind=${kind}&fileName=${encodeURIComponent(fileName)}&contentType=${encodeURIComponent(contentType)}`),
+  getAcademicViewUrls: async (keys: string[]): Promise<Record<string, string>> =>
+    fetchWithAuth('/academic-files/view-urls', { method: 'POST', body: JSON.stringify({ keys }) }),
+  getMyLessonPlans: async (): Promise<any[]> => fetchWithAuth('/lesson-plans/my'),
+  getDepartmentLessonPlans: async (department?: string, semester?: string): Promise<{ department: string; rows: any[] }> => {
+    const q = new URLSearchParams();
+    if (department && department !== 'All') q.set('department', department);
+    if (semester) q.set('semester', semester);
+    return fetchWithAuth(`/lesson-plans/department${q.toString() ? `?${q}` : ''}`);
+  },
+  getLessonPlan: async (allotmentId: string): Promise<any> => fetchWithAuth(`/lesson-plans/allotment/${allotmentId}`),
+  saveLessonPlan: async (allotmentId: string, body: any) => fetchWithAuth(`/lesson-plans/allotment/${allotmentId}`, { method: 'PUT', body: JSON.stringify(body) }),
+  submitLessonPlan: async (allotmentId: string) => fetchWithAuth(`/lesson-plans/allotment/${allotmentId}/submit`, { method: 'POST' }),
+  reviewLessonPlan: async (planId: number, status: 'approved' | 'returned', remarks?: string) =>
+    fetchWithAuth(`/lesson-plans/${planId}/review`, { method: 'PATCH', body: JSON.stringify({ status, remarks }) }),
+  markTopicCovered: async (allotmentId: string, topic_id: string, covered_on: string | null, remarks?: string) =>
+    fetchWithAuth(`/lesson-plans/allotment/${allotmentId}/coverage`, { method: 'PATCH', body: JSON.stringify({ topic_id, covered_on, remarks }) }),
+  getMeetingMeta: async (): Promise<{ types: string[] }> => fetchWithAuth('/meetings/meta'),
+  getMeetings: async (department?: string): Promise<any[]> => fetchWithAuth(`/meetings${department && department !== 'All' ? `?department=${encodeURIComponent(department)}` : ''}`),
+  getMyMeetingActions: async (): Promise<any[]> => fetchWithAuth('/meetings/my-actions'),
+  createMeeting: async (body: any) => fetchWithAuth('/meetings', { method: 'POST', body: JSON.stringify(body) }),
+  updateMeeting: async (id: number, body: any) => fetchWithAuth(`/meetings/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  publishMeeting: async (id: number) => fetchWithAuth(`/meetings/${id}/publish`, { method: 'POST' }),
+  cancelMeeting: async (id: number) => fetchWithAuth(`/meetings/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled' }) }),
+  setMeetingAction: async (id: number, actionId: string, status: 'done' | 'open') =>
+    fetchWithAuth(`/meetings/${id}/actions/${actionId}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+  getEventMeta: async (): Promise<{ types: string[] }> => fetchWithAuth('/events/meta'),
+  getEvents: async (params: { department?: string; type?: string; year?: string; status?: string } = {}): Promise<any[]> => {
+    const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v && v !== 'All') as [string, string][]).toString();
+    return fetchWithAuth(`/events${q ? `?${q}` : ''}`);
+  },
+  getEvent: async (id: number): Promise<any> => fetchWithAuth(`/events/${id}`),
+  createEvent: async (body: any) => fetchWithAuth('/events', { method: 'POST', body: JSON.stringify(body) }),
+  updateEvent: async (id: number, body: any) => fetchWithAuth(`/events/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  submitEvent: async (id: number) => fetchWithAuth(`/events/${id}/submit`, { method: 'POST' }),
+  reviewEvent: async (id: number, status: 'approved' | 'returned', remarks?: string) =>
+    fetchWithAuth(`/events/${id}/review`, { method: 'PATCH', body: JSON.stringify({ status, remarks }) }),
+  deleteEvent: async (id: number) => fetchWithAuth(`/events/${id}`, { method: 'DELETE' }),
+
   // ── Notifications (Telegram / browser push) ──
   getNotifyConfig: async (): Promise<{ push: { available: boolean; public_key: string | null }; telegram: { available: boolean; bot: string | null }; subscriptions: any[] }> =>
     fetchWithAuth('/notify/config'),

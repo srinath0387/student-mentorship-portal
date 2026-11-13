@@ -41,6 +41,9 @@ import {
   Settings,
   Sparkles,
   BellRing,
+  BookOpenCheck,
+  Presentation,
+  NotebookPen,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -119,6 +122,9 @@ const facultyNav: NavGroup[] = [
       { label: 'Take Attendance', path: '/attendance', icon: ClipboardCheck },
       { label: 'Attendance Records', path: '/faculty/dashboard?tab=attendance', icon: CalendarCheck },
       { label: 'CGPA Analytics', path: '/faculty/dashboard?tab=analytics', icon: FileBarChart },
+      { label: 'My Lesson Plans', path: '/lesson-plans', icon: BookOpenCheck },
+      { label: 'Events & Activities', path: '/events', icon: Presentation },
+      { label: 'Meetings & Action Items', path: '/meetings', icon: NotebookPen },
     ],
   },
   {
@@ -176,6 +182,9 @@ const adminNav: NavGroup[] = [
       { label: 'Editing of Attendance', path: '/admin/attendance?view=edit', icon: FileCheck },
       { label: 'Faculty Workload', path: '/attendance/workload', icon: BarChart2 },
       { label: 'Holiday Calendar', path: '/admin/dashboard?tab=holidays', icon: Calendar },
+      { label: 'Lesson Plan Register', path: '/lesson-plans/review', icon: BookOpenCheck },
+      { label: 'Events & Activities', path: '/events', icon: Presentation },
+      { label: 'Meetings & Minutes', path: '/meetings', icon: NotebookPen },
     ],
   },
   {
@@ -276,6 +285,16 @@ const hodNav: NavGroup[] = [
     ],
   },
   {
+    title: 'Academic Quality',
+    icon: BookOpenCheck,
+    items: [
+      { label: 'Lesson Plans & Coverage', path: '/lesson-plans/review', icon: BookOpenCheck },
+      { label: 'My Lesson Plans', path: '/lesson-plans', icon: NotebookPen },
+      { label: 'Meetings & Minutes', path: '/meetings', icon: NotebookPen },
+      { label: 'Events & Activities', path: '/events', icon: Presentation },
+    ],
+  },
+  {
     title: 'Leave & Duties',
     icon: ShieldCheck,
     items: [
@@ -321,6 +340,8 @@ const coordinatorNav: NavGroup[] = [
       { label: 'Fresher Directory', path: '/coordinator/dashboard?tab=freshers', icon: Users },
       { label: 'At-Risk Freshers', path: '/risk', icon: ShieldCheck },
       { label: 'Student Clubs', path: '/clubs/students', icon: Sparkles },
+      { label: 'My Lesson Plans', path: '/lesson-plans', icon: BookOpenCheck },
+      { label: 'Events & Activities', path: '/events', icon: Presentation },
       { label: 'Subject Allocation', path: '/coordinator/dashboard?tab=subjects', icon: FileText },
       { label: 'Class Incharges', path: '/coordinator/dashboard?tab=incharge', icon: Award },
       { label: 'Year Promotion', path: '/coordinator/dashboard?tab=promotion', icon: CheckCircle2 },
@@ -374,6 +395,9 @@ const oversightNav: NavGroup[] = [
     icon: LayoutDashboard,
     items: [
       { label: 'Duties & Office Orders', path: '/duties', icon: FileCheck },
+      { label: 'Lesson Plan Coverage', path: '/lesson-plans/review', icon: BookOpenCheck },
+      { label: 'Events & Activities', path: '/events', icon: Presentation },
+      { label: 'Meetings & Minutes', path: '/meetings', icon: NotebookPen },
       { label: 'Monthly Principal\'s Report', path: '/reports/monthly', icon: FileBarChart },
       { label: 'NAAC / NBA Data Pack', path: '/accreditation', icon: FileCheck },
       { label: 'CO–PO Attainment', path: '/obe', icon: CheckSquare },
