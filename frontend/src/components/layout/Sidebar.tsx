@@ -121,6 +121,7 @@ const facultyNav: NavGroup[] = [
     items: [
       { label: 'Leave & Duties', path: '/faculty/dashboard?tab=leaves', icon: CalendarCheck },
       { label: 'My Academic Duties', path: '/my-duties', icon: CheckSquare },
+      { label: 'My Office Orders', path: '/office-orders', icon: FileCheck },
     ],
   },
   {
@@ -260,6 +261,8 @@ const hodNav: NavGroup[] = [
     items: [
       { label: 'Leave & OD Approvals', path: '/hod/dashboard?tab=leaves', icon: ShieldCheck },
       { label: 'Academic Duties', path: '/academic-duties', icon: ClipboardList },
+      { label: 'Institutional Duties', path: '/duties', icon: FileCheck },
+      { label: 'My Office Orders', path: '/office-orders', icon: FileCheck },
       { label: 'Mentoring Compliance', path: '/hod/dashboard?tab=mentoring', icon: UserCheck },
     ],
   },
@@ -344,6 +347,7 @@ const oversightNav: NavGroup[] = [
     title: 'Institutional Oversight',
     icon: LayoutDashboard,
     items: [
+      { label: 'Duties & Office Orders', path: '/duties', icon: FileCheck },
       { label: 'Monthly Principal\'s Report', path: '/reports/monthly', icon: FileBarChart },
       { label: 'NAAC / NBA Data Pack', path: '/accreditation', icon: FileCheck },
       { label: 'CO–PO Attainment', path: '/obe', icon: CheckSquare },
@@ -373,7 +377,7 @@ const oversightNav: NavGroup[] = [
     title: 'Faculty & Documents',
     icon: User,
     items: [
-      { label: 'Faculty & Mentors', path: '/admin/dashboard?tab=faculty', icon: ShieldCheck },
+      { label: 'Faculty Directory', path: '/admin/dashboard?tab=faculty', icon: ShieldCheck },
       { label: 'Coding Leaderboard', path: '/coding-analytics', icon: BarChart2 },
       { label: 'Documents', path: '/documents', icon: FolderOpen },
     ],

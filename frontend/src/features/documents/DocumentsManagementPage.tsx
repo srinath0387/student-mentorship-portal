@@ -61,6 +61,8 @@ export function DocumentsManagementPage() {
   // isSuperAdmin = truly global admin (dept='*'); dept-admins (admin-EEE) are scoped like HOD
   const isSuperAdmin = user?.isSuperAdmin === true || user?.department === '*';
   const isAdmin = role === 'admin'; // kept for UI conditionals (approve button etc.)
+  // Oversight (principal / director / management / program chair) observes; it does not verify documents.
+  const canVerify = !['principal', 'director', 'management', 'program_chair'].includes(role);
   const userDept = isSuperAdmin ? '' : (user?.department || '');
 
   // Filters
@@ -374,7 +376,7 @@ export function DocumentsManagementPage() {
                           </button>
 
                           {/* Approve */}
-                          {doc.verification_status !== 'Verified' && (
+                          {canVerify && doc.verification_status !== 'Verified' && (
                             <button
                               onClick={() => { setActionDoc({ doc, action: 'approve' }); setAdminNote(''); }}
                               className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-600 text-white text-[11px] font-bold hover:bg-green-700 transition-colors"
@@ -385,7 +387,7 @@ export function DocumentsManagementPage() {
                           )}
 
                           {/* Reject */}
-                          {doc.verification_status !== 'Rejected' && (
+                          {canVerify && doc.verification_status !== 'Rejected' && (
                             <button
                               onClick={() => { setActionDoc({ doc, action: 'reject' }); setAdminNote(''); }}
                               className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-600 text-white text-[11px] font-bold hover:bg-red-700 transition-colors"

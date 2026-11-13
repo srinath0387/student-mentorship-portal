@@ -11,6 +11,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../lib/api';
 import { PlacementTrackerSection } from '../placement/PlacementTrackerSection';
+import { ExecutiveKpiBoard } from './ExecutiveKpiBoard';
 import { MeetingLogsView } from '../../components/MeetingLogsView';
 import type {
   ExecutiveDepartmentMetrics,
@@ -1420,26 +1421,7 @@ export const OversightDashboardPage: React.FC = () => {
                   <p className="text-sm text-white/80 mt-0.5">Institutional Oversight · {role?.charAt(0).toUpperCase()}{role?.slice(1)}</p>
                 </div>
               </div>
-              <div>
-                <p className="text-xs font-bold text-textMuted uppercase tracking-widest mb-3">Quick Navigation</p>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-                  {[
-                    { label: 'Student Analytics', tab: 'students', color: 'bg-blue-50 text-blue-700 border-blue-200' },
-                    { label: 'Faculty Analytics', tab: 'faculty', color: 'bg-green-50 text-green-700 border-green-200' },
-                    { label: 'Certifications', tab: 'certifications', color: 'bg-orange-50 text-orange-700 border-orange-200' },
-                    { label: 'Research', tab: 'research', color: 'bg-purple-50 text-purple-700 border-purple-200' },
-                    { label: 'Placements', tab: 'placements', color: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
-                  ].map(({ label, tab, color }) => (
-                    <button
-                      key={tab}
-                      onClick={() => navigate('/oversight/dashboard?tab=' + tab)}
-                      className={`flex items-center justify-center text-center px-3 py-4 rounded-xl border text-xs font-bold transition-all hover:scale-105 hover:shadow-md ${color}`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <ExecutiveKpiBoard departments={rawDepts} onOpenTab={tab => navigate('/oversight/dashboard?tab=' + tab)} />
             </div>
           )}
 

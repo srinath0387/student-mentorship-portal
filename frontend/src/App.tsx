@@ -32,6 +32,8 @@ const FacultyWorkloadPage = lazy(() => import('./features/attendance/workload/Fa
 const AttendanceReportsPage = lazy(() => import('./features/attendance/reports/AttendanceReportsPage').then(m => ({ default: m.AttendanceReportsPage })));
 const DocumentsManagementPage = lazy(() => import('./features/documents/DocumentsManagementPage').then(m => ({ default: m.DocumentsManagementPage })));
 const ExamPlannerPage = lazy(() => import('./features/exams/ExamPlannerPage'));
+const DutiesPage = lazy(() => import('./features/duties/DutiesPage'));
+const MyOfficeOrdersPage = lazy(() => import('./features/duties/MyOfficeOrdersPage'));
 const AlumniPage = lazy(() => import('./features/alumni/AlumniPage'));
 const AlumniSelfUpdatePage = lazy(() => import('./features/alumni/AlumniSelfUpdatePage'));
 const ObePage = lazy(() => import('./features/obe/ObePage'));
@@ -371,6 +373,12 @@ export const App: React.FC = () => {
               </Route>
               <Route element={<ProtectedRoute allowedRoles={['faculty', 'hod', 'admin', 'coordinator', 'director', 'principal']} />}>
                 <Route path="/my-duties" element={<MyDutiesPage />} />
+              </Route>
+              <Route element={<ProtectedRoute allowedRoles={['principal', 'director', 'management', 'program_chair', 'admin', 'hod']} />}>
+                <Route path="/duties" element={<DutiesPage />} />
+              </Route>
+              <Route element={<ProtectedRoute allowedRoles={['faculty', 'hod', 'coordinator', 'admin', 'principal', 'director']} />}>
+                <Route path="/office-orders" element={<MyOfficeOrdersPage />} />
               </Route>
 
               {/* Oversight (View-Only) routes */}

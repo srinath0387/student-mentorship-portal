@@ -4730,7 +4730,7 @@ app.post('/students/:id/documents', requireOwnerOrRole('id', 'admin', 'hod'), as
 });
 
 // PATCH /students/:id/documents/:docId/status \u2014 admin/hod approves or rejects
-app.patch('/students/:id/documents/:docId/status', requireAuth, requireRole('admin', 'hod', 'principal', 'director', 'management', 'program_chair', 'faculty'), async (req: Request, res: Response) => {
+app.patch('/students/:id/documents/:docId/status', requireAuth, requireRole('admin', 'hod', 'faculty'), async (req: Request, res: Response) => {
   try {
     const studentId = req.params.id.toUpperCase();
     const docId = parseInt(req.params.docId, 10);
@@ -9881,6 +9881,158 @@ app.put('/alumni/self/:token', async (req: Request, res: Response) => {
 // Invigilators: per room, the faculty with the fewest invigilation duties so far, skipping anyone
 // already on duty in the same date+slot or on approved leave that day.
 // ============================================================================
+// ── Institutional duties & office orders ─────────────────────────────────────
+// The principal (or director) appoints faculty to institutional bodies — IIC, ISTE, NSS, NCC,
+// IQAC… — and every appointment produces a numbered office order "with effect from" a date.
+const DUTY_CATALOG: { code: string; name: string; positions: string[] }[] = [
+  { code: 'IIC', name: "Institution's Innovation Council", positions: ['President', 'Vice-President', 'Convener', 'College Coordinator', 'Innovation Activity Coordinator', 'Member'] },
+  { code: 'IQAC', name: 'Internal Quality Assurance Cell', positions: ['Coordinator', 'Director', 'Member Secretary', 'Member'] },
+  { code: 'NSS', name: 'National Service Scheme', positions: ['Programme Coordinator', 'Programme Officer', 'Member'] },
+  { code: 'NCC', name: 'National Cadet Corps', positions: ['Associate NCC Officer (ANO)', 'Caretaker Officer', 'Member'] },
+  { code: 'ISTE', name: 'Indian Society for Technical Education — Student Chapter', positions: ['Faculty Advisor', 'Chapter Counsellor', 'College Coordinator', 'Member'] },
+  { code: 'NAAC', name: 'NAAC Accreditation Committee', positions: ['Coordinator', 'Criterion Coordinator', 'Member'] },
+  { code: 'NBA', name: 'NBA Accreditation Committee', positions: ['Coordinator', 'Programme Coordinator', 'Member'] },
+  { code: 'NIRF', name: 'NIRF Ranking Cell', positions: ['Coordinator', 'Member'] },
+  { code: 'EDC', name: 'Entrepreneurship Development Cell', positions: ['Coordinator', 'Member'] },
+  { code: 'TPO', name: 'Training & Placement Cell', positions: ['Training & Placement Officer', 'Department Placement Coordinator', 'Member'] },
+  { code: 'R&D', name: 'Research & Development Cell', positions: ['Dean R&D', 'Coordinator', 'Member'] },
+  { code: 'EXAM', name: 'Examination Cell', positions: ['Controller of Examinations', 'Additional Controller', 'Coordinator', 'Member'] },
+  { code: 'ARC', name: 'Anti-Ragging Committee', positions: ['Convener', 'Member', 'Squad Member'] },
+  { code: 'ICC', name: 'Internal Complaints Committee', positions: ['Presiding Officer', 'Member'] },
+  { code: 'GRC', name: 'Grievance Redressal Committee', positions: ['Chairperson', 'Convener', 'Member'] },
+  { code: 'WEC', name: 'Women Empowerment Cell', positions: ['Coordinator', 'Member'] },
+  { code: 'IEEE', name: 'IEEE Student Branch', positions: ['Branch Counsellor', 'Member'] },
+  { code: 'CSI', name: 'Computer Society of India — Student Branch', positions: ['Student Branch Coordinator', 'Member'] },
+  { code: 'SPORTS', name: 'Sports & Games Committee', positions: ['Coordinator', 'Member'] },
+  { code: 'ALUMNI', name: 'Alumni Relations Cell', positions: ['Coordinator', 'Member'] },
+  { code: 'OTHER', name: 'Other committee / cell', positions: ['Coordinator', 'Convener', 'Member'] },
+];
+const DUTY_ISSUERS = ['principal', 'director'];
+const DUTY_VIEWERS = ['principal', 'director', 'management', 'program_chair', 'admin', 'hod'];
+
+let dutyTablesReady: Promise<void> | null = null;
+function ensureDutyTables(): Promise<void> {
+  if (!dutyTablesReady) {
+    dutyTablesReady = db.query(`
+      CREATE TABLE IF NOT EXISTS institutional_duties (
+        id SERIAL PRIMARY KEY,
+        order_no TEXT UNIQUE NOT NULL,
+        academic_year TEXT NOT NULL,
+        faculty_email TEXT NOT NULL,
+        faculty_name TEXT,
+        department TEXT,
+        duty_code TEXT NOT NULL,
+        duty_name TEXT NOT NULL,
+        position TEXT NOT NULL,
+        effective_from DATE NOT NULL,
+        effective_to DATE,
+        responsibilities TEXT,
+        status TEXT NOT NULL DEFAULT 'Active' CHECK (status IN ('Active', 'Relieved', 'Cancelled')),
+        relieved_on DATE,
+        issued_by TEXT NOT NULL,
+        issued_by_role TEXT NOT NULL,
+        issued_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_inst_duties_email ON institutional_duties (LOWER(faculty_email));
+    `).then(() => undefined).catch((err: any) => { dutyTablesReady = null; throw err; });
+  }
+  return dutyTablesReady;
+}
+
+app.get('/duties/catalog', requireAuth, (_req: Request, res: Response) => {
+  res.json({ catalog: DUTY_CATALOG, issuers: DUTY_ISSUERS });
+});
+
+// GET /duties?status=&duty_code= — appointment register (HOD: own department only)
+app.get('/duties', requireRole(...DUTY_VIEWERS), async (req: Request, res: Response) => {
+  try {
+    await ensureDutyTables();
+    const where: string[] = []; const params: any[] = [];
+    if (req.auth!.role === 'hod') { params.push(req.auth!.department); where.push(`department = $${params.length}`); }
+    if (req.query.status) { params.push(String(req.query.status)); where.push(`status = $${params.length}`); }
+    if (req.query.duty_code) { params.push(String(req.query.duty_code)); where.push(`duty_code = $${params.length}`); }
+    const r = await db.query(
+      `SELECT * FROM institutional_duties ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+       ORDER BY (status = 'Active') DESC, effective_from DESC, id DESC`, params);
+    res.json(r.rows);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /duties/my — office orders addressed to the signed-in staff member
+app.get('/duties/my', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureDutyTables();
+    const r = await db.query(
+      `SELECT * FROM institutional_duties WHERE LOWER(faculty_email) = $1 AND status <> 'Cancelled'
+       ORDER BY (status = 'Active') DESC, effective_from DESC`, [String(req.auth!.email || '').toLowerCase()]);
+    res.json(r.rows);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /duties — principal / director appoints a faculty member; issues a numbered office order
+app.post('/duties', requireRole(...DUTY_ISSUERS), async (req: Request, res: Response) => {
+  try {
+    await ensureDutyTables();
+    const b = req.body || {};
+    const email = String(b.faculty_email || '').toLowerCase().trim();
+    const code = String(b.duty_code || '').trim().toUpperCase();
+    const position = String(b.position || '').trim();
+    const from = String(b.effective_from || '').slice(0, 10);
+    const to = b.effective_to ? String(b.effective_to).slice(0, 10) : null;
+    const cat = DUTY_CATALOG.find(c => c.code === code);
+    if (!email || !cat || !position || !/^\d{4}-\d{2}-\d{2}$/.test(from)) {
+      return res.status(400).json({ error: 'Faculty, duty, position and a valid "with effect from" date are required' });
+    }
+    if (to && (!/^\d{4}-\d{2}-\d{2}$/.test(to) || to < from)) return res.status(400).json({ error: '"Up to" date must be on or after the "with effect from" date' });
+    const dutyName = code === 'OTHER' ? String(b.duty_name || '').trim() : cat.name;
+    if (!dutyName) return res.status(400).json({ error: 'Enter the committee / cell name' });
+    if (position.length > 120 || dutyName.length > 160) return res.status(400).json({ error: 'Name too long' });
+
+    const f = await db.query('SELECT name, department FROM faculty WHERE LOWER(email) = $1 LIMIT 1', [email]);
+    if (!f.rows[0]) return res.status(404).json({ error: 'Faculty member not found' });
+    const dup = await db.query(
+      `SELECT order_no FROM institutional_duties WHERE LOWER(faculty_email) = $1 AND duty_code = $2 AND duty_name = $3
+         AND LOWER(position) = LOWER($4) AND status = 'Active' LIMIT 1`, [email, code, dutyName, position]);
+    if (dup.rows[0]) return res.status(409).json({ error: `Already appointed — order ${dup.rows[0].order_no} is active` });
+
+    const ay = currentAcademicYear(new Date(from + 'T00:00:00Z'));
+    const shortAy = ay.replace(/[–—]/g, '-');
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const seq = await db.query('SELECT COUNT(*)::int AS n FROM institutional_duties WHERE academic_year = $1', [ay]);
+      const orderNo = `RGMCET/PRL/${code}/${shortAy}/${String(Number(seq.rows[0]?.n || 0) + 1 + attempt).padStart(3, '0')}`;
+      try {
+        const r = await db.query(
+          `INSERT INTO institutional_duties (order_no, academic_year, faculty_email, faculty_name, department, duty_code, duty_name,
+             position, effective_from, effective_to, responsibilities, issued_by, issued_by_role)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+          [orderNo, ay, email, f.rows[0].name, f.rows[0].department, code, dutyName, position, from, to,
+            String(b.responsibilities || '').trim().slice(0, 2000) || null, req.auth!.email, req.auth!.role]);
+        return res.status(201).json(r.rows[0]);
+      } catch (e: any) {
+        if (e?.code !== '23505') throw e; // order number taken by a concurrent issue — try the next one
+      }
+    }
+    res.status(409).json({ error: 'Could not allocate an order number, please retry' });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// PATCH /duties/:id/status — relieve (with a date) or cancel an order issued in error
+app.patch('/duties/:id/status', requireRole(...DUTY_ISSUERS), async (req: Request, res: Response) => {
+  try {
+    await ensureDutyTables();
+    const status = String(req.body?.status || '');
+    if (!['Relieved', 'Cancelled', 'Active'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
+    const on = status === 'Relieved' ? String(req.body?.relieved_on || todayIST()).slice(0, 10) : null;
+    if (on && !/^\d{4}-\d{2}-\d{2}$/.test(on)) return res.status(400).json({ error: 'Invalid relieving date' });
+    const r = await db.query(
+      `UPDATE institutional_duties SET status = $1, relieved_on = $2, updated_at = NOW() WHERE id = $3 RETURNING *`,
+      [status, on, Number(req.params.id)]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Order not found' });
+    res.json(r.rows[0]);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 let examTablesReady: Promise<void> | null = null;
 function ensureExamTables(): Promise<void> {
   if (!examTablesReady) {

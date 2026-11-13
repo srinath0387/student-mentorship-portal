@@ -350,6 +350,61 @@
       "status": "done",
       "priority": "low",
       "commit_msg": "feat(exams): seating and invigilation planner"
+    },
+    {
+      "id": "OV001",
+      "title": "Oversight logins are observational (read-only)",
+      "description": "Principal/director/management/program chair see a read-only Faculty Directory (no mentor CSV upload, rename, link, merge, delete), no Add Student / Bulk Import, and cannot approve/reject documents (UI + API).",
+      "files_affected": [
+        "frontend/src/features/admin/AdminDashboardPage.tsx",
+        "frontend/src/features/admin/components/FacultyRecordsTable.tsx",
+        "frontend/src/features/documents/DocumentsManagementPage.tsx",
+        "frontend/src/components/layout/Sidebar.tsx",
+        "backend/src/handlers/api.ts"
+      ],
+      "acceptance_criteria": [
+        "Oversight sees no write controls on faculty tab",
+        "Document status PATCH returns 403 for principal"
+      ],
+      "status": "done",
+      "priority": 1,
+      "commit_msg": "feat(oversight): read-only views for authorities"
+    },
+    {
+      "id": "OV002",
+      "title": "Institutional duties & office orders",
+      "description": "Principal/director appoint faculty to IIC, IQAC, NSS, NCC, ISTE, NAAC, NBA… with a w.e.f. date; numbered office order RGMCET/PRL/<BODY>/<AY>/<seq>; relieve/cancel; faculty 'My Office Orders' with print.",
+      "files_affected": [
+        "backend/src/handlers/api.ts",
+        "frontend/src/features/duties/*",
+        "frontend/src/App.tsx",
+        "frontend/src/components/layout/Sidebar.tsx"
+      ],
+      "acceptance_criteria": [
+        "POST /duties issues numbered order",
+        "Duplicate active appointment refused",
+        "Management view-only",
+        "Faculty sees own orders and can print"
+      ],
+      "status": "done",
+      "priority": 1,
+      "commit_msg": "feat(duties): institutional duties and office orders"
+    },
+    {
+      "id": "OV003",
+      "title": "Interactive executive KPI board",
+      "description": "Oversight home shows 9 KPIs; clicking a KPI ranks departments by it with benchmark and breakdown; clicking a department cross-filters all KPIs with gap vs institution.",
+      "files_affected": [
+        "frontend/src/features/oversight/ExecutiveKpiBoard.tsx",
+        "frontend/src/features/oversight/OversightDashboardPage.tsx"
+      ],
+      "acceptance_criteria": [
+        "KPI click changes ranking + breakdown",
+        "Department click recomputes every KPI"
+      ],
+      "status": "done",
+      "priority": 1,
+      "commit_msg": "feat(oversight): interactive KPI board"
     }
   ]
 }

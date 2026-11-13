@@ -596,13 +596,13 @@ export const AdminDashboardPage: React.FC = () => {
             <ShieldCheck className="w-3.5 h-3.5" />
             <span>Academic Administration Portal</span>
           </div>
-          <h1 className="text-2xl font-extrabold text-textPrimary">Student Directory & Academic Analytics</h1>
-          <p className="text-xs text-textSecondary mt-1">Full administrative control over student records, CGPA rankings, and coding profile metrics</p>
+          <h1 className="text-2xl font-extrabold text-textPrimary">{isOversight && activeTab === 'faculty' ? 'Faculty Directory' : 'Student Directory & Academic Analytics'}</h1>
+          <p className="text-xs text-textSecondary mt-1">{isOversight ? 'Read-only view for institutional oversight — records are maintained by the department admins' : 'Full administrative control over student records, CGPA rankings, and coding profile metrics'}</p>
         </div>
         <div className="flex flex-wrap gap-2.5">
-          <PillButton variant="outline" size="sm" onClick={() => setShowBulkImportModal(true)} icon={<Upload className="w-4 h-4 text-brand-primary" />}>Bulk Import CSV</PillButton>
+          {!isOversight && <PillButton variant="outline" size="sm" onClick={() => setShowBulkImportModal(true)} icon={<Upload className="w-4 h-4 text-brand-primary" />}>Bulk Import CSV</PillButton>}
           <PillButton variant="outline" size="sm" onClick={exportCSV} icon={<Download className="w-4 h-4" />}>Export CSV</PillButton>
-          <PillButton variant="primary" size="sm" onClick={openAddModal} icon={<Plus className="w-4 h-4" />}>Add Student</PillButton>
+          {!isOversight && <PillButton variant="primary" size="sm" onClick={openAddModal} icon={<Plus className="w-4 h-4" />}>Add Student</PillButton>}
         </div>
       </div>
 
@@ -1213,8 +1213,8 @@ export const AdminDashboardPage: React.FC = () => {
       {/* ── TAB 3: Faculty & Mentor Assignments ── */}
       {activeTab === 'faculty' && (
         <div className="space-y-6">
-          {/* CSV Upload Card */}
-          <div className="bg-surface border border-borderLine rounded-xl p-6 shadow-sm">
+          {/* CSV Upload Card — admins only; oversight is read-only */}
+          {!isOversight && <div className="bg-surface border border-borderLine rounded-xl p-6 shadow-sm">
             <div className="mb-4">
               <h3 className="text-base font-bold text-textPrimary">Upload Mentor Assignment CSV</h3>
               <p className="text-xs text-textSecondary mt-0.5">
@@ -1324,10 +1324,11 @@ export const AdminDashboardPage: React.FC = () => {
                 <button onClick={() => setCsvResult(null)} className="text-brand-primary underline text-[11px]">Dismiss</button>
               </div>
             )}
-          </div>
+          </div>}
 
           {/* Live Faculty Records Table */}
           <FacultyRecordsTable
+            readOnly={isOversight}
             onLinkEmail={(facId) => { setLinkEmailFacId(facId); setLinkEmailValue(''); setLinkEmailMsg(''); }}
           />
         </div>

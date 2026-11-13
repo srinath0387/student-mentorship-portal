@@ -1051,6 +1051,17 @@ export const api = {
   deleteExamSession: async (id: number) => fetchWithAuth(`/exams/sessions/${id}`, { method: 'DELETE' }),
   getMyExams: async () => fetchWithAuth('/exams/my'),
 
+  // ── Institutional duties & office orders ──
+  getDutyCatalog: async (): Promise<{ catalog: { code: string; name: string; positions: string[] }[]; issuers: string[] }> => fetchWithAuth('/duties/catalog'),
+  getDuties: async (params: { status?: string; duty_code?: string } = {}) => {
+    const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]).toString();
+    return fetchWithAuth(`/duties${q ? `?${q}` : ''}`);
+  },
+  getMyOfficeOrders: async () => fetchWithAuth('/duties/my'),
+  assignDuty: async (data: any) => fetchWithAuth('/duties', { method: 'POST', body: JSON.stringify(data) }),
+  setDutyStatus: async (id: number, status: 'Relieved' | 'Cancelled' | 'Active', relieved_on?: string) =>
+    fetchWithAuth(`/duties/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status, relieved_on }) }),
+
   // ── Alumni ──
   getAlumni: async (p: { department?: string; batch?: string; status?: string; search?: string }) => {
     const q = new URLSearchParams(); Object.entries(p).forEach(([k, v]) => { if (v && v !== 'All') q.set(k, v); });

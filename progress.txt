@@ -58,3 +58,6 @@
 [2026-11-12 16:09] FT010 → done: alumni (CRUD, batch import, self-update links, analytics). 145 tests pass, builds ✓, screenshot checked. Committed 021df3b.
 [2026-11-12 16:12] FT011 → done: exam seating & invigilation planner. 147 tests pass, builds ✓. Committed 6e5b7d3.
 [2026-11-12 16:12] GSD SESSION END — FT001–FT011 all done.
+[2026-11-13 09:10] OV001 → done: oversight read-only (faculty directory, documents, add/import hidden; API guard)
+[2026-11-13 09:10] OV002 → done: institutional duties + numbered office orders, My Office Orders, print
+[2026-11-13 09:10] OV003 → done: interactive executive KPI board with cross-filtering

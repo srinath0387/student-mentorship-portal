@@ -495,3 +495,73 @@ describe('Leave eligibility table', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('Institutional duties & office orders', () => {
+  const PRINCIPAL = () => bearer('principal', 'principal@rgmcet.edu.in');
+  const body = { faculty_email: 'Ramesh@rgmcet.edu.in', duty_code: 'IIC', position: 'College Coordinator', effective_from: '2026-11-15' };
+
+  it('principal appoints a faculty member and gets a numbered office order for the academic year', async () => {
+    const calls = routeDb([
+      ['SELECT name, department FROM faculty', [{ name: 'Dr. Ramesh', department: 'CSE (Data Science)' }]],
+      ['COUNT(*)::int AS n FROM institutional_duties', [{ n: 4 }]],
+      ['INSERT INTO institutional_duties', (_s, p) => [{ id: 9, order_no: p[0], academic_year: p[1], faculty_email: p[2], duty_name: p[6], position: p[7], effective_from: p[8] }]],
+    ]);
+    const res = await request(app).post('/duties').set('Authorization', PRINCIPAL()).send(body);
+    expect(res.status).toBe(201);
+    expect(res.body.order_no).toBe('RGMCET/PRL/IIC/2026-27/005');
+    expect(res.body.faculty_email).toBe('ramesh@rgmcet.edu.in');
+    expect(res.body.duty_name).toBe("Institution's Innovation Council");
+    const ins = calls.find(c => c.sql.includes('INSERT INTO institutional_duties'))!;
+    expect(ins.params[12]).toBe('principal');
+  });
+
+  it('refuses a duplicate active appointment', async () => {
+    routeDb([
+      ['SELECT name, department FROM faculty', [{ name: 'Dr. Ramesh', department: 'CSE (Data Science)' }]],
+      ['SELECT order_no FROM institutional_duties', [{ order_no: 'RGMCET/PRL/IIC/2026-27/001' }]],
+    ]);
+    const res = await request(app).post('/duties').set('Authorization', PRINCIPAL()).send(body);
+    expect(res.status).toBe(409);
+  });
+
+  it('validates the body, position and date', async () => {
+    routeDb([]);
+    const res = await request(app).post('/duties').set('Authorization', PRINCIPAL()).send({ ...body, duty_code: 'XYZ' });
+    expect(res.status).toBe(400);
+    const res2 = await request(app).post('/duties').set('Authorization', PRINCIPAL()).send({ ...body, effective_to: '2026-01-01' });
+    expect(res2.status).toBe(400);
+  });
+
+  it('management can view the register but cannot issue orders', async () => {
+    routeDb([['FROM institutional_duties', [{ id: 1, order_no: 'X' }]]]);
+    const view = await request(app).get('/duties').set('Authorization', bearer('management', 'chair@rgmcet.edu.in'));
+    expect(view.status).toBe(200);
+    expect(view.body).toHaveLength(1);
+    const issue = await request(app).post('/duties').set('Authorization', bearer('management', 'chair@rgmcet.edu.in')).send(body);
+    expect(issue.status).toBe(403);
+  });
+
+  it('faculty sees only their own orders', async () => {
+    const calls = routeDb([['FROM institutional_duties WHERE LOWER(faculty_email)', [{ id: 1 }]]]);
+    const res = await request(app).get('/duties/my').set('Authorization', bearer('faculty', 'Ramesh@rgmcet.edu.in'));
+    expect(res.status).toBe(200);
+    expect(calls.find(c => c.sql.includes('LOWER(faculty_email) = $1'))!.params[0]).toBe('ramesh@rgmcet.edu.in');
+  });
+
+  it('principal relieves an appointee with a date', async () => {
+    const calls = routeDb([['UPDATE institutional_duties', (_s, p) => [{ id: p[2], status: p[0], relieved_on: p[1] }]]]);
+    const res = await request(app).patch('/duties/9/status').set('Authorization', PRINCIPAL()).send({ status: 'Relieved', relieved_on: '2027-05-31' });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ status: 'Relieved', relieved_on: '2027-05-31' });
+    expect(calls.some(c => c.sql.includes('UPDATE institutional_duties'))).toBe(true);
+  });
+});
+
+describe('Oversight is read-only', () => {
+  it('principal cannot verify student documents', async () => {
+    routeDb([]);
+    const res = await request(app).patch('/students/23091A3201/documents/5/status')
+      .set('Authorization', bearer('principal', 'principal@rgmcet.edu.in')).send({ verification_status: 'Verified' });
+    expect(res.status).toBe(403);
+  });
+});

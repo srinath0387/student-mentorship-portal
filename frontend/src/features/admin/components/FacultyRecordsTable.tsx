@@ -6,9 +6,12 @@ import { FacultyProfileInspectionModal } from '../../faculty/components/FacultyP
 
 interface Props {
   onLinkEmail: (facultyId: string) => void;
+  /** Oversight (principal / director / management): view only — no rename, link, merge or delete. */
+  readOnly?: boolean;
 }
 
-export const FacultyRecordsTable: React.FC<Props> = ({ onLinkEmail }) => {
+export const FacultyRecordsTable: React.FC<Props> = ({ onLinkEmail, readOnly = false }) => {
+  const [query, setQuery] = useState('');
   const queryClient = useQueryClient();
   const { data: faculty = [], isLoading } = useQuery({
     queryKey: ['adminFaculty'],
@@ -77,7 +80,10 @@ export const FacultyRecordsTable: React.FC<Props> = ({ onLinkEmail }) => {
           <h3 className="text-base font-bold text-textPrimary">Faculty Records</h3>
           <p className="text-xs text-textSecondary mt-0.5">{faculty.length} faculty member{faculty.length !== 1 ? 's' : ''} in system</p>
         </div>
-        <button
+        {readOnly ? (
+          <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search name, ID or email…"
+            className="px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-background text-textPrimary w-56 focus:outline-none focus:ring-2 focus:ring-brand-primary/40" />
+        ) : <button
           onClick={() => {
             setAutoMerging(true);
             api.smartAutoMergeFaculty()
@@ -93,7 +99,7 @@ export const FacultyRecordsTable: React.FC<Props> = ({ onLinkEmail }) => {
         >
           <Sparkles className={`w-3.5 h-3.5 ${autoMerging ? 'animate-spin text-purple-400' : 'text-purple-600 dark:text-purple-400'}`} />
           <span>{autoMerging ? 'Auto-Merging…' : '✨ Smart Auto-Link & Merge'}</span>
-        </button>
+        </button>}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
@@ -113,7 +119,7 @@ export const FacultyRecordsTable: React.FC<Props> = ({ onLinkEmail }) => {
                 </td>
               </tr>
             )}
-            {faculty.map((fac: any) => {
+            {faculty.filter((fac: any) => !query.trim() || `${fac.name} ${fac.faculty_id} ${fac.email || ''}`.toLowerCase().includes(query.trim().toLowerCase())).map((fac: any) => {
               const isLinked = fac.email && !fac.email.startsWith('pending_');
               const isRenaming = renamingId === fac.faculty_id;
               return (
@@ -172,6 +178,7 @@ export const FacultyRecordsTable: React.FC<Props> = ({ onLinkEmail }) => {
                           >
                             <Eye className="w-3 h-3" /> View Profile
                           </button>
+                          {!readOnly && <>
                           <button onClick={() => startRename(fac)}
                             className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg border border-borderLine hover:bg-amber-50 hover:text-amber-700 hover:border-amber-300 transition-colors">
                             <Pencil className="w-3 h-3" />Rename
@@ -193,6 +200,7 @@ export const FacultyRecordsTable: React.FC<Props> = ({ onLinkEmail }) => {
                             <Trash2 className="w-3 h-3" />
                             {confirmDeleteId === fac.faculty_id ? 'Confirm?' : 'Delete'}
                           </button>
+                          </>}
                         </>
                       )}
                     </div>
