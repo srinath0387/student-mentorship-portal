@@ -20097,6 +20097,11 @@ if (process.env.NODE_ENV !== 'production' && !process.env.AWS_LAMBDA_FUNCTION_NA
 const serverlessHandler = serverless(app);
 
 export const handler = async (event: any, context: any) => {
+  // Keep-warm ping (EventBridge, every 5 min): keeps an initialised instance + DB connection ready
+  if (event && event.warmup === true) {
+    await db.query('SELECT 1').catch(() => undefined);
+    return { statusCode: 200, body: 'warm' };
+  }
   if (event.source === 'aws.events' && event['detail-type'] === 'Scheduled Event') {
     console.log('[EventBridge] Intercepted Scheduled Event. Triggering Auto-Sync...');
     const { runCodingProfileCronSync } = await import('../services/cronSync');

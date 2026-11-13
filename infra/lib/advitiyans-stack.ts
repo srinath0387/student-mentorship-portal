@@ -301,6 +301,16 @@ export class AdvitiyansStack extends cdk.Stack {
     });
     nightlySyncRule.addTarget(new targets.LambdaFunction(apiLambda));
 
+    // Keep-warm: ping the API Lambda every 5 minutes so the first login after a quiet spell
+    // doesn't pay the cold-start cost (bundle load + Secrets Manager + DB TLS handshake).
+    const keepWarmRule = new events.Rule(this, 'ApiKeepWarm', {
+      schedule: events.Schedule.rate(cdk.Duration.minutes(5)),
+      description: 'Keeps one API Lambda instance and its DB connection warm.',
+    });
+    keepWarmRule.addTarget(new targets.LambdaFunction(apiLambda, {
+      event: events.RuleTargetInput.fromObject({ warmup: true }),
+    }));
+
     // ========================================================================
     // 11. API Gateway REST API
     // ========================================================================

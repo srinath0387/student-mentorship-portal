@@ -67,3 +67,4 @@
 [2026-11-13 10:07] LP001 → done: landing ID-card carousel, faculty dept from record (asked only on first login), registration on the card with dept/year/batch/email from reg no; batch no longer hardcoded
 [2026-11-13 10:26] HD001 → done: HOD dashboard = department KPI board + scorecard; principal analytics (students/faculty/research/placements) locked to HOD dept; Power BI canvas + quick-nav removed
 [2026-11-13 10:34] AT006 → fix: deleting an allotment removes its timetable slots; leftover-slot list with remove; allotment search; HOD dept check on slot delete
+[2026-11-13 10:52] PF001 → done: throttling fix — per-tab request limiter (6) + quick retry of API-Gateway throttles; minified Lambda bundle 4.5MB→2.6MB; 5-min keep-warm ping
