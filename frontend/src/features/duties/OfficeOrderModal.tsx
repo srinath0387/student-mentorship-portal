@@ -8,6 +8,7 @@ export interface DutyOrder {
   academic_year: string;
   faculty_email: string;
   faculty_name?: string;
+  designation?: string | null;
   department?: string;
   duty_code: string;
   duty_name: string;
@@ -38,7 +39,8 @@ export const OfficeOrderModal: React.FC<{ order: DutyOrder; onClose: () => void 
   const relieving = kind === 'relieving';
   const signatory = (order.issued_by_role || 'principal').toUpperCase();
   const name = order.faculty_name || order.faculty_email;
-  const dept = order.department ? `, Department of ${order.department}` : '';
+  const desig = order.designation ? `, ${order.designation}` : '';
+  const dept = `${desig}${order.department ? `, Department of ${order.department}` : ''}`;
   const body = bodyLabel(order);
   const duties = String(order.responsibilities || '').split('\n').map(l => l.replace(/^\s*[-•\d.)]+\s*/, '').trim()).filter(Boolean);
   const orderNo = relieving ? `${order.order_no}/R` : order.order_no;
@@ -122,7 +124,7 @@ export const OfficeOrderModal: React.FC<{ order: DutyOrder; onClose: () => void 
               </div>
 
               <div className="text-[11px] space-y-0.5">
-                <p><b>To:</b> {name}{order.department ? `, ${order.department}` : ''}</p>
+                <p><b>To:</b> {name}{desig}{order.department ? `, ${order.department}` : ''}</p>
                 <p><b>Copy to:</b> Head of the Department{order.department ? ` (${order.department})` : ''}; IQAC Coordinator; {order.duty_code !== 'IQAC' && order.duty_code !== 'OTHER' ? `${order.duty_code} records; ` : ''}Office file.</p>
               </div>
             </div>

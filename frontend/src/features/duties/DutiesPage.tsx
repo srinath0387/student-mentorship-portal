@@ -14,7 +14,7 @@ type Catalog = { code: string; name: string; positions: string[] }[];
 function AssignForm({ catalog, onIssued, onClose }: { catalog: Catalog; onIssued: (o: DutyOrder) => void; onClose: () => void }) {
   const { data: faculty = [] } = useQuery<any[]>({ queryKey: ['allFacultyForDuties'], queryFn: () => api.getAllFaculty() });
   const [q, setQ] = useState('');
-  const [f, setF] = useState({ faculty_email: '', duty_code: catalog[0]?.code || 'IIC', duty_name: '', position: '', effective_from: today(), effective_to: '', responsibilities: '' });
+  const [f, setF] = useState({ designation: '', faculty_email: '', duty_code: catalog[0]?.code || 'IIC', duty_name: '', position: '', effective_from: today(), effective_to: '', responsibilities: '' });
   const [err, setErr] = useState<string | null>(null);
   const cat = catalog.find(c => c.code === f.duty_code);
   const linked = faculty.filter((x: any) => x.email && !String(x.email).startsWith('pending_'));
@@ -42,7 +42,7 @@ function AssignForm({ catalog, onIssued, onClose }: { catalog: Catalog; onIssued
           {chosen ? (
             <div className="flex items-center justify-between px-3 py-2 rounded-xl border border-brand-primary/40 bg-brand-soft/40 text-xs">
               <span><b className="text-textPrimary">{chosen.name}</b> <span className="text-textMuted">· {chosen.department}</span></span>
-              <button onClick={() => { setF({ ...f, faculty_email: '' }); setQ(''); }} className="text-textMuted hover:text-red-600"><X className="w-3.5 h-3.5" /></button>
+              <button onClick={() => { setF({ ...f, faculty_email: '', designation: '' }); setQ(''); }} className="text-textMuted hover:text-red-600"><X className="w-3.5 h-3.5" /></button>
             </div>
           ) : (
             <>
@@ -53,13 +53,21 @@ function AssignForm({ catalog, onIssued, onClose }: { catalog: Catalog; onIssued
               {matches.length > 0 && (
                 <div className="absolute z-10 left-0 right-0 mt-1 bg-surface border border-borderLine rounded-xl shadow-lg max-h-64 overflow-y-auto">
                   {matches.map((m: any) => (
-                    <button key={m.email} onClick={() => { setF({ ...f, faculty_email: m.email }); setQ(''); }}
+                    <button key={m.email} onClick={() => { setF({ ...f, faculty_email: m.email, designation: m.designation || '' }); setQ(''); }}
                       className="w-full text-left px-3 py-2 text-xs hover:bg-surface-2 border-b border-borderLine last:border-0">
                       <b className="text-textPrimary">{m.name}</b> <span className="text-textMuted">· {m.department} · {m.email}</span>
                     </button>
                   ))}
                 </div>
               )}
+            </>
+          )}
+          {chosen && (
+            <>
+              <input list="duty-designations" value={f.designation} onChange={e => setF({ ...f, designation: e.target.value })}
+                placeholder="Designation, e.g. Associate Professor" className={`${input} w-full`} />
+              <datalist id="duty-designations">{['Professor', 'Associate Professor', 'Assistant Professor', 'Professor & HOD', 'Associate Professor & HOD', 'Senior Assistant Professor'].map(d => <option key={d} value={d} />)}</datalist>
+              {!f.designation.trim() && <p className="text-[10px] text-amber-600 font-semibold">No designation in the faculty profile — enter it so it prints on the order.</p>}
             </>
           )}
         </div>
@@ -106,7 +114,7 @@ function AssignForm({ catalog, onIssued, onClose }: { catalog: Catalog; onIssued
 
       {chosen && f.position && (
         <p className="text-xs text-textSecondary bg-surface-2 rounded-xl px-3 py-2">
-          Preview: <i>“With effect from {fmtLong(f.effective_from)}, {chosen.name}, Department of {chosen.department}, is hereby appointed as <b>{f.position}</b> of the <b>{f.duty_code === 'OTHER' ? (f.duty_name || '…') : `${cat?.name} (${f.duty_code})`}</b>…”</i>
+          Preview: <i>“With effect from {fmtLong(f.effective_from)}, {chosen.name}{f.designation.trim() ? `, ${f.designation.trim()}` : ''}, Department of {chosen.department}, is hereby appointed as <b>{f.position}</b> of the <b>{f.duty_code === 'OTHER' ? (f.duty_name || '…') : `${cat?.name} (${f.duty_code})`}</b>…”</i>
         </p>
       )}
       {err && <p className="text-xs text-red-600 font-semibold">{err}</p>}
@@ -240,7 +248,7 @@ export default function DutiesPage() {
               {rows.map(o => (
                 <tr key={o.id} className="hover:bg-surface-2/50">
                   <td className="py-3 px-4 font-mono text-[11px] text-textSecondary whitespace-nowrap">{o.order_no}</td>
-                  <td className="py-3 px-4"><p className="font-bold text-textPrimary">{o.faculty_name || o.faculty_email}</p><p className="text-[10px] text-textMuted">{o.department}</p></td>
+                  <td className="py-3 px-4"><p className="font-bold text-textPrimary">{o.faculty_name || o.faculty_email}</p><p className="text-[10px] text-textMuted">{[o.designation, o.department].filter(Boolean).join(' · ')}</p></td>
                   <td className="py-3 px-4 text-textSecondary" title={bodyLabel(o)}><b className="text-textPrimary">{o.duty_code === 'OTHER' ? o.duty_name : o.duty_code}</b></td>
                   <td className="py-3 px-4 text-textPrimary font-semibold">{o.position}</td>
                   <td className="py-3 px-4 whitespace-nowrap text-textSecondary">{fmtLong(o.effective_from)}{o.effective_to ? <span className="block text-[10px] text-textMuted">to {fmtLong(o.effective_to)}</span> : null}</td>

@@ -6202,6 +6202,7 @@ app.get('/faculty', requireRole('admin', 'hod', 'coordinator', 'faculty', 'direc
     const result = await db.query(`
       SELECT f.*,
              ffp.personal->>'photo_url' AS photo_url,
+             ffp.personal->>'designation' AS designation,
              COUNT(DISTINCT combined.roll_number)::int                            AS mentee_count,
              COUNT(DISTINCT CASE WHEN s2.year = '1st Year' THEN combined.roll_number END)::int AS year1_count,
              COUNT(DISTINCT CASE WHEN s2.year = '2nd Year' THEN combined.roll_number END)::int AS year2_count,
@@ -9935,6 +9936,7 @@ function ensureDutyTables(): Promise<void> {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_inst_duties_email ON institutional_duties (LOWER(faculty_email));
+      ALTER TABLE institutional_duties ADD COLUMN IF NOT EXISTS designation TEXT;
     `).then(() => undefined).catch((err: any) => { dutyTablesReady = null; throw err; });
   }
   return dutyTablesReady;
@@ -9953,8 +9955,10 @@ app.get('/duties', requireRole(...DUTY_VIEWERS), async (req: Request, res: Respo
     if (req.query.status) { params.push(String(req.query.status)); where.push(`status = $${params.length}`); }
     if (req.query.duty_code) { params.push(String(req.query.duty_code)); where.push(`duty_code = $${params.length}`); }
     const r = await db.query(
-      `SELECT * FROM institutional_duties ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-       ORDER BY (status = 'Active') DESC, effective_from DESC, id DESC`, params);
+      `SELECT d.*, COALESCE(NULLIF(d.designation, ''), fp.personal->>'designation') AS designation
+       FROM institutional_duties d LEFT JOIN faculty_full_profiles fp ON LOWER(fp.email) = LOWER(d.faculty_email)
+       ${where.length ? 'WHERE ' + where.map(w => 'd.' + w).join(' AND ') : ''}
+       ORDER BY (d.status = 'Active') DESC, d.effective_from DESC, d.id DESC`, params);
     res.json(r.rows);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -9964,8 +9968,10 @@ app.get('/duties/my', requireAuth, async (req: Request, res: Response) => {
   try {
     await ensureDutyTables();
     const r = await db.query(
-      `SELECT * FROM institutional_duties WHERE LOWER(faculty_email) = $1 AND status <> 'Cancelled'
-       ORDER BY (status = 'Active') DESC, effective_from DESC`, [String(req.auth!.email || '').toLowerCase()]);
+      `SELECT d.*, COALESCE(NULLIF(d.designation, ''), fp.personal->>'designation') AS designation
+       FROM institutional_duties d LEFT JOIN faculty_full_profiles fp ON LOWER(fp.email) = LOWER(d.faculty_email)
+       WHERE LOWER(d.faculty_email) = $1 AND d.status <> 'Cancelled'
+       ORDER BY (d.status = 'Active') DESC, d.effective_from DESC`, [String(req.auth!.email || '').toLowerCase()]);
     res.json(r.rows);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -9989,8 +9995,13 @@ app.post('/duties', requireRole(...DUTY_ISSUERS), async (req: Request, res: Resp
     if (!dutyName) return res.status(400).json({ error: 'Enter the committee / cell name' });
     if (position.length > 120 || dutyName.length > 160) return res.status(400).json({ error: 'Name too long' });
 
-    const f = await db.query('SELECT name, department FROM faculty WHERE LOWER(email) = $1 LIMIT 1', [email]);
+    const f = await db.query(
+      `SELECT f.name, f.department, fp.personal->>'designation' AS designation
+       FROM faculty f LEFT JOIN faculty_full_profiles fp ON LOWER(fp.email) = LOWER(f.email)
+       WHERE LOWER(f.email) = $1 LIMIT 1`, [email]);
     if (!f.rows[0]) return res.status(404).json({ error: 'Faculty member not found' });
+    // Designation as entered by the principal, else from the faculty profile
+    const designation = (String(b.designation || '').trim() || String(f.rows[0].designation || '').trim()).slice(0, 80) || null;
     const dup = await db.query(
       `SELECT order_no FROM institutional_duties WHERE LOWER(faculty_email) = $1 AND duty_code = $2 AND duty_name = $3
          AND LOWER(position) = LOWER($4) AND status = 'Active' LIMIT 1`, [email, code, dutyName, position]);
@@ -10004,10 +10015,10 @@ app.post('/duties', requireRole(...DUTY_ISSUERS), async (req: Request, res: Resp
       try {
         const r = await db.query(
           `INSERT INTO institutional_duties (order_no, academic_year, faculty_email, faculty_name, department, duty_code, duty_name,
-             position, effective_from, effective_to, responsibilities, issued_by, issued_by_role)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+             position, effective_from, effective_to, responsibilities, issued_by, issued_by_role, designation)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
           [orderNo, ay, email, f.rows[0].name, f.rows[0].department, code, dutyName, position, from, to,
-            String(b.responsibilities || '').trim().slice(0, 2000) || null, req.auth!.email, req.auth!.role]);
+            String(b.responsibilities || '').trim().slice(0, 2000) || null, req.auth!.email, req.auth!.role, designation]);
         return res.status(201).json(r.rows[0]);
       } catch (e: any) {
         if (e?.code !== '23505') throw e; // order number taken by a concurrent issue — try the next one

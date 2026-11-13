@@ -502,7 +502,7 @@ describe('Institutional duties & office orders', () => {
 
   it('principal appoints a faculty member and gets a numbered office order for the academic year', async () => {
     const calls = routeDb([
-      ['SELECT name, department FROM faculty', [{ name: 'Dr. Ramesh', department: 'CSE (Data Science)' }]],
+      ["fp.personal->>'designation' AS designation", [{ name: 'Dr. Ramesh', department: 'CSE (Data Science)', designation: 'Associate Professor' }]],
       ['COUNT(*)::int AS n FROM institutional_duties', [{ n: 4 }]],
       ['INSERT INTO institutional_duties', (_s, p) => [{ id: 9, order_no: p[0], academic_year: p[1], faculty_email: p[2], duty_name: p[6], position: p[7], effective_from: p[8] }]],
     ]);
@@ -513,11 +513,12 @@ describe('Institutional duties & office orders', () => {
     expect(res.body.duty_name).toBe("Institution's Innovation Council");
     const ins = calls.find(c => c.sql.includes('INSERT INTO institutional_duties'))!;
     expect(ins.params[12]).toBe('principal');
+    expect(ins.params[13]).toBe('Associate Professor'); // from the faculty profile
   });
 
   it('refuses a duplicate active appointment', async () => {
     routeDb([
-      ['SELECT name, department FROM faculty', [{ name: 'Dr. Ramesh', department: 'CSE (Data Science)' }]],
+      ["fp.personal->>'designation' AS designation", [{ name: 'Dr. Ramesh', department: 'CSE (Data Science)', designation: 'Associate Professor' }]],
       ['SELECT order_no FROM institutional_duties', [{ order_no: 'RGMCET/PRL/IIC/2026-27/001' }]],
     ]);
     const res = await request(app).post('/duties').set('Authorization', PRINCIPAL()).send(body);
@@ -542,10 +543,10 @@ describe('Institutional duties & office orders', () => {
   });
 
   it('faculty sees only their own orders', async () => {
-    const calls = routeDb([['FROM institutional_duties WHERE LOWER(faculty_email)', [{ id: 1 }]]]);
+    const calls = routeDb([['WHERE LOWER(d.faculty_email) = $1', [{ id: 1 }]]]);
     const res = await request(app).get('/duties/my').set('Authorization', bearer('faculty', 'Ramesh@rgmcet.edu.in'));
     expect(res.status).toBe(200);
-    expect(calls.find(c => c.sql.includes('LOWER(faculty_email) = $1'))!.params[0]).toBe('ramesh@rgmcet.edu.in');
+    expect(calls.find(c => c.sql.includes('LOWER(d.faculty_email) = $1'))!.params[0]).toBe('ramesh@rgmcet.edu.in');
   });
 
   it('principal relieves an appointee with a date', async () => {
