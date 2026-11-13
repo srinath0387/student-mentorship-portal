@@ -54,7 +54,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
     if (p.startsWith('/hod/dashboard')) return { parent: 'HOD Portal', child: tab };
     if (p.startsWith('/admin/dashboard')) return { parent: 'Administration', child: tab };
     if (p.startsWith('/coordinator/dashboard')) return { parent: 'Coordinator Hub', child: tab };
-    if (p.startsWith('/oversight/dashboard')) return { parent: 'Institutional Oversight', child: tab };
+    if (p.startsWith('/oversight/dashboard')) return { parent: user?.role === 'hod' ? 'Department Analytics' : 'Institutional Oversight', child: tab };
     if (p.startsWith('/admin/faculty')) return { parent: 'Administration', child: 'Faculty Management' };
     if (p.startsWith('/attendance/workload')) return { parent: 'Attendance', child: 'Faculty Workload' };
     if (p.startsWith('/attendance/reports')) return { parent: 'Attendance', child: 'Reports' };

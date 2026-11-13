@@ -302,7 +302,8 @@ export const OversightDashboardPage: React.FC = () => {
     else setActiveTab('home');
   }, [location.search]);
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
-  const [selectedDept, setSelectedDept] = useState<string>('All');
+  const isHodView = role === 'hod';
+  const [selectedDept, setSelectedDept] = useState<string>(isHodView && user?.department ? user.department : 'All');
   const [cadreFilter, setCadreFilter] = useState<CadreFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPubYear, setSelectedPubYear] = useState<string>('All');
@@ -743,7 +744,7 @@ export const OversightDashboardPage: React.FC = () => {
                       }`}
                       style={{ width: `${Math.min(100, (d.sfr / 30) * 100)}%` }}
                     >
-                      <span className="text-[9px] text-white font-bold">1:{d.sfr}</span>
+                      <span className="text-[9px] text-white font-bold">1:{Number(d.sfr || 0).toFixed(1)}</span>
                     </div>
                   </div>
                   <span className={`text-[9px] font-bold ${d.sfr_status === 'compliant' ? 'text-emerald-600' : d.sfr_status === 'warning' ? 'text-amber-600' : 'text-red-600'}`}>
@@ -926,7 +927,7 @@ export const OversightDashboardPage: React.FC = () => {
                       d.sfr_status === 'compliant' ? 'bg-emerald-500/10 text-emerald-700 border border-emerald-500/20' :
                       d.sfr_status === 'warning' ? 'bg-amber-500/10 text-amber-700 border border-amber-500/20' :
                       'bg-red-500/10 text-red-700 border border-red-500/20'
-                    }`}>1:{d.sfr || '—'}</span>
+                    }`}>{d.sfr ? `1:${Number(d.sfr).toFixed(1)}` : '—'}</span>
                   </td>
                   <td className="py-2.5 px-3 text-center">
                     <button
@@ -1289,7 +1290,9 @@ export const OversightDashboardPage: React.FC = () => {
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 -mb-1">
           <Filter className="w-3.5 h-3.5 text-textMuted shrink-0 mr-1" />
-          {['All', ...allowedDepts].map(d => (
+          {isHodView ? (
+            <span className="shrink-0 px-3 py-1.5 rounded-xl text-[11px] font-bold bg-brand-primary text-white">{user?.department} · your department</span>
+          ) : ['All', ...allowedDepts].map(d => (
             <button key={d} onClick={() => setSelectedDept(d)}
               className={`shrink-0 px-3 py-1.5 rounded-xl text-[11px] font-bold border transition-all ${selectedDept === d
                 ? 'bg-brand-primary text-white border-brand-primary shadow-sm'
@@ -1577,7 +1580,7 @@ export const OversightDashboardPage: React.FC = () => {
       <div className="rounded-2xl border border-borderLine bg-surface shadow-sm p-5 space-y-3">
         <h3 className="text-sm font-bold text-textPrimary flex items-center gap-2">
           📋 Recent Mentor Meeting Logs
-          <span className="text-xs font-normal text-textMuted">(institution-wide)</span>
+          <span className="text-xs font-normal text-textMuted">({selectedDept === 'All' ? 'institution-wide' : selectedDept})</span>
         </h3>
         <MeetingLogsView
           logs={oversightMeetingLogs}

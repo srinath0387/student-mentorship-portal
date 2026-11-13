@@ -158,7 +158,9 @@ export const ExecutiveKpiBoard: React.FC<{
   onOpenTab: (tab: string) => void;
 }> = ({ departments, dept, onDeptChange: setDept, onOpenTab }) => {
   const [focus, setFocus] = useState<Key>('attendance');
-  const deptRow = departments.find(d => d.department === dept) || null;
+  // HOD view: one department — scorecard against targets instead of a department ranking
+  const single = departments.length === 1;
+  const deptRow = single ? null : departments.find(d => d.department === dept) || null;
   const inst = useMemo(() => aggregate(departments), [departments]);
   const scoped = useMemo(() => (deptRow ? aggregate([deptRow]) : inst), [deptRow, inst]);
   const m = METRICS.find(x => x.key === focus)!;
@@ -177,8 +179,10 @@ export const ExecutiveKpiBoard: React.FC<{
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="text-lg font-black text-textPrimary">Executive KPIs</h2>
-          <p className="text-[11px] text-textSecondary">Click a KPI to rank departments by it · click a department to see every KPI for that department</p>
+          <h2 className="text-lg font-black text-textPrimary">{single ? `Department KPIs · ${departments[0].department}` : 'Executive KPIs'}</h2>
+          <p className="text-[11px] text-textSecondary">{single
+            ? 'Click a KPI (or a scorecard row) to see its breakdown'
+            : 'Click a KPI to rank departments by it · click a department to see every KPI for that department'}</p>
         </div>
         {deptRow && (
           <button onClick={() => setDept(null)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand-primary text-white text-xs font-bold">
@@ -216,6 +220,34 @@ export const ExecutiveKpiBoard: React.FC<{
       </div>
 
       <div className="grid lg:grid-cols-5 gap-4">
+        {single ? (
+          <div className="lg:col-span-3 bg-surface border border-borderLine rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-black text-textPrimary">Scorecard against targets</p>
+              <span className="text-[10px] font-bold text-textMuted">┆ target line</span>
+            </div>
+            <div className="space-y-1">
+              {METRICS.filter(k => k.benchmark).map(k => {
+                const v = scoped[k.key]; const st = status(k, v); const b = k.benchmark!.value;
+                const max = Math.max(v, b) * 1.15 || 1;
+                return (
+                  <button key={k.key} onClick={() => setFocus(k.key)}
+                    title={`${k.label}: ${fmt(k, v)} (target ${k.benchmark!.label})`}
+                    className={`w-full flex items-center gap-2 px-2 py-2 rounded-xl text-[11px] transition-colors ${k.key === focus ? 'bg-brand-soft/60 ring-1 ring-brand-primary/40' : 'hover:bg-surface-2'}`}>
+                    <span className="w-36 shrink-0 truncate text-left font-semibold text-textPrimary">{k.label}{k.better === false ? ' ↓' : ''}</span>
+                    <div className="flex-1 relative h-3 rounded-full bg-surface-2">
+                      <div className="absolute inset-y-0 left-0 rounded-r bg-brand-primary" style={{ width: `${Math.min(100, (v / max) * 100)}%` }} />
+                      <div className="absolute -top-0.5 -bottom-0.5 w-0.5 rounded bg-slate-800 dark:bg-slate-100 z-10" style={{ left: `${(b / max) * 100}%` }} />
+                    </div>
+                    <span className="w-16 text-right font-black text-textPrimary">{fmt(k, v)}</span>
+                    <span className="w-14 text-right">{st && <span className={`px-1.5 py-px rounded text-[9px] font-black ${STATUS_STYLE[st].chip}`}>{STATUS_STYLE[st].icon} {STATUS_STYLE[st].text}</span>}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-textMuted">↓ lower is better. Targets: attendance 75%, student : faculty 1:20 (AICTE), certified students 50%, placement 60%, Ph.D. faculty 30%.</p>
+          </div>
+        ) : (
         <div className="lg:col-span-3 bg-surface border border-borderLine rounded-2xl p-4 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs font-black text-textPrimary">{m.label} by department {m.better === false ? '(lower is better)' : ''}</p>
@@ -232,7 +264,7 @@ export const ExecutiveKpiBoard: React.FC<{
                   <span className="w-36 shrink-0 truncate text-left font-semibold text-textPrimary">{d.department}</span>
                   <div className="flex-1 relative h-3 rounded-full bg-surface-2">
                     <div className="absolute inset-y-0 left-0 rounded-r bg-brand-primary" style={{ width: `${Math.min(100, (v / rankMax) * 100)}%` }} />
-                    {m.benchmark && <div className="absolute -top-0.5 -bottom-0.5 border-l-2 border-dashed border-textPrimary/60" style={{ left: `${(m.benchmark.value / rankMax) * 100}%` }} />}
+                    {m.benchmark && <div className="absolute -top-0.5 -bottom-0.5 w-0.5 rounded bg-slate-800 dark:bg-slate-100 z-10" style={{ left: `${(m.benchmark.value / rankMax) * 100}%` }} />}
                   </div>
                   <span className="w-16 text-right font-black text-textPrimary">{fmt(m, v)}</span>
                   <span className="w-14 text-right">{st && <span className={`px-1.5 py-px rounded text-[9px] font-black ${STATUS_STYLE[st].chip}`}>{STATUS_STYLE[st].icon} {STATUS_STYLE[st].text}</span>}</span>
@@ -241,10 +273,11 @@ export const ExecutiveKpiBoard: React.FC<{
             })}
           </div>
         </div>
+        )}
 
         <div className="lg:col-span-2 bg-surface border border-borderLine rounded-2xl p-4 flex flex-col gap-4">
-          <Composition focus={focus} scope={deptRow ? [deptRow] : departments} scopeLabel={deptRow ? deptRow.department : 'All departments'} />
-          {needsAttention.length > 0 && !deptRow && (
+          <Composition focus={focus} scope={deptRow ? [deptRow] : departments} scopeLabel={deptRow ? deptRow.department : single ? departments[0].department : 'All departments'} />
+          {needsAttention.length > 0 && !deptRow && !single && (
             <div className="rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 px-3 py-2 text-[11px] text-red-800 dark:text-red-300">
               <b>Needs attention ({m.label}):</b> {needsAttention.join(', ')}
             </div>

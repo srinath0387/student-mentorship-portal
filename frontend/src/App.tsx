@@ -382,7 +382,7 @@ export const App: React.FC = () => {
               </Route>
 
               {/* Oversight (View-Only) routes */}
-              <Route element={<ProtectedRoute allowedRoles={['director', 'principal', 'management', 'program_chair', 'admin']} />}>
+              <Route element={<ProtectedRoute allowedRoles={['director', 'principal', 'management', 'program_chair', 'admin', 'hod']} />}>
                 <Route path="/oversight/dashboard" element={<OversightDashboardPage />} />
               </Route>
 

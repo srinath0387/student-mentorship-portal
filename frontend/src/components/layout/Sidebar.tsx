@@ -38,6 +38,7 @@ import {
   ChevronRight,
   Home,
   LucideIcon,
+  Settings,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -230,11 +231,20 @@ const hodNav: NavGroup[] = [
     title: 'Dashboard',
     icon: LayoutDashboard,
     items: [
-      { label: 'Power BI Canvas', path: '/hod/dashboard?tab=powerbi', icon: BarChart2 },
-      { label: 'Year-Wise Overview', path: '/hod/dashboard?tab=overview', icon: Building2 },
+      { label: 'Department Dashboard', path: '/hod/dashboard', icon: LayoutDashboard },
+      { label: 'Student Analytics', path: '/oversight/dashboard?tab=students', icon: Users },
+      { label: 'Faculty Analytics', path: '/oversight/dashboard?tab=faculty', icon: User },
+      { label: 'Research & Publications', path: '/oversight/dashboard?tab=research', icon: FileBarChart },
+      { label: 'Placements', path: '/oversight/dashboard?tab=placements', icon: Award },
       { label: 'Certification Analytics', path: '/hod/dashboard?tab=certifications', icon: CheckCircle2 },
-      { label: 'Academic & Holiday Calendar', path: '/hod/dashboard?tab=holidays', icon: Calendar },
+      { label: 'Year-Wise Overview', path: '/hod/dashboard?tab=overview', icon: Building2 },
       { label: 'At-Risk Students', path: '/risk', icon: ShieldCheck },
+    ],
+  },
+  {
+    title: 'Reports & Quality',
+    icon: FileCheck,
+    items: [
       { label: 'Monthly Report', path: '/reports/monthly', icon: FileBarChart },
       { label: 'NAAC / NBA Data Pack', path: '/accreditation', icon: FileCheck },
       { label: 'CO–PO Attainment', path: '/obe', icon: CheckSquare },
@@ -243,6 +253,7 @@ const hodNav: NavGroup[] = [
       { label: 'Student Feedback', path: '/feedback', icon: Star },
       { label: 'Placement Drives', path: '/placement/drives', icon: Award },
       { label: 'Faculty Appraisal', path: '/appraisal', icon: ClipboardCheck },
+      { label: 'Academic & Holiday Calendar', path: '/hod/dashboard?tab=holidays', icon: Calendar },
       { label: 'Unregistered Students', path: '/hod/dashboard?tab=unregistered', icon: FileBarChart },
     ],
   },
@@ -272,6 +283,7 @@ const hodNav: NavGroup[] = [
     items: [
       { label: 'Faculty API Score', path: '/faculty/api', icon: Star },
       { label: 'Faculty Directory & 360°', path: '/admin/faculty', icon: ShieldCheck },
+      { label: 'Account Settings', path: '/hod/dashboard?tab=settings', icon: Settings },
     ],
   },
   {
@@ -280,6 +292,7 @@ const hodNav: NavGroup[] = [
     items: [
       { label: 'Student Directory', path: '/hod/dashboard?tab=students', icon: Users },
       { label: 'CGPA & Rankings', path: '/hod/dashboard?tab=rankings', icon: Award },
+      { label: 'Academic Analytics', path: '/hod/dashboard?tab=analytics', icon: FileBarChart },
       { label: 'My Mentees', path: '/hod/dashboard?tab=mentees', icon: UserCheck },
       { label: 'Placement Tracker', path: '/hod/dashboard?tab=placement-tracker', icon: Award },
       { label: 'Coding Leaderboard', path: '/coding-analytics', icon: BarChart2 },
@@ -411,7 +424,7 @@ function isItemActive(itemPath: string, pathname: string, search: string): boole
   const cur = pathname + search;
   if (itemPath.includes('?')) return cur === itemPath;
   if (itemPath === '/admin/dashboard') return pathname === '/admin/dashboard' && (!search || search === '?tab=students');
-  if (itemPath === '/hod/dashboard') return pathname === '/hod/dashboard' && (!search || search === '?tab=overview');
+  if (itemPath === '/hod/dashboard') return pathname === '/hod/dashboard' && (!search || search === '?tab=home');
   if (itemPath === '/coordinator/dashboard') return pathname === '/coordinator/dashboard' && (!search || search === '?tab=onboarding');
   if (itemPath === '/faculty/dashboard') return pathname === '/faculty/dashboard' && !search;
   return pathname === itemPath;
