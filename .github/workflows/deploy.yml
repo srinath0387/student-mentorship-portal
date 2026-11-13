@@ -54,5 +54,8 @@ jobs:
           ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
           FACULTY_SECRET_KEY: ${{ secrets.FACULTY_SECRET_KEY }}
           GITHUB_PAT: ${{ secrets.GH_PAT }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
         run: ./deploy.sh
 

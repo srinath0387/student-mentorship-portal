@@ -11,6 +11,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../lib/api';
 import { PlacementTrackerSection } from '../placement/PlacementTrackerSection';
+import { ResearchImpactPanel } from './ResearchImpactPanel';
 import { ExecutiveKpiBoard } from './ExecutiveKpiBoard';
 import { MeetingLogsView } from '../../components/MeetingLogsView';
 import type {
@@ -1094,6 +1095,7 @@ export const OversightDashboardPage: React.FC = () => {
 
     return (
       <div className="space-y-5">
+        <ResearchImpactPanel department={selectedDept} canRefresh={['admin', 'hod', 'principal', 'director', 'management', 'program_chair'].includes(role || '')} />
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <KpiCard
             label="Total Publications"

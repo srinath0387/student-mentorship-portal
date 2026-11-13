@@ -63,6 +63,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
     if (p.startsWith('/my-duties')) return { parent: 'Leave & Duties', child: 'My Duties' };
     if (p.startsWith('/faculty/api')) return { parent: 'Faculty', child: 'API Score' };
     if (p.startsWith('/coding-analytics')) return { parent: 'Overview', child: 'Coding Leaderboard' };
+    if (p.startsWith('/notifications')) return { parent: 'Settings', child: 'Phone Alerts' };
     if (p.startsWith('/clubs/manage')) return { parent: 'Clubs', child: 'Manage Clubs' };
     if (p.startsWith('/clubs/students')) return { parent: 'Clubs', child: user?.role === 'faculty' ? 'Mentee Clubs' : 'Student Clubs' };
     if (p.startsWith('/clubs')) return { parent: 'Clubs', child: '' };
@@ -446,6 +447,13 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
                   )}
                 </div>
               </div>
+
+              <button
+                onClick={() => { setIsNotifOpen(false); navigate('/notifications'); }}
+                className="w-full px-4 py-2 text-left text-[11px] font-semibold text-brand-primary bg-brand-primary/5 hover:bg-brand-primary/10 border-b border-borderLine"
+              >
+                📲 Get these alerts on your phone (Telegram / notifications) →
+              </button>
 
               {/* Notifications List */}
               <div className="max-h-80 overflow-y-auto divide-y divide-borderLine/50">

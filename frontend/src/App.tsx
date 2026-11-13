@@ -35,6 +35,7 @@ const ExamPlannerPage = lazy(() => import('./features/exams/ExamPlannerPage'));
 const DutiesPage = lazy(() => import('./features/duties/DutiesPage'));
 const MyOfficeOrdersPage = lazy(() => import('./features/duties/MyOfficeOrdersPage'));
 const ClubsPage = lazy(() => import('./features/clubs/ClubsPage'));
+const NotificationsPage = lazy(() => import('./features/notifications/NotificationsPage'));
 const ClubManagePage = lazy(() => import('./features/clubs/ClubManagePage'));
 const ClubStudentsPage = lazy(() => import('./features/clubs/ClubStudentsPage'));
 const AlumniPage = lazy(() => import('./features/alumni/AlumniPage'));
@@ -368,6 +369,7 @@ export const App: React.FC = () => {
               <Route path="/attendance/reports" element={<AttendanceReportsPage />} />
               <Route path="/documents" element={<DocumentsManagementPage />} />
               <Route path="/resume-builder" element={<ResumeBuilderPage />} />
+              <Route path="/notifications" element={<NotificationsPage />} />
 
               {/* Faculty API leaderboard — HOD & Admin only */}
               <Route element={<ProtectedRoute allowedRoles={['hod', 'admin', 'director', 'principal', 'management', 'program_chair']} />}>

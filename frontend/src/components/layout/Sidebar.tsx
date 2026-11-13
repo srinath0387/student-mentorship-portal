@@ -40,6 +40,7 @@ import {
   LucideIcon,
   Settings,
   Sparkles,
+  BellRing,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -93,6 +94,7 @@ const studentNav: NavGroup[] = [
       { label: 'Certificates', path: '/profile?tab=certifications', icon: CheckCircle2 },
       { label: 'Documents', path: '/profile?tab=documents', icon: FolderOpen },
       { label: 'Resume Builder', path: '/resume-builder', icon: FileText },
+      { label: 'Phone Alerts', path: '/notifications', icon: BellRing },
     ],
   },
 ];
@@ -137,6 +139,7 @@ const facultyNav: NavGroup[] = [
       { label: 'My Appraisal', path: '/appraisal', icon: ClipboardCheck },
       { label: 'CO–PO Attainment', path: '/obe', icon: CheckSquare },
       { label: 'My Exam Duties', path: '/exams', icon: ClipboardList },
+      { label: 'Phone Alerts', path: '/notifications', icon: BellRing },
     ],
   },
   {
@@ -227,6 +230,7 @@ const adminNav: NavGroup[] = [
     items: [
       { label: 'HOD Credentials', path: '/admin/dashboard?tab=hod-credentials', icon: ShieldCheck },
       { label: 'Student Passwords', path: '/admin/dashboard?tab=student-passwords', icon: FileCheck },
+      { label: 'Phone Alerts', path: '/notifications', icon: BellRing },
     ],
   },
 ];
@@ -289,6 +293,7 @@ const hodNav: NavGroup[] = [
       { label: 'Faculty API Score', path: '/faculty/api', icon: Star },
       { label: 'Faculty Directory & 360°', path: '/admin/faculty', icon: ShieldCheck },
       { label: 'Account Settings', path: '/hod/dashboard?tab=settings', icon: Settings },
+      { label: 'Phone Alerts', path: '/notifications', icon: BellRing },
     ],
   },
   {
@@ -346,6 +351,7 @@ const parentNav: NavGroup[] = [
     icon: LayoutDashboard,
     items: [
       { label: 'Ward Dashboard', path: '/dashboard', icon: LayoutDashboard },
+      { label: 'Phone Alerts', path: '/notifications', icon: BellRing },
     ],
   },
   {

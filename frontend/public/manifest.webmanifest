@@ -1,0 +1,13 @@
+{
+  "name": "RGM ManageBAC",
+  "short_name": "RGMCET",
+  "description": "RGMCET academic, attendance and mentoring platform",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0b6fb8",
+  "icons": [
+    { "src": "/rgmcet-crest.png", "sizes": "any", "type": "image/png", "purpose": "any" }
+  ]
+}

@@ -12,6 +12,14 @@ npm install
 npm run build
 cd ..
 
+# 1b. Notifications: bot username from the token (Telegram is optional — skipped when no token)
+if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+  TELEGRAM_BOT_USERNAME=$(curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{console.log(JSON.parse(d).result.username||'')}catch{console.log('')}})")
+  echo "Telegram bot: @${TELEGRAM_BOT_USERNAME:-<token invalid>}"
+fi
+export TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}" TELEGRAM_BOT_USERNAME="${TELEGRAM_BOT_USERNAME:-}"
+export VAPID_PUBLIC_KEY="${VAPID_PUBLIC_KEY:-}" VAPID_PRIVATE_KEY="${VAPID_PRIVATE_KEY:-}"
+
 # 2. Deploy AWS CDK Stack
 echo "â˜ï¸ Step 2: Deploying Infrastructure with AWS CDK..."
 cd infra
@@ -35,6 +43,13 @@ CLIENT_ID=$(node -e "const o = require('./cdk-outputs.json'); console.log(Object
 FRONTEND_BUCKET=$(node -e "const o = require('./cdk-outputs.json'); console.log(Object.values(o)[0].FrontendBucketName || '');")
 CLOUDFRONT_URL=$(node -e "const o = require('./cdk-outputs.json'); console.log(Object.values(o)[0].CloudFrontUrl || '');")
 DISTRIBUTION_ID=$(node -e "const o = require('./cdk-outputs.json'); console.log(Object.values(o)[0].CloudFrontDistributionId || '');")
+NOTIFIER_URL=$(node -e "const o = require('./cdk-outputs.json'); console.log(Object.values(o)[0].NotifierUrl || '');")
+if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "$NOTIFIER_URL" ]; then
+  TG_SECRET=$(node -e "console.log(require('crypto').createHash('sha256').update(process.argv[1]).digest('hex').slice(0,48))" "$TELEGRAM_BOT_TOKEN")
+  curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
+    -d "url=${NOTIFIER_URL}" -d "secret_token=${TG_SECRET}" -d 'allowed_updates=["message"]' > /dev/null \
+    && echo "Telegram webhook set"
+fi
 
 echo "âœ… Infrastructure Deployed!"
 echo "   API Base URL: $API_URL"

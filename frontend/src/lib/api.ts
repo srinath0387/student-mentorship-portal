@@ -801,6 +801,9 @@ export const api = {
     return fetchWithAuth(`/oversight/faculty-by-cadre?${params.toString()}`);
   },
 
+  saveCitationCounts: async (updates: { faculty_email: string; id: string; citations: number }[]): Promise<{ updated: number }> =>
+    fetchWithAuth('/publications/citations', { method: 'POST', body: JSON.stringify({ updates }) }),
+
   // Institutional Oversight: Research Publications by Year & Department
   getPublications: async (department: string = 'All', year: string = 'All', category: string = 'all', search: string = ''): Promise<import('../types').PublicationsResponse> => {
     const params = new URLSearchParams({ department, year, category, search });
@@ -1063,6 +1066,17 @@ export const api = {
   assignDuty: async (data: any) => fetchWithAuth('/duties', { method: 'POST', body: JSON.stringify(data) }),
   setDutyStatus: async (id: number, status: 'Relieved' | 'Cancelled' | 'Active', relieved_on?: string) =>
     fetchWithAuth(`/duties/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status, relieved_on }) }),
+
+  // ── Notifications (Telegram / browser push) ──
+  getNotifyConfig: async (): Promise<{ push: { available: boolean; public_key: string | null }; telegram: { available: boolean; bot: string | null }; subscriptions: any[] }> =>
+    fetchWithAuth('/notify/config'),
+  savePushSubscription: async (subscription: any, label: string) => fetchWithAuth('/notify/push', { method: 'POST', body: JSON.stringify({ subscription, label }) }),
+  removePushSubscription: async (endpoint: string) => fetchWithAuth('/notify/push', { method: 'DELETE', body: JSON.stringify({ endpoint }) }),
+  removeNotifySubscription: async (id: number) => fetchWithAuth(`/notify/subscriptions/${id}`, { method: 'DELETE' }),
+  createTelegramLink: async (): Promise<{ code: string; url: string }> => fetchWithAuth('/notify/telegram/link', { method: 'POST' }),
+  checkTelegramLink: async (code: string): Promise<{ linked: boolean }> => fetchWithAuth(`/notify/telegram/link/${code}`),
+  sendTestNotification: async () => fetchWithAuth('/notify/test', { method: 'POST' }),
+  getNotifyStats: async (): Promise<any[]> => fetchWithAuth('/notify/stats'),
 
   // ── Clubs ──
   getClubs: async (archived = false): Promise<any[]> => fetchWithAuth(`/clubs${archived ? '?archived=1' : ''}`),

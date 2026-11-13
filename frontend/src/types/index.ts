@@ -270,6 +270,7 @@ export interface FacultyPersonalDetails {
   linkedin_url?: string;
   scopus_id?: string;
   orcid_id?: string;
+  research_metrics?: { citations: number; h_index: number; i10_index: number; works: number; source: string; updated_at: string };
   photo_url?: string;
   joining_date?: string; // YYYY-MM-DD
   prior_experience_years?: number;
@@ -327,6 +328,9 @@ export interface FacultyPublicationRecord {
   patent_status?: 'Published' | 'Granted';
   patent_date?: string;
   affiliation_institute?: string;
+  /** Times cited (Crossref), refreshed on import / “Update citations” */
+  citations?: number;
+  source?: 'orcid' | 'manual';
 }
 
 export interface FacultyFullProfile {
@@ -787,6 +791,7 @@ export interface OversightPublication {
   doi_link?: string;
   co_authors?: string;
   document_url?: string;
+  citations?: number | null;
   faculty_id?: string;
   faculty_name: string;
   faculty_email: string;

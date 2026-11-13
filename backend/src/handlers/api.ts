@@ -9359,12 +9359,16 @@ app.post('/parent/alerts/dispatch', requireRole('admin'), async (req: Request, r
     }));
     const withPhone = messages.filter((m: any) => m.to);
     let sent = 0;
+    let appNotified = 0;
     if (req.body?.send && messagingConfigured()) {
       for (const m of withPhone) if (await sendParentMessage(m.to, m.text)) sent++;
     }
+    if (req.body?.send) {
+      for (const m of messages) appNotified += await notifyUsers([parentKey(m.roll_number)], { title: `Absent — ${m.name}`, body: m.text, url: '/dashboard', tag: `absent-${date}` });
+    }
     res.json({
       date, provider: messagingConfigured() ? 'webhook' : 'disabled',
-      absent_students: messages.length, with_parent_phone: withPhone.length, sent,
+      absent_students: messages.length, with_parent_phone: withPhone.length, sent, app_notified: appNotified,
       preview: messages.slice(0, 200),
     });
   } catch (err: any) {
@@ -10027,6 +10031,8 @@ app.post('/duties', requireRole(...DUTY_ISSUERS), async (req: Request, res: Resp
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
           [orderNo, ay, email, f.rows[0].name, f.rows[0].department, code, dutyName, position, from, to,
             String(b.responsibilities || '').trim().slice(0, 2000) || null, req.auth!.email, req.auth!.role, designation]);
+        await notifyUsers([staffKey(email)], { title: 'New office order', url: '/office-orders', tag: `order-${r.rows[0].id}`,
+          body: `You are appointed as ${position}, ${dutyName} w.e.f. ${from}. Order ${orderNo}.` });
         return res.status(201).json(r.rows[0]);
       } catch (e: any) {
         if (e?.code !== '23505') throw e; // order number taken by a concurrent issue — try the next one
@@ -10051,6 +10057,308 @@ app.patch('/duties/:id/status', requireRole(...DUTY_ISSUERS), async (req: Reques
     res.json(r.rows[0]);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
+
+// ============================================================================
+// Notifications — Web Push (browser / installed app) and Telegram.
+// The API Lambda has no internet access, so it writes each job to the uploads bucket
+// (notify/outbox/*.json, via the free S3 gateway endpoint); the notifier Lambda outside the
+// VPC delivers it. Users subscribe per device / Telegram chat; recipients are identified by a
+// user key: S:<roll> (student), P:<roll> (parent of that student), E:<email> (staff).
+// ============================================================================
+let notifyTablesReady: Promise<void> | null = null;
+function ensureNotifyTables(): Promise<void> {
+  if (!notifyTablesReady) {
+    notifyTablesReady = db.query(`
+      CREATE TABLE IF NOT EXISTS notify_subscriptions (
+        id SERIAL PRIMARY KEY,
+        user_key TEXT NOT NULL,
+        role TEXT,
+        department TEXT,
+        channel TEXT NOT NULL CHECK (channel IN ('push', 'telegram')),
+        address TEXT NOT NULL,
+        keys JSONB,
+        label TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (channel, address)
+      );
+      CREATE INDEX IF NOT EXISTS idx_notify_subs_user ON notify_subscriptions (user_key);
+      CREATE TABLE IF NOT EXISTS telegram_link_codes (
+        code TEXT PRIMARY KEY,
+        user_key TEXT NOT NULL,
+        role TEXT,
+        department TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `).then(() => undefined).catch((err: any) => { notifyTablesReady = null; throw err; });
+  }
+  return notifyTablesReady;
+}
+
+function notifyUserKey(a: any): string | null {
+  if (!a) return null;
+  if (a.role === 'student') return a.regNo ? `S:${String(a.regNo).toUpperCase()}` : null;
+  if (a.role === 'parent') return a.regNo ? `P:${String(a.regNo).toUpperCase()}` : null;
+  return a.email ? `E:${String(a.email).toLowerCase()}` : null;
+}
+const studentKey = (roll: string) => `S:${String(roll).toUpperCase()}`;
+const d10 = (v: any) => (v instanceof Date ? v.toISOString() : String(v || '')).slice(0, 10);
+const parentKey = (roll: string) => `P:${String(roll).toUpperCase()}`;
+const staffKey = (email: string) => `E:${String(email).toLowerCase()}`;
+
+let s3ForNotify: any = null;
+async function notifyS3() {
+  if (!s3ForNotify) {
+    const { S3Client } = await import('@aws-sdk/client-s3');
+    s3ForNotify = new S3Client({});
+  }
+  return s3ForNotify;
+}
+
+export interface NotifyMessage { title: string; body: string; url?: string; tag?: string }
+
+/** Queue a message for everyone subscribed among these user keys. Never throws. Returns targets queued. */
+async function notifyUsers(userKeys: string[], msg: NotifyMessage): Promise<number> {
+  try {
+    const keys = Array.from(new Set(userKeys.filter(Boolean)));
+    if (!keys.length || db.isMock || !process.env.UPLOADS_BUCKET_NAME) return 0;
+    await ensureNotifyTables();
+    const subs = await db.query('SELECT channel, address, keys FROM notify_subscriptions WHERE user_key = ANY($1::text[])', [keys]);
+    return await queueNotifyTargets(subs.rows, msg);
+  } catch (err: any) {
+    console.warn('[notify] queue failed:', err.message);
+    return 0;
+  }
+}
+
+async function queueNotifyTargets(rows: any[], msg: NotifyMessage): Promise<number> {
+  if (!rows.length || !process.env.UPLOADS_BUCKET_NAME) return 0;
+  const { PutObjectCommand } = await import('@aws-sdk/client-s3');
+  const s3 = await notifyS3();
+  const clean = {
+    title: String(msg.title).slice(0, 120), body: String(msg.body).slice(0, 600),
+    url: msg.url, tag: msg.tag,
+  };
+  // Chunk large audiences so one notifier run stays well inside its timeout
+  for (let i = 0; i < rows.length; i += 400) {
+    const targets = rows.slice(i, i + 400).map((r: any) => ({ channel: r.channel, address: r.address, keys: r.keys || undefined }));
+    await s3.send(new PutObjectCommand({
+      Bucket: process.env.UPLOADS_BUCKET_NAME,
+      Key: `notify/outbox/${Date.now()}-${crypto.randomBytes(5).toString('hex')}.json`,
+      Body: JSON.stringify({ msg: clean, targets }), ContentType: 'application/json',
+    }));
+  }
+  return rows.length;
+}
+
+/** Remove subscriptions the notifier reported as dead (blocked bot / expired browser). */
+async function processGoneSubscriptions(): Promise<number> {
+  if (db.isMock || !process.env.UPLOADS_BUCKET_NAME) return 0;
+  await ensureNotifyTables();
+  const { ListObjectsV2Command, GetObjectCommand, DeleteObjectCommand } = await import('@aws-sdk/client-s3');
+  const s3 = await notifyS3();
+  const Bucket = process.env.UPLOADS_BUCKET_NAME;
+  const list = await s3.send(new ListObjectsV2Command({ Bucket, Prefix: 'notify/gone/', MaxKeys: 1000 }));
+  let removed = 0;
+  for (const o of list.Contents || []) {
+    try {
+      const obj = await s3.send(new GetObjectCommand({ Bucket, Key: o.Key }));
+      const g = JSON.parse(await obj.Body.transformToString());
+      const r = await db.query('DELETE FROM notify_subscriptions WHERE channel = $1 AND address = $2', [g.channel, String(g.address)]);
+      removed += r.rowCount || 0;
+      await s3.send(new DeleteObjectCommand({ Bucket, Key: o.Key }));
+    } catch (err: any) { console.warn('[notify] gone cleanup:', err.message); }
+  }
+  return removed;
+}
+
+// GET /notify/config — what's available + this user's connected devices
+app.get('/notify/config', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureNotifyTables();
+    const key = notifyUserKey(req.auth);
+    const subs = key ? await db.query(
+      'SELECT id, channel, label, created_at FROM notify_subscriptions WHERE user_key = $1 ORDER BY created_at DESC', [key]) : { rows: [] };
+    res.json({
+      push: { available: Boolean(process.env.VAPID_PUBLIC_KEY), public_key: process.env.VAPID_PUBLIC_KEY || null },
+      telegram: { available: Boolean(process.env.TELEGRAM_BOT_USERNAME), bot: process.env.TELEGRAM_BOT_USERNAME || null },
+      subscriptions: subs.rows,
+    });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /notify/push — save this browser's push subscription
+app.post('/notify/push', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureNotifyTables();
+    const key = notifyUserKey(req.auth);
+    const sub = req.body?.subscription || {};
+    const endpoint = String(sub.endpoint || '');
+    if (!key) return res.status(400).json({ error: 'Your account cannot receive notifications' });
+    if (!/^https:\/\/[^\s]{10,800}$/.test(endpoint) || !sub.keys?.p256dh || !sub.keys?.auth) return res.status(400).json({ error: 'Invalid push subscription' });
+    const r = await db.query(
+      `INSERT INTO notify_subscriptions (user_key, role, department, channel, address, keys, label)
+       VALUES ($1,$2,$3,'push',$4,$5,$6)
+       ON CONFLICT (channel, address) DO UPDATE SET user_key = EXCLUDED.user_key, role = EXCLUDED.role, department = EXCLUDED.department,
+         keys = EXCLUDED.keys, label = EXCLUDED.label, created_at = NOW()
+       RETURNING id`,
+      [key, req.auth!.role, req.auth!.department || null, endpoint,
+        JSON.stringify({ p256dh: String(sub.keys.p256dh), auth: String(sub.keys.auth) }), String(req.body?.label || 'Browser').slice(0, 80)]);
+    res.status(201).json({ id: r.rows[0].id });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /notify/push { endpoint } — this browser turned notifications off
+app.delete('/notify/push', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureNotifyTables();
+    await db.query(`DELETE FROM notify_subscriptions WHERE channel = 'push' AND address = $1 AND user_key = $2`,
+      [String(req.body?.endpoint || ''), notifyUserKey(req.auth)]);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /notify/subscriptions/:id — disconnect one of my devices / Telegram
+app.delete('/notify/subscriptions/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureNotifyTables();
+    const r = await db.query('DELETE FROM notify_subscriptions WHERE id = $1 AND user_key = $2 RETURNING id', [Number(req.params.id), notifyUserKey(req.auth)]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /notify/telegram/link — a one-time personal link to the bot
+app.post('/notify/telegram/link', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureNotifyTables();
+    const bot = process.env.TELEGRAM_BOT_USERNAME;
+    const key = notifyUserKey(req.auth);
+    if (!bot) return res.status(503).json({ error: 'Telegram is not set up yet' });
+    if (!key) return res.status(400).json({ error: 'Your account cannot receive notifications' });
+    await db.query(`DELETE FROM telegram_link_codes WHERE created_at < NOW() - INTERVAL '1 day'`);
+    const code = crypto.randomBytes(16).toString('hex');
+    await db.query('INSERT INTO telegram_link_codes (code, user_key, role, department) VALUES ($1,$2,$3,$4)',
+      [code, key, req.auth!.role, req.auth!.department || null]);
+    res.json({ code, url: `https://t.me/${bot}?start=${code}` });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /notify/telegram/link/:code — has the user pressed Start in Telegram yet?
+app.get('/notify/telegram/link/:code', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureNotifyTables();
+    const code = String(req.params.code || '').toLowerCase();
+    const c = await db.query('SELECT * FROM telegram_link_codes WHERE code = $1 AND user_key = $2', [code, notifyUserKey(req.auth)]);
+    if (!c.rows[0]) return res.status(404).json({ error: 'Link expired — start again' });
+    if (db.isMock || !process.env.UPLOADS_BUCKET_NAME) return res.json({ linked: false });
+    const { GetObjectCommand, DeleteObjectCommand } = await import('@aws-sdk/client-s3');
+    const s3 = await notifyS3();
+    const Key = `notify/telegram-links/${code}.json`;
+    let link: any = null;
+    try {
+      const obj = await s3.send(new GetObjectCommand({ Bucket: process.env.UPLOADS_BUCKET_NAME, Key }));
+      link = JSON.parse(await obj.Body.transformToString());
+    } catch { return res.json({ linked: false }); }
+    await db.query(
+      `INSERT INTO notify_subscriptions (user_key, role, department, channel, address, label)
+       VALUES ($1,$2,$3,'telegram',$4,$5)
+       ON CONFLICT (channel, address) DO UPDATE SET user_key = EXCLUDED.user_key, role = EXCLUDED.role,
+         department = EXCLUDED.department, label = EXCLUDED.label, created_at = NOW()`,
+      [c.rows[0].user_key, c.rows[0].role, c.rows[0].department, String(link.chat_id), `Telegram${link.name ? ` · ${String(link.name).slice(0, 40)}` : ''}`]);
+    await db.query('DELETE FROM telegram_link_codes WHERE code = $1', [code]);
+    await s3.send(new DeleteObjectCommand({ Bucket: process.env.UPLOADS_BUCKET_NAME, Key })).catch(() => undefined);
+    await notifyUsers([c.rows[0].user_key], { title: 'Notifications are on', body: 'You will get your RGMCET alerts here.', url: '/notifications' });
+    res.json({ linked: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /notify/test — send a test message to all of my devices
+app.post('/notify/test', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const n = await notifyUsers([notifyUserKey(req.auth) || ''], { title: 'Test notification', body: 'Notifications from RGMCET are working on this device. 🎉', url: '/notifications', tag: 'test' });
+    if (!n) return res.status(400).json({ error: 'No device is connected yet' });
+    res.json({ queued: n });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /notify/stats — admin: who is reachable
+app.get('/notify/stats', requireRole('admin', 'hod', 'principal', 'director'), async (req: Request, res: Response) => {
+  try {
+    await ensureNotifyTables();
+    const r = await db.query(
+      `SELECT CASE WHEN user_key LIKE 'P:%' THEN 'parent' WHEN user_key LIKE 'S:%' THEN 'student' ELSE 'staff' END AS audience,
+              channel, COUNT(DISTINCT user_key)::int AS people
+       FROM notify_subscriptions GROUP BY 1, 2 ORDER BY 1, 2`);
+    res.json(r.rows);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+/** Daily (6 PM IST): absence alerts to subscribed parents & students, tomorrow's club sessions, cleanup. */
+async function runDailyNotifications(): Promise<any> {
+  const out: any = { gone_removed: 0, absence_alerts: 0, club_reminders: 0 };
+  out.gone_removed = await processGoneSubscriptions().catch(() => 0);
+  await ensureNotifyTables();
+  const today = todayIST();
+  const subs = await db.query(`SELECT DISTINCT user_key FROM notify_subscriptions WHERE user_key LIKE 'P:%' OR user_key LIKE 'S:%'`);
+  const reachable = new Set(subs.rows.map((r: any) => r.user_key));
+  if (reachable.size) {
+    const abs = await db.query(
+      `SELECT UPPER(ar.roll_number) AS roll, st.name, array_agg(DISTINCT a.subject_name ORDER BY a.subject_name) AS subjects
+       FROM attendance_records ar JOIN attendance_sessions s ON s.id = ar.session_id JOIN subject_allotments a ON a.id = s.allotment_id
+       JOIN students st ON UPPER(st.roll_number) = UPPER(ar.roll_number)
+       WHERE ar.is_present = false AND s.session_date = $1 GROUP BY UPPER(ar.roll_number), st.name`, [today]).catch(() => ({ rows: [] }));
+    for (const r of abs.rows) {
+      const subj = (r.subjects || []).join(', ');
+      if (reachable.has(parentKey(r.roll))) {
+        out.absence_alerts += await notifyUsers([parentKey(r.roll)], { title: `Absent today — ${r.name}`, body: `${r.name} (${r.roll}) was marked absent on ${today} for ${subj}.`, url: '/dashboard', tag: `absent-${today}` });
+      }
+      if (reachable.has(studentKey(r.roll))) {
+        out.absence_alerts += await notifyUsers([studentKey(r.roll)], { title: 'Marked absent today', body: `You were marked absent for ${subj}. If this is wrong, contact the subject faculty today.`, url: '/profile?tab=attendance', tag: `absent-${today}` });
+      }
+    }
+  }
+  // Club sessions happening tomorrow
+  await ensureClubTables().catch(() => undefined);
+  const tomorrow = new Date(Date.now() + 5.5 * 3600000 + 86400000).toISOString().slice(0, 10);
+  const sessions = await db.query(
+    `SELECT s.club_id, s.title, s.start_time, s.venue, c.name AS club_name,
+            (SELECT array_agg(m.roll_number) FROM club_memberships m WHERE m.club_id = s.club_id AND m.status = 'approved') AS rolls
+     FROM club_sessions s JOIN clubs c ON c.id = s.club_id WHERE s.kind = 'session' AND s.session_date = $1`, [tomorrow]).catch(() => ({ rows: [] }));
+  for (const s of sessions.rows) {
+    out.club_reminders += await notifyUsers((s.rolls || []).map(studentKey),
+      { title: `Tomorrow: ${s.club_name}`, body: `${s.title}${s.start_time ? ` at ${s.start_time}` : ''}${s.venue ? ` · ${s.venue}` : ''}`, url: '/clubs', tag: `club-${s.club_id}-${tomorrow}` });
+  }
+  console.log('[daily-notify]', out);
+  return out;
+}
+
+/** Push a broadcast announcement to subscribed devices of its audience. */
+async function notifyBroadcast(b: any): Promise<number> {
+  try {
+    if (db.isMock) return 0;
+    await ensureNotifyTables();
+    const params: any[] = []; const where: string[] = [];
+    if (b.target_role === 'students') where.push(`user_key LIKE 'S:%'`);
+    else if (b.target_role === 'faculty') where.push(`user_key LIKE 'E:%'`);
+    else if (b.target_role === 'mentees') {
+      const m = await db.query(
+        `SELECT s.roll_number FROM students s WHERE UPPER(s.faculty_mentor_id) = UPPER($1)
+           OR EXISTS (SELECT 1 FROM mentor_assignments ma WHERE UPPER(ma.roll_number) = UPPER(s.roll_number) AND UPPER(ma.faculty_id) = UPPER($1))`,
+        [b.target_mentor_id || '']).catch(() => ({ rows: [] }));
+      params.push(m.rows.map((r: any) => studentKey(r.roll_number)));
+      where.push(`user_key = ANY($${params.length}::text[])`);
+    } else where.push(`user_key NOT LIKE 'P:%'`);
+    const dept = String(b.target_department || '');
+    if (b.target_role !== 'mentees' && dept && !['all', '*'].includes(dept.toLowerCase())) {
+      params.push(normDept(dept));
+      where.push(`LOWER(REGEXP_REPLACE(COALESCE(department, ''), '[^a-zA-Z0-9]', '', 'g')) = $${params.length}`);
+    }
+    const subs = await db.query(`SELECT channel, address, keys FROM notify_subscriptions WHERE ${where.join(' AND ')}`, params);
+    return await queueNotifyTargets(subs.rows, {
+      title: `${b.priority === 'urgent' ? '🔴 ' : ''}${b.title}`, body: `${b.message}\n— ${b.sender_name}`, url: '/dashboard', tag: `broadcast-${b.id}`,
+    });
+  } catch (err: any) { console.warn('[notify] broadcast failed:', err.message); return 0; }
+}
 
 // ============================================================================
 // Clubs — registration window, seat limit, payment (QR + UTR), waitlist,
@@ -10155,10 +10463,16 @@ async function refreshClubSeats(q: { query: (t: string, p?: any[]) => Promise<an
   for (const c of clubs.rows) {
     const free = Number(c.max_seats) - Number(c.taken);
     if (free <= 0) continue;
-    await q.query(
+    const moved = await q.query(
       `UPDATE club_memberships SET status = $2, applied_at = NOW(), remarks = 'Moved up from the waitlist'
-       WHERE id IN (SELECT id FROM club_memberships WHERE club_id = $1 AND status = 'waitlisted' ORDER BY applied_at, id LIMIT $3)`,
+       WHERE id IN (SELECT id FROM club_memberships WHERE club_id = $1 AND status = 'waitlisted' ORDER BY applied_at, id LIMIT $3)
+       RETURNING roll_number`,
       [c.id, Number(c.fee) > 0 ? 'pending_payment' : 'approved', free]);
+    const paid = Number(c.fee) > 0;
+    await notifyUsers((moved.rows || []).map((r: any) => studentKey(r.roll_number)), {
+      title: 'A club seat opened for you', url: '/clubs', tag: `club-${c.id}`,
+      body: paid ? `You moved up from the waitlist. Pay within ${CLUB_PAYMENT_HOURS} hours to keep the seat.` : 'You moved up from the waitlist and are now a member.',
+    });
   }
 }
 
@@ -10455,6 +10769,10 @@ app.patch('/clubs/memberships/:mid', requireRole(...CLUB_MANAGERS), async (req: 
            remarks = $2, decided_at = NOW(), decided_by = $3 WHERE id = $4`,
         [status, String(remarks || '').trim().slice(0, 300) || null, req.auth!.email, mid]);
       if (status === 'rejected') await refreshClubSeats(db, m.club_id).catch(() => undefined);
+      const cn = (await db.query('SELECT name FROM clubs WHERE id = $1', [m.club_id])).rows[0]?.name || 'the club';
+      await notifyUsers([studentKey(m.roll_number)], status === 'approved'
+        ? { title: `Welcome to ${cn}! 🎉`, body: 'Your registration is confirmed. Session updates will reach you here.', url: '/clubs', tag: `club-${m.club_id}` }
+        : { title: `${cn}: registration rejected`, body: String(remarks || '').trim().slice(0, 300), url: '/clubs', tag: `club-${m.club_id}` });
     }
     if (role !== undefined) {
       if (!['member', 'lead', 'co_lead'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
@@ -10515,7 +10833,16 @@ app.post('/clubs/:id/sessions', requireAuth, async (req: Request, res: Response)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
       [id, kind, title, String(b.details || '').trim().slice(0, 3000) || null, date, t(b.start_time), t(b.end_time),
         String(b.venue || '').trim().slice(0, 160) || null, poster, posterName]);
-    res.status(201).json(r.rows[0]);
+    const club = await db.query(
+      `SELECT c.name, COALESCE((SELECT array_agg(m.roll_number) FROM club_memberships m WHERE m.club_id = c.id AND m.status = 'approved'), '{}') AS rolls
+       FROM clubs c WHERE c.id = $1`, [id]);
+    const s = r.rows[0];
+    const when = kind === 'session' ? `${date}${s.start_time ? ` ${s.start_time}` : ''}${s.venue ? ` · ${s.venue}` : ''}` : '';
+    await notifyUsers((club.rows[0]?.rolls || []).filter((x: string) => x.toUpperCase() !== String(req.auth!.regNo || '').toUpperCase()).map(studentKey), {
+      title: `${club.rows[0]?.name || 'Club'}: ${kind === 'session' ? 'new session' : 'announcement'}`,
+      body: `${title}${when ? `\n${when}` : ''}`, url: '/clubs', tag: `club-${id}-${s.id}`,
+    });
+    res.status(201).json(s);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
@@ -10917,6 +11244,45 @@ app.get('/oversight/faculty-by-cadre', requireRole('director', 'principal', 'man
 
 // ============================================================================
 // Institutional Oversight: Publications by Year & Department — Drill-Down
+// POST /publications/citations — { updates: [{ faculty_email, id, citations }] }
+// Citation counts fetched in the browser from Crossref (the API has no internet), saved into each
+// faculty profile's publications list. HOD: own department only.
+app.post('/publications/citations', requireRole('admin', 'hod', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    const updates = Array.isArray(req.body?.updates) ? req.body.updates.slice(0, 5000) : [];
+    const byEmail = new Map<string, Map<string, number>>();
+    for (const u of updates) {
+      const email = String(u?.faculty_email || '').toLowerCase().trim();
+      const n = Number(u?.citations);
+      if (!email || !u?.id || !Number.isInteger(n) || n < 0 || n > 1_000_000) continue;
+      if (!byEmail.has(email)) byEmail.set(email, new Map());
+      byEmail.get(email)!.set(String(u.id), n);
+    }
+    if (!byEmail.size) return res.json({ updated: 0 });
+    const rows = await db.query(
+      `SELECT p.email, p.publications, f.department FROM faculty_full_profiles p JOIN faculty f ON LOWER(f.email) = LOWER(p.email)
+       WHERE LOWER(p.email) = ANY($1::text[])`, [Array.from(byEmail.keys())]);
+    let updated = 0;
+    for (const r of rows.rows) {
+      if (req.auth!.role === 'hod' && normDept(r.department) !== normDept(req.auth!.department)) continue;
+      const want = byEmail.get(String(r.email).toLowerCase())!;
+      const pubs = Array.isArray(r.publications) ? r.publications : [];
+      let changed = 0;
+      const next = pubs.map((p: any) => {
+        const n = want.get(String(p.id));
+        if (n == null || Number(p.citations) === n) return p;
+        changed++;
+        return { ...p, citations: n };
+      });
+      if (changed) {
+        await db.query('UPDATE faculty_full_profiles SET publications = $1, updated_at = CURRENT_TIMESTAMP WHERE LOWER(email) = LOWER($2)', [JSON.stringify(next), r.email]);
+        updated += changed;
+      }
+    }
+    res.json({ updated });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 // GET /oversight/publications?department=All&year=2026&category=all&search=...
 // ============================================================================
 app.get('/oversight/publications', requireRole('director', 'principal', 'management', 'program_chair', 'admin', 'hod'), async (req: Request, res: Response) => {
@@ -10990,6 +11356,7 @@ app.get('/oversight/publications', requireRole('director', 'principal', 'managem
           doi_link: p.doi_link || '',
           co_authors: p.co_authors || '',
           document_url: p.document_url || '',
+          citations: p.citations != null ? Number(p.citations) : null,
           faculty_id: r.faculty_id,
           faculty_name: r.faculty_name,
           faculty_email: r.faculty_email,
@@ -18365,6 +18732,13 @@ app.put('/hod/leaves/faculty/:id/status', requireRole('hod', 'admin', 'principal
     );
 
     if (result.rows.length === 0) return res.status(404).json({ error: 'Leave record not found' });
+    {
+      const lv = result.rows[0];
+      await notifyUsers([staffKey(lv.faculty_email)], {
+        title: status === 'Approved' ? 'Leave approved by HOD' : 'Leave rejected by HOD', url: '/faculty/dashboard?tab=leaves', tag: `leave-${id}`,
+        body: `${lv.leave_type} ${d10(lv.from_date)} → ${d10(lv.to_date)}${status === 'Approved' ? ' — forwarded to the Principal for final approval.' : hod_remarks ? ` — ${hod_remarks}` : ''}`,
+      });
+    }
 
     res.json({
       success: true,
@@ -18414,6 +18788,10 @@ app.put('/principal/leaves/faculty/:id/status', requireRole('admin', 'hod'), asy
        RETURNING *`,
       [finalStatus, status, principal_remarks || null, approvedBy, isDeducted, id]
     );
+    await notifyUsers([staffKey(leave.faculty_email)], {
+      title: status === 'Approved' ? 'Leave granted ✅' : 'Leave rejected', url: '/faculty/dashboard?tab=leaves', tag: `leave-${id}`,
+      body: `${leave.leave_type} ${d10(leave.from_date)} → ${d10(leave.to_date)}${principal_remarks ? ` — ${principal_remarks}` : ''}`,
+    });
 
     res.json({
       success: true,
@@ -20204,7 +20582,8 @@ app.post('/notifications/broadcast', requireAuth, async (req: Request, res: Resp
     );
 
     console.log('[Broadcast Posted]:', { id: notifId, senderEmail, role: finalTargetRole, dept: finalTargetDept });
-    res.status(201).json(insertRes.rows[0]);
+    const pushed = await notifyBroadcast(insertRes.rows[0]);
+    res.status(201).json({ ...insertRes.rows[0], pushed_to: pushed });
   } catch (err: any) {
     console.error('[POST /notifications/broadcast Error]:', err);
     res.status(500).json({ error: err.message });
@@ -20699,6 +21078,10 @@ export const handler = async (event: any, context: any) => {
   if (event && event.warmup === true) {
     await db.query('SELECT 1').catch(() => undefined);
     return { statusCode: 200, body: 'warm' };
+  }
+  if (event && event.job === 'daily-notify') {
+    const out = await runDailyNotifications().catch((e: any) => ({ error: e.message }));
+    return { statusCode: 200, body: JSON.stringify(out) };
   }
   if (event.source === 'aws.events' && event['detail-type'] === 'Scheduled Event') {
     console.log('[EventBridge] Intercepted Scheduled Event. Triggering Auto-Sync...');

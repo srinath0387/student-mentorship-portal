@@ -12,6 +12,7 @@ import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
+import * as s3n from 'aws-cdk-lib/aws-s3-notifications';
 import * as path from 'path';
 
 export class AdvitiyansStack extends cdk.Stack {
@@ -270,6 +271,9 @@ export class AdvitiyansStack extends cdk.Stack {
         GITHUB_PAT: process.env.GITHUB_PAT || '',
         // Resolved by CloudFormation at deploy time (dynamic reference) — value never appears in the template
         SESSION_SIGNING_SECRET: sessionSigningSecret.secretValue.unsafeUnwrap(),
+        // Notifications: public halves only — the notifier Lambda holds the private keys / bot token
+        VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY || '',
+        TELEGRAM_BOT_USERNAME: process.env.TELEGRAM_BOT_USERNAME || '',
         BUILD_TIMESTAMP: new Date().toISOString(),
       },
     });
@@ -431,6 +435,40 @@ export class AdvitiyansStack extends cdk.Stack {
     // ========================================================================
     // Stack Outputs
     // ========================================================================
+    // ========================================================================
+    // 14. Notifier Lambda (outside the VPC — has internet, no NAT needed)
+    //     API Lambda → S3 notify/outbox/*.json (free gateway endpoint) → this Lambda → Telegram / Web Push.
+    //     Its Function URL is the Telegram webhook (verified with a secret header).
+    // ========================================================================
+    const notifierLambda = new lambda.Function(this, 'AdvitiyansNotifier', {
+      runtime: lambda.Runtime.NODEJS_22_X,
+      handler: 'handlers/notifier.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../backend/dist')),
+      timeout: cdk.Duration.seconds(60),
+      memorySize: 256,
+      environment: {
+        NOTIFY_BUCKET: uploadsBucket.bucketName,
+        APP_URL: `https://${cfDistribution.distributionDomainName}`,
+        TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '',
+        VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY || '',
+        VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY || '',
+        VAPID_SUBJECT: 'mailto:admin@rgmcet.edu.in',
+      },
+    });
+    uploadsBucket.grantReadWrite(notifierLambda, 'notify/*');
+    uploadsBucket.addEventNotification(s3.EventType.OBJECT_CREATED, new s3n.LambdaDestination(notifierLambda), { prefix: 'notify/outbox/' });
+    const notifierUrl = notifierLambda.addFunctionUrl({ authType: lambda.FunctionUrlAuthType.NONE });
+
+    // Daily 6:00 PM IST: absence alerts to subscribed parents / students, tomorrow's club sessions
+    const dailyNotifyRule = new events.Rule(this, 'DailyNotifications', {
+      schedule: events.Schedule.cron({ minute: '30', hour: '12', month: '*', weekDay: '*', year: '*' }),
+      description: 'Queues daily absence alerts and club session reminders (6 PM IST).',
+    });
+    dailyNotifyRule.addTarget(new targets.LambdaFunction(apiLambda, {
+      event: events.RuleTargetInput.fromObject({ job: 'daily-notify' }),
+    }));
+
+    new cdk.CfnOutput(this, 'NotifierUrl', { value: notifierUrl.url });
     new cdk.CfnOutput(this, 'ApiGatewayUrl', { value: api.url });
     new cdk.CfnOutput(this, 'UserPoolId', { value: userPool.userPoolId });
     new cdk.CfnOutput(this, 'UserPoolClientId', { value: userPoolClient.userPoolClientId });

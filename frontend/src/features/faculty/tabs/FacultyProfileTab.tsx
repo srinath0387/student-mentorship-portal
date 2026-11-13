@@ -61,6 +61,7 @@ import { formatExternalUrl } from '../../../lib/urlUtils';
 import { SubjectsHandledSection } from '../components/SubjectsHandledSection';
 import { FacultyApiScoreCard } from '../FacultyApiScoreCard';
 import { VALID_DEPARTMENT_NAMES } from '../../../lib/validation/auth';
+import { importFromOrcid, refreshCitations, lookupDoi, fetchAuthorMetrics, computeMetrics, ResearchMetrics } from '../../../lib/scholarly';
 
 const BLOOD_GROUPS: BloodGroup[] = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'];
 const DESIGNATIONS: FacultyDesignation[] = ['Assistant Professor', 'Associate Professor', 'Professor'];
@@ -121,6 +122,7 @@ export const FacultyProfileTab: React.FC = () => {
   const [publications, setPublications] = useState<FacultyPublicationRecord[]>([]);
   const [scopusId, setScopusId] = useState('');
   const [orcidId, setOrcidId] = useState('');
+  const [researchMetrics, setResearchMetrics] = useState<ResearchMetrics | null>(null);
   const [domains, setDomains] = useState<string[]>([]);
   const [customDomainInput, setCustomDomainInput] = useState('');
 
@@ -237,6 +239,7 @@ export const FacultyProfileTab: React.FC = () => {
       setLinkedinUrl(p.linkedin_url || '');
       setScopusId(profileData.scopus_id || p.scopus_id || '');
       setOrcidId(profileData.orcid_id || p.orcid_id || '');
+      setResearchMetrics((p as any).research_metrics || null);
       setJoiningDate(p.joining_date || '');
       setPriorYears(p.prior_experience_years || 0);
       setPriorMonths(p.prior_experience_months || 0);
@@ -276,6 +279,7 @@ export const FacultyProfileTab: React.FC = () => {
         linkedin_url: linkedinUrl,
         scopus_id: scopusId.trim() || undefined,
         orcid_id: orcidId.trim() || undefined,
+        research_metrics: researchMetrics || undefined,
         joining_date: joiningDate,
         prior_experience_years: priorYears,
         prior_experience_months: priorMonths,
@@ -319,6 +323,7 @@ export const FacultyProfileTab: React.FC = () => {
     activities,
     publications,
     domains,
+    researchMetrics,
   ]);
 
   const completionInfo = useMemo(
@@ -620,88 +625,17 @@ export const FacultyProfileTab: React.FC = () => {
 
     setIsFetchingOrcid(true);
     setOrcidFetchMessage(null);
-
     try {
-      const url = `https://pub.orcid.org/v3.0/${encodeURIComponent(cleanId)}/works`;
-      const response = await fetch(url, {
-        headers: {
-          Accept: 'application/json',
-        },
+      const r = await importFromOrcid(cleanId, publications);
+      setPublications(r.publications);
+      setResearchMetrics(r.metrics);
+      setOrcidFetchMessage({
+        type: r.added ? 'success' : 'info',
+        text: (r.added
+          ? `Imported ${r.added} new publication(s) from ORCID. Tag each one (SCI / SCOPUS / WoS / Patent). `
+          : 'No new publications on this ORCID record. ')
+          + `Citation counts updated for ${r.withCitations} DOI(s). Click "Save Faculty Profile" below to keep the changes.`,
       });
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          throw new Error('No publications found for this ORCID ID, or the record is private — you can add publications manually below.');
-        }
-        throw new Error(`ORCID record could not be retrieved (${response.status}) — you can add publications manually below.`);
-      }
-
-      const data = await response.json();
-      const groups = data?.group || [];
-      if (groups.length === 0) {
-        setOrcidFetchMessage({
-          type: 'info',
-          text: 'No publications found for this ORCID ID, or the record is private — you can add publications manually below.',
-        });
-        setIsFetchingOrcid(false);
-        return;
-      }
-
-      const fetchedPubs: FacultyPublicationRecord[] = [];
-      const existingTitles = new Set(publications.map((p) => p.title.toLowerCase().trim()));
-
-      for (const group of groups) {
-        const summaries = group['work-summary'] || [];
-        if (summaries.length === 0) continue;
-        const summary = summaries[0];
-
-        const title = summary?.title?.title?.value || 'Untitled Publication';
-        if (existingTitles.has(title.toLowerCase().trim())) {
-          continue;
-        }
-
-        const journal = summary?.['journal-title']?.value || summary?.type?.replace(/_/g, ' ') || 'Journal / Conference Article';
-
-        const yearVal = summary?.['publication-date']?.year?.value;
-        const parsedYear = yearVal ? parseInt(yearVal, 10) : new Date().getFullYear();
-        const year = !isNaN(parsedYear) ? parsedYear : new Date().getFullYear();
-
-        let doiLink = '';
-        const externalIds = summary?.['external-ids']?.['external-id'] || [];
-        const doiObj = externalIds.find((ext: any) => ext?.['external-id-type']?.toLowerCase() === 'doi');
-        if (doiObj) {
-          const doiVal = doiObj['external-id-value'];
-          const doiUrl = doiObj['external-id-url']?.value;
-          if (doiUrl) {
-            doiLink = doiUrl;
-          } else if (doiVal) {
-            doiLink = doiVal.startsWith('http') ? doiVal : `https://doi.org/${doiVal}`;
-          }
-        }
-
-        fetchedPubs.push({
-          id: `orcid_${summary?.['put-code'] || Math.random().toString(36).substring(2, 9)}_${Date.now()}`,
-          category: 'Unclassified',
-          title,
-          journal_name: journal,
-          year,
-          doi_link: doiLink || undefined,
-          needs_review: true,
-        });
-      }
-
-      if (fetchedPubs.length === 0) {
-        setOrcidFetchMessage({
-          type: 'info',
-          text: 'All publications from this ORCID record are already in your publications list.',
-        });
-      } else {
-        setPublications((prev) => [...fetchedPubs, ...prev]);
-        setOrcidFetchMessage({
-          type: 'success',
-          text: `Retrieved ${fetchedPubs.length} publication(s) from ORCID. Please review, categorize each entry (SCI / SCOPUS / WoS / Patent), and click "Save Faculty Profile" below to save.`,
-        });
-      }
     } catch (err: any) {
       setOrcidFetchMessage({
         type: 'error',
@@ -710,6 +644,35 @@ export const FacultyProfileTab: React.FC = () => {
     } finally {
       setIsFetchingOrcid(false);
     }
+  };
+
+  const handleRefreshCitations = async () => {
+    setIsFetchingOrcid(true);
+    setOrcidFetchMessage(null);
+    try {
+      const r = await refreshCitations(publications);
+      setPublications(r.publications);
+      const cleanId = orcidId.trim().replace(/^https?:\/\/orcid\.org\//i, '');
+      const m = /^\d{4}-\d{4}-\d{4}-[\dX]{4}$/i.test(cleanId) ? await fetchAuthorMetrics(cleanId).catch(() => null) : null;
+      setResearchMetrics(m || computeMetrics(r.publications));
+      setOrcidFetchMessage({ type: 'success', text: `Citations updated for ${r.updated} publication(s) with a DOI. Click "Save Faculty Profile" to keep them.` });
+    } catch (err: any) {
+      setOrcidFetchMessage({ type: 'error', text: err?.message || 'Could not reach Crossref — try again in a minute.' });
+    } finally {
+      setIsFetchingOrcid(false);
+    }
+  };
+
+  const [doiBusy, setDoiBusy] = useState(false);
+  const [doiError, setDoiError] = useState<string | null>(null);
+  const handleDoiLookup = async () => {
+    setDoiBusy(true); setDoiError(null);
+    try {
+      const m = await lookupDoi(newPub.doi_link);
+      if (!m) { setDoiError('DOI not found on Crossref — fill the details by hand.'); return; }
+      setNewPub({ ...newPub, title: m.title || newPub.title, journal_name: m.journal_name || newPub.journal_name, year: m.year, co_authors: m.co_authors || newPub.co_authors, doi_link: m.doi_link });
+    } catch (err: any) { setDoiError(err?.message || 'Lookup failed'); }
+    finally { setDoiBusy(false); }
   };
 
   // Quick category update for unclassified/reviewed publications
@@ -1562,6 +1525,30 @@ export const FacultyProfileTab: React.FC = () => {
           </div>
         )}
 
+        {/* ── Research impact (Crossref citations · OpenAlex h-index) ── */}
+        {publications.length > 0 && (
+          <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl bg-surface-2 border border-borderLine">
+            {[
+              ['Citations', researchMetrics?.citations ?? publications.reduce((n, p) => n + Number(p.citations || 0), 0)],
+              ['h-index', researchMetrics?.h_index ?? '—'],
+              ['i10-index', researchMetrics?.i10_index ?? '—'],
+              ['Publications', publications.filter(p => p.category !== 'Patent').length],
+            ].map(([k, v]) => (
+              <div key={String(k)} className="px-3 py-1.5 rounded-lg bg-surface border border-borderLine min-w-[84px]">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-textMuted">{k}</p>
+                <p className="text-lg font-black text-textPrimary leading-tight">{v}</p>
+              </div>
+            ))}
+            <div className="flex-1 min-w-[160px] text-[10px] text-textMuted">
+              {researchMetrics ? `From ${researchMetrics.source} · updated ${new Date(researchMetrics.updated_at).toLocaleDateString('en-IN')}` : 'Citation counts come from Crossref (free) using each DOI.'}
+            </div>
+            <button type="button" onClick={handleRefreshCitations} disabled={isFetchingOrcid}
+              className="px-3 py-1.5 rounded-lg border border-borderLine text-xs font-bold text-textSecondary hover:bg-surface disabled:opacity-50">
+              {isFetchingOrcid ? 'Updating…' : '↻ Update citations'}
+            </button>
+          </div>
+        )}
+
         {publications.length > 0 ? (
           <div className="space-y-3">
             {publications.map((p) => (
@@ -1598,6 +1585,9 @@ export const FacultyProfileTab: React.FC = () => {
                   <p className="text-xs text-textSecondary">
                     <strong className="text-textPrimary">{p.journal_name}</strong> ({p.year})
                     {p.co_authors && ` &bull; Authors: ${p.co_authors}`}
+                    {p.citations != null && (
+                      <span className="ml-2 inline-block px-1.5 py-px rounded bg-sky-100 text-sky-800 dark:bg-sky-950/50 dark:text-sky-300 text-[10px] font-black">Cited by {p.citations}</span>
+                    )}
                   </p>
 
                   {p.doi_link && (
@@ -2245,14 +2235,23 @@ export const FacultyProfileTab: React.FC = () => {
               </div>
 
               <div>
-                <label className="block font-semibold text-textPrimary mb-1">DOI / Link (Optional)</label>
-                <input
-                  type="url"
-                  placeholder="https://doi.org/10.1109/..."
-                  value={newPub.doi_link}
-                  onChange={(e) => setNewPub({ ...newPub, doi_link: e.target.value })}
-                  className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
-                />
+                <label className="block font-semibold text-textPrimary mb-1">DOI / Link (Optional) <span className="font-normal text-textMuted text-[11px]">— paste a DOI and press “Fill from DOI”</span></label>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    placeholder="https://doi.org/10.1109/..."
+                    value={newPub.doi_link}
+                    onChange={(e) => { setNewPub({ ...newPub, doi_link: e.target.value }); setDoiError(null); }}
+                    className="flex-1 px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                  />
+                  {newPub.category !== 'Patent' && (
+                    <button type="button" onClick={handleDoiLookup} disabled={doiBusy || !/10\.\d{4,9}\//.test(newPub.doi_link)}
+                      className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold disabled:opacity-40 whitespace-nowrap">
+                      {doiBusy ? 'Looking up…' : 'Fill from DOI'}
+                    </button>
+                  )}
+                </div>
+                {doiError && <p className="text-[11px] text-red-600 mt-1">{doiError}</p>}
               </div>
 
               {/* ── Patent-specific fields ── */}

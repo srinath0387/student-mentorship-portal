@@ -8,6 +8,11 @@ if (typeof window !== 'undefined' && typeof (window as any).global === 'undefine
   (window as any).global = window;
 }
 
+// Service worker: shows push notifications (see public/sw.js)
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => undefined); });
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />
