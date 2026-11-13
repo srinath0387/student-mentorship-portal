@@ -28,7 +28,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
       // shared
       home: 'Home',
       attendance: 'Attendance', leaves: 'Leave & OD', performance: 'CGPA & Rankings',
-      students: 'Student Directory', faculty: 'Faculty & Mentors', holidays: 'Holiday Calendar',
+      students: 'Student Directory', faculty: 'Faculty Directory', holidays: 'Holiday Calendar',
       overview: 'Dept Overview', rankings: 'CGPA & Rankings', mentees: 'Mentees',
       analytics: 'CGPA Analytics', profile: 'My Profile', 'coding-profiles': 'Coding Profiles',
       permissions: 'On-Duty Permissions', certifications: 'Certificates', documents: 'Documents',

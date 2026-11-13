@@ -663,8 +663,8 @@ export const AdminDashboardPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Stat Cards — always visible */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Stat Cards — student stats; not shown on the oversight Faculty Directory */}
+      <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 ${isOversight && activeTab === 'faculty' ? 'hidden' : ''}`}>
         <StatCard icon={<Users className="w-5 h-5" />} iconBgColor="bg-brand-soft text-brand-primary"
           accentColor="brand" label="Total Students" value={students.length} subtext="Active in platform" />
         <StatCard icon={<GraduationCap className="w-5 h-5" />} iconBgColor="bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"

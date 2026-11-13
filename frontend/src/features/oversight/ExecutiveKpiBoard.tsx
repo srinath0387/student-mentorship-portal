@@ -150,9 +150,14 @@ function Composition({ focus, scope, scopeLabel }: { focus: Key; scope: Dept[]; 
  * to that metric. Click a department to cross-filter: every KPI re-computes for that department
  * and shows its gap against the institution.
  */
-export const ExecutiveKpiBoard: React.FC<{ departments: Dept[]; onOpenTab: (tab: string) => void }> = ({ departments, onOpenTab }) => {
+export const ExecutiveKpiBoard: React.FC<{
+  departments: Dept[];
+  /** Controlled department cross-filter (null = whole institution) */
+  dept: string | null;
+  onDeptChange: (dept: string | null) => void;
+  onOpenTab: (tab: string) => void;
+}> = ({ departments, dept, onDeptChange: setDept, onOpenTab }) => {
   const [focus, setFocus] = useState<Key>('attendance');
-  const [dept, setDept] = useState<string | null>(null);
   const deptRow = departments.find(d => d.department === dept) || null;
   const inst = useMemo(() => aggregate(departments), [departments]);
   const scoped = useMemo(() => (deptRow ? aggregate([deptRow]) : inst), [deptRow, inst]);

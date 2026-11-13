@@ -330,6 +330,13 @@ export const OversightDashboardPage: React.FC = () => {
     staleTime: 60 * 1000,
   });
 
+  // KPI board always ranks against the whole institution; the department chip only cross-filters it
+  const { data: instMetrics } = useQuery({
+    queryKey: ['executiveMetrics', 'All'],
+    queryFn: () => api.getExecutiveMetrics('All'),
+    staleTime: 60 * 1000,
+  });
+
   const { data: cadreData, isLoading: cadreLoading } = useQuery({
     queryKey: ['facultyByCadre', drawerDept, drawerCadre],
     queryFn: () => api.getFacultyByCadre(drawerDept, drawerCadre),
@@ -390,18 +397,10 @@ export const OversightDashboardPage: React.FC = () => {
   }, [rawDepts]);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
-  const roleTitle = useMemo(() => {
-    switch (role) {
-      case 'director': return "Director's Executive Desk";
-      case 'principal': return "Principal's Institutional Desk";
-      case 'management': return 'Management Governance Board';
-      case 'program_chair': return 'Program Chair — CSE & Allied Branches';
-      default: return 'Institutional Oversight Command Center';
-    }
-  }, [role]);
 
   const openProfileDrawer = (dept: string, cadre: CadreFilter) => {
-    setDrawerDept(dept);
+    // 'All' respects the department chosen in the toolbar
+    setDrawerDept(dept === 'All' ? selectedDept : dept);
     setDrawerCadre(cadre);
     setProfileSearch('');
     setDrawerOpen(true);
@@ -1286,66 +1285,32 @@ export const OversightDashboardPage: React.FC = () => {
   return (
     <div className="space-y-5 pb-20">
 
-      {/* ── Header Banner ── */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-3xl p-5 shadow-xl relative overflow-hidden text-white">
-        <div className="absolute top-0 right-0 -mt-8 -mr-8 w-64 h-64 bg-brand-primary/15 rounded-full blur-3xl pointer-events-none" />
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex flex-wrap items-center gap-2 mb-1.5">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-[10px] font-black uppercase tracking-wider">
-                <ShieldCheck className="w-3 h-3" /> {roleTitle}
-              </span>
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-bold">
-                <Eye className="w-3 h-3" /> Live Real-Time Governance
-              </span>
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold">
-                <Sparkles className="w-3 h-3" /> Pure Real-Time Data
-              </span>
-            </div>
-            <h2 className="text-2xl font-black tracking-tight">Institutional Oversight Command Center</h2>
-            <p className="text-xs text-slate-300 mt-0.5">
-              {isProgramChair ? 'Scoped to CSE & Allied Branches' : 'Institute-Wide — All Departments & Sciences'}
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Department Selector */}
-            <div className="bg-white/10 backdrop-blur-md border border-white/15 rounded-2xl px-3 py-2 flex items-center gap-2">
-              <Filter className="w-3.5 h-3.5 text-indigo-300" />
-              <select
-                value={selectedDept}
-                onChange={e => setSelectedDept(e.target.value)}
-                className="bg-slate-900/90 text-white text-xs font-semibold px-2 py-1 rounded-xl border border-indigo-400/30 focus:outline-none"
-              >
-                <option value="All">All Departments</option>
-                {allowedDepts.map(d => <option key={d} value={d}>{d}</option>)}
-              </select>
-            </div>
-
-            {/* View Mode Toggle */}
-            <div className="flex bg-white/10 border border-white/15 rounded-2xl p-0.5 gap-0.5">
-              <button
-                onClick={() => setViewMode('grid')}
-                className={`px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all ${viewMode === 'grid' ? 'bg-white text-slate-900 shadow-sm' : 'text-white hover:bg-white/10'}`}
-              >
-                📋 Grid
-              </button>
-              <button
-                onClick={() => setViewMode('powerbi')}
-                className={`px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all ${viewMode === 'powerbi' ? 'bg-white text-slate-900 shadow-sm' : 'text-white hover:bg-white/10'}`}
-              >
-                📊 Power BI Canvas
-              </button>
-            </div>
-
-            {/* Export */}
-            <button
-              onClick={handleExportCSV}
-              className="px-3 py-2 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-bold text-white transition-all flex items-center gap-1.5"
-            >
-              <Download className="w-3.5 h-3.5" /> Export CSV
+      {/* ── Toolbar: department filter · view mode · export ── */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 -mb-1">
+          <Filter className="w-3.5 h-3.5 text-textMuted shrink-0 mr-1" />
+          {['All', ...allowedDepts].map(d => (
+            <button key={d} onClick={() => setSelectedDept(d)}
+              className={`shrink-0 px-3 py-1.5 rounded-xl text-[11px] font-bold border transition-all ${selectedDept === d
+                ? 'bg-brand-primary text-white border-brand-primary shadow-sm'
+                : 'bg-surface text-textSecondary border-borderLine hover:text-textPrimary hover:border-brand-primary/40'}`}>
+              {d === 'All' ? (isProgramChair ? 'All CSE & Allied' : 'All Departments') : d}
             </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="flex bg-surface border border-borderLine rounded-xl p-0.5">
+            {(['grid', 'powerbi'] as const).map(m => (
+              <button key={m} onClick={() => setViewMode(m)}
+                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold ${viewMode === m ? 'bg-brand-primary text-white' : 'text-textSecondary'}`}>
+                {m === 'grid' ? 'Grid' : 'Power BI'}
+              </button>
+            ))}
           </div>
+          <button onClick={handleExportCSV}
+            className="px-3 py-1.5 rounded-xl bg-surface border border-borderLine text-[11px] font-bold text-textSecondary hover:text-textPrimary inline-flex items-center gap-1.5">
+            <Download className="w-3.5 h-3.5" /> Export CSV
+          </button>
         </div>
       </div>
 
@@ -1400,7 +1365,8 @@ export const OversightDashboardPage: React.FC = () => {
                   <p className="text-sm text-white/80 mt-0.5">Institutional Oversight · {role?.charAt(0).toUpperCase()}{role?.slice(1)}</p>
                 </div>
               </div>
-              <ExecutiveKpiBoard departments={rawDepts} onOpenTab={tab => navigate('/oversight/dashboard?tab=' + tab)} />
+              <ExecutiveKpiBoard departments={instMetrics?.departments || rawDepts} dept={selectedDept === 'All' ? null : selectedDept}
+                onDeptChange={d => setSelectedDept(d || 'All')} onOpenTab={tab => navigate('/oversight/dashboard?tab=' + tab)} />
             </div>
           )}
 
@@ -1450,8 +1416,8 @@ export const OversightDashboardPage: React.FC = () => {
               </button>
             </div>
 
-            {/* Search within profiles */}
-            <div className="px-4 py-3 border-b border-borderLine bg-surface sticky top-[72px] z-10">
+            {/* Search + department filter within profiles */}
+            <div className="px-4 py-3 border-b border-borderLine bg-surface sticky top-[72px] z-10 space-y-2">
               <div className="relative">
                 <Search className="w-3.5 h-3.5 text-textMuted absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
@@ -1461,6 +1427,14 @@ export const OversightDashboardPage: React.FC = () => {
                   onChange={e => setProfileSearch(e.target.value)}
                   className="w-full pl-8 pr-3 py-2 text-xs bg-surface-2 border border-borderLine rounded-xl focus:outline-none focus:ring-1 focus:ring-brand-primary"
                 />
+              </div>
+              <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+                {['All', ...allowedDepts].map(d => (
+                  <button key={d} onClick={() => setDrawerDept(d)}
+                    className={`shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-bold border ${drawerDept === d ? 'bg-brand-primary text-white border-brand-primary' : 'border-borderLine text-textSecondary hover:text-textPrimary'}`}>
+                    {d === 'All' ? 'All Departments' : d}
+                  </button>
+                ))}
               </div>
             </div>
 

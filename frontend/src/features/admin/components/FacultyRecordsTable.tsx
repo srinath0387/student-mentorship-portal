@@ -12,6 +12,7 @@ interface Props {
 
 export const FacultyRecordsTable: React.FC<Props> = ({ onLinkEmail, readOnly = false }) => {
   const [query, setQuery] = useState('');
+  const [dept, setDept] = useState('All');
   const queryClient = useQueryClient();
   const { data: faculty = [], isLoading } = useQuery({
     queryKey: ['adminFaculty'],
@@ -65,6 +66,11 @@ export const FacultyRecordsTable: React.FC<Props> = ({ onLinkEmail, readOnly = f
     }
   };
 
+  const departments = Array.from(new Set(faculty.map((f: any) => f.department).filter(Boolean))).sort() as string[];
+  const shown = faculty.filter((fac: any) =>
+    (dept === 'All' || fac.department === dept) &&
+    (!query.trim() || `${fac.name} ${fac.faculty_id} ${fac.email || ''} ${fac.designation || ''}`.toLowerCase().includes(query.trim().toLowerCase())));
+
   if (isLoading) {
     return (
       <div className="bg-surface border border-borderLine rounded-xl p-6 text-center text-xs text-textSecondary">
@@ -78,8 +84,13 @@ export const FacultyRecordsTable: React.FC<Props> = ({ onLinkEmail, readOnly = f
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <div>
           <h3 className="text-base font-bold text-textPrimary">Faculty Records</h3>
-          <p className="text-xs text-textSecondary mt-0.5">{faculty.length} faculty member{faculty.length !== 1 ? 's' : ''} in system</p>
+          <p className="text-xs text-textSecondary mt-0.5">{shown.length} of {faculty.length} faculty member{faculty.length !== 1 ? 's' : ''}{dept !== 'All' ? ` · ${dept}` : ''}</p>
         </div>
+        <select value={dept} onChange={e => setDept(e.target.value)} aria-label="Department"
+          className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-borderLine bg-background text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary/40">
+          <option value="All">All departments</option>
+          {departments.map(d => <option key={d} value={d}>{d}</option>)}
+        </select>
         {readOnly ? (
           <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search name, ID or email…"
             className="px-3 py-1.5 text-xs rounded-xl border border-borderLine bg-background text-textPrimary w-56 focus:outline-none focus:ring-2 focus:ring-brand-primary/40" />
@@ -112,14 +123,14 @@ export const FacultyRecordsTable: React.FC<Props> = ({ onLinkEmail, readOnly = f
             </tr>
           </thead>
           <tbody className="divide-y divide-borderLine text-sm">
-            {faculty.length === 0 && (
+            {shown.length === 0 && (
               <tr>
                 <td colSpan={4} className="py-10 text-center text-textSecondary text-xs">
-                  No faculty records yet. Upload a CSV to auto-create faculty.
+                  {faculty.length === 0 ? (readOnly ? 'No faculty records yet.' : 'No faculty records yet. Upload a CSV to auto-create faculty.') : 'No faculty match this department / search.'}
                 </td>
               </tr>
             )}
-            {faculty.filter((fac: any) => !query.trim() || `${fac.name} ${fac.faculty_id} ${fac.email || ''}`.toLowerCase().includes(query.trim().toLowerCase())).map((fac: any) => {
+            {shown.map((fac: any) => {
               const isLinked = fac.email && !fac.email.startsWith('pending_');
               const isRenaming = renamingId === fac.faculty_id;
               return (
@@ -135,7 +146,7 @@ export const FacultyRecordsTable: React.FC<Props> = ({ onLinkEmail, readOnly = f
                     ) : (
                       <>
                         <p className="font-semibold text-textPrimary text-sm">{fac.name}</p>
-                        <p className="text-[11px] text-textSecondary">{fac.faculty_id}</p>
+                        <p className="text-[11px] text-textSecondary">{[fac.designation, fac.department, fac.faculty_id].filter(Boolean).join(' · ')}</p>
                         {deleteError[fac.faculty_id] && <p className="text-[11px] text-red-500 mt-0.5">{deleteError[fac.faculty_id]}</p>}
                       </>
                     )}
