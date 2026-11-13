@@ -216,6 +216,7 @@ export interface ScoreBreakdown {
   githubScore: number;           // max 200
   academicsScore: number;        // max 250
   certsScore: number;            // max 200
+  clubsScore?: number;           // bonus, max 100
   levelNumber: number;           // 1-10
   levelTitle: string;
   badge: string;

@@ -275,6 +275,7 @@ export const PlacementPreferencesTab: React.FC<PlacementPreferencesTabProps> = (
             { label: '🐙 GitHub', score: scoreData?.githubScore ?? 0, max: 200, color: '#6b7280', bg: 'bg-gray-100', text: 'text-gray-700' },
             { label: '📚 Academics', score: scoreData?.academicsScore ?? 0, max: 250, color: '#3b82f6', bg: 'bg-blue-100', text: 'text-blue-700' },
             { label: '🏅 Certifications', score: scoreData?.certsScore ?? 0, max: 200, color: '#10b981', bg: 'bg-emerald-100', text: 'text-emerald-700' },
+            { label: '✨ Clubs (bonus)', score: (scoreData as any)?.clubsScore ?? 0, max: 100, color: '#a855f7', bg: 'bg-purple-100', text: 'text-purple-700' },
           ].map((p) => (
             <div key={p.label} className="flex items-center gap-3">
               <span className="w-32 text-xs font-semibold text-textSecondary shrink-0">{p.label}</span>

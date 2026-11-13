@@ -14,6 +14,8 @@
 export const db = {
   query: jest.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
   healthCheck: jest.fn().mockResolvedValue({ status: 'ok', latency_ms: 1 }),
+  // Runs the callback with a client whose queries go through db.query (so routeDb mocks apply)
+  transaction: jest.fn(async (cb: (client: any) => Promise<any>) => cb({ query: (...args: any[]) => (db.query as any)(...args) })),
   getClient: jest.fn().mockResolvedValue({
     query: jest.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
     release: jest.fn(),

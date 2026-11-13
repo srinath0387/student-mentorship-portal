@@ -4489,6 +4489,7 @@ app.get('/students/:id/employability-score', requireAuth, async (req: Request, r
       academics: academicsRes.rows,
       codingProfiles: codingRes.rows,
       certifications: combinedCerts,
+      clubs: await clubScoreData(studentId),
     });
 
     // Upsert into student_scores cache
@@ -10050,6 +10051,603 @@ app.patch('/duties/:id/status', requireRole(...DUTY_ISSUERS), async (req: Reques
     res.json(r.rows[0]);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
+
+// ============================================================================
+// Clubs — registration window, seat limit, payment (QR + UTR), waitlist,
+// lead / co-lead roles, sessions & announcements, session attendance.
+// Membership feeds the employability score; mentors / HODs see their students' clubs.
+// ============================================================================
+const CLUB_MANAGERS = ['admin'];
+const CLUB_OVERSIGHT = ['admin', 'hod', 'faculty', 'coordinator', 'principal', 'director', 'management', 'program_chair'];
+const CLUB_SEAT_STATUSES = ['pending_payment', 'payment_submitted', 'approved'];
+const MAX_CLUBS_PER_STUDENT = 3;
+const CLUB_PAYMENT_HOURS = 48; // an unpaid seat is released after this
+const CLUB_CATEGORIES = ['Technical', 'Coding', 'Cultural', 'Literary', 'Sports', 'Social Service', 'Entrepreneurship', 'Arts', 'Other'];
+
+let clubTablesReady: Promise<void> | null = null;
+function ensureClubTables(): Promise<void> {
+  if (!clubTablesReady) {
+    clubTablesReady = db.query(`
+      CREATE TABLE IF NOT EXISTS clubs (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'Other',
+        motive TEXT,
+        activities TEXT,
+        max_seats INT NOT NULL CHECK (max_seats > 0),
+        reg_open TIMESTAMPTZ NOT NULL,
+        reg_close TIMESTAMPTZ NOT NULL,
+        fee NUMERIC(10,2) NOT NULL DEFAULT 0,
+        upi_id TEXT,
+        payment_qr TEXT,
+        allowed_departments TEXT[] NOT NULL DEFAULT '{}',
+        allowed_years TEXT[] NOT NULL DEFAULT '{}',
+        coordinator_email TEXT,
+        coordinator_name TEXT,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
+        created_by TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_clubs_name ON clubs (LOWER(name)) WHERE status = 'active';
+      CREATE TABLE IF NOT EXISTS club_memberships (
+        id SERIAL PRIMARY KEY,
+        club_id INT NOT NULL REFERENCES clubs(id) ON DELETE CASCADE,
+        roll_number TEXT NOT NULL,
+        student_name TEXT,
+        department TEXT,
+        year TEXT,
+        section TEXT,
+        status TEXT NOT NULL CHECK (status IN ('pending_payment','payment_submitted','approved','waitlisted','rejected','withdrawn','expired')),
+        role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member','lead','co_lead')),
+        payment_ref TEXT,
+        payment_submitted_at TIMESTAMPTZ,
+        remarks TEXT,
+        applied_at TIMESTAMPTZ DEFAULT NOW(),
+        decided_at TIMESTAMPTZ,
+        decided_by TEXT,
+        UNIQUE (club_id, roll_number)
+      );
+      CREATE INDEX IF NOT EXISTS idx_club_members_roll ON club_memberships (UPPER(roll_number));
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_club_payment_ref ON club_memberships (UPPER(payment_ref)) WHERE payment_ref IS NOT NULL;
+      CREATE TABLE IF NOT EXISTS club_sessions (
+        id SERIAL PRIMARY KEY,
+        club_id INT NOT NULL REFERENCES clubs(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL DEFAULT 'session' CHECK (kind IN ('session','announcement')),
+        title TEXT NOT NULL,
+        details TEXT,
+        session_date DATE,
+        start_time TEXT,
+        end_time TEXT,
+        venue TEXT,
+        posted_by TEXT,
+        posted_by_name TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_club_sessions_club ON club_sessions (club_id, session_date DESC);
+      CREATE TABLE IF NOT EXISTS club_session_attendance (
+        session_id INT NOT NULL REFERENCES club_sessions(id) ON DELETE CASCADE,
+        roll_number TEXT NOT NULL,
+        marked_by TEXT,
+        marked_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (session_id, roll_number)
+      );
+    `).then(() => undefined).catch((err: any) => { clubTablesReady = null; throw err; });
+  }
+  return clubTablesReady;
+}
+
+const normDept = (d: any) => String(d || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/** Release unpaid seats past the payment deadline, then move waitlisted students up into free seats. */
+async function refreshClubSeats(q: { query: (t: string, p?: any[]) => Promise<any> }, clubId?: number) {
+  const scope = clubId ? ' AND club_id = $1' : '';
+  const params = clubId ? [clubId] : [];
+  await q.query(
+    `UPDATE club_memberships SET status = 'expired', decided_at = NOW(), remarks = 'Payment not submitted within ${CLUB_PAYMENT_HOURS} hours'
+     WHERE status = 'pending_payment' AND applied_at < NOW() - INTERVAL '${CLUB_PAYMENT_HOURS} hours'${scope}`, params);
+  const clubs = await q.query(
+    `SELECT c.id, c.max_seats, c.fee,
+            (SELECT COUNT(*)::int FROM club_memberships m WHERE m.club_id = c.id AND m.status = ANY($${params.length + 1}::text[])) AS taken
+     FROM clubs c WHERE c.status = 'active'${clubId ? ' AND c.id = $1' : ''}
+       AND EXISTS (SELECT 1 FROM club_memberships w WHERE w.club_id = c.id AND w.status = 'waitlisted')`,
+    [...params, CLUB_SEAT_STATUSES]);
+  for (const c of clubs.rows) {
+    const free = Number(c.max_seats) - Number(c.taken);
+    if (free <= 0) continue;
+    await q.query(
+      `UPDATE club_memberships SET status = $2, applied_at = NOW(), remarks = 'Moved up from the waitlist'
+       WHERE id IN (SELECT id FROM club_memberships WHERE club_id = $1 AND status = 'waitlisted' ORDER BY applied_at, id LIMIT $3)`,
+      [c.id, Number(c.fee) > 0 ? 'pending_payment' : 'approved', free]);
+  }
+}
+
+function clubWindow(c: any, now = Date.now()): 'upcoming' | 'open' | 'closed' {
+  if (now < new Date(c.reg_open).getTime()) return 'upcoming';
+  if (now > new Date(c.reg_close).getTime()) return 'closed';
+  return 'open';
+}
+
+/** Is the caller allowed to run this club (post sessions, mark attendance, see members)? */
+async function clubRunner(req: Request, clubId: number): Promise<'admin' | 'coordinator' | 'lead' | null> {
+  const a = req.auth!;
+  if (CLUB_MANAGERS.includes(a.role)) return 'admin';
+  const c = await db.query('SELECT coordinator_email FROM clubs WHERE id = $1', [clubId]);
+  if (!c.rows[0]) return null;
+  if (a.email && String(c.rows[0].coordinator_email || '').toLowerCase() === String(a.email).toLowerCase()) return 'coordinator';
+  if (a.role === 'student' && a.regNo) {
+    const m = await db.query(
+      `SELECT 1 FROM club_memberships WHERE club_id = $1 AND UPPER(roll_number) = UPPER($2) AND status = 'approved' AND role IN ('lead','co_lead')`,
+      [clubId, a.regNo]);
+    if (m.rows[0]) return 'lead';
+  }
+  return null;
+}
+
+function parseClubBody(b: any): { error?: string; v?: any } {
+  const name = String(b.name || '').trim();
+  const maxSeats = Number(b.max_seats);
+  const open = new Date(b.reg_open); const close = new Date(b.reg_close);
+  const fee = Number(b.fee || 0);
+  if (!name || name.length > 120) return { error: 'Enter the club name (max 120 characters)' };
+  if (!Number.isInteger(maxSeats) || maxSeats < 1 || maxSeats > 5000) return { error: 'Seats must be a whole number between 1 and 5000' };
+  if (isNaN(open.getTime()) || isNaN(close.getTime())) return { error: 'Enter valid registration open and close dates' };
+  if (close <= open) return { error: 'Registration must close after it opens' };
+  if (!(fee >= 0 && fee <= 100000)) return { error: 'Enter a valid fee' };
+  const qr = b.payment_qr == null ? null : String(b.payment_qr);
+  if (qr && (!/^data:image\/(png|jpe?g|webp);base64,/.test(qr) || qr.length > 1_500_000)) return { error: 'Payment QR must be a PNG/JPG image under 1 MB' };
+  if (fee > 0 && !qr && !String(b.upi_id || '').trim()) return { error: 'A paid club needs a payment QR or a UPI ID' };
+  const arr = (x: any) => (Array.isArray(x) ? x.map((s: any) => String(s).trim()).filter(Boolean).slice(0, 20) : []);
+  return {
+    v: {
+      name, category: CLUB_CATEGORIES.includes(b.category) ? b.category : 'Other',
+      motive: String(b.motive || '').trim().slice(0, 3000) || null,
+      activities: String(b.activities || '').trim().slice(0, 3000) || null,
+      max_seats: maxSeats, reg_open: open.toISOString(), reg_close: close.toISOString(), fee,
+      upi_id: String(b.upi_id || '').trim().slice(0, 100) || null, payment_qr: qr,
+      allowed_departments: arr(b.allowed_departments), allowed_years: arr(b.allowed_years),
+      coordinator_email: String(b.coordinator_email || '').trim().toLowerCase() || null,
+    },
+  };
+}
+
+const CLUB_LIST_SQL = `
+  SELECT c.id, c.name, c.category, c.motive, c.activities, c.max_seats, c.reg_open, c.reg_close, c.fee, c.upi_id,
+         (c.payment_qr IS NOT NULL) AS has_qr, c.allowed_departments, c.allowed_years, c.coordinator_email, c.coordinator_name,
+         c.status, c.created_at,
+         COUNT(m.id) FILTER (WHERE m.status = ANY($1::text[]))::int AS seats_taken,
+         COUNT(m.id) FILTER (WHERE m.status = 'approved')::int AS members,
+         COUNT(m.id) FILTER (WHERE m.status = 'payment_submitted')::int AS payments_to_verify,
+         COUNT(m.id) FILTER (WHERE m.status = 'waitlisted')::int AS waitlisted,
+         (SELECT student_name FROM club_memberships l WHERE l.club_id = c.id AND l.status = 'approved' AND l.role = 'lead' LIMIT 1) AS lead_name,
+         (SELECT COUNT(*)::int FROM club_sessions s WHERE s.club_id = c.id AND s.kind = 'session') AS sessions_count
+  FROM clubs c LEFT JOIN club_memberships m ON m.club_id = c.id`;
+
+// GET /clubs — catalogue. Students also get their own membership per club.
+app.get('/clubs', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureClubTables();
+    await refreshClubSeats(db).catch(() => undefined);
+    const includeArchived = req.query.archived === '1' && CLUB_MANAGERS.includes(req.auth!.role);
+    const r = await db.query(`${CLUB_LIST_SQL} ${includeArchived ? '' : "WHERE c.status = 'active'"}
+      GROUP BY c.id ORDER BY c.status, c.reg_close DESC, c.name`, [CLUB_SEAT_STATUSES]);
+    let mine: Record<number, any> = {};
+    if (req.auth!.role === 'student' && req.auth!.regNo) {
+      const m = await db.query(
+        `SELECT id, club_id, status, role, payment_ref, remarks, applied_at FROM club_memberships WHERE UPPER(roll_number) = UPPER($1)`,
+        [req.auth!.regNo]);
+      mine = Object.fromEntries(m.rows.map((x: any) => [x.club_id, x]));
+    }
+    const now = Date.now();
+    res.json(r.rows.map((c: any) => ({ ...c, window: clubWindow(c, now), my_membership: mine[c.id] || null })));
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/clubs/meta', requireAuth, (_req: Request, res: Response) => {
+  res.json({ categories: CLUB_CATEGORIES, max_clubs_per_student: MAX_CLUBS_PER_STUDENT, payment_hours: CLUB_PAYMENT_HOURS });
+});
+
+// GET /clubs/:id/payment — QR + UPI for a student holding a seat (and for managers)
+app.get('/clubs/:id/payment', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureClubTables();
+    const id = Number(req.params.id);
+    if (!CLUB_MANAGERS.includes(req.auth!.role)) {
+      const m = await db.query(`SELECT 1 FROM club_memberships WHERE club_id = $1 AND UPPER(roll_number) = UPPER($2)
+        AND status IN ('pending_payment','payment_submitted','approved')`, [id, req.auth!.regNo || '']);
+      if (!m.rows[0]) return res.status(403).json({ error: 'Register for the club first' });
+    }
+    const r = await db.query('SELECT payment_qr, upi_id, fee, name FROM clubs WHERE id = $1', [id]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Club not found' });
+    res.json(r.rows[0]);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /clubs — admin creates a club
+app.post('/clubs', requireRole(...CLUB_MANAGERS), async (req: Request, res: Response) => {
+  try {
+    await ensureClubTables();
+    const { error, v } = parseClubBody(req.body || {});
+    if (error) return res.status(400).json({ error });
+    let coordName: string | null = null;
+    if (v.coordinator_email) {
+      const f = await db.query('SELECT name FROM faculty WHERE LOWER(email) = $1 LIMIT 1', [v.coordinator_email]);
+      if (!f.rows[0]) return res.status(404).json({ error: 'Faculty coordinator not found' });
+      coordName = f.rows[0].name;
+    }
+    try {
+      const r = await db.query(
+        `INSERT INTO clubs (name, category, motive, activities, max_seats, reg_open, reg_close, fee, upi_id, payment_qr,
+           allowed_departments, allowed_years, coordinator_email, coordinator_name, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
+        [v.name, v.category, v.motive, v.activities, v.max_seats, v.reg_open, v.reg_close, v.fee, v.upi_id, v.payment_qr,
+          v.allowed_departments, v.allowed_years, v.coordinator_email, coordName, req.auth!.email]);
+      res.status(201).json({ id: r.rows[0].id });
+    } catch (e: any) {
+      if (e?.code === '23505') return res.status(409).json({ error: 'A club with this name already exists' });
+      throw e;
+    }
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /clubs/:id — admin edits a club (omit payment_qr to keep the current one)
+app.put('/clubs/:id', requireRole(...CLUB_MANAGERS), async (req: Request, res: Response) => {
+  try {
+    await ensureClubTables();
+    const id = Number(req.params.id);
+    const cur = await db.query('SELECT payment_qr FROM clubs WHERE id = $1', [id]);
+    if (!cur.rows[0]) return res.status(404).json({ error: 'Club not found' });
+    const body = { ...(req.body || {}) };
+    if (body.payment_qr === undefined) body.payment_qr = cur.rows[0].payment_qr;
+    const { error, v } = parseClubBody(body);
+    if (error) return res.status(400).json({ error });
+    const taken = await db.query(`SELECT COUNT(*)::int AS n FROM club_memberships WHERE club_id = $1 AND status = ANY($2::text[])`, [id, CLUB_SEAT_STATUSES]);
+    if (v.max_seats < Number(taken.rows[0].n)) return res.status(400).json({ error: `${taken.rows[0].n} seats are already taken — seats cannot go below that` });
+    let coordName: string | null = null;
+    if (v.coordinator_email) {
+      const f = await db.query('SELECT name FROM faculty WHERE LOWER(email) = $1 LIMIT 1', [v.coordinator_email]);
+      if (!f.rows[0]) return res.status(404).json({ error: 'Faculty coordinator not found' });
+      coordName = f.rows[0].name;
+    }
+    try {
+      await db.query(
+        `UPDATE clubs SET name=$1, category=$2, motive=$3, activities=$4, max_seats=$5, reg_open=$6, reg_close=$7, fee=$8, upi_id=$9,
+           payment_qr=$10, allowed_departments=$11, allowed_years=$12, coordinator_email=$13, coordinator_name=$14, updated_at=NOW()
+         WHERE id = $15`,
+        [v.name, v.category, v.motive, v.activities, v.max_seats, v.reg_open, v.reg_close, v.fee, v.upi_id, v.payment_qr,
+          v.allowed_departments, v.allowed_years, v.coordinator_email, coordName, id]);
+    } catch (e: any) {
+      if (e?.code === '23505') return res.status(409).json({ error: 'A club with this name already exists' });
+      throw e;
+    }
+    await refreshClubSeats(db, id).catch(() => undefined); // more seats → waitlist moves up
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// PATCH /clubs/:id/status — archive / restore
+app.patch('/clubs/:id/status', requireRole(...CLUB_MANAGERS), async (req: Request, res: Response) => {
+  try {
+    await ensureClubTables();
+    const status = req.body?.status === 'archived' ? 'archived' : 'active';
+    const r = await db.query('UPDATE clubs SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING id', [status, Number(req.params.id)]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Club not found' });
+    res.json({ success: true });
+  } catch (err: any) {
+    if (err?.code === '23505') return res.status(409).json({ error: 'An active club already uses this name' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /clubs/:id/register — student registers (seat held, or waitlisted when full)
+app.post('/clubs/:id/register', requireRole('student'), async (req: Request, res: Response) => {
+  try {
+    await ensureClubTables();
+    const id = Number(req.params.id);
+    const roll = String(req.auth!.regNo || '').toUpperCase();
+    if (!roll) return res.status(400).json({ error: 'Your student record was not found' });
+    const st = await db.query('SELECT roll_number, name, department, year, section FROM students WHERE UPPER(roll_number) = $1 LIMIT 1', [roll]);
+    const s = st.rows[0];
+    if (!s) return res.status(404).json({ error: 'Your student record was not found' });
+
+    const result = await db.transaction(async (client: any) => {
+      await refreshClubSeats(client, id);
+      const c = (await client.query('SELECT * FROM clubs WHERE id = $1 FOR UPDATE', [id])).rows[0];
+      if (!c || c.status !== 'active') return { code: 404, body: { error: 'Club not found' } };
+      const w = clubWindow(c);
+      if (w !== 'open') return { code: 400, body: { error: w === 'upcoming' ? 'Registration has not opened yet' : 'Registration is closed' } };
+      if (c.allowed_departments?.length && !c.allowed_departments.some((d: string) => normDept(d) === normDept(s.department)))
+        return { code: 403, body: { error: `This club is open to ${c.allowed_departments.join(', ')} only` } };
+      if (c.allowed_years?.length && !c.allowed_years.includes(s.year))
+        return { code: 403, body: { error: `This club is open to ${c.allowed_years.join(', ')} only` } };
+      const existing = (await client.query('SELECT status FROM club_memberships WHERE club_id = $1 AND UPPER(roll_number) = $2', [id, roll])).rows[0];
+      if (existing && !['withdrawn', 'expired', 'rejected'].includes(existing.status))
+        return { code: 409, body: { error: 'You have already registered for this club' } };
+      const active = await client.query(
+        `SELECT COUNT(*)::int AS n FROM club_memberships WHERE UPPER(roll_number) = $1 AND status IN ('pending_payment','payment_submitted','approved','waitlisted')`, [roll]);
+      if (Number(active.rows[0].n) >= MAX_CLUBS_PER_STUDENT)
+        return { code: 400, body: { error: `You can be in at most ${MAX_CLUBS_PER_STUDENT} clubs (including pending and waitlisted)` } };
+      const taken = (await client.query(`SELECT COUNT(*)::int AS n FROM club_memberships WHERE club_id = $1 AND status = ANY($2::text[])`, [id, CLUB_SEAT_STATUSES])).rows[0].n;
+      const status = Number(taken) >= Number(c.max_seats) ? 'waitlisted' : Number(c.fee) > 0 ? 'pending_payment' : 'approved';
+      const r = await client.query(
+        `INSERT INTO club_memberships (club_id, roll_number, student_name, department, year, section, status, role, payment_ref, payment_submitted_at, remarks, applied_at, decided_at, decided_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'member',NULL,NULL,NULL,NOW(),NULL,NULL)
+         ON CONFLICT (club_id, roll_number) DO UPDATE SET status = EXCLUDED.status, role = 'member', payment_ref = NULL,
+           payment_submitted_at = NULL, remarks = NULL, applied_at = NOW(), decided_at = NULL, decided_by = NULL,
+           student_name = EXCLUDED.student_name, department = EXCLUDED.department, year = EXCLUDED.year, section = EXCLUDED.section
+         RETURNING id, status`,
+        [id, roll, s.name, s.department, s.year, s.section, status]);
+      return { code: 201, body: r.rows[0] };
+    });
+    res.status(result.code).json(result.body);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /clubs/:id/payment — student submits the UPI transaction reference (UTR)
+app.post('/clubs/:id/payment', requireRole('student'), async (req: Request, res: Response) => {
+  try {
+    await ensureClubTables();
+    const ref = String(req.body?.payment_ref || '').trim().toUpperCase();
+    if (!/^[A-Z0-9]{6,30}$/.test(ref)) return res.status(400).json({ error: 'Enter the 6–30 character transaction ID / UTR from your payment app' });
+    try {
+      const r = await db.query(
+        `UPDATE club_memberships SET status = 'payment_submitted', payment_ref = $1, payment_submitted_at = NOW(), remarks = NULL
+         WHERE club_id = $2 AND UPPER(roll_number) = UPPER($3) AND status IN ('pending_payment','payment_submitted') RETURNING id, status`,
+        [ref, Number(req.params.id), req.auth!.regNo || '']);
+      if (!r.rows[0]) return res.status(400).json({ error: 'No payment is due for this club (the seat may have expired)' });
+      res.json(r.rows[0]);
+    } catch (e: any) {
+      if (e?.code === '23505') return res.status(409).json({ error: 'This transaction ID has already been used for another registration' });
+      throw e;
+    }
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /clubs/:id/register — student withdraws (seat goes to the waitlist)
+app.delete('/clubs/:id/register', requireRole('student'), async (req: Request, res: Response) => {
+  try {
+    await ensureClubTables();
+    const id = Number(req.params.id);
+    const r = await db.query(
+      `UPDATE club_memberships SET status = 'withdrawn', role = 'member', decided_at = NOW()
+       WHERE club_id = $1 AND UPPER(roll_number) = UPPER($2) AND status IN ('pending_payment','payment_submitted','approved','waitlisted') RETURNING id`,
+      [id, req.auth!.regNo || '']);
+    if (!r.rows[0]) return res.status(404).json({ error: 'You are not registered for this club' });
+    await refreshClubSeats(db, id).catch(() => undefined);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /clubs/:id/members — admin, faculty coordinator, student lead / co-lead
+app.get('/clubs/:id/members', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureClubTables();
+    const id = Number(req.params.id);
+    const who = await clubRunner(req, id);
+    if (!who) return res.status(403).json({ error: 'Only the club coordinator, lead, co-lead or admin can see members' });
+    await refreshClubSeats(db, id).catch(() => undefined);
+    const r = await db.query(
+      `SELECT m.*, (SELECT COUNT(*)::int FROM club_session_attendance a JOIN club_sessions s ON s.id = a.session_id
+                    WHERE s.club_id = m.club_id AND UPPER(a.roll_number) = UPPER(m.roll_number)) AS sessions_attended
+       FROM club_memberships m WHERE m.club_id = $1
+       ORDER BY CASE m.role WHEN 'lead' THEN 0 WHEN 'co_lead' THEN 1 ELSE 2 END,
+                CASE m.status WHEN 'payment_submitted' THEN 0 WHEN 'approved' THEN 1 WHEN 'pending_payment' THEN 2 WHEN 'waitlisted' THEN 3 ELSE 4 END,
+                m.applied_at`, [id]);
+    // Leads see no payment references
+    res.json(who === 'lead' ? r.rows.filter((m: any) => m.status === 'approved').map((m: any) => ({ ...m, payment_ref: undefined })) : r.rows);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// PATCH /clubs/memberships/:mid — admin verifies payment (approve / reject) and assigns lead / co-lead
+app.patch('/clubs/memberships/:mid', requireRole(...CLUB_MANAGERS), async (req: Request, res: Response) => {
+  try {
+    await ensureClubTables();
+    const mid = Number(req.params.mid);
+    const m = (await db.query('SELECT * FROM club_memberships WHERE id = $1', [mid])).rows[0];
+    if (!m) return res.status(404).json({ error: 'Registration not found' });
+    const { status, role, remarks } = req.body || {};
+    if (status !== undefined) {
+      if (!['approved', 'rejected'].includes(status)) return res.status(400).json({ error: 'Status must be approved or rejected' });
+      if (status === 'approved' && m.status === 'waitlisted') return res.status(400).json({ error: 'Waitlisted students move up automatically when a seat frees' });
+      if (status === 'rejected' && !String(remarks || '').trim()) return res.status(400).json({ error: 'Give a reason for rejecting' });
+      await db.query(
+        `UPDATE club_memberships SET status = $1, role = CASE WHEN $1 = 'rejected' THEN 'member' ELSE role END,
+           remarks = $2, decided_at = NOW(), decided_by = $3 WHERE id = $4`,
+        [status, String(remarks || '').trim().slice(0, 300) || null, req.auth!.email, mid]);
+      if (status === 'rejected') await refreshClubSeats(db, m.club_id).catch(() => undefined);
+    }
+    if (role !== undefined) {
+      if (!['member', 'lead', 'co_lead'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+      const cur = (await db.query('SELECT status FROM club_memberships WHERE id = $1', [mid])).rows[0];
+      if (role !== 'member' && cur.status !== 'approved') return res.status(400).json({ error: 'Only approved members can be lead or co-lead' });
+      if (role === 'lead') await db.query(`UPDATE club_memberships SET role = 'member' WHERE club_id = $1 AND role = 'lead' AND id <> $2`, [m.club_id, mid]);
+      if (role === 'co_lead') {
+        const n = await db.query(`SELECT COUNT(*)::int AS n FROM club_memberships WHERE club_id = $1 AND role = 'co_lead' AND id <> $2`, [m.club_id, mid]);
+        if (Number(n.rows[0].n) >= 2) return res.status(400).json({ error: 'A club can have at most 2 co-leads' });
+      }
+      await db.query('UPDATE club_memberships SET role = $1 WHERE id = $2', [role, mid]);
+    }
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /clubs/:id/sessions — members, runners and staff
+app.get('/clubs/:id/sessions', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureClubTables();
+    const id = Number(req.params.id);
+    if (req.auth!.role === 'student' && !(await clubRunner(req, id))) {
+      const m = await db.query(`SELECT 1 FROM club_memberships WHERE club_id = $1 AND UPPER(roll_number) = UPPER($2) AND status = 'approved'`, [id, req.auth!.regNo || '']);
+      if (!m.rows[0]) return res.status(403).json({ error: 'Only club members can see its sessions' });
+    }
+    const r = await db.query(
+      `SELECT s.*, (SELECT COUNT(*)::int FROM club_session_attendance a WHERE a.session_id = s.id) AS present_count,
+              COALESCE((SELECT array_agg(a.roll_number) FROM club_session_attendance a WHERE a.session_id = s.id), '{}') AS present
+       FROM club_sessions s WHERE s.club_id = $1 ORDER BY COALESCE(s.session_date, s.created_at::date) DESC, s.id DESC`, [id]);
+    res.json(r.rows);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /clubs/:id/sessions — admin / coordinator / lead posts a session or announcement
+app.post('/clubs/:id/sessions', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureClubTables();
+    const id = Number(req.params.id);
+    if (!(await clubRunner(req, id))) return res.status(403).json({ error: 'Only the club coordinator, lead, co-lead or admin can post' });
+    const b = req.body || {};
+    const kind = b.kind === 'announcement' ? 'announcement' : 'session';
+    const title = String(b.title || '').trim();
+    if (!title || title.length > 160) return res.status(400).json({ error: 'Enter a title (max 160 characters)' });
+    const date = b.session_date ? String(b.session_date).slice(0, 10) : null;
+    if (kind === 'session' && (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date))) return res.status(400).json({ error: 'A session needs a date' });
+    const t = (x: any) => (x && /^\d{2}:\d{2}$/.test(String(x)) ? String(x) : null);
+    let poster = req.auth!.email || req.auth!.regNo;
+    let posterName = req.auth!.role === 'admin' ? 'Admin' : poster;
+    if (req.auth!.role === 'student') {
+      const s = await db.query('SELECT name FROM students WHERE UPPER(roll_number) = UPPER($1)', [req.auth!.regNo]);
+      poster = req.auth!.regNo; posterName = s.rows[0]?.name || req.auth!.regNo;
+    } else if (req.auth!.role !== 'admin') {
+      const f = await db.query('SELECT name FROM faculty WHERE LOWER(email) = LOWER($1)', [req.auth!.email]);
+      posterName = f.rows[0]?.name || poster;
+    }
+    const r = await db.query(
+      `INSERT INTO club_sessions (club_id, kind, title, details, session_date, start_time, end_time, venue, posted_by, posted_by_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [id, kind, title, String(b.details || '').trim().slice(0, 3000) || null, date, t(b.start_time), t(b.end_time),
+        String(b.venue || '').trim().slice(0, 160) || null, poster, posterName]);
+    res.status(201).json(r.rows[0]);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /clubs/sessions/:sid
+app.delete('/clubs/sessions/:sid', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureClubTables();
+    const s = (await db.query('SELECT club_id FROM club_sessions WHERE id = $1', [Number(req.params.sid)])).rows[0];
+    if (!s) return res.status(404).json({ error: 'Not found' });
+    if (!(await clubRunner(req, s.club_id))) return res.status(403).json({ error: 'Not allowed' });
+    await db.query('DELETE FROM club_sessions WHERE id = $1', [Number(req.params.sid)]);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /clubs/sessions/:sid/attendance — { present: [roll numbers] } replaces the list
+app.put('/clubs/sessions/:sid/attendance', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await ensureClubTables();
+    const sid = Number(req.params.sid);
+    const s = (await db.query('SELECT club_id, kind, session_date FROM club_sessions WHERE id = $1', [sid])).rows[0];
+    if (!s) return res.status(404).json({ error: 'Session not found' });
+    if (s.kind !== 'session') return res.status(400).json({ error: 'Attendance is only for sessions' });
+    if (!(await clubRunner(req, s.club_id))) return res.status(403).json({ error: 'Not allowed' });
+    if (s.session_date && String(s.session_date instanceof Date ? s.session_date.toISOString() : s.session_date).slice(0, 10) > todayIST())
+      return res.status(400).json({ error: 'Attendance can be marked on or after the session date' });
+    const present = Array.isArray(req.body?.present) ? req.body.present.map((x: any) => String(x).toUpperCase()) : [];
+    const valid = await db.query(
+      `SELECT UPPER(roll_number) AS r FROM club_memberships WHERE club_id = $1 AND status = 'approved' AND UPPER(roll_number) = ANY($2::text[])`,
+      [s.club_id, present]);
+    const rolls = valid.rows.map((x: any) => x.r);
+    await db.transaction(async (client: any) => {
+      await client.query('DELETE FROM club_session_attendance WHERE session_id = $1', [sid]);
+      if (rolls.length) {
+        await client.query(
+          `INSERT INTO club_session_attendance (session_id, roll_number, marked_by) SELECT $1, UNNEST($2::text[]), $3`,
+          [sid, rolls, req.auth!.email || req.auth!.regNo]);
+      }
+    });
+    res.json({ success: true, present: rolls.length });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /clubs/my — the student's clubs, role, and the update feed from approved clubs
+app.get('/clubs/my', requireRole('student'), async (req: Request, res: Response) => {
+  try {
+    await ensureClubTables();
+    await refreshClubSeats(db).catch(() => undefined);
+    const roll = req.auth!.regNo || '';
+    const m = await db.query(
+      `SELECT m.id, m.club_id, m.status, m.role, m.payment_ref, m.remarks, m.applied_at, c.name, c.category, c.fee,
+              c.coordinator_name, c.reg_close,
+              (SELECT COUNT(*)::int FROM club_sessions s WHERE s.club_id = c.id AND s.kind = 'session' AND s.session_date <= CURRENT_DATE) AS sessions_held,
+              (SELECT COUNT(*)::int FROM club_session_attendance a JOIN club_sessions s ON s.id = a.session_id
+                WHERE s.club_id = c.id AND UPPER(a.roll_number) = UPPER(m.roll_number)) AS sessions_attended,
+              (SELECT COUNT(*)::int + 1 FROM club_memberships w WHERE w.club_id = m.club_id AND w.status = 'waitlisted'
+                AND (w.applied_at, w.id) < (m.applied_at, m.id)) AS waitlist_position
+       FROM club_memberships m JOIN clubs c ON c.id = m.club_id
+       WHERE UPPER(m.roll_number) = UPPER($1) AND m.status <> 'withdrawn'
+       ORDER BY CASE m.status WHEN 'approved' THEN 0 WHEN 'payment_submitted' THEN 1 WHEN 'pending_payment' THEN 2 WHEN 'waitlisted' THEN 3 ELSE 4 END, m.applied_at DESC`,
+      [roll]);
+    const approvedIds = m.rows.filter((x: any) => x.status === 'approved').map((x: any) => x.club_id);
+    const feed = approvedIds.length ? await db.query(
+      `SELECT s.*, c.name AS club_name,
+              EXISTS (SELECT 1 FROM club_session_attendance a WHERE a.session_id = s.id AND UPPER(a.roll_number) = UPPER($2)) AS attended
+       FROM club_sessions s JOIN clubs c ON c.id = s.club_id WHERE s.club_id = ANY($1::int[])
+       ORDER BY (s.session_date >= CURRENT_DATE) DESC NULLS LAST,
+                CASE WHEN s.session_date >= CURRENT_DATE THEN s.session_date END ASC,
+                COALESCE(s.session_date, s.created_at::date) DESC, s.id DESC LIMIT 60`, [approvedIds, roll]) : { rows: [] };
+    const deadlineMs = CLUB_PAYMENT_HOURS * 3600 * 1000;
+    res.json({
+      memberships: m.rows.map((x: any) => ({
+        ...x, waitlist_position: x.status === 'waitlisted' ? x.waitlist_position : null,
+        pay_by: x.status === 'pending_payment' ? new Date(new Date(x.applied_at).getTime() + deadlineMs).toISOString() : null,
+      })),
+      updates: feed.rows,
+    });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /clubs/students?department= — club participation for staff:
+// faculty → own mentees, HOD → own department, admin / oversight → everyone (optional department filter)
+app.get('/clubs/students', requireRole(...CLUB_OVERSIGHT), async (req: Request, res: Response) => {
+  try {
+    await ensureClubTables();
+    const a = req.auth!;
+    const params: any[] = [];
+    const where: string[] = [`m.status IN ('approved','payment_submitted','pending_payment','waitlisted')`];
+    if (a.role === 'faculty' || a.role === 'coordinator') {
+      const f = await db.query('SELECT faculty_id FROM faculty WHERE LOWER(email) = LOWER($1) LIMIT 1', [a.email]);
+      const fid = f.rows[0]?.faculty_id;
+      if (!fid) return res.json({ scope: 'My mentees', rows: [], summary: [] });
+      params.push(fid);
+      where.push(`(UPPER(s.faculty_mentor_id) = UPPER($${params.length})
+        OR EXISTS (SELECT 1 FROM mentor_assignments ma WHERE UPPER(ma.roll_number) = UPPER(s.roll_number) AND UPPER(ma.faculty_id) = UPPER($${params.length})))`);
+    } else {
+      let dept = a.role === 'hod' ? a.department : (req.query.department ? String(req.query.department) : '');
+      if (a.role === 'program_chair' && !dept) {
+        params.push(CSE_ALLIED_DEPTS); where.push(`s.department = ANY($${params.length}::text[])`);
+      }
+      if (a.role === 'admin' && !a.isSuperAdmin && a.department && a.department !== '*' && a.department !== 'All') dept = a.department;
+      if (dept && dept !== 'All' && dept !== '*') {
+        params.push(normDept(dept)); where.push(`LOWER(REGEXP_REPLACE(s.department, '[^a-zA-Z0-9]', '', 'g')) = $${params.length}`);
+      }
+    }
+    const r = await db.query(
+      `SELECT s.roll_number, s.name, s.department, s.year, s.section,
+              c.id AS club_id, c.name AS club_name, c.category, m.status, m.role,
+              (SELECT COUNT(*)::int FROM club_sessions cs WHERE cs.club_id = c.id AND cs.kind = 'session' AND cs.session_date <= CURRENT_DATE) AS sessions_held,
+              (SELECT COUNT(*)::int FROM club_session_attendance at JOIN club_sessions cs ON cs.id = at.session_id
+                WHERE cs.club_id = c.id AND UPPER(at.roll_number) = UPPER(s.roll_number)) AS sessions_attended
+       FROM club_memberships m JOIN clubs c ON c.id = m.club_id
+       JOIN students s ON UPPER(s.roll_number) = UPPER(m.roll_number)
+       WHERE ${where.join(' AND ')}
+       ORDER BY s.department, s.year, s.section, s.roll_number, c.name
+       LIMIT 5000`, params);
+    const scope = a.role === 'faculty' || a.role === 'coordinator' ? 'My mentees' : a.role === 'hod' ? a.department : (req.query.department || 'All departments');
+    res.json({ scope, rows: r.rows });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+/** Club data for the employability score: approved memberships with role + sessions attended. */
+async function clubScoreData(roll: string): Promise<{ role: string; sessions_attended: number }[]> {
+  try {
+    await ensureClubTables();
+    const r = await db.query(
+      `SELECT m.role, (SELECT COUNT(*)::int FROM club_session_attendance a JOIN club_sessions s ON s.id = a.session_id
+                        WHERE s.club_id = m.club_id AND UPPER(a.roll_number) = UPPER(m.roll_number)) AS sessions_attended
+       FROM club_memberships m WHERE UPPER(m.roll_number) = UPPER($1) AND m.status = 'approved'`, [roll]);
+    return r.rows;
+  } catch { return []; }
+}
 
 let examTablesReady: Promise<void> | null = null;
 function ensureExamTables(): Promise<void> {

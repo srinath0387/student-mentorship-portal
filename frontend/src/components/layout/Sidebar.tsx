@@ -39,6 +39,7 @@ import {
   Home,
   LucideIcon,
   Settings,
+  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -77,6 +78,7 @@ const studentNav: NavGroup[] = [
       { label: 'Program Leaderboard', path: '/coding-analytics', icon: BarChart2 },
       { label: 'Faculty Feedback', path: '/feedback', icon: Star },
       { label: 'Placement Drives', path: '/placement/drives', icon: Award },
+      { label: 'Clubs', path: '/clubs', icon: Sparkles },
       { label: 'My Exam Seats', path: '/exams', icon: ClipboardList },
     ],
   },
@@ -101,6 +103,7 @@ const facultyNav: NavGroup[] = [
     icon: LayoutDashboard,
     items: [
       { label: 'Assigned Mentees', path: '/faculty/dashboard?tab=mentees', icon: Users },
+      { label: 'Mentee Clubs', path: '/clubs/students', icon: Sparkles },
       { label: 'At-Risk Mentees', path: '/risk', icon: ShieldCheck },
       { label: 'Placement Eligibility', path: '/faculty/dashboard?tab=placement', icon: Award },
       { label: 'Placement Drives', path: '/placement/drives', icon: Award },
@@ -195,6 +198,8 @@ const adminNav: NavGroup[] = [
       { label: 'Certifications', path: '/admin/dashboard?tab=certifications', icon: CheckCircle2 },
       { label: 'Coding Leaderboard', path: '/coding-analytics', icon: BarChart2 },
       { label: 'Documents', path: '/documents', icon: FolderOpen },
+      { label: 'Clubs', path: '/clubs/manage', icon: Sparkles },
+      { label: 'Student Clubs', path: '/clubs/students', icon: Users },
     ],
   },
   {
@@ -295,6 +300,7 @@ const hodNav: NavGroup[] = [
       { label: 'Academic Analytics', path: '/hod/dashboard?tab=analytics', icon: FileBarChart },
       { label: 'My Mentees', path: '/hod/dashboard?tab=mentees', icon: UserCheck },
       { label: 'Placement Tracker', path: '/hod/dashboard?tab=placement-tracker', icon: Award },
+      { label: 'Student Clubs', path: '/clubs/students', icon: Sparkles },
       { label: 'Coding Leaderboard', path: '/coding-analytics', icon: BarChart2 },
       { label: 'Documents', path: '/documents', icon: FolderOpen },
     ],
@@ -309,6 +315,7 @@ const coordinatorNav: NavGroup[] = [
       { label: 'Onboarding', path: '/coordinator/dashboard?tab=onboarding', icon: LayoutDashboard },
       { label: 'Fresher Directory', path: '/coordinator/dashboard?tab=freshers', icon: Users },
       { label: 'At-Risk Freshers', path: '/risk', icon: ShieldCheck },
+      { label: 'Student Clubs', path: '/clubs/students', icon: Sparkles },
       { label: 'Subject Allocation', path: '/coordinator/dashboard?tab=subjects', icon: FileText },
       { label: 'Class Incharges', path: '/coordinator/dashboard?tab=incharge', icon: Award },
       { label: 'Year Promotion', path: '/coordinator/dashboard?tab=promotion', icon: CheckCircle2 },
@@ -375,6 +382,7 @@ const oversightNav: NavGroup[] = [
       { label: 'Research', path: '/oversight/dashboard?tab=research', icon: FileBarChart },
       { label: 'Placements', path: '/oversight/dashboard?tab=placements', icon: Award },
       { label: 'Placement Drives', path: '/placement/drives', icon: Award },
+      { label: 'Student Clubs', path: '/clubs/students', icon: Sparkles },
     ],
   },
   {

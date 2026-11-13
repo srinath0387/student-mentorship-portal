@@ -627,3 +627,111 @@ describe('Subject allotment removal', () => {
     expect(calls.find(c => c.sql.includes('FROM timetable_entries t'))!.sql).toContain('NOT EXISTS');
   });
 });
+
+describe('Clubs — registration, seats, payment, roles, score', () => {
+  const STUDENT = () => bearer('student', '24091a3201@rgmcet.edu.in', '24091A3201');
+  const student = { roll_number: '24091A3201', name: 'Asha', department: 'CSE (Data Science)', year: '2nd Year', section: 'A' };
+  const hourAgo = new Date(Date.now() - 3600000).toISOString();
+  const inAWeek = new Date(Date.now() + 7 * 86400000).toISOString();
+  const club = (over: any = {}) => ({ id: 7, name: 'Coding Club', status: 'active', max_seats: 100, fee: '200', reg_open: hourAgo, reg_close: inAWeek,
+    allowed_departments: [], allowed_years: [], ...over });
+  const registerDb = (c: any, opts: { taken?: number; mine?: number; existing?: any } = {}) => routeDb([
+    ['SELECT roll_number, name, department, year, section FROM students', [student]],
+    ['FROM clubs WHERE id = $1 FOR UPDATE', [c]],
+    ['SELECT status FROM club_memberships WHERE club_id', opts.existing ? [opts.existing] : []],
+    ['COUNT(*)::int AS n FROM club_memberships WHERE UPPER(roll_number)', [{ n: opts.mine ?? 0 }]],
+    ['COUNT(*)::int AS n FROM club_memberships WHERE club_id = $1 AND status = ANY', [{ n: opts.taken ?? 10 }]],
+    ['INSERT INTO club_memberships', (_s, p) => [{ id: 1, status: p[6] }]],
+  ]);
+
+  it('holds a seat pending payment for a paid club with seats left', async () => {
+    const calls = registerDb(club());
+    const res = await request(app).post('/clubs/7/register').set('Authorization', STUDENT());
+    expect(res.status).toBe(201);
+    expect(res.body.status).toBe('pending_payment');
+    const ins = calls.find(c => c.sql.includes('INSERT INTO club_memberships'))!;
+    expect(ins.params.slice(0, 3)).toEqual([7, '24091A3201', 'Asha']);
+  });
+
+  it('approves straight away when the club is free', async () => {
+    registerDb(club({ fee: '0' }));
+    const res = await request(app).post('/clubs/7/register').set('Authorization', STUDENT());
+    expect(res.body.status).toBe('approved');
+  });
+
+  it('waitlists when all seats are taken', async () => {
+    registerDb(club({ max_seats: 100 }), { taken: 100 });
+    const res = await request(app).post('/clubs/7/register').set('Authorization', STUDENT());
+    expect(res.status).toBe(201);
+    expect(res.body.status).toBe('waitlisted');
+  });
+
+  it('enforces the registration window, eligibility, duplicates and the 3-club limit', async () => {
+    registerDb(club({ reg_close: hourAgo, reg_open: new Date(Date.now() - 7200000).toISOString() }));
+    expect((await request(app).post('/clubs/7/register').set('Authorization', STUDENT())).status).toBe(400);
+    registerDb(club({ reg_open: inAWeek, reg_close: new Date(Date.now() + 9 * 86400000).toISOString() }));
+    expect((await request(app).post('/clubs/7/register').set('Authorization', STUDENT())).body.error).toMatch(/not opened/);
+    registerDb(club({ allowed_departments: ['ECE'] }));
+    expect((await request(app).post('/clubs/7/register').set('Authorization', STUDENT())).status).toBe(403);
+    registerDb(club({ allowed_years: ['1st Year'] }));
+    expect((await request(app).post('/clubs/7/register').set('Authorization', STUDENT())).status).toBe(403);
+    registerDb(club(), { existing: { status: 'approved' } });
+    expect((await request(app).post('/clubs/7/register').set('Authorization', STUDENT())).status).toBe(409);
+    registerDb(club(), { mine: 3 });
+    expect((await request(app).post('/clubs/7/register').set('Authorization', STUDENT())).body.error).toMatch(/at most 3/);
+  });
+
+  it('validates the UTR and rejects one already used', async () => {
+    routeDb([]);
+    expect((await request(app).post('/clubs/7/payment').set('Authorization', STUDENT()).send({ payment_ref: '12' })).status).toBe(400);
+    routeDb([['UPDATE club_memberships SET status = \'payment_submitted\'', () => { throw Object.assign(new Error('dup'), { code: '23505' }); }]]);
+    const dup = await request(app).post('/clubs/7/payment').set('Authorization', STUDENT()).send({ payment_ref: '412345678901' });
+    expect(dup.status).toBe(409);
+    routeDb([['UPDATE club_memberships SET status = \'payment_submitted\'', [{ id: 1, status: 'payment_submitted' }]]]);
+    const ok = await request(app).post('/clubs/7/payment').set('Authorization', STUDENT()).send({ payment_ref: 'utr 4123 4567 8901'.replace(/\s/g, '') });
+    expect(ok.status).toBe(200);
+  });
+
+  it('only admins create clubs, and dates / seats are validated', async () => {
+    routeDb([]);
+    const base = { name: 'Robotics Club', max_seats: 100, reg_open: hourAgo, reg_close: inAWeek, fee: 0 };
+    expect((await request(app).post('/clubs').set('Authorization', bearer('faculty', 'f@rgmcet.edu.in')).send(base)).status).toBe(403);
+    expect((await request(app).post('/clubs').set('Authorization', ADMIN()).send({ ...base, reg_close: hourAgo, reg_open: inAWeek })).status).toBe(400);
+    expect((await request(app).post('/clubs').set('Authorization', ADMIN()).send({ ...base, fee: 100 })).body.error).toMatch(/QR or a UPI ID/);
+    const calls = routeDb([['INSERT INTO clubs', [{ id: 3 }]]]);
+    const ok = await request(app).post('/clubs').set('Authorization', ADMIN()).send(base);
+    expect(ok.status).toBe(201);
+    expect(calls.find(c => c.sql.includes('INSERT INTO clubs'))!.params[4]).toBe(100);
+  });
+
+  it('lead / co-lead only for approved members', async () => {
+    routeDb([
+      ['SELECT * FROM club_memberships WHERE id = $1', [{ id: 5, club_id: 7, status: 'pending_payment' }]],
+      ['SELECT status FROM club_memberships WHERE id = $1', [{ status: 'pending_payment' }]],
+    ]);
+    const res = await request(app).patch('/clubs/memberships/5').set('Authorization', ADMIN()).send({ role: 'lead' });
+    expect(res.status).toBe(400);
+  });
+
+  it('mentor sees only their mentees, HOD only their department', async () => {
+    let calls = routeDb([['SELECT faculty_id FROM faculty', [{ faculty_id: 'FAC9' }]]]);
+    const r = await request(app).get('/clubs/students').set('Authorization', bearer('faculty', 'ramesh@rgmcet.edu.in'));
+    expect(r.status).toBe(200);
+    let q = calls.find(c => c.sql.includes('FROM club_memberships m JOIN clubs c'))!;
+    expect(q.sql).toContain('mentor_assignments');
+    expect(q.params).toEqual(['FAC9']);
+    expect((await request(app).get('/clubs/students').set('Authorization', STUDENT())).status).toBe(403);
+  });
+
+  it('club membership, lead role and sessions raise the employability score (capped bonus)', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { calculateRPGScore } = require('../../src/services/employability');
+    const none = calculateRPGScore({});
+    const lead = calculateRPGScore({ clubs: [{ role: 'lead', sessions_attended: 8 }, { role: 'member', sessions_attended: 3 }] });
+    expect(none.clubsScore).toBe(0);
+    expect(lead.clubsScore).toBe(20 + 40 + 22);
+    expect(lead.overallScore - none.overallScore).toBe(82);
+    const huge = calculateRPGScore({ clubs: [{ role: 'lead', sessions_attended: 50 }, { role: 'co_lead', sessions_attended: 50 }] });
+    expect(huge.clubsScore).toBe(90);
+  });
+});

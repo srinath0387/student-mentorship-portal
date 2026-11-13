@@ -1064,6 +1064,27 @@ export const api = {
   setDutyStatus: async (id: number, status: 'Relieved' | 'Cancelled' | 'Active', relieved_on?: string) =>
     fetchWithAuth(`/duties/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status, relieved_on }) }),
 
+  // ── Clubs ──
+  getClubs: async (archived = false): Promise<any[]> => fetchWithAuth(`/clubs${archived ? '?archived=1' : ''}`),
+  getClubMeta: async (): Promise<{ categories: string[]; max_clubs_per_student: number; payment_hours: number }> => fetchWithAuth('/clubs/meta'),
+  getClubPayment: async (id: number): Promise<{ payment_qr: string | null; upi_id: string | null; fee: number; name: string }> => fetchWithAuth(`/clubs/${id}/payment`),
+  createClub: async (body: any) => fetchWithAuth('/clubs', { method: 'POST', body: JSON.stringify(body) }),
+  updateClub: async (id: number, body: any) => fetchWithAuth(`/clubs/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  setClubStatus: async (id: number, status: 'active' | 'archived') => fetchWithAuth(`/clubs/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+  registerClub: async (id: number) => fetchWithAuth(`/clubs/${id}/register`, { method: 'POST' }),
+  withdrawClub: async (id: number) => fetchWithAuth(`/clubs/${id}/register`, { method: 'DELETE' }),
+  submitClubPayment: async (id: number, payment_ref: string) => fetchWithAuth(`/clubs/${id}/payment`, { method: 'POST', body: JSON.stringify({ payment_ref }) }),
+  getMyClubs: async (): Promise<{ memberships: any[]; updates: any[] }> => fetchWithAuth('/clubs/my'),
+  getClubMembers: async (id: number): Promise<any[]> => fetchWithAuth(`/clubs/${id}/members`),
+  updateClubMembership: async (mid: number, body: { status?: 'approved' | 'rejected'; role?: 'member' | 'lead' | 'co_lead'; remarks?: string }) =>
+    fetchWithAuth(`/clubs/memberships/${mid}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  getClubSessions: async (id: number): Promise<any[]> => fetchWithAuth(`/clubs/${id}/sessions`),
+  postClubSession: async (id: number, body: any) => fetchWithAuth(`/clubs/${id}/sessions`, { method: 'POST', body: JSON.stringify(body) }),
+  deleteClubSession: async (sid: number) => fetchWithAuth(`/clubs/sessions/${sid}`, { method: 'DELETE' }),
+  markClubAttendance: async (sid: number, present: string[]) => fetchWithAuth(`/clubs/sessions/${sid}/attendance`, { method: 'PUT', body: JSON.stringify({ present }) }),
+  getClubStudents: async (department?: string): Promise<{ scope: string; rows: any[] }> =>
+    fetchWithAuth(`/clubs/students${department && department !== 'All' ? `?department=${encodeURIComponent(department)}` : ''}`),
+
   // ── Alumni ──
   getAlumni: async (p: { department?: string; batch?: string; status?: string; search?: string }) => {
     const q = new URLSearchParams(); Object.entries(p).forEach(([k, v]) => { if (v && v !== 'All') q.set(k, v); });

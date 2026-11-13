@@ -63,6 +63,9 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
     if (p.startsWith('/my-duties')) return { parent: 'Leave & Duties', child: 'My Duties' };
     if (p.startsWith('/faculty/api')) return { parent: 'Faculty', child: 'API Score' };
     if (p.startsWith('/coding-analytics')) return { parent: 'Overview', child: 'Coding Leaderboard' };
+    if (p.startsWith('/clubs/manage')) return { parent: 'Clubs', child: 'Manage Clubs' };
+    if (p.startsWith('/clubs/students')) return { parent: 'Clubs', child: user?.role === 'faculty' ? 'Mentee Clubs' : 'Student Clubs' };
+    if (p.startsWith('/clubs')) return { parent: 'Clubs', child: '' };
     if (p.startsWith('/documents')) return { parent: 'Documents', child: '' };
     if (p.startsWith('/mentor')) return { parent: 'My Profile', child: 'My Mentor' };
     if (p.startsWith('/profile')) return { parent: 'My Profile', child: tab };

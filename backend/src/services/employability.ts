@@ -26,6 +26,8 @@ export interface EmployabilityData {
     suggested?: boolean;
   }[];
   attendance?: { attendance_pct?: number | string; total_held?: number; total_present?: number };
+  /** Approved club memberships: role + club sessions attended */
+  clubs?: { role?: string; sessions_attended?: number | string }[];
 }
 
 export interface RPGLevel {
@@ -66,6 +68,7 @@ export interface ScoreBreakdown {
   githubScore: number;      // Max 200 XP
   academicsScore: number;   // Max 250 XP
   certsScore: number;       // Max 200 XP
+  clubsScore: number;       // Bonus, max 100 XP (total still capped at 1000)
 
   // Detailed sub-breakdown
   codingBreakdown: {
@@ -104,6 +107,15 @@ export interface ScoreBreakdown {
     trendPoints: number;
     attendancePct: number;
     attendancePoints: number;
+  };
+
+  clubsBreakdown: {
+    clubCount: number;
+    membershipPoints: number;
+    role: 'lead' | 'co_lead' | 'member' | null;
+    rolePoints: number;
+    sessionsAttended: number;
+    sessionPoints: number;
   };
 
   certsBreakdown: {
@@ -363,9 +375,25 @@ export function calculateRPGScore(data: EmployabilityData): ScoreBreakdown {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
+  // 5. CLUBS & LEADERSHIP (bonus, max 100 XP)
+  //    10 XP per club (up to 2), lead +40 / co-lead +25 (best role), 2 XP per session attended (up to 30)
+  // ──────────────────────────────────────────────────────────────────────────
+  const clubs = data.clubs || [];
+  const clubCount = clubs.length;
+  const membershipPoints = Math.min(2, clubCount) * 10;
+  const clubRole: 'lead' | 'co_lead' | 'member' | null = clubs.some(c => c.role === 'lead') ? 'lead'
+    : clubs.some(c => c.role === 'co_lead') ? 'co_lead' : clubCount ? 'member' : null;
+  const rolePoints = clubRole === 'lead' ? 40 : clubRole === 'co_lead' ? 25 : 0;
+  const sessionsAttended = clubs.reduce((n, c) => n + Number(c.sessions_attended || 0), 0);
+  const sessionPoints = Math.min(30, sessionsAttended * 2);
+  const clubsScore = Math.min(100, membershipPoints + rolePoints + sessionPoints);
+  if (clubCount === 0) quests.push('Join a college club (+10 XP, more for attending sessions)');
+  else if (!rolePoints) quests.push('Take up a lead / co-lead role in your club (+25–40 XP)');
+
+  // ──────────────────────────────────────────────────────────────────────────
   // TOTAL XP & LEVEL CALCULATION
   // ──────────────────────────────────────────────────────────────────────────
-  const overallScore = Math.min(1000, Math.round((codingScore + githubScore + academicsScore + certsScore) * 10) / 10);
+  const overallScore = Math.min(1000, Math.round((codingScore + githubScore + academicsScore + certsScore + clubsScore) * 10) / 10);
 
   // Find level
   const currentLevel = RPG_LEVELS.find(lvl => overallScore >= lvl.minXp && overallScore <= lvl.maxXp) || RPG_LEVELS[RPG_LEVELS.length - 1];
@@ -401,6 +429,7 @@ export function calculateRPGScore(data: EmployabilityData): ScoreBreakdown {
     githubScore,
     academicsScore,
     certsScore,
+    clubsScore,
 
     codingBreakdown: {
       easyCount,
@@ -439,6 +468,8 @@ export function calculateRPGScore(data: EmployabilityData): ScoreBreakdown {
       attendancePct: Math.round(attPct * 10) / 10,
       attendancePoints,
     },
+
+    clubsBreakdown: { clubCount, membershipPoints, role: clubRole, rolePoints, sessionsAttended, sessionPoints },
 
     certsBreakdown: {
       totalCerts: platinumCount + goldCount + silverCount + bronzeCount,

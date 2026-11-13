@@ -34,6 +34,9 @@ const DocumentsManagementPage = lazy(() => import('./features/documents/Document
 const ExamPlannerPage = lazy(() => import('./features/exams/ExamPlannerPage'));
 const DutiesPage = lazy(() => import('./features/duties/DutiesPage'));
 const MyOfficeOrdersPage = lazy(() => import('./features/duties/MyOfficeOrdersPage'));
+const ClubsPage = lazy(() => import('./features/clubs/ClubsPage'));
+const ClubManagePage = lazy(() => import('./features/clubs/ClubManagePage'));
+const ClubStudentsPage = lazy(() => import('./features/clubs/ClubStudentsPage'));
 const AlumniPage = lazy(() => import('./features/alumni/AlumniPage'));
 const AlumniSelfUpdatePage = lazy(() => import('./features/alumni/AlumniSelfUpdatePage'));
 const ObePage = lazy(() => import('./features/obe/ObePage'));
@@ -379,6 +382,15 @@ export const App: React.FC = () => {
               </Route>
               <Route element={<ProtectedRoute allowedRoles={['faculty', 'hod', 'coordinator', 'admin', 'principal', 'director']} />}>
                 <Route path="/office-orders" element={<MyOfficeOrdersPage />} />
+              </Route>
+              <Route element={<ProtectedRoute allowedRoles={['student']} />}>
+                <Route path="/clubs" element={<ClubsPage />} />
+              </Route>
+              <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
+                <Route path="/clubs/manage" element={<ClubManagePage />} />
+              </Route>
+              <Route element={<ProtectedRoute allowedRoles={['admin', 'hod', 'faculty', 'coordinator', 'principal', 'director', 'management', 'program_chair']} />}>
+                <Route path="/clubs/students" element={<ClubStudentsPage />} />
               </Route>
 
               {/* Oversight (View-Only) routes */}
