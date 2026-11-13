@@ -20,7 +20,8 @@ import {
   AlertCircle,
   Loader2,
   UserPlus,
-  X
+  X,
+  ArrowLeft
 } from 'lucide-react';
 import { useLandingTheme } from '../../lib/pageTheme';
 import { Footer } from '../../components/layout/Footer';
@@ -29,6 +30,8 @@ import { useAuth } from '../../context/AuthContext';
 import { api } from '../../lib/api';
 import { cognitoSignIn, cognitoForgotPassword, cognitoConfirmPassword } from '../../lib/cognitoAuth';
 import { VALID_DEPARTMENT_NAMES, getDeptFromRollNumber, RGMCET_EMAIL_REGEX, isStudentEmail } from '../../lib/validation/auth';
+import { RoleCarousel, IdCardHeader } from './RoleCarousel';
+import { RegisterPanel } from './RegisterPanel';
 
 interface RoleOption {
   id: UserRole;
@@ -140,16 +143,19 @@ export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
   const { login, registerSession } = useAuth();
 
-  // Dropdown state
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [roleSearch, setRoleSearch] = useState('');
+  // Role carousel state — the centred ID card is the selected role; 'flipped' shows its login form
+  const [roleIndex, setRoleIndex] = useState(0);
   const [selectedRole, setSelectedRole] = useState<RoleOption | null>(ALL_ROLES[0]); // Default to Student
+  const [flipped, setFlipped] = useState(false);
+  const [registerMode, setRegisterMode] = useState(false);
+  // Faculty department is read from the faculty record; asked only when no record exists yet
+  const [needDept, setNeedDept] = useState(false);
 
   // Form Fields State
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [selectedDept, setSelectedDept] = useState('CSE (Data Science)');
+  const [selectedDept, setSelectedDept] = useState('');
   const [studentYearMode, setStudentYearMode] = useState<'regular' | 'fresher'>('regular');
   const [fresherDob, setFresherDob] = useState('');
 
@@ -171,50 +177,19 @@ export const LandingPage: React.FC = () => {
   // "not in directory" soft-state — email exists in DB but not in faculty directory
   const [forgotNotInDirectory, setForgotNotInDirectory] = useState(false);
 
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
-
-  // Close dropdown on outside click
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  // Filter roles based on search
-  const filteredRoles = useMemo(() => {
-    if (!roleSearch.trim()) return ALL_ROLES;
-    const q = roleSearch.toLowerCase();
-    return ALL_ROLES.filter(r => 
-      r.title.toLowerCase().includes(q) || 
-      r.description.toLowerCase().includes(q) ||
-      r.id.toLowerCase().includes(q)
-    );
-  }, [roleSearch]);
-
-  const staffStudentRoles = useMemo(() => 
-    filteredRoles.filter(r => r.category === 'staff_student'), 
-  [filteredRoles]);
-
-  const oversightRoles = useMemo(() => 
-    filteredRoles.filter(r => r.category === 'oversight'), 
-  [filteredRoles]);
-
-  // Handle role selection
-  const handleSelectRole = (role: RoleOption) => {
-    setSelectedRole(role);
-    setIsDropdownOpen(false);
-    setRoleSearch('');
+  // Handle role selection (carousel)
+  const handleSelectIndex = (i: number) => {
+    setRoleIndex(i);
+    setSelectedRole(ALL_ROLES[i]);
     setErrorMessage(null);
-
+    setNeedDept(false);
+    setSelectedDept('');
     // Always start blank — don't pre-fill credentials
     setIdentifier('');
     setPassword('');
   };
+  const openCard = () => { setRegisterMode(false); setFlipped(true); };
+  const closeCard = () => { setFlipped(false); setRegisterMode(false); setErrorMessage(null); setNeedDept(false); };
 
   // ── Forgot Password Handlers ──
   const openForgotModal = () => {
@@ -358,7 +333,7 @@ export const LandingPage: React.FC = () => {
 
           // Guard: Reject faculty/staff emails attempting student login
           if (!isStudentEmail(emailInput)) {
-            throw new Error('This appears to be a faculty or staff email. Please select your official role (Faculty, HOD, Admin) to log in.');
+            throw new Error('This appears to be a faculty or staff email. Please choose your staff card (Faculty, HOD, Admin) to log in.');
           }
 
           let jwtIdToken: string | undefined = undefined;
@@ -430,7 +405,7 @@ export const LandingPage: React.FC = () => {
 
         // Prevent students from logging in as faculty
         if (isStudentEmail(trimmedId)) {
-          throw new Error('This is a student email. Please select the "Student" role from the dropdown to log in.');
+          throw new Error('This is a student email. Please choose the Student card to log in.');
         }
 
         const emailLower = trimmedId.toLowerCase();
@@ -464,7 +439,7 @@ export const LandingPage: React.FC = () => {
           let studentCheck: any = null;
           try { studentCheck = await api.getStudentByEmail(emailLower); } catch { /* silent */ }
           if (studentCheck) {
-            throw new Error('This account belongs to a student. Please select the "Student" role to log in.');
+            throw new Error('This account belongs to a student. Please choose the Student card to log in.');
           }
 
           let faculty: any = null;
@@ -472,11 +447,15 @@ export const LandingPage: React.FC = () => {
 
           // Auto-resolve or create profile if not present in faculty DB table yet (never block a valid Cognito faculty)
           if (!faculty) {
+            if (!selectedDept) {
+              setNeedDept(true);
+              throw new Error('First login on this portal — choose your department below, then press Login again.');
+            }
             const facId = `FAC_${emailLower.split('@')[0].toUpperCase()}`;
             const facName = emailLower.split('@')[0]
               .replace(/[._]/g, ' ')
               .replace(/\b\w/g, (c: string) => c.toUpperCase());
-            const facDeptNew = selectedDept || 'CSE (Data Science)';
+            const facDeptNew = selectedDept;
             try {
               await api.createFaculty({
                 faculty_id: facId,
@@ -491,7 +470,7 @@ export const LandingPage: React.FC = () => {
             }
           }
 
-          const facDept = faculty?.department || selectedDept || 'CSE (Data Science)';
+          const facDept = faculty?.department || selectedDept;
           const facName = faculty?.name || emailLower.split('@')[0];
           login(emailLower, 'faculty', faculty?.faculty_id, facName, tokens?.idToken, facDept);
           await registerSession(emailLower, 'faculty');
@@ -515,14 +494,14 @@ export const LandingPage: React.FC = () => {
 
       // Prevent students from logging in as staff/faculty
       if (isStudentEmail(trimmedId)) {
-        throw new Error('This is a student email. Please select the "Student" role from the dropdown to log in.');
+        throw new Error('This is a student email. Please choose the Student card to log in.');
       }
 
-      const adminRes = await api.adminLogin(trimmedId, trimmedPass, selectedDept);
+      const adminRes = await api.adminLogin(trimmedId, trimmedPass, undefined);
       if (adminRes.valid) {
         const assignedRole = (adminRes.role as UserRole) || selectedRole.id;
         const isSuperAdmin = Boolean(adminRes.isSuperAdmin);
-        const assignedDept = adminRes.department || selectedDept;
+        const assignedDept = adminRes.department || '';
 
         // Role authorization check: ensure the account has permissions for the selected role
         if (selectedRole.id === 'hod' && assignedRole !== 'hod' && !isSuperAdmin) {
@@ -591,148 +570,20 @@ export const LandingPage: React.FC = () => {
       </div>
 
       {/* ── Main Unified Login Container ── */}
-      <main className="z-10 relative flex-1 max-w-xl w-full mx-auto px-4 py-2 sm:py-3 flex flex-col justify-center items-center my-auto min-h-0">
-        <div className="w-full neu-raised rounded-[28px] p-6 sm:p-8 relative">
-          {/* ── Searchable / Typeahead Role Selector Dropdown ── */}
-          <div className="relative mb-4 sm:mb-5" ref={dropdownRef}>
-            <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500 mb-1.5">
-              Select Your Role to Login
-            </label>
-
-            <button
-              type="button"
-              onClick={() => {
-                setIsDropdownOpen(!isDropdownOpen);
-                setTimeout(() => searchInputRef.current?.focus(), 50);
-              }}
-              className="w-full flex items-center justify-between p-3.5 sm:p-4 rounded-2xl neu-raised-sm text-left group focus:outline-none focus:ring-2 focus:ring-brand-primary/30"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                {selectedRole ? (
-                  <>
-                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${selectedRole.accentColor}`}>
-                      <selectedRole.icon className="w-5 h-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-extrabold text-slate-900 truncate">{selectedRole.title}</span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 truncate">{selectedRole.description}</p>
-                    </div>
-                  </>
-                ) : (
-                  <span className="text-sm text-slate-400 font-semibold">Choose your role...</span>
-                )}
-              </div>
-              <ChevronDown className={`w-5 h-5 text-slate-400 shrink-0 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180 text-brand-primary' : ''}`} />
-            </button>
-
-            {/* Dropdown Menu Modal */}
-            {isDropdownOpen && (
-              <div className="absolute top-full inset-x-0 mt-1.5 neu-panel rounded-2xl z-[100] flex flex-col animate-in fade-in zoom-in-95 duration-150" style={{maxHeight: 'min(300px, 48vh)'}}>
-                {/* Typeahead Search Input */}
-                <div className="p-2.5 border-b border-slate-300/50 shrink-0 z-10 flex items-center gap-2 rounded-t-2xl">
-                  <Search className="w-3.5 h-3.5 text-brand-primary shrink-0 ml-1" />
-                  <input
-                    ref={searchInputRef}
-                    type="text"
-                    value={roleSearch}
-                    onChange={(e) => setRoleSearch(e.target.value)}
-                    placeholder="Search roles (e.g. Student, Faculty, HOD)..."
-                    className="w-full bg-transparent text-xs text-slate-800 placeholder-slate-400 focus:outline-none font-medium"
-                  />
-                  {roleSearch && (
-                    <button type="button" onClick={() => setRoleSearch('')} className="text-slate-400 hover:text-slate-700">
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-
-                {/* Role List with Categories */}
-                <div className="overflow-y-auto flex-1 min-h-0 p-2 space-y-2">
-                  {/* Category 1: Staff & Student Logins */}
-                  {staffStudentRoles.length > 0 && (
-                    <div>
-                      <div className="px-3 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400">
-                        Staff &amp; Student Logins
-                      </div>
-                      <div className="space-y-1 mt-0.5">
-                        {staffStudentRoles.map((role) => (
-                          <button
-                            key={role.id}
-                            type="button"
-                            onClick={() => handleSelectRole(role)}
-                            className={`w-full flex items-center justify-between p-2 rounded-xl text-left transition-all ${
-                              selectedRole?.id === role.id 
-                                ? 'bg-brand-soft text-brand-primary border border-brand-primary/30 font-bold' 
-                                : 'hover:bg-white/50 text-slate-700'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border ${role.accentColor}`}>
-                                <role.icon className="w-3.5 h-3.5" />
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-xs font-bold text-slate-900 truncate">{role.title}</p>
-                                <p className="text-[10px] text-slate-500 truncate">{role.description}</p>
-                              </div>
-                            </div>
-                            {selectedRole?.id === role.id && (
-                              <CheckCircle2 className="w-3.5 h-3.5 text-brand-primary shrink-0 ml-2" />
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Category 2: Institutional Oversight */}
-                  {oversightRoles.length > 0 && (
-                    <div className="pt-1.5 border-t border-slate-100">
-                      <div className="px-3 py-1 text-[10px] font-black uppercase tracking-wider text-brand-primary font-bold">
-                        <span>Institutional Oversight</span>
-                      </div>
-                      <div className="space-y-1 mt-0.5">
-                        {oversightRoles.map((role) => (
-                          <button
-                            key={role.id}
-                            type="button"
-                            onClick={() => handleSelectRole(role)}
-                            className={`w-full flex items-center justify-between p-2 rounded-xl text-left transition-all ${
-                              selectedRole?.id === role.id 
-                                ? 'bg-brand-soft text-brand-primary border border-brand-primary/30 font-bold' 
-                                : 'hover:bg-white/50 text-slate-700'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border ${role.accentColor}`}>
-                                <role.icon className="w-3.5 h-3.5" />
-                              </div>
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-1.5">
-                                  <p className="text-xs font-bold text-slate-900 truncate">{role.title}</p>
-                                </div>
-                                <p className="text-[10px] text-slate-500 truncate">{role.description}</p>
-                              </div>
-                            </div>
-                            {selectedRole?.id === role.id && (
-                              <CheckCircle2 className="w-3.5 h-3.5 text-brand-primary shrink-0 ml-2" />
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {filteredRoles.length === 0 && (
-                    <div className="p-4 text-center text-xs text-slate-400">
-                      No matching roles found for "{roleSearch}"
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+      <main className={`z-10 relative flex-1 w-full mx-auto px-4 py-2 sm:py-3 flex flex-col justify-center items-center my-auto min-h-0 ${flipped ? 'max-w-md' : 'max-w-4xl'}`}>
+        {!flipped ? (
+          <RoleCarousel roles={ALL_ROLES} index={roleIndex} onIndexChange={handleSelectIndex} onOpen={openCard} />
+        ) : selectedRole && (
+        <div key={`${selectedRole.id}-${registerMode}`} className="w-full neu-raised rounded-[24px] overflow-hidden relative card-flip-in">
+          <IdCardHeader role={selectedRole} right={
+            <button type="button" onClick={closeCard} className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-[11px] font-bold">
+              <ArrowLeft className="w-3.5 h-3.5" />Change role
+            </button>} />
+          <div className="p-5 sm:p-6">
+          {registerMode && (selectedRole.id === 'student' || selectedRole.id === 'faculty') ? (
+            <RegisterPanel kind={selectedRole.id} onBack={() => setRegisterMode(false)} />
+          ) : (
+          <>
 
           {/* ── Dynamic Form Fields for Selected Role ── */}
           {selectedRole && (
@@ -806,22 +657,18 @@ export const LandingPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Department Selector (for Faculty) */}
-              {selectedRole.id === 'faculty' && (
+              {/* Department — only when this faculty email has no record yet (first login) */}
+              {selectedRole.id === 'faculty' && needDept && (
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Department
-                  </label>
-                  <select
-                    value={selectedDept}
-                    onChange={(e) => setSelectedDept(e.target.value)}
-                    aria-label="Department Selection"
-                    className="w-full px-3.5 py-3 rounded-xl neu-inset border border-transparent text-slate-800 text-xs sm:text-sm font-medium focus:outline-none cursor-pointer transition-all"
-                  >
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">Your department</label>
+                  <div className="flex flex-wrap gap-1.5">
                     {VALID_DEPARTMENT_NAMES.map(dept => (
-                      <option key={dept} value={dept}>{dept}</option>
+                      <button key={dept} type="button" onClick={() => setSelectedDept(dept)}
+                        className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all ${selectedDept === dept ? 'bg-brand-primary text-white' : 'neu-raised-sm text-slate-600 hover:text-brand-primary'}`}>
+                        {dept}
+                      </button>
                     ))}
-                  </select>
+                  </div>
                 </div>
               )}
 
@@ -930,7 +777,7 @@ export const LandingPage: React.FC = () => {
                 <div className="text-center pt-1">
                   <button
                     type="button"
-                    onClick={() => navigate('/login?role=student&signup=true')}
+                    onClick={() => setRegisterMode(true)}
                     className="inline-flex items-center gap-1.5 text-xs font-bold text-brand-primary hover:underline transition-colors"
                   >
                     <UserPlus className="w-3.5 h-3.5" />
@@ -942,7 +789,7 @@ export const LandingPage: React.FC = () => {
                 <div className="text-center pt-1">
                   <button
                     type="button"
-                    onClick={() => navigate('/login?role=faculty&signup=true')}
+                    onClick={() => setRegisterMode(true)}
                     className="inline-flex items-center gap-1.5 text-xs font-bold text-brand-primary hover:underline transition-colors"
                   >
                     <UserPlus className="w-3.5 h-3.5" />
@@ -952,7 +799,11 @@ export const LandingPage: React.FC = () => {
               )}
             </form>
           )}
+          </>
+          )}
+          </div>
         </div>
+        )}
       </main>
 
       {/* ── Global Footer ── */}

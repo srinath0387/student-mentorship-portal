@@ -10,6 +10,7 @@ import { useAuth } from '../../context/AuthContext';
 import { PillButton } from '../../components/common/PillButton';
 import { Footer } from '../../components/layout/Footer';
 import { useLandingTheme } from '../../lib/pageTheme';
+import { deriveFromRegNo } from './RegisterPanel';
 import { UserRole } from '../../types';
 
 // Admin/HOD login is handled server-side via POST /auth/admin-login.
@@ -480,8 +481,7 @@ export const AuthPage: React.FC = () => {
         email: data.email,
         year: data.year,
         department: data.department,
-        batch: '2023-2027',
-        section: 'A',
+        batch: deriveFromRegNo(regNo)?.batch,
       }).catch((dbErr: any) => {
         console.warn('[DB Student Create Notice]:', dbErr.message);
       });

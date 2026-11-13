@@ -410,3 +410,11 @@ html:not(.dark):not(.theme-landing) .bg-white:is(.rounded-lg, .rounded-xl, .roun
   .print-portal > .fixed { position: static !important; inset: auto !important; background: #fff !important; padding: 0 !important; backdrop-filter: none !important; overflow: visible !important; display: block !important; }
   .print-portal > .fixed > div { max-height: none !important; overflow: visible !important; box-shadow: none !important; border: none !important; }
 }
+
+/* Landing: ID card flips over to reveal the login / registration form */
+@keyframes card-flip-in {
+  from { transform: perspective(1200px) rotateY(-80deg); opacity: 0.3; }
+  to   { transform: perspective(1200px) rotateY(0deg); opacity: 1; }
+}
+.card-flip-in { animation: card-flip-in 0.45s cubic-bezier(.2,.8,.2,1); transform-origin: center; }
+@media (prefers-reduced-motion: reduce) { .card-flip-in { animation: none; } }
