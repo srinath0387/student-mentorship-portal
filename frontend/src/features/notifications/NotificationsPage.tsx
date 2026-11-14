@@ -9,10 +9,36 @@ const card = 'bg-surface border border-borderLine rounded-2xl shadow-sm';
 const btn = 'px-3.5 py-2 rounded-xl text-xs font-bold disabled:opacity-50';
 
 const WHAT_YOU_GET: Record<string, string[]> = {
-  student: ['Absent in a class today (6 PM summary)', 'Club sessions — new, and a reminder the day before', 'Club registration approved / rejected / seat opened', 'Announcements from your HOD, mentor and principal'],
-  parent: ["Your ward was absent today (6 PM summary, with subjects)", 'Absence messages sent by the college office'],
-  faculty: ['Leave approved / rejected (HOD and Principal)', 'New office orders addressed to you', 'Announcements from your HOD and principal'],
-  hod: ['Leave decisions on your own leave', 'Office orders addressed to you', 'Announcements from the principal'],
+  student: [
+    'Absent in a class today (6 PM summary)',
+    'Attendance below 75% (every Monday)',
+    'Faculty selection opened, choice confirmed, released or changed by admin, and a reminder before it closes',
+    'Documents, internships and placement offers verified or rejected',
+    'On-duty / permission requests approved or rejected',
+    'New placement drives you are eligible for, and shortlisted / selected results',
+    'Exam seat allotted',
+    'Club sessions, reminders the day before, and registration decisions',
+    'Announcements from your HOD, mentor and principal',
+  ],
+  parent: [
+    'Your ward was absent today (6 PM summary, with subjects)',
+    "Your ward's attendance below 75% (every Monday)",
+    'On-duty / permission requests approved or rejected',
+    'Absence messages sent by the college office',
+  ],
+  faculty: [
+    'Leave approved / rejected (HOD and Principal)',
+    'New office orders and invigilation duties',
+    'Meeting invites, cancellations and action items',
+    'Lesson plan and event report review results',
+    'Announcements from your HOD and principal',
+  ],
+  hod: [
+    'Lesson plans and event reports waiting for your approval',
+    'Leave decisions on your own leave',
+    'Office orders, invigilation duties and meeting invites',
+    'Announcements from the principal',
+  ],
 };
 
 function TelegramIcon() {

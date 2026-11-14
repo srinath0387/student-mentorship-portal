@@ -25,6 +25,15 @@ import {
 
 const router = Router();
 
+// ─── Phone alerts (Telegram / app push) — wired in by api.ts; a no-op until then ──────────
+type FsNotify = (userKeys: string[], msg: { title: string; body: string; url?: string; tag?: string }) => Promise<number>;
+let notify: FsNotify = async () => 0;
+export function setFsNotifier(fn: FsNotify) { notify = fn; }
+const sKey = (roll: string) => `S:${String(roll).toUpperCase()}`;
+/** Alerts must never break or slow down a pick */
+const alert = (keys: string[], msg: Parameters<FsNotify>[1]) => { notify(keys, msg).catch(() => 0); };
+const fmtIST = (v: any) => new Date(v).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+
 // ─── Plumbing ──────────────────────────────────────────────────────────────────
 router.use(async (_req: Request, res: Response, next) => {
   if ((db as any).isMock) {
@@ -166,6 +175,15 @@ router.post('/rounds/:id/status', requireRole(...MANAGERS), h(async (req, res) =
   }
   const r = await db.query(`UPDATE fs_rounds SET status = $2, updated_at = NOW() WHERE id = $1 RETURNING *`, [round.id, status]);
   await audit(db, { roundId: round.id, ...actor(req), action: `round_${status}`, details: { from: round.status } });
+  if (status === 'open' && round.status !== 'open') {
+    const el = await db.query(`SELECT roll_number FROM fs_eligible_students WHERE round_id = $1`, [round.id]);
+    const opensLater = new Date(r.rows[0].starts_at) > new Date();
+    alert(el.rows.map((x: any) => sKey(x.roll_number)), {
+      title: `Faculty selection ${opensLater ? 'opens' : 'is open'}: ${round.title}`,
+      body: `${opensLater ? `Opens ${fmtIST(r.rows[0].starts_at)}. ` : ''}Choose your faculty before ${fmtIST(r.rows[0].ends_at)}. Seats are first come, first served.`,
+      url: '/faculty-selection', tag: `fs-open-${round.id}`,
+    });
+  }
   res.json({ ...r.rows[0], open_now: roundOpenNow(r.rows[0]) });
 }));
 
@@ -430,6 +448,7 @@ router.post('/selections/:sid/release', requireRole(...MANAGERS), h(async (req, 
   await managedRound(req, await roundIdOf('fs_selections', req.params.sid));
   const { reason } = parse<any>(releaseSchema, req.body);
   const out = await db.transaction((q: any) => releaseInTx(q, req.params.sid, actorOf(req), reason));
+  alert([sKey(out.roll_number)], { title: `Faculty choice released: ${out.subject_name}`, body: `Your choice for ${out.subject_name} was released by the admin. The admin will assign your faculty.`, url: '/faculty-selection/allotted', tag: `fs-${out.id}` });
   res.json({ released: true, roster_rows_removed: out.roster_rows_removed, class_removed: out.class_removed });
 }));
 
@@ -447,6 +466,7 @@ router.post('/rounds/:id/assign', requireRole(...MANAGERS), h(async (req, res) =
     student: { roll_number: student.roll_number, email: student.email, section: student.section },
     actor: actorOf(req), adminOverride: true, reuseReleasedId: cur?.id,
   }));
+  alert([sKey(student.roll_number)], { title: `Faculty assigned: ${out.subject_name}`, body: `${out.faculty_name} is your faculty for ${out.subject_name} (Section ${out.section}).`, url: '/faculty-selection/allotted', tag: `fs-${out.selection_id}` });
   res.json(out);
 }));
 
@@ -464,8 +484,9 @@ router.post('/selections/:sid/reassign', requireRole(...MANAGERS), h(async (req,
       actor: actorOf(req), adminOverride: true, reuseReleasedId: sel.id,
     });
     await audit(q, { roundId: round.id, ...actor(req), action: 'reassign', roll: student.roll_number, details: { subject: sel.subject_name, from: sel.faculty_email, to_offering: body.offering_id } });
-    return picked;
+    return { ...picked, roll_number: student.roll_number };
   });
+  alert([sKey(out.roll_number)], { title: `Faculty changed: ${out.subject_name}`, body: `The admin moved you to ${out.faculty_name} for ${out.subject_name} (Section ${out.section}).`, url: '/faculty-selection/allotted', tag: `fs-${out.selection_id}` });
   res.json(out);
 }));
 
@@ -636,6 +657,14 @@ router.post('/me/rounds/:id/select', requireRole('student'), h(async (req, res) 
       if (!(err instanceof FsError)) throw err;
       results.push({ ...base, ok: false, status: err.status, code: err.code, message: err.message });
     }
+  }
+  const okPicks = results.filter(r => r.ok);
+  if (okPicks.length) {
+    alert([sKey(student.roll_number)], {
+      title: okPicks.length === 1 ? `Confirmed: ${okPicks[0].faculty_name} for ${okPicks[0].subject_name}` : `${okPicks.length} faculty choices confirmed`,
+      body: okPicks.map(r => `${r.subject_name}: ${r.faculty_name}`).join(' · '),
+      url: '/faculty-selection/allotted', tag: `fs-confirm-${round.id}`,
+    });
   }
   const view = await studentRoundView(round.id, student);
   res.status(results.every(r => r.ok) ? 200 : 207).json({ results, ...view });

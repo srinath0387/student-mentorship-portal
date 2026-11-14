@@ -135,6 +135,7 @@ if (fs.existsSync(publicDir)) {
 // ============================================================================
 app.use('/', routes);
 app.use('/faculty-selection', require('../routes/facultySelection.routes').default); // eslint-disable-line @typescript-eslint/no-var-requires
+require('../routes/facultySelection.routes').setFsNotifier((keys: string[], msg: any) => notifyUsers(keys, msg)); // eslint-disable-line @typescript-eslint/no-var-requires
 
 // ONE-TIME: Clean up coding_profiles handles stored as full URLs
 // Protected by ADMIN_SECRET header — must be set in Lambda environment variables.
@@ -4856,7 +4857,12 @@ app.patch('/students/:id/documents/:docId/status', requireAuth, requireRole('adm
       [verification_status, admin_note || null, callerEmail, docId, studentId]
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Document not found.' });
-    res.json(result.rows[0]);
+    const doc = result.rows[0];
+    const docName = doc.title || doc.document_type || doc.file_name || 'Your document';
+    await notifyUsers([studentKey(studentId)], verification_status === 'Verified'
+      ? { title: 'Document verified ✓', body: `${docName} was verified.`, url: '/profile?tab=documents', tag: `doc-${docId}` }
+      : { title: 'Document rejected', body: `${docName} was rejected${admin_note ? `: ${admin_note}` : ''}. Upload a corrected copy.`, url: '/profile?tab=documents', tag: `doc-${docId}` });
+    res.json(doc);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -8832,7 +8838,16 @@ app.post('/placement/drives', requireRole('admin'), async (req: Request, res: Re
        toTextArray(b.departments), toTextArray(b.batches), toTextArray(b.required_skills), Boolean(b.exclude_placed),
        b.description || null, req.auth!.email]
     );
-    res.json({ success: true, drive: r.rows[0] });
+    const drive = r.rows[0];
+    try {
+      const eligible = await eligibleForDrive(drive, null);
+      await notifyUsers(eligible.map((x: any) => studentKey(x.roll_number)), {
+        title: `New placement drive: ${drive.company_name}`,
+        body: `${drive.role_title || 'Hiring'}${drive.package_lpa ? ` · ${drive.package_lpa} LPA` : ''}. You are eligible${drive.last_date ? ` — apply by ${d10(drive.last_date)}` : ''}.`,
+        url: '/placement/drives', tag: `drive-${drive.id}`,
+      });
+    } catch (e: any) { console.warn('[drives] alert failed:', e.message); }
+    res.json({ success: true, drive });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -8926,6 +8941,14 @@ app.put('/placement/drives/:id/applications/:roll', requireRole('admin', 'hod'),
           [roll, st.name, st.department, st.batch, drive.company_name, drive.role_title, drive.package_lpa, drive.drive_date || new Date().toISOString().slice(0, 10), req.auth!.email]
         ).catch((e: any) => console.warn('[drives] could not record placement:', e.message));
       }
+    }
+    if (status !== 'Eligible' && status !== 'Applied') {
+      const msgs: Record<string, string> = {
+        Shortlisted: `You are shortlisted for ${drive.company_name}. Watch for the next round details.`,
+        Selected: `Congratulations! You are selected at ${drive.company_name}${drive.role_title ? ` as ${drive.role_title}` : ''}.`,
+        Rejected: `Your application to ${drive.company_name} was not taken forward this time.`,
+      };
+      if (msgs[status]) await notifyUsers([studentKey(roll)], { title: `${drive.company_name}: ${status}`, body: msgs[status], url: '/placement/drives', tag: `drive-${drive.id}` });
     }
     res.json({ success: true, roll_number: roll, status });
   } catch (err: any) {
@@ -10429,6 +10452,41 @@ async function runDailyNotifications(): Promise<any> {
   for (const s of sessions.rows) {
     out.club_reminders += await notifyUsers((s.rolls || []).map(studentKey),
       { title: `Tomorrow: ${s.club_name}`, body: `${s.title}${s.start_time ? ` at ${s.start_time}` : ''}${s.venue ? ` · ${s.venue}` : ''}`, url: '/clubs', tag: `club-${s.club_id}-${tomorrow}` });
+  }
+  // Faculty selection closing within the next day: remind students who have not finished
+  out.selection_reminders = 0;
+  try {
+    const rounds = await db.query(
+      `SELECT r.id, r.title, r.ends_at, (SELECT COUNT(*) FROM fs_subjects s WHERE s.round_id = r.id)::int AS subjects,
+              ARRAY(SELECT e.roll_number FROM fs_eligible_students e WHERE e.round_id = r.id
+                     AND (SELECT COUNT(*) FROM fs_selections x WHERE x.round_id = r.id AND x.roll_number = e.roll_number)
+                         < (SELECT COUNT(*) FROM fs_subjects s2 WHERE s2.round_id = r.id)) AS pending
+       FROM fs_rounds r WHERE r.status = 'open' AND r.ends_at > NOW() AND r.ends_at <= NOW() + INTERVAL '30 hours'`);
+    for (const r of rounds.rows) {
+      out.selection_reminders += await notifyUsers((r.pending || []).map(studentKey), {
+        title: `Faculty selection closes soon`, url: '/faculty-selection', tag: `fs-close-${r.id}`,
+        body: `${r.title} closes ${new Date(r.ends_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}. You have not chosen all your faculty yet.`,
+      });
+    }
+  } catch { /* faculty selection tables not created yet */ }
+
+  // Mondays: students below 75% attendance (last 120 days, at least 10 periods held)
+  out.low_attendance = 0;
+  if (new Date(Date.now() + 5.5 * 3600000).getUTCDay() === 1 && reachable.size) {
+    const low = await db.query(
+      `SELECT UPPER(ar.roll_number) AS roll, st.name,
+              SUM(s.num_periods)::int AS held, SUM(CASE WHEN ar.is_present THEN s.num_periods ELSE 0 END)::int AS attended
+       FROM attendance_records ar JOIN attendance_sessions s ON s.id = ar.session_id
+       JOIN students st ON UPPER(st.roll_number) = UPPER(ar.roll_number)
+       WHERE s.session_date >= CURRENT_DATE - 120
+       GROUP BY UPPER(ar.roll_number), st.name
+       HAVING SUM(s.num_periods) >= 10 AND SUM(CASE WHEN ar.is_present THEN s.num_periods ELSE 0 END) * 100 < SUM(s.num_periods) * 75`
+    ).catch(() => ({ rows: [] as any[] }));
+    for (const r of low.rows) {
+      const pct = Math.round((r.attended / r.held) * 1000) / 10;
+      if (reachable.has(studentKey(r.roll))) out.low_attendance += await notifyUsers([studentKey(r.roll)], { title: `Attendance ${pct}% — below 75%`, body: `You have attended ${r.attended} of ${r.held} periods. Attend regularly to stay eligible for exams.`, url: '/profile?tab=attendance', tag: `lowatt-${today}` });
+      if (reachable.has(parentKey(r.roll))) out.low_attendance += await notifyUsers([parentKey(r.roll)], { title: `Attendance ${pct}% — ${r.name}`, body: `${r.name} (${r.roll}) has attended ${r.attended} of ${r.held} periods (${pct}%), below the required 75%.`, url: '/dashboard', tag: `lowatt-${today}` });
+    }
   }
   console.log('[daily-notify]', out);
   return out;
@@ -11966,6 +12024,9 @@ app.post('/exams/sessions', requireRole('admin'), async (req: Request, res: Resp
       await db.query(`INSERT INTO exam_invigilation (session_id, room_id, faculty_email, faculty_name) VALUES ($1,$2,$3,$4)`, [sess.id, a.room, a.email, a.name]);
     }
     const needed = usedRooms.length * perRoom;
+    const when = `${date} (${slot === 'AN' ? 'afternoon' : 'forenoon'})`;
+    await notifyUsers(seating.map(x => studentKey(x.roll)), { title: `Exam seat allotted: ${title}`, body: `Your seat for ${title} on ${when} is ready. Open My Exam Seats for the room and seat number.`, url: '/exams', tag: `exam-${sess.id}` });
+    await notifyUsers(assigned.map(a => staffKey(a.email)), { title: `Invigilation duty: ${title}`, body: `You are invigilating ${title} on ${when}. Open My Exam Duties for the room.`, url: '/exams', tag: `exam-${sess.id}` });
     res.json({ success: true, session: sess, students: students.length, rooms_used: usedRooms.length, seats_available: capacity,
       invigilators_assigned: assigned.length, invigilators_short: Math.max(0, needed - assigned.length) });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
@@ -12895,7 +12956,9 @@ app.patch('/student-placements/:id/verify', requireRole('hod', 'admin', 'princip
       [callerEmail, id]
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Placement not found.' });
-    res.json(result.rows[0]);
+    const pl = result.rows[0];
+    if (pl.roll_number) await notifyUsers([studentKey(pl.roll_number)], { title: 'Placement verified ✓', body: `Your offer from ${pl.company_name} has been verified.`, url: '/placement/drives', tag: `placement-${pl.id}` });
+    res.json(pl);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -20111,6 +20174,21 @@ app.put('/hod/permissions/students/:id/status', requireRole('hod', 'admin', 'coo
     }
 
     const permission = result.rows[0];
+    if (permission.roll_number) {
+      const kind = permission.permission_type || 'Permission';
+      const when = permission.from_date ? ` (${d10(permission.from_date)}${permission.to_date && d10(permission.to_date) !== d10(permission.from_date) ? ` to ${d10(permission.to_date)}` : ''})` : '';
+      const ok = status === 'Approved';
+      await notifyUsers([studentKey(permission.roll_number)], {
+        title: `${kind} ${ok ? 'approved ✓' : 'rejected'}`,
+        body: `Your ${kind.toLowerCase()} request${when} was ${ok ? 'approved' : 'rejected'}${hod_remarks ? `: ${hod_remarks}` : '.'}`,
+        url: '/profile?tab=permissions', tag: `perm-${permission.id}`,
+      });
+      await notifyUsers([parentKey(permission.roll_number)], {
+        title: `${kind} ${ok ? 'approved' : 'rejected'}`,
+        body: `${permission.roll_number}'s ${kind.toLowerCase()} request${when} was ${ok ? 'approved' : 'rejected'}.`,
+        url: '/dashboard', tag: `perm-${permission.id}`,
+      });
+    }
 
     // ── Retroactive Attendance Credit ─────────────────────────────────────────
     // When HOD approves, find all attendance_records already saved for this
@@ -21243,8 +21321,15 @@ app.put('/internships/:id/verify', requireRole('faculty', 'hod', 'admin', 'super
     if (updateRes.rows.length === 0) {
       return res.status(404).json({ error: 'Internship record not found' });
     }
-
-    res.json(updateRes.rows[0]);
+    const intern = updateRes.rows[0];
+    if (verification_status !== 'pending' && intern.roll_number) {
+      await notifyUsers([studentKey(intern.roll_number)], {
+        title: verification_status === 'verified' ? 'Internship verified ✓' : 'Internship not verified',
+        body: `${intern.role || 'Internship'} at ${intern.company_name}${verification_status === 'verified' ? ' was verified.' : ` was rejected${remarks ? `: ${remarks}` : ''}.`}`,
+        url: '/profile', tag: `intern-${intern.id}`,
+      });
+    }
+    res.json(intern);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
