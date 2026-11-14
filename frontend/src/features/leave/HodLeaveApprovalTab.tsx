@@ -54,6 +54,7 @@ export const HodLeaveApprovalTab: React.FC<{ studentsOnly?: boolean }> = ({ stud
   const { data: facultyLeaves = [], isLoading: isLoadingFaculty } = useQuery<FacultyLeaveRecord[]>({
     queryKey: ['hodFacultyLeaves'],
     queryFn: () => api.getHodFacultyLeaves(),
+    enabled: !studentsOnly, // coordinators see only student permissions
   });
 
   const { data: studentPermissions = [], isLoading: isLoadingStudents } = useQuery<StudentPermissionRecord[]>({

@@ -97,6 +97,7 @@ const ScoreboardRow: React.FC<{ entry: LeaderboardEntry; isExpanded: boolean; on
           <PillarBar label="🐙 GitHub" score={entry.githubScore} max={200} color="bg-gray-500" />
           <PillarBar label="📚 Academics" score={entry.academicsScore} max={250} color="bg-blue-500" />
           <PillarBar label="🏅 Certs" score={entry.certsScore} max={200} color="bg-emerald-500" />
+          <PillarBar label="✨ Clubs" score={entry.clubsScore || 0} max={100} color="bg-purple-500" />
         </div>
       )}
     </div>

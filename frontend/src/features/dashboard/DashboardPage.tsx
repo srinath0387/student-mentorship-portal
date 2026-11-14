@@ -167,8 +167,8 @@ export const DashboardPage: React.FC = () => {
               iconBgColor="bg-brand-soft text-brand-primary"
               accentColor="brand"
               label="Employability Score"
-              value={`${scoreData?.overallScore ?? 0}/100`}
-              subtext="Computed from GPA & coding activity"
+              value={`${scoreData?.overallScore ?? 0} / 1000`}
+              subtext={scoreData?.levelTitle ? `${scoreData.badge || ''} ${scoreData.levelTitle} · coding, GitHub, academics, certs & clubs` : 'Coding, GitHub, academics, certifications & clubs'}
               onClick={role !== 'parent' ? () => navigate('/profile?tab=placement-preferences') : undefined}
             />
             <StatCard

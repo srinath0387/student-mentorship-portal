@@ -23,6 +23,7 @@ const PILLAR_CONFIG = [
   { key: 'githubScore' as keyof LeaderboardEntry, label: '🐙 GitHub', max: 200, color: 'bg-gray-500' },
   { key: 'academicsScore' as keyof LeaderboardEntry, label: '📚 Academics', max: 250, color: 'bg-blue-500' },
   { key: 'certsScore' as keyof LeaderboardEntry, label: '🏅 Certs', max: 200, color: 'bg-emerald-500' },
+  { key: 'clubsScore' as keyof LeaderboardEntry, label: '✨ Clubs', max: 100, color: 'bg-purple-500' },
 ];
 
 function exportToCSV(data: LeaderboardEntry[]) {

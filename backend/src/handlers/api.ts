@@ -2026,10 +2026,11 @@ app.get('/students', requireAuth, async (req: Request, res: Response) => {
       const scopedDept = reqDeptStr && reqDeptStr !== 'All' && CSE_ALLIED_DEPTS.includes(reqDeptStr)
         ? reqDeptStr : null;
       if (scopedDept) {
-        conditions.push(`s.department = $${paramIndex++}`);
+        // parenthesised: bare conditions get an "s." prefix added below
+        conditions.push(`(s.department = $${paramIndex++})`);
         params.push(scopedDept);
       } else {
-        conditions.push(`s.department = ANY($${paramIndex++}::text[])`);
+        conditions.push(`(s.department = ANY($${paramIndex++}::text[]))`);
         params.push(CSE_ALLIED_DEPTS);
       }
     }
@@ -4477,13 +4478,10 @@ app.get('/students/:id/employability-score', requireAuth, async (req: Request, r
       db.query('SELECT * FROM academics WHERE student_id = $1', [studentId]),
       db.query('SELECT * FROM coding_profiles WHERE student_id = $1', [studentId]),
       db.query('SELECT * FROM certifications WHERE student_id = $1', [studentId]),
-      db.query("SELECT * FROM student_certifications WHERE student_id = $1 AND status = 'verified'", [studentId]).catch(() => ({ rows: [] })),
+      db.query("SELECT * FROM student_certifications WHERE UPPER(roll_number) = $1 AND LOWER(status) = 'verified'", [studentId]).catch(() => ({ rows: [] })),
     ]);
 
-    const combinedCerts = [
-      ...certsRes.rows,
-      ...studentCertsRes.rows.map((c: any) => ({ ...c, provider: c.issuer, verified: true })),
-    ];
+    const combinedCerts = mergeScoreCerts(certsRes.rows, studentCertsRes.rows);
 
     const scoreData = calculateRPGScore({
       academics: academicsRes.rows,
@@ -4514,6 +4512,30 @@ app.get('/students/:id/employability-score', requireAuth, async (req: Request, r
 // Leaderboards (RPG Scoreboard)
 // ============================================================================
 
+// Extra per-student data for live leaderboard scoring (mirrors GET /students/:id/employability-score)
+const SCORE_EXTRA_SQL = `(SELECT json_agg(to_jsonb(sc) || jsonb_build_object('provider', sc.issuer, 'verified', true))
+                 FROM student_certifications sc WHERE UPPER(sc.roll_number) = UPPER(s.roll_number) AND LOWER(sc.status) = 'verified') AS verified_certs_data,
+              (SELECT json_agg(json_build_object('role', m.role, 'sessions_attended',
+                   (SELECT COUNT(*) FROM club_session_attendance ca JOIN club_sessions cs ON cs.id = ca.session_id
+                     WHERE cs.club_id = m.club_id AND UPPER(ca.roll_number) = UPPER(m.roll_number))))
+                 FROM club_memberships m WHERE UPPER(m.roll_number) = UPPER(s.roll_number) AND m.status = 'approved') AS clubs_data`;
+/** Self-entered certifications + staff-verified ones, without counting the same certificate twice. */
+function mergeScoreCerts(own: any[], verified: any[]): any[] {
+  const key = (c: any) => String(c.title || c.certificate_name || c.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const seen = new Set(own.map(key).filter(Boolean));
+  return [...own, ...verified.filter(v => !seen.has(key(v))).map(v => ({ ...v, title: v.certificate_name, provider: v.issuer, verified: true }))];
+}
+function liveScoreFromRow(r: any): any | null {
+  try {
+    return calculateRPGScore({
+      academics: r.academics_data || [],
+      codingProfiles: r.coding_data || [],
+      certifications: mergeScoreCerts(r.certs_data || [], r.verified_certs_data || []),
+      clubs: r.clubs_data || [],
+    });
+  } catch { return null; }
+}
+
 // GET /leaderboard/faculty — mentee scoreboard for a faculty (live-computed)
 app.get('/leaderboard/faculty', requireAuth, requireRole('faculty', 'hod', 'admin'), async (req: Request, res: Response) => {
   try {
@@ -4538,13 +4560,15 @@ app.get('/leaderboard/faculty', requireAuth, requireRole('faculty', 'hod', 'admi
     if (!facultyId) return res.json([]); // Faculty record not found
 
     // Get mentees via faculty_mentor_id OR mentor_assignments, with live profile data for scoring
+    await ensureClubTables().catch(() => undefined);
     const menteesRes = await db.query(
       `SELECT s.roll_number, s.name, s.section, s.year, s.department,
               ss.overall_score, ss.coding_score, ss.github_score, ss.academics_score, ss.certs_score,
               ss.level_number, ss.level_title, ss.badge, ss.computed_at,
               (SELECT json_agg(a.*) FROM academics a WHERE a.student_id = s.roll_number) AS academics_data,
               (SELECT json_agg(cp.*) FROM coding_profiles cp WHERE cp.student_id = s.roll_number) AS coding_data,
-              (SELECT json_agg(c.*) FROM certifications c WHERE c.student_id = s.roll_number) AS certs_data
+              (SELECT json_agg(c.*) FROM certifications c WHERE c.student_id = s.roll_number) AS certs_data,
+              ${SCORE_EXTRA_SQL}
        FROM students s
        LEFT JOIN student_scores ss ON ss.student_id = s.roll_number
        WHERE UPPER(s.faculty_mentor_id) = UPPER($1)
@@ -4553,18 +4577,11 @@ app.get('/leaderboard/faculty', requireAuth, requireRole('faculty', 'hod', 'admi
     );
 
     const rows = menteesRes.rows.map((r: any) => {
-      // If cached score exists and is recent (< 24h), use it
-      const hasCache = r.overall_score != null;
-      let score: any = null;
-      if (!hasCache) {
-        try {
-          score = calculateRPGScore({
-            academics: r.academics_data || [],
-            codingProfiles: r.coding_data || [],
-            certifications: r.certs_data || [],
-          });
-        } catch { score = null; }
-      }
+      // Same calculation as the student's own score (verified certificates + clubs included);
+      // the cached row is only a fallback if the live data can't be scored.
+      const live = liveScoreFromRow(r);
+      const hasCache = !live && r.overall_score != null;
+      const score: any = live;
       return {
         studentId: r.roll_number,
         name: r.name,
@@ -4576,6 +4593,7 @@ app.get('/leaderboard/faculty', requireAuth, requireRole('faculty', 'hod', 'admi
         githubScore: hasCache ? (r.github_score || 0) : (score?.githubScore || 0),
         academicsScore: hasCache ? (r.academics_score || 0) : (score?.academicsScore || 0),
         certsScore: hasCache ? (r.certs_score || 0) : (score?.certsScore || 0),
+        clubsScore: hasCache ? 0 : (score?.clubsScore || 0),
         levelNumber: hasCache ? (r.level_number || 1) : (score?.levelNumber || 1),
         levelTitle: hasCache ? (r.level_title || 'Apprentice Novice') : (score?.levelTitle || 'Apprentice Novice'),
         badge: hasCache ? (r.badge || '🐣') : (score?.badge || '🐣'),
@@ -4611,6 +4629,7 @@ app.get('/leaderboard/hod', requireAuth, requireRole('hod', 'admin', 'principal'
     const whereClause = filters.length > 0 ? 'WHERE ' + filters.join(' AND ') : '';
     const limitNum = Math.min(parseInt(limit) || 100, 300);
 
+    await ensureClubTables().catch(() => undefined);
     const result = await db.query(
       `SELECT s.roll_number, s.name, s.section, s.year, s.department,
               s.faculty_mentor_id AS mentor_id,
@@ -4619,7 +4638,8 @@ app.get('/leaderboard/hod', requireAuth, requireRole('hod', 'admin', 'principal'
               ss.level_number, ss.level_title, ss.badge, ss.computed_at,
               (SELECT json_agg(a.*) FROM academics a WHERE a.student_id = s.roll_number) AS academics_data,
               (SELECT json_agg(cp.*) FROM coding_profiles cp WHERE cp.student_id = s.roll_number) AS coding_data,
-              (SELECT json_agg(c.*) FROM certifications c WHERE c.student_id = s.roll_number) AS certs_data
+              (SELECT json_agg(c.*) FROM certifications c WHERE c.student_id = s.roll_number) AS certs_data,
+              ${SCORE_EXTRA_SQL}
        FROM students s
        LEFT JOIN student_scores ss ON ss.student_id = s.roll_number
        LEFT JOIN faculty f ON UPPER(f.faculty_id) = UPPER(s.faculty_mentor_id)
@@ -4629,17 +4649,11 @@ app.get('/leaderboard/hod', requireAuth, requireRole('hod', 'admin', 'principal'
     );
 
     const rows = result.rows.map((r: any) => {
-      const hasCache = r.overall_score != null;
-      let score: any = null;
-      if (!hasCache) {
-        try {
-          score = calculateRPGScore({
-            academics: r.academics_data || [],
-            codingProfiles: r.coding_data || [],
-            certifications: r.certs_data || [],
-          });
-        } catch { score = null; }
-      }
+      // Same calculation as the student's own score (verified certificates + clubs included);
+      // the cached row is only a fallback if the live data can't be scored.
+      const live = liveScoreFromRow(r);
+      const hasCache = !live && r.overall_score != null;
+      const score: any = live;
       return {
         studentId: r.roll_number,
         name: r.name,
@@ -4652,6 +4666,7 @@ app.get('/leaderboard/hod', requireAuth, requireRole('hod', 'admin', 'principal'
         githubScore: hasCache ? (r.github_score || 0) : (score?.githubScore || 0),
         academicsScore: hasCache ? (r.academics_score || 0) : (score?.academicsScore || 0),
         certsScore: hasCache ? (r.certs_score || 0) : (score?.certsScore || 0),
+        clubsScore: hasCache ? 0 : (score?.clubsScore || 0),
         levelNumber: hasCache ? (r.level_number || 1) : (score?.levelNumber || 1),
         levelTitle: hasCache ? (r.level_title || 'Apprentice Novice') : (score?.levelTitle || 'Apprentice Novice'),
         badge: hasCache ? (r.badge || '🐣') : (score?.badge || '🐣'),
@@ -4746,7 +4761,12 @@ app.patch('/students/:id/documents/:docId/status', requireAuth, requireRole('adm
     // Faculty can only approve docs for their assigned mentees
     if (callerRole === 'faculty') {
       const menteeCheck = await db.query(
-        `SELECT 1 FROM mentor_assignments WHERE faculty_email = $1 AND roll_number = $2 LIMIT 1`,
+        `SELECT 1 FROM students s
+         WHERE UPPER(s.roll_number) = UPPER($2) AND EXISTS (
+           SELECT 1 FROM faculty f WHERE LOWER(f.email) = LOWER($1) AND (
+             UPPER(s.faculty_mentor_id) = UPPER(f.faculty_id)
+             OR EXISTS (SELECT 1 FROM mentor_assignments ma WHERE UPPER(ma.roll_number) = UPPER(s.roll_number) AND UPPER(ma.faculty_id) = UPPER(f.faculty_id))))
+         LIMIT 1`,
         [callerEmail, studentId]
       );
       if (menteeCheck.rowCount === 0) {
@@ -4821,7 +4841,7 @@ app.delete('/students/:id/documents/:docId', requireOwnerOrRole('id', 'admin', '
 });
 
 // GET /documents/download-zip-urls — HOD/Admin: get presigned download URLs for all docs, filtered by academic_year & department
-app.get('/documents/download-zip-urls', requireRole('hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
+app.get('/documents/download-zip-urls', requireRole('faculty', 'hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     const callerRole = req.auth?.role;
     const callerDept = req.auth?.department;
@@ -4849,7 +4869,13 @@ app.get('/documents/download-zip-urls', requireRole('hod', 'admin', 'principal',
       WHERE 1=1  -- include all statuses for management view
     `;
 
-    if (targetDept) {
+    if (callerRole === 'faculty') {
+      // A mentor reviews only their own mentees' documents
+      params.push(String(req.auth?.email || '').toLowerCase());
+      query += ` AND EXISTS (SELECT 1 FROM faculty f WHERE LOWER(f.email) = $${params.length} AND (
+                   UPPER(s.faculty_mentor_id) = UPPER(f.faculty_id)
+                   OR EXISTS (SELECT 1 FROM mentor_assignments ma WHERE UPPER(ma.roll_number) = UPPER(s.roll_number) AND UPPER(ma.faculty_id) = UPPER(f.faculty_id))))`;
+    } else if (targetDept) {
       params.push(targetDept);
       query += ` AND LOWER(TRIM(s.department)) = LOWER(TRIM($${params.length}))`;
     } else if (isChair) {
@@ -12532,7 +12558,9 @@ app.delete('/mentor-meetings/:id', requireRole('faculty', 'hod', 'admin', 'coord
 
 app.get('/hod/mentoring-compliance', requireRole('hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
-    const department = (req.query.department as string) || (req.auth as any)?.department;
+    const ownDept = req.auth?.role === 'hod' ? req.auth?.department : null; // HOD: own department only
+    const reqDept = ownDept || (req.query.department as string) || (req.auth as any)?.department;
+    const department = reqDept && !['*', 'All', 'CSE_ALLIED'].includes(reqDept) ? reqDept : '';
     await db.query(`
       CREATE TABLE IF NOT EXISTS mentor_meetings (
         id SERIAL PRIMARY KEY, faculty_id TEXT, faculty_email TEXT NOT NULL,
@@ -12542,9 +12570,10 @@ app.get('/hod/mentoring-compliance', requireRole('hod', 'admin', 'principal', 'd
       )
     `).catch(() => {});
 
+    // Names / departments live in the faculty table (faculty_full_profiles has neither column)
     const deptJoin = department
-      ? `JOIN faculty_full_profiles fp ON fp.email = mm.faculty_email AND fp.department = $1`
-      : `LEFT JOIN faculty_full_profiles fp ON fp.email = mm.faculty_email`;
+      ? `JOIN faculty fp ON LOWER(fp.email) = LOWER(mm.faculty_email) AND LOWER(REPLACE(fp.department, ' ', '')) = LOWER(REPLACE($1, ' ', ''))`
+      : `LEFT JOIN faculty fp ON LOWER(fp.email) = LOWER(mm.faculty_email)`;
     const params: any[] = department ? [department] : [];
 
     const result = await db.query(`
@@ -12563,16 +12592,16 @@ app.get('/hod/mentoring-compliance', requireRole('hod', 'admin', 'principal', 'd
     `, params);
 
     // Also pull faculty who have ZERO meetings
-    const deptFilter = department ? `WHERE department = $1` : '';
+    const deptFilter = department ? `AND LOWER(REPLACE(department, ' ', '')) = LOWER(REPLACE($1, ' ', ''))` : '';
     const zeroResult = await db.query(`
-      SELECT email, name, department FROM faculty_full_profiles
-      ${deptFilter}
+      SELECT email, name, department FROM faculty
+      WHERE email NOT LIKE 'pending_%' ${deptFilter}
     `, params);
 
     const compliance = result.rows;
-    const emailsWithMeetings = new Set(compliance.map((r: any) => r.faculty_email));
+    const emailsWithMeetings = new Set(compliance.map((r: any) => String(r.faculty_email).toLowerCase()));
     for (const f of zeroResult.rows) {
-      if (!emailsWithMeetings.has(f.email)) {
+      if (!emailsWithMeetings.has(String(f.email).toLowerCase())) {
         compliance.push({
           faculty_email: f.email,
           faculty_name: f.name,
@@ -12807,8 +12836,25 @@ app.get('/hod/placement-summary', requireRole('hod', 'admin', 'principal', 'dire
 // Feature 5: Enhanced Broadcast Notifications
 // ============================================================================
 
+// The notices table was never created by the app — create it (no-op where it already exists)
+let noticesTableReady: Promise<void> | null = null;
+function ensureNoticesTable(): Promise<void> {
+  if (!noticesTableReady) {
+    noticesTableReady = db.query(`
+      CREATE TABLE IF NOT EXISTS notices (
+        id SERIAL PRIMARY KEY, title TEXT NOT NULL, message TEXT NOT NULL, created_by TEXT,
+        priority TEXT DEFAULT 'normal', expires_at TIMESTAMPTZ, targeting JSONB, created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      ALTER TABLE notices ADD COLUMN IF NOT EXISTS targeting JSONB;
+      ALTER TABLE notices ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'normal';
+    `).then(() => undefined).catch((err: any) => { noticesTableReady = null; throw err; });
+  }
+  return noticesTableReady;
+}
+
 app.post('/notices/broadcast', requireRole('hod', 'admin', 'principal', 'director', 'management', 'program_chair', 'coordinator'), async (req: Request, res: Response) => {
   try {
+    await ensureNoticesTable();
     const { title, message, target_department, target_year, target_roles, priority, expires_at } = req.body;
     if (!title || !message) {
       return res.status(400).json({ error: 'title and message are required.' });
@@ -12846,6 +12892,7 @@ app.post('/notices/broadcast', requireRole('hod', 'admin', 'principal', 'directo
 
 app.get('/notices/broadcast', requireRole('hod', 'admin', 'principal', 'director', 'management', 'program_chair', 'coordinator', 'faculty'), async (req: Request, res: Response) => {
   try {
+    await ensureNoticesTable();
     const department = req.query.department as string;
     const result = await db.query(
       `SELECT * FROM notices
@@ -14915,7 +14962,7 @@ app.get('/attendance/not-posted', requireRole('faculty', 'hod', 'coordinator', '
        FROM attendance_no_class_requests
        WHERE status = 'Approved' AND date BETWEEN $1 AND $2`,
       [fromStr, toStr]
-    );
+    ).catch(() => ({ rows: [] as any[] })); // table only exists where schema.sql was applied
     const noClassSet = new Set(noClassRes.rows.map((r: any) =>
       `${r.date}|${(r.department || '').toLowerCase().trim()}|${r.semester_label}|${(r.section || '').toUpperCase()}|${(r.subject_name || '').toLowerCase()}|${r.period_start}`
     ));
@@ -14923,7 +14970,7 @@ app.get('/attendance/not-posted', requireRole('faculty', 'hod', 'coordinator', '
     // Build timetable filter condition
     let deptCondition = '';
     const deptParams: any[] = [];
-    let pi = 1;
+    let pi = 2; // $1 is the day of the week in the per-day timetable query below
     if (callerRole === 'faculty') {
       deptCondition = `AND LOWER(t.faculty_email) = LOWER($${pi++})`;
       deptParams.push(callerEmail);

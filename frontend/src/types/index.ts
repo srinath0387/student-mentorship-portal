@@ -247,6 +247,7 @@ export interface LeaderboardEntry {
   githubScore: number;
   academicsScore: number;
   certsScore: number;
+  clubsScore?: number;
   levelNumber: number;
   levelTitle: string;
   badge: string;
