@@ -967,7 +967,7 @@ export const FacultyLeaveTab: React.FC = () => {
 
                 {/* Adjustments Preview Table */}
                 {formAdjustments.length > 0 && (
-                  <div className="rounded-xl border border-borderLine overflow-hidden">
+                  <div className="rounded-xl border border-borderLine overflow-x-auto">
                     <table className="w-full text-left text-[11px]">
                       <thead className="bg-surface-2 text-textMuted font-bold border-b border-borderLine">
                         <tr>

@@ -170,7 +170,7 @@ export function FacultyApiPage() {
           <p className="text-sm font-semibold text-textSecondary">No API scores yet</p>
         </div>
       ) : (
-        <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden shadow-sm">
+        <div className="bg-surface border border-borderLine rounded-2xl overflow-x-auto shadow-sm">
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-surface-2 border-b border-borderLine">
@@ -290,7 +290,7 @@ export function FacultyApiPage() {
           <p className="text-sm font-semibold text-textSecondary">All duties reviewed — inbox is clear!</p>
         </div>
       ) : (
-        <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden shadow-sm">
+        <div className="bg-surface border border-borderLine rounded-2xl overflow-x-auto shadow-sm">
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-surface-2 border-b border-borderLine">

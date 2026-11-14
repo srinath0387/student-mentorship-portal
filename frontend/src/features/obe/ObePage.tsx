@@ -114,7 +114,7 @@ function CourseEditor({ allotmentId }: { allotmentId: string }) {
             </label>
           ))}
         </div>
-        <table className="w-full text-xs">
+        <div className="overflow-x-auto"><table className="w-full text-xs">
           <thead><tr className="text-textMuted font-bold text-[10px] uppercase"><th className="text-left py-1.5">CO</th><th className="text-left">% students ≥ target (direct)</th><th className="text-left">Course-exit survey (0–3)</th><th className="text-center">Direct level</th><th className="text-center">CO attainment</th></tr></thead>
           <tbody className="divide-y divide-borderLine">
             {cfg.cos.map((co, i) => (
@@ -127,7 +127,7 @@ function CourseEditor({ allotmentId }: { allotmentId: string }) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       </div>
 
       <div className={`${card} overflow-hidden`}>
@@ -201,7 +201,7 @@ export const ObePage: React.FC = () => {
         : courses.length === 0 ? <div className={`${card} p-8 text-center text-xs text-textMuted`}>No subject allotments found.</div>
         : mode === 'summary' ? <DepartmentSummary courses={courses} />
         : (
-          <div className="grid lg:grid-cols-[280px_1fr] gap-4 items-start">
+          <div className="grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)] gap-4 items-start">
             <div className="space-y-1.5 max-h-[75vh] overflow-y-auto">
               {courses.map(c => (
                 <button key={c.allotment_id} onClick={() => setSelected(c.allotment_id)}

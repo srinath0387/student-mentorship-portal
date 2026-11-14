@@ -287,7 +287,7 @@ function DutyCard({ duty, refetch }: { duty: any; refetch: () => void }) {
       {/* Expanded faculty list */}
       {expanded && (
         <div className="border-t border-gray-100">
-          <table className="w-full text-xs">
+          <div className="overflow-x-auto"><table className="w-full text-xs">
             <thead className="bg-gray-50">
               <tr>
                 <th className="text-left px-5 py-2.5 font-semibold text-gray-600">Faculty</th>
@@ -361,7 +361,7 @@ function DutyCard({ duty, refetch }: { duty: any; refetch: () => void }) {
                 );
               })}
             </tbody>
-          </table>
+          </table></div>
         </div>
       )}
     </div>

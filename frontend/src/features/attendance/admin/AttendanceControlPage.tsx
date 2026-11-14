@@ -113,7 +113,7 @@ function SessionEditor({ slot, onClose }: { slot: DaySlot; onClose: () => void }
           <Pill tone="green">{present} present</Pill>
           <Pill tone="red">{records.length - present} absent</Pill>
         </div>
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-auto">
           {isLoading ? (
             <div className="p-10 text-center text-xs text-textMuted"><Loader2 className="w-4 h-4 animate-spin inline mr-2" />Loading students…</div>
           ) : records.length === 0 ? (
@@ -281,7 +281,7 @@ function ParentDispatch() {
         </div>
       )}
       {result?.sent > 0 && <div className="px-4 py-2.5 rounded-xl bg-emerald-500/10 text-emerald-700 text-xs font-semibold">{result.sent} messages sent.</div>}
-      <div className={`${card} overflow-hidden`}>
+      <div className={`${card} overflow-x-auto`}>
         <table className="w-full text-xs text-left">
           <thead><tr className="bg-surface-2 border-b border-borderLine text-textMuted font-bold uppercase text-[10px] tracking-wider">
             <th className="py-2.5 px-4">Student</th><th className="py-2.5 px-3">Parent phone</th><th className="py-2.5 px-3">Message</th></tr></thead>

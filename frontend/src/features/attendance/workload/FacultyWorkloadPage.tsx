@@ -247,7 +247,7 @@ export const FacultyWorkloadPage: React.FC = () => {
       )}
 
       {/* Faculty Workload Table */}
-      <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden">
+      <div className="bg-surface border border-borderLine rounded-2xl overflow-x-auto">
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
             <div className="w-8 h-8 border-3 border-brand-primary border-t-transparent rounded-full animate-spin" />

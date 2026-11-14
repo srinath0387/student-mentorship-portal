@@ -247,7 +247,7 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({ isOpen, onClos
                 <CheckCircle2 className="w-3.5 h-3.5" /> Ready for import
               </span>
             </div>
-            <div className="max-h-40 overflow-y-auto border border-borderLine rounded-xl">
+            <div className="max-h-40 overflow-auto border border-borderLine rounded-xl">
               <table className="w-full text-left text-xs border-collapse">
                 <thead className="bg-surface-2 border-b border-borderLine text-textSecondary font-semibold">
                   <tr>

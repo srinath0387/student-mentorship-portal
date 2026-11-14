@@ -130,7 +130,7 @@ function MyExams({ role }: { role: string }) {
   const { data, isLoading } = useQuery({ queryKey: ['myExams'], queryFn: () => api.getMyExams() });
   const list: any[] = role === 'student' ? data?.seats || [] : data?.duties || [];
   return (
-    <div className={`${card} overflow-hidden`}>
+    <div className={`${card} overflow-x-auto`}>
       <div className="px-4 py-3 border-b border-borderLine text-xs font-black uppercase tracking-wider text-textSecondary">{role === 'student' ? 'My exam seats' : 'My invigilation duties'}</div>
       {isLoading ? <div className="p-6 text-center text-xs text-textMuted">Loading…</div>
         : list.length === 0 ? <div className="p-6 text-center text-xs text-textMuted">Nothing scheduled.</div>
@@ -172,7 +172,7 @@ export const ExamPlannerPage: React.FC = () => {
         <>
           {isAdmin && <Rooms />}
           {creating && <NewSession onDone={(id) => { setCreating(false); qc.invalidateQueries({ queryKey: ['examSessions'] }); if (id) setOpen(id); }} />}
-          <div className={`${card} overflow-hidden`}>
+          <div className={`${card} overflow-x-auto`}>
             <table className="w-full text-xs text-left">
               <thead><tr className="bg-surface-2 border-b border-borderLine text-textMuted font-bold uppercase text-[10px] tracking-wider">
                 <th className="py-2.5 px-4">Date</th><th className="py-2.5 px-3">Session</th><th className="py-2.5 px-3 text-center">Students</th><th className="py-2.5 px-3 text-center">Rooms</th><th className="py-2.5 px-3 text-center">Invigilators</th></tr></thead>

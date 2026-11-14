@@ -844,7 +844,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
           </div>
 
           {/* Incharges List */}
-          <div className="bg-surface border border-borderLine rounded-2xl shadow-sm overflow-hidden">
+          <div className="bg-surface border border-borderLine rounded-2xl shadow-sm overflow-x-auto">
             <table className="w-full text-xs text-left border-collapse">
               <thead className="bg-surface-2 text-textMuted font-bold uppercase tracking-wider border-b border-borderLine">
                 <tr>

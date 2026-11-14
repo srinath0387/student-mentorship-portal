@@ -466,7 +466,7 @@ export const LeaveCreditManagementTab: React.FC = () => {
                 </div>
 
                 {/* Table */}
-                <table className="w-full text-[11px] border border-slate-300 text-left">
+                <div className="overflow-x-auto"><table className="w-full text-[11px] border border-slate-300 text-left">
                   <thead className="bg-slate-100 font-bold border-b border-slate-300">
                     <tr>
                       <th className="p-1.5 border-r border-slate-300">Faculty Name</th>
@@ -493,7 +493,7 @@ export const LeaveCreditManagementTab: React.FC = () => {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </table></div>
 
                 {/* Signatures */}
                 <div className="pt-8 border-t border-slate-300 grid grid-cols-2 gap-8 text-xs">

@@ -144,7 +144,7 @@ function StaffDrives({ isAdmin, canEdit }: { isAdmin: boolean; canEdit: boolean 
     <div className="space-y-4">
       {isAdmin && (creating ? <NewDriveForm onDone={() => { setCreating(false); qc.invalidateQueries({ queryKey: ['placementDrives'] }); }} />
         : <button onClick={() => setCreating(true)} className="px-3 py-2 text-xs font-bold rounded-xl bg-brand-primary text-white inline-flex items-center gap-1.5"><Plus className="w-3.5 h-3.5" />New placement drive</button>)}
-      <div className="grid md:grid-cols-[300px_1fr] gap-4 items-start">
+      <div className="grid grid-cols-1 md:grid-cols-[300px_minmax(0,1fr)] gap-4 items-start">
         <div className="space-y-2">
           {isLoading ? <p className="text-xs text-textMuted">Loading…</p>
             : drives.length === 0 ? <div className={`${card} p-6 text-center text-xs text-textMuted`}>No drives yet.</div>

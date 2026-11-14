@@ -1266,7 +1266,7 @@ export const AdminDashboardPage: React.FC = () => {
                     ))}
                   </div>
                 </div>
-                <div className="max-h-52 overflow-y-auto border border-borderLine rounded-lg">
+                <div className="max-h-52 overflow-auto border border-borderLine rounded-lg">
                   <table className="w-full text-xs">
                     <thead className="bg-background border-b border-borderLine sticky top-0">
                       <tr>

@@ -95,13 +95,13 @@ export function ResearchImpactPanel({ department, canRefresh }: { department: st
               </div>
               <div>
                 <p className="text-[11px] font-bold text-textSecondary uppercase tracking-wider mb-2">Faculty by citations</p>
-                <table className="w-full text-xs">
+                <div className="overflow-x-auto"><table className="w-full text-xs">
                   <thead><tr className="text-[10px] text-textMuted uppercase"><th className="text-left font-bold pb-1">Faculty</th><th className="font-bold pb-1">Citations</th><th className="font-bold pb-1">h-index</th></tr></thead>
                   <tbody>{s.topFaculty.map(f => (
                     <tr key={f.name} className="border-t border-borderLine"><td className="py-1.5"><b className="text-textPrimary">{f.name}</b> <span className="text-[10px] text-textMuted">{f.dept}</span></td>
                       <td className="text-center font-black text-textPrimary">{f.total}</td><td className="text-center font-bold text-textSecondary">{f.h}</td></tr>
                   ))}</tbody>
-                </table>
+                </table></div>
               </div>
             </div>
           ) : (

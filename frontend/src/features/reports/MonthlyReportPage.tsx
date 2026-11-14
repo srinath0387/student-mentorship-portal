@@ -96,7 +96,7 @@ export const MonthlyReportPage: React.FC = () => {
       </div>
 
       {(data?.lowest_posting_compliance || []).length > 0 && (
-        <div className="bg-surface border border-borderLine rounded-2xl shadow-sm overflow-hidden print:shadow-none print:border-slate-300 print:break-inside-avoid">
+        <div className="bg-surface border border-borderLine rounded-2xl shadow-sm overflow-x-auto print:shadow-none print:border-slate-300 print:break-inside-avoid">
           <div className="px-4 py-3 border-b border-borderLine text-xs font-black uppercase tracking-wider text-textSecondary flex items-center gap-1.5">
             <AlertTriangle className="w-4 h-4 text-amber-600 print:hidden" />Lowest attendance-posting compliance
           </div>

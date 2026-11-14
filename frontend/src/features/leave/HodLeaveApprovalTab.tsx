@@ -381,7 +381,7 @@ export const HodLeaveApprovalTab: React.FC<{ studentsOnly?: boolean }> = ({ stud
                         </div>
 
                         {l.adjustments && l.adjustments.length > 0 && (
-                          <div className="rounded-xl border border-borderLine overflow-hidden">
+                          <div className="rounded-xl border border-borderLine overflow-x-auto">
                             <table className="w-full text-left text-[11px]">
                               <thead className="bg-surface font-bold text-textMuted border-b border-borderLine">
                                 <tr>

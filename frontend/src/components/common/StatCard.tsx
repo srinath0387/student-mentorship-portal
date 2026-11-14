@@ -36,7 +36,7 @@ export const StatCard: React.FC<StatCardProps> = ({
   return (
     <div
       onClick={onClick}
-      className={`relative bg-surface border border-borderLine rounded-2xl p-5 overflow-hidden transition-all ${
+      className={`relative bg-surface border border-borderLine rounded-2xl p-4 sm:p-5 overflow-hidden transition-all ${
         onClick ? 'hover:border-brand-primary hover:shadow-md cursor-pointer' : 'shadow-xs'
       }`}
     >
@@ -48,15 +48,15 @@ export const StatCard: React.FC<StatCardProps> = ({
         />
       )}
 
-      <div className="flex items-start gap-4">
+      <div className="flex flex-col sm:flex-row items-start gap-3 sm:gap-4">
         <div className={`p-3 rounded-xl shrink-0 ${iconBgColor}`}>
           {icon}
         </div>
         <div className="min-w-0 flex-1 pt-0.5">
-          <p className="text-[11px] font-semibold text-textSecondary uppercase tracking-widest mb-1">
+          <p className="text-[11px] font-semibold text-textSecondary uppercase tracking-wider sm:tracking-widest mb-1 break-words">
             {label}
           </p>
-          <h3 className="text-2xl font-extrabold text-textPrimary tracking-tight tabular-nums leading-none">
+          <h3 className="text-xl sm:text-2xl font-extrabold text-textPrimary tracking-tight tabular-nums leading-tight sm:leading-none break-words">
             {value}
           </h3>
           {subtext && (

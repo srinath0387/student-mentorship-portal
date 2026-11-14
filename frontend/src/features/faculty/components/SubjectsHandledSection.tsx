@@ -549,7 +549,7 @@ export const SubjectsHandledSection: React.FC<SubjectsHandledSectionProps> = ({
                   <span className="text-emerald-400">Ready to save</span>
                 </div>
 
-                <div className="max-h-48 overflow-y-auto rounded-xl border border-borderLine">
+                <div className="max-h-48 overflow-auto rounded-xl border border-borderLine">
                   <table className="w-full text-left text-xs">
                     <thead className="bg-surface-2 text-textMuted font-bold border-b border-borderLine">
                       <tr>
