@@ -43,6 +43,11 @@ const ChangePasswordPage = lazy(() => import('./features/account/ChangePasswordP
 const EventsPage = lazy(() => import('./features/events/EventsPage'));
 const ClubManagePage = lazy(() => import('./features/clubs/ClubManagePage'));
 const ClubStudentsPage = lazy(() => import('./features/clubs/ClubStudentsPage'));
+const FsManageRoundsPage = lazy(() => import('./features/faculty-selection/ManageRoundsPage'));
+const FsRoundWorkspacePage = lazy(() => import('./features/faculty-selection/RoundWorkspacePage'));
+const FsStudentSelectionPage = lazy(() => import('./features/faculty-selection/StudentSelectionPage'));
+const FsMyAllottedPage = lazy(() => import('./features/faculty-selection/StudentSelectionPage').then(m => ({ default: m.MyAllottedPage })));
+const FsFacultyMyStudentsPage = lazy(() => import('./features/faculty-selection/FacultyMyStudentsPage'));
 const AlumniPage = lazy(() => import('./features/alumni/AlumniPage'));
 const AlumniSelfUpdatePage = lazy(() => import('./features/alumni/AlumniSelfUpdatePage'));
 const ObePage = lazy(() => import('./features/obe/ObePage'));
@@ -411,6 +416,19 @@ export const App: React.FC = () => {
               </Route>
               <Route element={<ProtectedRoute allowedRoles={['admin', 'hod', 'faculty', 'coordinator', 'principal', 'director', 'management', 'program_chair']} />}>
                 <Route path="/clubs/students" element={<ClubStudentsPage />} />
+              </Route>
+
+              {/* Faculty Selection */}
+              <Route element={<ProtectedRoute allowedRoles={['admin', 'hod']} />}>
+                <Route path="/faculty-selection/manage" element={<FsManageRoundsPage />} />
+                <Route path="/faculty-selection/manage/:roundId" element={<FsRoundWorkspacePage />} />
+              </Route>
+              <Route element={<ProtectedRoute allowedRoles={['student']} />}>
+                <Route path="/faculty-selection" element={<FsStudentSelectionPage />} />
+                <Route path="/faculty-selection/allotted" element={<FsMyAllottedPage />} />
+              </Route>
+              <Route element={<ProtectedRoute allowedRoles={['faculty', 'hod']} />}>
+                <Route path="/faculty-selection/my-students" element={<FsFacultyMyStudentsPage />} />
               </Route>
 
               {/* Oversight (View-Only) routes */}

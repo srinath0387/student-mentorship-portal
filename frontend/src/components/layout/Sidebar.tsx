@@ -44,8 +44,11 @@ import {
   BookOpenCheck,
   Presentation,
   NotebookPen,
+  Vote,
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext';
+import { fsApi } from '../../features/faculty-selection/fsApi';
 
 /* ─────────────────────────── Types ─────────────────────────── */
 
@@ -60,6 +63,8 @@ interface NavItem {
   path: string;
   icon: LucideIcon;
   soon?: boolean;
+  /** Shown only to students on an open faculty-selection list (or with an allotted faculty) */
+  fsOnly?: boolean;
 }
 
 /** An accordion group: clicking the header expands/collapses its items */
@@ -83,6 +88,8 @@ const studentNav: NavGroup[] = [
       { label: 'Faculty Feedback', path: '/feedback', icon: Star },
       { label: 'Placement Drives', path: '/placement/drives', icon: Award },
       { label: 'Clubs', path: '/clubs', icon: Sparkles },
+      { label: 'Faculty Selection', path: '/faculty-selection', icon: Vote, fsOnly: true },
+      { label: 'My Allotted Faculty', path: '/faculty-selection/allotted', icon: UserCheck, fsOnly: true },
       { label: 'My Exam Seats', path: '/exams', icon: ClipboardList },
     ],
   },
@@ -120,6 +127,7 @@ const facultyNav: NavGroup[] = [
     icon: CalendarCheck,
     items: [
       { label: 'Take Attendance', path: '/attendance', icon: ClipboardCheck },
+      { label: 'My Selected Students', path: '/faculty-selection/my-students', icon: Vote },
       { label: 'Attendance Records', path: '/faculty/dashboard?tab=attendance', icon: CalendarCheck },
       { label: 'CGPA Analytics', path: '/faculty/dashboard?tab=analytics', icon: FileBarChart },
       { label: 'My Lesson Plans', path: '/lesson-plans', icon: BookOpenCheck },
@@ -193,6 +201,7 @@ const adminNav: NavGroup[] = [
     items: [
       { label: 'Subject Master', path: '/admin/dashboard?tab=attendance&sub=subjects', icon: FileText },
       { label: 'Assign Subject to Faculty', path: '/admin/dashboard?tab=attendance&sub=allotment', icon: User },
+      { label: 'Faculty Selection', path: '/faculty-selection/manage', icon: Vote },
       { label: 'Assign Students to Faculty', path: '/admin/dashboard?tab=attendance&sub=roster', icon: Users },
       { label: 'Remove Class for a Date', path: '/admin/attendance?view=remove', icon: CalendarCheck },
       { label: 'Academic Calendar & Approvals', path: '/admin/attendance?view=calendar', icon: Calendar },
@@ -291,6 +300,8 @@ const hodNav: NavGroup[] = [
     items: [
       { label: 'Lesson Plans & Coverage', path: '/lesson-plans/review', icon: BookOpenCheck },
       { label: 'My Lesson Plans', path: '/lesson-plans', icon: NotebookPen },
+      { label: 'Faculty Selection', path: '/faculty-selection/manage', icon: Vote },
+      { label: 'My Selected Students', path: '/faculty-selection/my-students', icon: Users },
       { label: 'Meetings & Minutes', path: '/meetings', icon: NotebookPen },
       { label: 'Events & Activities', path: '/events', icon: Presentation },
     ],
@@ -486,7 +497,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, collapsed, onClose }) 
   const navigate = useNavigate();
   const location = useLocation();
 
-  const navGroups = getNavGroups(role);
+  const fsMe = useQuery({
+    queryKey: ['fs', 'me'],
+    queryFn: () => fsApi.me(),
+    enabled: role === 'student',
+    staleTime: 60_000,
+    retry: false,
+  });
+  const showFs = role === 'student' && !!fsMe.data?.show;
+  const navGroups = getNavGroups(role)
+    .map(g => ({ ...g, items: g.items.filter(i => !i.fsOnly || showFs) }))
+    .filter(g => g.items.length > 0);
 
   // Start with ALL groups closed on login (-1 = nothing open)
   const [openGroup, setOpenGroup] = useState<number>(-1);

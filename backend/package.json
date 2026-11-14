@@ -11,7 +11,9 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "start": "ts-node src/local.ts",
-    "db:init": "ts-node src/scripts/init-db.ts"
+    "db:init": "ts-node src/scripts/init-db.ts",
+    "fs:migrate": "ts-node src/scripts/migrate-faculty-selection.ts",
+    "fs:rollback": "ts-node src/scripts/rollback-faculty-selection.ts"
   },
   "jest": {
     "preset": "ts-jest",

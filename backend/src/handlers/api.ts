@@ -134,6 +134,7 @@ if (fs.existsSync(publicDir)) {
 // The legacy handlers below remain until Phase 4 migration is complete.
 // ============================================================================
 app.use('/', routes);
+app.use('/faculty-selection', require('../routes/facultySelection.routes').default); // eslint-disable-line @typescript-eslint/no-var-requires
 
 // ONE-TIME: Clean up coding_profiles handles stored as full URLs
 // Protected by ADMIN_SECRET header — must be set in Lambda environment variables.
@@ -15838,6 +15839,34 @@ app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res
         ORDER BY a.semester_label, a.subject_name`,
         [rollNumber, dept, sec]
       );
+    } else {
+      // A student on some rosters (e.g. faculty-selection electives) still belongs to their section's
+      // whole-class subjects that have no roster at all (faculty mark those from the section list).
+      const wholeSection = await db.query(
+        `SELECT a.id AS allotment_id, a.subject_name, a.subject_type, a.semester_label, a.faculty_name, NULL as joining_date,
+          COALESCE(SUM(s.num_periods), 0) AS total_periods_held,
+          COALESCE(SUM(CASE WHEN r.is_present = true THEN s.num_periods ELSE 0 END), 0) AS periods_attended
+        FROM subject_allotments a
+        LEFT JOIN attendance_sessions s ON s.allotment_id = a.id
+        LEFT JOIN attendance_records r ON r.session_id = s.id AND UPPER(r.roll_number) = $1
+        WHERE NOT EXISTS (SELECT 1 FROM subject_rosters x WHERE x.allotment_id = a.id)
+          AND (
+            EXISTS (SELECT 1 FROM attendance_records ar JOIN attendance_sessions sess ON sess.id = ar.session_id WHERE sess.allotment_id = a.id AND UPPER(ar.roll_number) = $1)
+            OR (
+              ($2 <> '' AND (LOWER(REPLACE(a.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($2, ' ', '')) || '%' OR LOWER(REPLACE($2, ' ', '')) ILIKE '%' || LOWER(REPLACE(a.department, ' ', '')) || '%'))
+              AND ($3 <> '' AND UPPER(a.section) = UPPER($3))
+              AND ($4 = '' OR LEFT(a.semester_label, 1) = $4)
+            )
+          )
+        GROUP BY a.id, a.subject_name, a.subject_type, a.semester_label, a.faculty_name`,
+        [rollNumber, dept, sec, String(student.year || '').charAt(0).replace(/[^1-4]/, '')]
+      ).catch(() => ({ rows: [] as any[] }));
+      if (wholeSection.rows.length) {
+        const have = new Set(subjectsRes.rows.map((x: any) => x.allotment_id));
+        const rows = [...subjectsRes.rows, ...wholeSection.rows.filter((x: any) => !have.has(x.allotment_id))]
+          .sort((x: any, y: any) => `${x.semester_label}|${x.subject_name}`.localeCompare(`${y.semester_label}|${y.subject_name}`));
+        subjectsRes = { ...subjectsRes, rows };
+      }
     }
 
     let grandTotalHeld = 0;
