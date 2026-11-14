@@ -57,7 +57,7 @@ async function getPool(): Promise<Pool> {
     password,
     database: process.env.DB_NAME || 'advitiyans',
     // Direct RDS connection (RDS Proxy removed — t3.large has 855 max connections).
-    // Lambda reserved concurrency: 200 × max:2 = 400 total connections max → safe headroom.
+    // API Lambda reserved concurrency 300 × max:2 = 600 connections max → under t3.large's ~855.
     max: process.env.AWS_LAMBDA_FUNCTION_NAME ? 2 : 5,
     idleTimeoutMillis: 60000,           // Reduced from 120s: Lambda invocations are short-lived
     connectionTimeoutMillis: 5000,

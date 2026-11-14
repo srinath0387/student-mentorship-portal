@@ -242,9 +242,10 @@ export class AdvitiyansStack extends cdk.Stack {
       code: lambda.Code.fromAsset(path.join(__dirname, '../../backend/dist')),
       timeout: cdk.Duration.seconds(900),       // Max 15 mins for EventBridge Cron. API Gateway will still drop at 29s.
       memorySize: 512,                          // 2× CPU speed vs 256 MB; runs ~35% faster
-      // NOTE: reservedConcurrentExecutions removed — account limit is only 10 total concurrent
-      // executions. With t3.large (855 max DB connections) and only 10 max Lambda executions,
-      // connection exhaustion is impossible. No reservation needed.
+      // Account limit is now 1,000 concurrent executions. Cap the API at 300 copies so the
+      // database (t3.large, ~855 connections) can never run out: 300 × pool max 2 = 600.
+      // Leaves 700 for the notifier and other functions (AWS needs at least 100 unreserved).
+      reservedConcurrentExecutions: 300,
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
       securityGroups: [lambdaSg],
@@ -322,8 +323,8 @@ export class AdvitiyansStack extends cdk.Stack {
       restApiName: 'Advitiyans Placement Readiness API',
       description: 'API for Advitiyans Student 360 platform (direct RDS connection)',
       deployOptions: {
-        throttlingBurstLimit: 1000,     // Absorbs burst of up to 1000 simultaneous student logins
-        throttlingRateLimit: 300,       // Sustained 300 requests/second — well above normal usage
+        throttlingBurstLimit: 2000,     // Absorbs a burst of ~2000 requests (a whole batch logging in together)
+        throttlingRateLimit: 1000,      // Sustained 1000 requests/second (load test: 300/s cap threw 429s at 500/s)
         metricsEnabled: true,           // Enables free CloudWatch metrics dashboard
       },
       defaultCorsPreflightOptions: {
