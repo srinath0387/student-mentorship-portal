@@ -39,10 +39,10 @@ CREATE TABLE IF NOT EXISTS students (
     linkedin_url TEXT,
     linkedin_updated TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT check_roll_number_format CHECK (roll_number ~* '^(\\d{4}[15]A(01|02|03|04|05|32|33|34|37)[0-9A-Za-z]{2}|\\d{4}1E00[0-9A-Za-z]{2}|\\d{4}1F00[0-9A-Za-z]{2})$'),
-    CONSTRAINT check_rgmcet_email CHECK (email ~* '^[a-zA-Z0-9._%+-]+@rgmcet\\.edu\\.in$')
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    -- No roll-number / @rgmcet.edu.in CHECKs: 1st-year freshers sign up with an admission ID and a
+    -- personal email before they get a roll number, and validation lives in lib/validation.ts.
+    -- (The app also drops any old copies of these checks on startup — see db/index.ts.)
 );
 
 -- 3. Academics Table

@@ -76,8 +76,6 @@ d('Faculty selection against real PostgreSQL', () => {
     const schema = fs.readFileSync(path.join(__dirname, '../../src/schema.sql'), 'utf8');
     await pool.query(schema);
     for (const s of FS_DDL) await pool.query(s); // idempotent: a second run must not fail
-    // schema.sql's email CHECK escapes the dot twice and rejects real addresses on a fresh DB (pre-existing; test DB only)
-    await pool.query(`ALTER TABLE students DROP CONSTRAINT IF EXISTS check_rgmcet_email, DROP CONSTRAINT IF EXISTS check_roll_number_format`);
     await pool.query(`DELETE FROM students WHERE roll_number LIKE '22091A05%'`);
     await pool.query(`DELETE FROM faculty WHERE email LIKE '%@rgmcet.edu.in' AND faculty_id LIKE 'FS-%'`);
     for (let n = 1; n <= 90; n++) {
