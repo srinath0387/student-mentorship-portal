@@ -177,6 +177,7 @@ export const AdminDashboardPage: React.FC = () => {
   const [newAdminSaving, setNewAdminSaving] = useState(false);
   // Change my password (super admin self-service)
   const [myNewPwd, setMyNewPwd] = useState('');
+  const [myCurPwd, setMyCurPwd] = useState('');
   const [myNewPwdConfirm, setMyNewPwdConfirm] = useState('');
   const [myPwdSaving, setMyPwdSaving] = useState(false);
   const [myPwdMsg, setMyPwdMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -2016,7 +2017,7 @@ export const AdminDashboardPage: React.FC = () => {
                     className="px-3 py-2 text-xs rounded-lg border border-borderLine bg-background focus:outline-none focus:border-brand-primary" />
                   <input type="email" placeholder="Email address" value={newAdminEmail} onChange={(e) => setNewAdminEmail(e.target.value)}
                     className="px-3 py-2 text-xs rounded-lg border border-borderLine bg-background focus:outline-none focus:border-brand-primary" />
-                  <input type="text" placeholder="Password (min 4 chars)" value={newAdminPassword} onChange={(e) => setNewAdminPassword(e.target.value)}
+                  <input type="text" placeholder="Password (8+ chars, letters & numbers)" value={newAdminPassword} onChange={(e) => setNewAdminPassword(e.target.value)}
                     className="px-3 py-2 text-xs rounded-lg border border-borderLine bg-background focus:outline-none focus:border-brand-primary font-mono" />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -2040,7 +2041,7 @@ export const AdminDashboardPage: React.FC = () => {
                   <button
                     onClick={async () => {
                       if (!newAdminName || !newAdminEmail || !newAdminPassword) { setAdminMsg({ key: 'add', type: 'error', text: 'All fields required.' }); return; }
-                      if (newAdminPassword.length < 4) { setAdminMsg({ key: 'add', type: 'error', text: 'Password min 4 chars.' }); return; }
+                      if (newAdminPassword.length < 8) { setAdminMsg({ key: 'add', type: 'error', text: 'Password needs 8+ characters with letters and numbers.' }); return; }
                       setNewAdminSaving(true);
                       try {
                         await api.createAdmin(user!.email, newAdminName, newAdminEmail, newAdminPassword, newAdminDept);
@@ -2120,8 +2121,8 @@ export const AdminDashboardPage: React.FC = () => {
                               <div className="flex items-center justify-end gap-2">
                                 <button
                                   onClick={async () => {
-                                    if (!adminPwdEditValue || adminPwdEditValue.length < 4) {
-                                      setAdminMsg({ key: row.email, type: 'error', text: 'Min 4 chars required.' });
+                                    if (!adminPwdEditValue || adminPwdEditValue.length < 8) {
+                                      setAdminMsg({ key: row.email, type: 'error', text: 'Use 8+ characters with letters and numbers.' });
                                       setTimeout(() => setAdminMsg(null), 3000); return;
                                     }
                                     setAdminPwdSaving(true);
@@ -2214,7 +2215,7 @@ export const AdminDashboardPage: React.FC = () => {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <input type="email" placeholder="Email address" value={newTier1BEmail} onChange={(e) => setNewTier1BEmail(e.target.value)}
                       className="px-3 py-2 text-xs rounded-lg border border-borderLine bg-background focus:outline-none focus:border-amber-500" />
-                    <input type="text" placeholder="Password (min 4 chars)" value={newTier1BPassword} onChange={(e) => setNewTier1BPassword(e.target.value)}
+                    <input type="text" placeholder="Password (8+ chars, letters & numbers)" value={newTier1BPassword} onChange={(e) => setNewTier1BPassword(e.target.value)}
                       className="px-3 py-2 text-xs rounded-lg border border-borderLine bg-background focus:outline-none focus:border-amber-500 font-mono" />
                   </div>
                   {tier1BMsg?.key === 'add' && (
@@ -2224,7 +2225,7 @@ export const AdminDashboardPage: React.FC = () => {
                     <button
                       onClick={async () => {
                         if (!newTier1BEmail || !newTier1BPassword) { setTier1BMsg({ key: 'add', type: 'error', text: 'Email and password required.' }); return; }
-                        if (newTier1BPassword.length < 4) { setTier1BMsg({ key: 'add', type: 'error', text: 'Password min 4 chars.' }); return; }
+                        if (newTier1BPassword.length < 8) { setTier1BMsg({ key: 'add', type: 'error', text: 'Password needs 8+ characters with letters and numbers.' }); return; }
                         setTier1BSaving(true);
                         try {
                           await api.createTier1BAdmin(user!.email, newTier1BEmail, newTier1BPassword);
@@ -2335,19 +2336,22 @@ export const AdminDashboardPage: React.FC = () => {
               Changing <span className="font-semibold text-textPrimary">{user.email}</span>'s password only. You cannot change another super admin's password.
             </p>
             <div className="flex flex-col sm:flex-row gap-3 max-w-lg">
-              <input type="password" placeholder="New password (min 4 chars)" value={myNewPwd} onChange={(e) => setMyNewPwd(e.target.value)}
+              <input type="password" placeholder="Current password" autoComplete="current-password" value={myCurPwd} onChange={(e) => setMyCurPwd(e.target.value)}
+                className="px-3 py-2 text-xs rounded-lg border border-borderLine bg-background focus:outline-none focus:border-brand-primary flex-1 font-mono" />
+              <input type="password" placeholder="New password (8+ chars, letters & numbers)" value={myNewPwd} onChange={(e) => setMyNewPwd(e.target.value)}
                 className="px-3 py-2 text-xs rounded-lg border border-borderLine bg-background focus:outline-none focus:border-brand-primary flex-1 font-mono" />
               <input type="password" placeholder="Confirm new password" value={myNewPwdConfirm} onChange={(e) => setMyNewPwdConfirm(e.target.value)}
                 className="px-3 py-2 text-xs rounded-lg border border-borderLine bg-background focus:outline-none focus:border-brand-primary flex-1 font-mono" />
               <button
                 onClick={async () => {
-                  if (!myNewPwd || myNewPwd.length < 4) { setMyPwdMsg({ type: 'error', text: 'Min 4 characters required.' }); return; }
+                  if (!myCurPwd) { setMyPwdMsg({ type: 'error', text: 'Enter your current password.' }); return; }
+                  if (!myNewPwd || myNewPwd.length < 8 || !/[A-Za-z]/.test(myNewPwd) || !/[0-9]/.test(myNewPwd)) { setMyPwdMsg({ type: 'error', text: 'Use at least 8 characters with letters and numbers.' }); return; }
                   if (myNewPwd !== myNewPwdConfirm) { setMyPwdMsg({ type: 'error', text: 'Passwords do not match.' }); return; }
                   setMyPwdSaving(true);
                   try {
-                    await api.changeSuperAdminMyPassword(user!.email, myNewPwd);
-                    setMyNewPwd(''); setMyNewPwdConfirm('');
-                    setMyPwdMsg({ type: 'success', text: '✓ Password updated! Use the new password on next login.' });
+                    await api.changeSuperAdminMyPassword(user!.email, myNewPwd, myCurPwd);
+                    setMyNewPwd(''); setMyNewPwdConfirm(''); setMyCurPwd('');
+                    setMyPwdMsg({ type: 'success', text: '✓ Password updated. Only the new password works now; other devices were signed out.' });
                     setTimeout(() => setMyPwdMsg(null), 5000);
                   } catch (e: any) {
                     setMyPwdMsg({ type: 'error', text: e.message || 'Failed to update password.' });

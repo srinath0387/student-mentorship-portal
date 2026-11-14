@@ -240,6 +240,7 @@ const adminNav: NavGroup[] = [
       { label: 'HOD Credentials', path: '/admin/dashboard?tab=hod-credentials', icon: ShieldCheck },
       { label: 'Student Passwords', path: '/admin/dashboard?tab=student-passwords', icon: FileCheck },
       { label: 'Phone Alerts', path: '/notifications', icon: BellRing },
+      { label: 'Change Password', path: '/account/password', icon: Settings },
     ],
   },
 ];
@@ -313,6 +314,7 @@ const hodNav: NavGroup[] = [
       { label: 'Faculty Directory & 360°', path: '/admin/faculty', icon: ShieldCheck },
       { label: 'Account Settings', path: '/hod/dashboard?tab=settings', icon: Settings },
       { label: 'Phone Alerts', path: '/notifications', icon: BellRing },
+      { label: 'Change Password', path: '/account/password', icon: Settings },
     ],
   },
   {
@@ -355,6 +357,7 @@ const coordinatorNav: NavGroup[] = [
       { label: 'Manage Attendance', path: '/coordinator/dashboard?tab=manage-attendance', icon: ClipboardCheck },
       { label: 'Leave Approvals', path: '/coordinator/dashboard?tab=leaves', icon: ShieldCheck },
       { label: 'Holiday Calendar', path: '/coordinator/dashboard?tab=calendar', icon: Calendar },
+      { label: 'Change Password', path: '/account/password', icon: Settings },
     ],
   },
   {
@@ -398,6 +401,7 @@ const oversightNav: NavGroup[] = [
       { label: 'Lesson Plan Coverage', path: '/lesson-plans/review', icon: BookOpenCheck },
       { label: 'Events & Activities', path: '/events', icon: Presentation },
       { label: 'Meetings & Minutes', path: '/meetings', icon: NotebookPen },
+      { label: 'Change Password', path: '/account/password', icon: Settings },
       { label: 'Monthly Principal\'s Report', path: '/reports/monthly', icon: FileBarChart },
       { label: 'NAAC / NBA Data Pack', path: '/accreditation', icon: FileCheck },
       { label: 'CO–PO Attainment', path: '/obe', icon: CheckSquare },

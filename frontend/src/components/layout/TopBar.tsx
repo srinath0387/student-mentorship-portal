@@ -63,6 +63,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
     if (p.startsWith('/my-duties')) return { parent: 'Leave & Duties', child: 'My Duties' };
     if (p.startsWith('/faculty/api')) return { parent: 'Faculty', child: 'API Score' };
     if (p.startsWith('/coding-analytics')) return { parent: 'Overview', child: 'Coding Leaderboard' };
+    if (p.startsWith('/account/password')) return { parent: 'Settings', child: 'Change Password' };
     if (p.startsWith('/lesson-plans/review')) return { parent: 'Academic Quality', child: 'Lesson Plans & Coverage' };
     if (p.startsWith('/lesson-plans')) return { parent: 'Academic Quality', child: 'My Lesson Plans' };
     if (p.startsWith('/meetings')) return { parent: 'Academic Quality', child: 'Meetings & Minutes' };
@@ -566,6 +567,15 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
               </div>
 
               <div className="p-2 space-y-0.5">
+                {['admin', 'hod', 'coordinator', 'principal', 'director', 'management', 'program_chair'].includes(user?.role || '') && (
+                  <button
+                    onClick={() => { setIsProfileOpen(false); navigate('/account/password'); }}
+                    className="w-full px-3 py-2.5 rounded-xl text-xs font-semibold text-textPrimary hover:bg-surface-2 flex items-center gap-2.5 transition-colors"
+                  >
+                    <ShieldAlert className="w-3.5 h-3.5 text-brand-primary" />
+                    <span>Change password</span>
+                  </button>
+                )}
                 {user?.role === 'hod' ? (
                   <>
                     <button

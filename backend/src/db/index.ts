@@ -340,6 +340,7 @@ async function ensureSchema(p: Pool) {
     // Create unique index on department for hod_credentials
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_hod_dept ON hod_credentials(LOWER(department)) WHERE department IS NOT NULL;`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_hod_email ON hod_credentials(LOWER(email));`,
+    `ALTER TABLE hod_credentials ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ;`,
 
     // Seed/upsert official HOD credentials — keyed on EMAIL so it always works even if IDs differ.
     // Email format: h<short_dept>@rgmcet.edu.in, Password: hod@2026
@@ -349,25 +350,23 @@ async function ensureSchema(p: Pool) {
     // S&H HODs (ALL 1st year students only — scoped by year, not department):
     //   hmathematics→Mathematics, henglish→English, hphysics→Physics, hchemistry→Chemistry
     //   fycoordinator→FY Coordinator (sees all 1st year students)
-    `INSERT INTO hod_credentials (email, password, department) VALUES ('hce@rgmcet.edu.in', 'hod@2026', 'Civil') ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, updated_at = NOW();`,
-    `INSERT INTO hod_credentials (email, password, department) VALUES ('heee@rgmcet.edu.in', 'hod@2026', 'EEE') ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, updated_at = NOW();`,
-    `INSERT INTO hod_credentials (email, password, department) VALUES ('hme@rgmcet.edu.in', 'hod@2026', 'Mechanical') ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, updated_at = NOW();`,
-    `INSERT INTO hod_credentials (email, password, department) VALUES ('hece@rgmcet.edu.in', 'hod@2026', 'ECE') ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, updated_at = NOW();`,
-    `INSERT INTO hod_credentials (email, password, department) VALUES ('hcse@rgmcet.edu.in', 'hod@2026', 'CSE') ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, updated_at = NOW();`,
-    `INSERT INTO hod_credentials (email, password, department) VALUES ('hcseds@rgmcet.edu.in', 'hod@2026', 'CSE (Data Science)') ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, updated_at = NOW();`,
-    `INSERT INTO hod_credentials (email, password, department) VALUES ('hcseaiml@rgmcet.edu.in', 'hod@2026', 'CSE (AI & ML)') ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, updated_at = NOW();`,
-    `INSERT INTO hod_credentials (email, password, department) VALUES ('hcsebs@rgmcet.edu.in', 'hod@2026', 'CSE (BS)') ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, updated_at = NOW();`,
-    `INSERT INTO hod_credentials (email, password, department) VALUES ('hcsecs@rgmcet.edu.in', 'hod@2026', 'CSE (CS)') ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, updated_at = NOW();`,
-    `INSERT INTO hod_credentials (email, password, department) VALUES ('hmca@rgmcet.edu.in', 'hod@2026', 'MCA') ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, updated_at = NOW();`,
-    `INSERT INTO hod_credentials (email, password, department) VALUES ('hmba@rgmcet.edu.in', 'hod@2026', 'MBA') ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, updated_at = NOW();`,
-    `INSERT INTO hod_credentials (email, password, department) VALUES ('hmathematics@rgmcet.edu.in', 'hod@2026', 'Mathematics') ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, updated_at = NOW();`,
-    `INSERT INTO hod_credentials (email, password, department) VALUES ('henglish@rgmcet.edu.in', 'hod@2026', 'English') ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, updated_at = NOW();`,
-    `INSERT INTO hod_credentials (email, password, department) VALUES ('hphysics@rgmcet.edu.in', 'hod@2026', 'Physics') ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, updated_at = NOW();`,
-    `INSERT INTO hod_credentials (email, password, department) VALUES ('hchemistry@rgmcet.edu.in', 'hod@2026', 'Chemistry') ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, updated_at = NOW();`,
-    `INSERT INTO hod_credentials (email, password, department) VALUES ('fycoordinator@rgmcet.edu.in', 'hod@2026', '1st Year') ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, updated_at = NOW();`,
+    `INSERT INTO hod_credentials (email, password, department) SELECT 'hce@rgmcet.edu.in', 'hod@2026', 'Civil' WHERE NOT EXISTS (SELECT 1 FROM hod_credentials WHERE LOWER(department) = LOWER('Civil') OR LOWER(email) = 'hce@rgmcet.edu.in');`,
+    `INSERT INTO hod_credentials (email, password, department) SELECT 'heee@rgmcet.edu.in', 'hod@2026', 'EEE' WHERE NOT EXISTS (SELECT 1 FROM hod_credentials WHERE LOWER(department) = LOWER('EEE') OR LOWER(email) = 'heee@rgmcet.edu.in');`,
+    `INSERT INTO hod_credentials (email, password, department) SELECT 'hme@rgmcet.edu.in', 'hod@2026', 'Mechanical' WHERE NOT EXISTS (SELECT 1 FROM hod_credentials WHERE LOWER(department) = LOWER('Mechanical') OR LOWER(email) = 'hme@rgmcet.edu.in');`,
+    `INSERT INTO hod_credentials (email, password, department) SELECT 'hece@rgmcet.edu.in', 'hod@2026', 'ECE' WHERE NOT EXISTS (SELECT 1 FROM hod_credentials WHERE LOWER(department) = LOWER('ECE') OR LOWER(email) = 'hece@rgmcet.edu.in');`,
+    `INSERT INTO hod_credentials (email, password, department) SELECT 'hcse@rgmcet.edu.in', 'hod@2026', 'CSE' WHERE NOT EXISTS (SELECT 1 FROM hod_credentials WHERE LOWER(department) = LOWER('CSE') OR LOWER(email) = 'hcse@rgmcet.edu.in');`,
+    `INSERT INTO hod_credentials (email, password, department) SELECT 'hcseds@rgmcet.edu.in', 'hod@2026', 'CSE (Data Science)' WHERE NOT EXISTS (SELECT 1 FROM hod_credentials WHERE LOWER(department) = LOWER('CSE (Data Science)') OR LOWER(email) = 'hcseds@rgmcet.edu.in');`,
+    `INSERT INTO hod_credentials (email, password, department) SELECT 'hcseaiml@rgmcet.edu.in', 'hod@2026', 'CSE (AI & ML)' WHERE NOT EXISTS (SELECT 1 FROM hod_credentials WHERE LOWER(department) = LOWER('CSE (AI & ML)') OR LOWER(email) = 'hcseaiml@rgmcet.edu.in');`,
+    `INSERT INTO hod_credentials (email, password, department) SELECT 'hcsebs@rgmcet.edu.in', 'hod@2026', 'CSE (BS)' WHERE NOT EXISTS (SELECT 1 FROM hod_credentials WHERE LOWER(department) = LOWER('CSE (BS)') OR LOWER(email) = 'hcsebs@rgmcet.edu.in');`,
+    `INSERT INTO hod_credentials (email, password, department) SELECT 'hcsecs@rgmcet.edu.in', 'hod@2026', 'CSE (CS)' WHERE NOT EXISTS (SELECT 1 FROM hod_credentials WHERE LOWER(department) = LOWER('CSE (CS)') OR LOWER(email) = 'hcsecs@rgmcet.edu.in');`,
+    `INSERT INTO hod_credentials (email, password, department) SELECT 'hmca@rgmcet.edu.in', 'hod@2026', 'MCA' WHERE NOT EXISTS (SELECT 1 FROM hod_credentials WHERE LOWER(department) = LOWER('MCA') OR LOWER(email) = 'hmca@rgmcet.edu.in');`,
+    `INSERT INTO hod_credentials (email, password, department) SELECT 'hmba@rgmcet.edu.in', 'hod@2026', 'MBA' WHERE NOT EXISTS (SELECT 1 FROM hod_credentials WHERE LOWER(department) = LOWER('MBA') OR LOWER(email) = 'hmba@rgmcet.edu.in');`,
+    `INSERT INTO hod_credentials (email, password, department) SELECT 'hmathematics@rgmcet.edu.in', 'hod@2026', 'Mathematics' WHERE NOT EXISTS (SELECT 1 FROM hod_credentials WHERE LOWER(department) = LOWER('Mathematics') OR LOWER(email) = 'hmathematics@rgmcet.edu.in');`,
+    `INSERT INTO hod_credentials (email, password, department) SELECT 'henglish@rgmcet.edu.in', 'hod@2026', 'English' WHERE NOT EXISTS (SELECT 1 FROM hod_credentials WHERE LOWER(department) = LOWER('English') OR LOWER(email) = 'henglish@rgmcet.edu.in');`,
+    `INSERT INTO hod_credentials (email, password, department) SELECT 'hphysics@rgmcet.edu.in', 'hod@2026', 'Physics' WHERE NOT EXISTS (SELECT 1 FROM hod_credentials WHERE LOWER(department) = LOWER('Physics') OR LOWER(email) = 'hphysics@rgmcet.edu.in');`,
+    `INSERT INTO hod_credentials (email, password, department) SELECT 'hchemistry@rgmcet.edu.in', 'hod@2026', 'Chemistry' WHERE NOT EXISTS (SELECT 1 FROM hod_credentials WHERE LOWER(department) = LOWER('Chemistry') OR LOWER(email) = 'hchemistry@rgmcet.edu.in');`,
+    `INSERT INTO hod_credentials (email, password, department) SELECT 'fycoordinator@rgmcet.edu.in', 'hod@2026', '1st Year' WHERE NOT EXISTS (SELECT 1 FROM hod_credentials WHERE LOWER(department) = LOWER('1st Year') OR LOWER(email) = 'fycoordinator@rgmcet.edu.in');`,
 
-    // Remove old row 1 that duplicated hcseds; correct rows now handled by email-based upsert above
-    `DELETE FROM hod_credentials WHERE id = 1;`,
 
     // Faculty credentials table — per-faculty login credentials (email + password)
     // Faculty register via the self-registration flow; admins can also seed via CSV import.
@@ -418,6 +417,7 @@ async function ensureSchema(p: Pool) {
       password TEXT NOT NULL,
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );`,
+    `ALTER TABLE super_admin_credentials ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ;`,
 
     // Seed the super admins — DO NOTHING on conflict so changed passwords survive redeploys
     `INSERT INTO super_admin_credentials (email, password) VALUES
@@ -437,6 +437,7 @@ async function ensureSchema(p: Pool) {
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );`,
+    `ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ;`,
 
     // Migration: add department column to existing admin_accounts
     `ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS department VARCHAR(100);`,
@@ -461,7 +462,9 @@ async function ensureSchema(p: Pool) {
       ('management@rgmcet.edu.in', 'Management Board', 'management@2026', '*', 'System'),
       ('chaircse@rgmcet.edu.in', 'Program Chair (CSE Allied)', 'chair@2026', 'CSE_ALLIED', 'System'),
       ('programchair@rgmcet.edu.in', 'Program Chair (CSE Allied)', 'chair@2026', 'CSE_ALLIED', 'System')
-     ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department, password = EXCLUDED.password;`,
+     ON CONFLICT (email) DO UPDATE SET department = EXCLUDED.department;`,
+    // ↑ never overwrite the password: this runs on every cold start, and resetting it
+    //   would bring back the default password after someone changed theirs.
 
     // Migration: add 1st year fresher admission and migration columns to students table
     `ALTER TABLE students DROP CONSTRAINT IF EXISTS check_roll_number_format;`,

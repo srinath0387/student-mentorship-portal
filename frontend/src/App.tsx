@@ -39,6 +39,7 @@ const NotificationsPage = lazy(() => import('./features/notifications/Notificati
 const LessonPlansPage = lazy(() => import('./features/lessonplans/LessonPlansPage'));
 const LessonPlanReviewPage = lazy(() => import('./features/lessonplans/LessonPlansPage').then(m => ({ default: m.LessonPlanReviewPage })));
 const MeetingsPage = lazy(() => import('./features/meetings/MeetingsPage'));
+const ChangePasswordPage = lazy(() => import('./features/account/ChangePasswordPage'));
 const EventsPage = lazy(() => import('./features/events/EventsPage'));
 const ClubManagePage = lazy(() => import('./features/clubs/ClubManagePage'));
 const ClubStudentsPage = lazy(() => import('./features/clubs/ClubStudentsPage'));
@@ -391,6 +392,9 @@ export const App: React.FC = () => {
               </Route>
               <Route element={<ProtectedRoute allowedRoles={['faculty', 'hod', 'coordinator', 'admin']} />}>
                 <Route path="/lesson-plans" element={<LessonPlansPage />} />
+              </Route>
+              <Route element={<ProtectedRoute allowedRoles={['admin', 'hod', 'coordinator', 'principal', 'director', 'management', 'program_chair']} />}>
+                <Route path="/account/password" element={<ChangePasswordPage />} />
               </Route>
               <Route element={<ProtectedRoute allowedRoles={['hod', 'admin', 'principal', 'director', 'management', 'program_chair']} />}>
                 <Route path="/lesson-plans/review" element={<LessonPlanReviewPage />} />

@@ -566,21 +566,11 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
         if (hodDbResult.rows.length > 0) {
           const hodRow = hodDbResult.rows[0];
           const stored = hodRow.password;
-          let isMatch = await compareAndUpgradePassword(password, stored, async (newHash) => {
+          // The saved (hashed) password is the only one that works. No Cognito fallback: Cognito can
+          // still hold an older password, which would let a changed password be bypassed.
+          const isMatch = await compareAndUpgradePassword(password, stored, async (newHash) => {
             await db.query('UPDATE hod_credentials SET password = $1, updated_at = NOW() WHERE LOWER(email) = $2', [newHash, emailLower]);
           });
-
-          // Also verify through Cognito (e.g. after password updates in Cognito)
-          if (!isMatch) {
-            try {
-              const cognitoTokens = await adminSignIn(emailLower, password);
-              if (cognitoTokens?.idToken) {
-                isMatch = true;
-                const newHash = await bcrypt.hash(password, 10);
-                await db.query('UPDATE hod_credentials SET password = $1, updated_at = NOW() WHERE LOWER(email) = $2', [newHash, emailLower]);
-              }
-            } catch { /* not valid in cognito */ }
-          }
 
           if (isMatch) {
             const assignedDept = hodRow.department || department || 'CSE (Data Science)';
@@ -602,14 +592,13 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
         const isFyCoord = emailLower === 'fycoordinator@rgmcet.edu.in';
         const resolvedDept = isFyCoord ? '1st Year' : (matchHod ? hodDeptMap[matchHod[1]] : null);
 
-        if (resolvedDept) {
-          let isCognitoValid = false;
-          try {
-            const cognitoTokens = await adminSignIn(emailLower, password);
-            if (cognitoTokens?.idToken) isCognitoValid = true;
-          } catch { /* not valid in cognito */ }
-
-          if (isCognitoValid || password === 'hod@2026') {
+        // Only a department that has NO HOD account yet may be bootstrapped with the initial password.
+        // If the HOD changed their login email, the old email has no row — it must not log in.
+        const deptHasAccount = resolvedDept
+          ? (await db.query('SELECT 1 FROM hod_credentials WHERE LOWER(department) = LOWER($1) LIMIT 1', [resolvedDept])).rows.length > 0
+          : true;
+        if (resolvedDept && !deptHasAccount) {
+          if (password === 'hod@2026') {
             // Auto-seed the missing row so next login hits the DB path
             try {
               const hashToStore = await bcrypt.hash(password, 10);
@@ -651,7 +640,11 @@ app.post('/auth/admin-login', async (req: Request, res: Response) => {
     }
 
     if (hodEmail && emailLower === hodEmail) {
-      if (hodPass && password === hodPass) {
+      // Legacy env login only while the department has no saved HOD account — otherwise the saved
+      // (changeable) password is the only way in.
+      const legacyDept = department || 'CSE (Data Science)';
+      const hasSaved = db.isMock ? false : (await db.query('SELECT 1 FROM hod_credentials WHERE LOWER(department) = LOWER($1) LIMIT 1', [legacyDept]).catch(() => ({ rows: [] as any[] }))).rows.length > 0;
+      if (!hasSaved && hodPass && password === hodPass) {
         return res.json({ valid: true, role: 'hod', department: department || 'CSE (Data Science)', email: hodEmail });
       }
       return failWithDelay('Invalid email or password.');
@@ -801,6 +794,83 @@ function isTier1ACaller(callerEmail: string): boolean {
   return TIER1A_EMAILS_LOWER.includes(callerEmail.toLowerCase());
 }
 
+// ============================================================================
+// Password changes for staff logins (super admin / admin / coordinator / oversight / HOD)
+// The new password is stored as a bcrypt hash and is the only one that works afterwards;
+// password_changed_at signs out every session issued before the change (see authMiddleware).
+// ============================================================================
+const DEFAULT_STAFF_PASSWORDS = ['hod@2026', 'admin@2026', 'coordinator@2026', 'director@2026', 'principal@2026', 'management@2026',
+  'chair@2026', 'cseds@2026', 'jdj275152', 'password', 'password1', '12345678', '123456789', 'rgmcet@123', 'rgmcet123'];
+const STAFF_PASSWORD_TABLES = ['super_admin_credentials', 'admin_accounts', 'hod_credentials'] as const;
+type StaffPasswordTable = typeof STAFF_PASSWORD_TABLES[number];
+
+let staffPwColumnsReady: Promise<void> | null = null;
+function ensureStaffPasswordColumns(): Promise<void> {
+  if (!staffPwColumnsReady) {
+    staffPwColumnsReady = db.query(`
+      ALTER TABLE super_admin_credentials ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ;
+      ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ;
+      ALTER TABLE hod_credentials ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ;
+    `).then(() => undefined).catch((err: any) => { staffPwColumnsReady = null; throw err; });
+  }
+  return staffPwColumnsReady;
+}
+
+/** Why a new password is not acceptable, or null when it is fine. */
+function staffPasswordProblem(pw: string): string | null {
+  const p = String(pw || '');
+  if (p.length < 8) return 'The new password must be at least 8 characters.';
+  if (p.length > 72) return 'The new password is too long (max 72 characters).';
+  if (!/[A-Za-z]/.test(p) || !/[0-9]/.test(p)) return 'Use both letters and numbers in the new password.';
+  if (DEFAULT_STAFF_PASSWORDS.includes(p.toLowerCase())) return 'That is a default password — choose your own.';
+  return null;
+}
+
+/** Save a new password hash and mark the change time (seconds from this server's clock, matching token iat). */
+async function setStaffPassword(table: StaffPasswordTable, email: string, plain: string): Promise<number> {
+  await ensureStaffPasswordColumns();
+  const hash = await bcrypt.hash(String(plain), BCRYPT_ROUNDS);
+  const r = await db.query(
+    `UPDATE ${table} SET password = $1, password_changed_at = to_timestamp($3), updated_at = NOW() WHERE LOWER(email) = LOWER($2)`,
+    [hash, email, Date.now() / 1000]);
+  return r.rowCount || 0;
+}
+
+async function findStaffAccount(email: string): Promise<{ table: StaffPasswordTable; row: any } | null> {
+  for (const table of STAFF_PASSWORD_TABLES) {
+    const r = await db.query(`SELECT * FROM ${table} WHERE LOWER(email) = LOWER($1) LIMIT 1`, [email]).catch(() => ({ rows: [] as any[] }));
+    if (r.rows[0]) return { table, row: r.rows[0] };
+  }
+  return null;
+}
+
+// PUT /auth/my-password — { current_password, new_password } for any staff login
+app.put('/auth/my-password', requireRole('admin', 'hod', 'coordinator', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    const email = String(req.auth?.email || '').toLowerCase();
+    const current = String(req.body?.current_password || '');
+    const next = String(req.body?.new_password || '');
+    const rate = checkRateLimit(`change_pw_${email}`, 5, 15 * 60000);
+    if (!rate.allowed) return res.status(429).json({ error: `Too many attempts. Try again in ${rate.retryAfterSeconds} seconds.` });
+    if (!current || !next) return res.status(400).json({ error: 'Enter your current password and the new password.' });
+    const acct = await findStaffAccount(email);
+    if (!acct) return res.status(404).json({ error: 'No saved password for this login. Ask the super admin to set one.' });
+    if (!(await compareAndUpgradePassword(current, acct.row.password))) {
+      await new Promise(r => setTimeout(r, 600));
+      return res.status(401).json({ error: 'Your current password is incorrect.' });
+    }
+    const problem = staffPasswordProblem(next);
+    if (problem) return res.status(400).json({ error: problem });
+    if (await compareAndUpgradePassword(next, acct.row.password)) return res.status(400).json({ error: 'The new password must be different from the current one.' });
+    await setStaffPassword(acct.table, email, next);
+    // A fresh token for this device; every older session (other devices, old tabs) is now rejected
+    const token = signSessionToken({ role: req.auth!.role, email });
+    res.json({ success: true, token, message: 'Password changed. Other devices have been signed out.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /super-admin/tier1b — list all Tier 1B super-admin accounts (Tier 1A only)
 app.get('/super-admin/tier1b', requireRole('admin'), async (req: Request, res: Response) => {
   try {
@@ -835,12 +905,15 @@ app.post('/super-admin/tier1b', requireRole('admin'), async (req: Request, res: 
     if (TIER1A_EMAILS_LOWER.includes(email.toLowerCase())) {
       return res.status(400).json({ error: 'This email already has Tier 1A super-admin privileges' });
     }
+    const problem = staffPasswordProblem(password);
+    if (problem) return res.status(400).json({ error: problem });
+    await ensureStaffPasswordColumns();
     const hashedPassword = await bcrypt.hash(String(password), BCRYPT_ROUNDS);
     await db.query(
-      `INSERT INTO super_admin_credentials (email, password, updated_at)
-       VALUES (LOWER($1), $2, NOW())
-       ON CONFLICT (email) DO UPDATE SET password = $2, updated_at = NOW()`,
-      [email, hashedPassword]
+      `INSERT INTO super_admin_credentials (email, password, updated_at, password_changed_at)
+       VALUES (LOWER($1), $2, NOW(), to_timestamp($3))
+       ON CONFLICT (email) DO UPDATE SET password = $2, updated_at = NOW(), password_changed_at = to_timestamp($3)`,
+      [email, hashedPassword, Date.now() / 1000]
     );
     res.json({ success: true });
   } catch (err: any) {
@@ -907,13 +980,16 @@ app.post('/super-admin/admins', requireRole('admin'), async (req: Request, res: 
     if (SUPER_ADMIN_EMAILS_LOWER.includes(email.toLowerCase())) {
       return res.status(400).json({ error: 'Cannot create a regular admin account for a super admin email' });
     }
+    const problem = staffPasswordProblem(password);
+    if (problem) return res.status(400).json({ error: problem });
     const dept = department || 'CSE (Data Science)';
+    await ensureStaffPasswordColumns();
     const hashedPassword = await bcrypt.hash(String(password), BCRYPT_ROUNDS);
     await db.query(
-      `INSERT INTO admin_accounts (email, name, password, department, created_by, created_at, updated_at)
-       VALUES (LOWER($1), $2, $3, $4, LOWER($5), NOW(), NOW())
-       ON CONFLICT (email) DO UPDATE SET name = $2, password = $3, department = $4, updated_at = NOW()`,
-      [email, name, hashedPassword, dept, caller_email]
+      `INSERT INTO admin_accounts (email, name, password, department, created_by, created_at, updated_at, password_changed_at)
+       VALUES (LOWER($1), $2, $3, $4, LOWER($5), NOW(), NOW(), to_timestamp($6))
+       ON CONFLICT (email) DO UPDATE SET name = $2, password = $3, department = $4, updated_at = NOW(), password_changed_at = to_timestamp($6)`,
+      [email, name, hashedPassword, dept, caller_email, Date.now() / 1000]
     );
     res.json({ success: true });
   } catch (err: any) {
@@ -948,18 +1024,15 @@ app.put('/super-admin/admins/:email/password', requireRole('admin'), async (req:
     if (!await isSuperAdminCaller(caller_email)) {
       return res.status(403).json({ error: 'Super admin access required' });
     }
-    if (!password || String(password).length < 4) {
-      return res.status(400).json({ error: 'Password must be at least 4 characters' });
-    }
+    const problem = staffPasswordProblem(password);
+    if (problem) return res.status(400).json({ error: problem });
     const targetEmail = req.params.email.toLowerCase();
     if (SUPER_ADMIN_EMAILS_LOWER.includes(targetEmail)) {
       return res.status(400).json({ error: 'Use /super-admin/my-password to change a super admin password' });
     }
-    const hashedPassword = await bcrypt.hash(String(password), BCRYPT_ROUNDS);
-    await db.query(
-      'UPDATE admin_accounts SET password = $1, updated_at = NOW() WHERE LOWER(email) = $2',
-      [hashedPassword, targetEmail]
-    );
+    // Saves the new hash and signs that account out everywhere
+    const n = await setStaffPassword('admin_accounts', targetEmail, String(password));
+    if (!n) return res.status(404).json({ error: 'Admin account not found' });
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -969,22 +1042,23 @@ app.put('/super-admin/admins/:email/password', requireRole('admin'), async (req:
 // PUT /super-admin/my-password — super admin changes ONLY their own password
 app.put('/super-admin/my-password', requireRole('admin'), async (req: Request, res: Response) => {
   try {
-    const { new_password } = req.body;
+    const { new_password, current_password } = req.body;
     // Identity comes from the verified session — a body-supplied email is ignored
     const my_email = req.auth?.email || '';
     if (!await isSuperAdminCaller(my_email)) {
       return res.status(403).json({ error: 'Super admin access required' });
     }
-    if (!new_password || String(new_password).length < 4) {
-      return res.status(400).json({ error: 'Password must be at least 4 characters' });
+    const row = (await db.query('SELECT password FROM super_admin_credentials WHERE LOWER(email) = LOWER($1)', [my_email])).rows[0];
+    if (!current_password || !row || !(await compareAndUpgradePassword(String(current_password), row.password))) {
+      await new Promise(r => setTimeout(r, 600));
+      return res.status(401).json({ error: 'Your current password is incorrect.' });
     }
+    const problem = staffPasswordProblem(new_password);
+    if (problem) return res.status(400).json({ error: problem });
+    if (await compareAndUpgradePassword(String(new_password), row.password)) return res.status(400).json({ error: 'The new password must be different from the current one.' });
     // Updates ONLY the row for my_email — cannot target another super admin
-    const hashedPassword = await bcrypt.hash(String(new_password), BCRYPT_ROUNDS);
-    await db.query(
-      'UPDATE super_admin_credentials SET password = $1, updated_at = NOW() WHERE LOWER(email) = LOWER($2)',
-      [hashedPassword, my_email]
-    );
-    res.json({ success: true });
+    await setStaffPassword('super_admin_credentials', my_email, String(new_password));
+    res.json({ success: true, token: signSessionToken({ role: 'admin', email: my_email }) });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -1031,23 +1105,42 @@ app.get('/auth/hod-credentials', requireRole('hod', 'admin'), async (req: Reques
 // PUT /auth/hod-credentials — HOD/Admin updates HOD email/password for department
 app.put('/auth/hod-credentials', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
   try {
-    const { new_email, new_password, department } = req.body;
+    const { new_email, new_password, department, current_password } = req.body;
     if (!new_email && !new_password) {
       return res.status(400).json({ error: 'Provide at least new_email or new_password to update' });
     }
 
-    const targetDept = department || req.auth?.department || 'CSE (Data Science)';
+    const isHod = req.auth?.role === 'hod';
+    // A HOD can change only their own department's login; admins may pick a department
+    const targetDept = (isHod ? req.auth?.department : department) || req.auth?.department || 'CSE (Data Science)';
     const hodEmailEnv = process.env.HOD_MASTER_EMAIL?.toLowerCase() || null;
     const hodPassEnv  = process.env.HOD_MASTER_PASS || null;
 
     if (db.isMock) {
       return res.json({ success: true, message: 'HOD credentials updated.', email: new_email || hodEmailEnv || '', department: targetDept });
     }
+    if (new_password) {
+      const problem = staffPasswordProblem(new_password);
+      if (problem) return res.status(400).json({ error: problem });
+    }
 
     const existing = await db.query(
       'SELECT email, password FROM hod_credentials WHERE LOWER(department) = LOWER($1) LIMIT 1',
       [targetDept]
     ).catch(() => ({ rows: [] }));
+
+    // The HOD must prove they know the current password before changing email or password
+    if (isHod) {
+      const stored = existing.rows[0]?.password;
+      if (!current_password || !stored || !(await compareAndUpgradePassword(String(current_password), stored))) {
+        await new Promise(r => setTimeout(r, 600));
+        return res.status(401).json({ error: 'Your current password is incorrect.' });
+      }
+      if (new_password && await compareAndUpgradePassword(String(new_password), stored)) {
+        return res.status(400).json({ error: 'The new password must be different from the current one.' });
+      }
+    }
+    await ensureStaffPasswordColumns();
 
     const currentEmail    = existing.rows[0]?.email    || hodEmailEnv || `hod.${targetDept.toLowerCase().replace(/[^a-z]/g, '')}@rgmcet.edu.in`;
     const currentPassword = existing.rows[0]?.password || hodPassEnv || 'hod@2026';
@@ -1057,36 +1150,23 @@ app.put('/auth/hod-credentials', requireRole('hod', 'admin'), async (req: Reques
     const updatedPassword = rawNewPassword ? await bcrypt.hash(rawNewPassword, 10) : currentPassword;
 
     // Direct UPDATE first, fallback to INSERT if no row exists for this department
+    // password_changed_at signs this HOD out of every existing session (old password / old email)
+    const changedAt = Date.now() / 1000;
     const updateRes = await db.query(
-      `UPDATE hod_credentials SET email = LOWER($1), password = $2, updated_at = NOW() WHERE LOWER(department) = LOWER($3)`,
-      [updatedEmail, updatedPassword, targetDept]
+      `UPDATE hod_credentials SET email = LOWER($1), password = $2, updated_at = NOW(), password_changed_at = to_timestamp($4) WHERE LOWER(department) = LOWER($3)`,
+      [updatedEmail, updatedPassword, targetDept, changedAt]
     );
     if ((updateRes.rowCount ?? 0) === 0) {
       await db.query(
-        `INSERT INTO hod_credentials (email, password, department, updated_at) VALUES (LOWER($1), $2, $3, NOW())`,
-        [updatedEmail, updatedPassword, targetDept]
+        `INSERT INTO hod_credentials (email, password, department, updated_at, password_changed_at) VALUES (LOWER($1), $2, $3, NOW(), to_timestamp($4))`,
+        [updatedEmail, updatedPassword, targetDept, changedAt]
       );
     }
 
-    // Sync new password to Cognito so authentication verifies through Cognito
-    if (rawNewPassword) {
-      try {
-        const cognitoUpdated = await updateCognitoUserPassword(updatedEmail, rawNewPassword);
-        if (!cognitoUpdated) {
-          await adminCreateCognitoUser({
-            email: updatedEmail,
-            password: rawNewPassword,
-            rollNo: updatedEmail.split('@')[0],
-            role: 'hod',
-            name: `HOD (${targetDept})`,
-          }).catch(() => {});
-        }
-      } catch (cogErr: any) {
-        console.warn('[Cognito] Failed to sync HOD password to Cognito:', cogErr.message);
-      }
-    }
-
-    return res.json({ success: true, message: `HOD credentials updated successfully for ${targetDept}.`, email: updatedEmail, department: targetDept });
+    // HOD logins are checked only against the saved hash (no Cognito), so there is nothing to sync.
+    // A HOD changing their own login gets a fresh session for this device.
+    const token = isHod ? signSessionToken({ role: 'hod', email: updatedEmail }) : undefined;
+    return res.json({ success: true, message: `HOD credentials updated successfully for ${targetDept}.`, email: updatedEmail, department: targetDept, ...(token ? { token } : {}) });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -1100,13 +1180,21 @@ app.post('/auth/hod-credentials/admin-reset', requireRole('admin'), async (req: 
       return res.status(400).json({ error: 'Provide at least new_email or new_password' });
     }
 
-    const targetDept = department || 'CSE (Data Science)';
+    // A department admin may reset only their own department's HOD; super admins any department
+    const callerDept = req.auth?.department;
+    const scoped = !req.auth?.isSuperAdmin && callerDept && !['*', 'All'].includes(callerDept);
+    const targetDept = (scoped ? callerDept : department) || 'CSE (Data Science)';
     const hodEmailEnv = process.env.HOD_MASTER_EMAIL || null;
     const hodPassEnv  = process.env.HOD_MASTER_PASS  || null;
 
     if (db.isMock) {
       return res.json({ success: true, message: 'Mock mode: HOD credentials reset.', email: new_email || hodEmailEnv || '' });
     }
+    if (new_password) {
+      const problem = staffPasswordProblem(new_password);
+      if (problem) return res.status(400).json({ error: problem });
+    }
+    await ensureStaffPasswordColumns();
 
     const existing = await db.query(
       'SELECT email, password FROM hod_credentials WHERE LOWER(department) = LOWER($1) OR LOWER(email) = LOWER($2) LIMIT 1',
@@ -1120,33 +1208,20 @@ app.post('/auth/hod-credentials/admin-reset', requireRole('admin'), async (req: 
     const rawNewPassword  = new_password ? String(new_password) : null;
     const updatedPassword = rawNewPassword ? await bcrypt.hash(rawNewPassword, 10) : currentPassword;
 
+    // password_changed_at signs this HOD out of every existing session (old password / old email)
+    const changedAt = Date.now() / 1000;
     const updateRes = await db.query(
-      `UPDATE hod_credentials SET email = LOWER($1), password = $2, updated_at = NOW() WHERE LOWER(department) = LOWER($3)`,
-      [updatedEmail, updatedPassword, targetDept]
+      `UPDATE hod_credentials SET email = LOWER($1), password = $2, updated_at = NOW(), password_changed_at = to_timestamp($4) WHERE LOWER(department) = LOWER($3)`,
+      [updatedEmail, updatedPassword, targetDept, changedAt]
     );
     if ((updateRes.rowCount ?? 0) === 0) {
       await db.query(
-        `INSERT INTO hod_credentials (email, password, department, updated_at) VALUES (LOWER($1), $2, $3, NOW())`,
-        [updatedEmail, updatedPassword, targetDept]
+        `INSERT INTO hod_credentials (email, password, department, updated_at, password_changed_at) VALUES (LOWER($1), $2, $3, NOW(), to_timestamp($4))`,
+        [updatedEmail, updatedPassword, targetDept, changedAt]
       );
     }
 
-    if (rawNewPassword && updatedEmail) {
-      try {
-        const cognitoUpdated = await updateCognitoUserPassword(updatedEmail, rawNewPassword);
-        if (!cognitoUpdated) {
-          await adminCreateCognitoUser({
-            email: updatedEmail,
-            password: rawNewPassword,
-            rollNo: updatedEmail.split('@')[0],
-            role: 'hod',
-            name: `HOD (${targetDept})`,
-          }).catch(() => {});
-        }
-      } catch (cogErr: any) {
-        console.warn('[Cognito] Failed to sync HOD password to Cognito:', cogErr.message);
-      }
-    }
+    // (No Cognito sync — HOD logins are checked only against the saved hash.)
 
     return res.json({ success: true, message: 'HOD credentials reset by admin.', email: updatedEmail });
   } catch (err: any) {

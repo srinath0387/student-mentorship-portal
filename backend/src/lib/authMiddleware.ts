@@ -101,6 +101,24 @@ async function verifyJwt(token: string): Promise<Record<string, any> | null> {
 }
 
 /**
+ * True when the account's password was changed after this session token was issued —
+ * every session from before a password change stops working (other devices are signed out).
+ * Tables: super_admin_credentials / admin_accounts / hod_credentials (column password_changed_at).
+ * Any lookup error is treated as "not changed" so a missing column can never lock everyone out.
+ */
+const PASSWORD_TABLES = ['super_admin_credentials', 'admin_accounts', 'hod_credentials'] as const;
+export async function passwordChangedSince(table: typeof PASSWORD_TABLES[number], email: string, iat: number): Promise<boolean> {
+  if (db.isMock || !PASSWORD_TABLES.includes(table) || !email || !iat) return false;
+  try {
+    const r = await db.query(`SELECT password_changed_at FROM ${table} WHERE LOWER(email) = LOWER($1) LIMIT 1`, [email]);
+    const changed = r.rows[0]?.password_changed_at;
+    return !!changed && new Date(changed).getTime() > (iat + 1) * 1000;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * extractAuth — Non-blocking middleware. Runs on every request.
  *
  * Attempts to identify the caller via:
@@ -247,6 +265,9 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
           superAdmin = true;
         }
 
+        if (verified && await passwordChangedSince(superAdmin ? 'super_admin_credentials' : 'admin_accounts', email, session.iat)) {
+          return next(); // signed in before the last password change → must sign in again
+        }
         if (verified) {
           req.auth = {
             email: email,
@@ -286,6 +307,9 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
           verified = true;
         }
 
+        if (verified && await passwordChangedSince('hod_credentials', email, session.iat)) {
+          return next(); // signed in before the last password change → must sign in again
+        }
         if (verified) {
           req.auth = {
             email: email,
@@ -298,6 +322,7 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
       }
 
       if (demoRole === 'coordinator' && email) {
+        if (await passwordChangedSince('admin_accounts', email, session.iat)) return next();
         req.auth = {
           email: email,
           role: 'coordinator',
@@ -308,6 +333,7 @@ export async function extractAuth(req: Request, _res: Response, next: NextFuncti
       }
 
       if (['director', 'principal', 'management', 'program_chair'].includes(demoRole) && email) {
+        if (await passwordChangedSince('admin_accounts', email, session.iat)) return next();
         req.auth = {
           email: email,
           role: demoRole,

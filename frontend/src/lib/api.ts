@@ -25,6 +25,11 @@ export { API_BASE_URL };
 
 
 
+/** After a password change the server signs out every older session and returns a fresh one for this tab. */
+export function storeSessionToken(token?: string | null) {
+  if (token) { try { sessionStorage.setItem('advitiyans_jwt_token', token); } catch { /* ignore */ } }
+}
+
 export const api = {
   // Auth Availability
   checkAvailability: async (type: 'email' | 'regNo', value: string) => {
@@ -831,12 +836,24 @@ export const api = {
     return fetchWithAuth(`/auth/hod-credentials${q}`);
   },
 
-  // HOD updates their own email/password — no current password required
-  updateHodCredentials: async (newEmail?: string, newPassword?: string, department?: string): Promise<{ success: boolean; message: string; email: string }> => {
-    return fetchWithAuth('/auth/hod-credentials', {
+  // HOD updates their own login email/password — current password required; returns a fresh session token
+  updateHodCredentials: async (newEmail?: string, newPassword?: string, department?: string, currentPassword?: string): Promise<{ success: boolean; message: string; email: string; token?: string }> => {
+    const r = await fetchWithAuth('/auth/hod-credentials', {
       method: 'PUT',
-      body: JSON.stringify({ new_email: newEmail || undefined, new_password: newPassword || undefined, department }),
+      body: JSON.stringify({ new_email: newEmail || undefined, new_password: newPassword || undefined, department, current_password: currentPassword }),
     });
+    storeSessionToken(r?.token);
+    return r;
+  },
+
+  // Any staff login (admin / HOD / coordinator / principal / director / management / program chair)
+  changeMyPassword: async (currentPassword: string, newPassword: string): Promise<{ success: boolean; message: string }> => {
+    const r = await fetchWithAuth('/auth/my-password', {
+      method: 'PUT',
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    });
+    storeSessionToken(r?.token);
+    return r;
   },
 
   // Admin resets HOD credentials without needing the current password
@@ -900,11 +917,13 @@ export const api = {
   },
 
   // Super admin changes ONLY their own password (my_email scoped server-side)
-  changeSuperAdminMyPassword: async (myEmail: string, newPassword: string): Promise<{ success: boolean }> => {
-    return fetchWithAuth('/super-admin/my-password', {
+  changeSuperAdminMyPassword: async (myEmail: string, newPassword: string, currentPassword?: string): Promise<{ success: boolean }> => {
+    const r = await fetchWithAuth('/super-admin/my-password', {
       method: 'PUT',
-      body: JSON.stringify({ my_email: myEmail, new_password: newPassword }),
+      body: JSON.stringify({ my_email: myEmail, new_password: newPassword, current_password: currentPassword }),
     });
+    storeSessionToken(r?.token);
+    return r;
   },
 
   // ── Tier 1A: Manage Tier 1B Super-Admin Accounts ────────────────────────────
