@@ -32,7 +32,7 @@ export async function meetingPdf(m: any, kind: 'minutes' | 'notice') {
     r.refLine('', `Date: ${fmtD(m.created_at || today())}`);
     r.title('Notice of Meeting', m.meeting_type);
     r.para(`A ${m.meeting_type.toLowerCase()} of the Department of ${m.department} is scheduled as per the details below. All members are requested to attend without fail.`);
-    r.keyValues([['Meeting', m.title], ['Date & Time', when], ['Venue', m.venue], ['Chaired by', m.chair_name]]);
+    r.keyValues([['Meeting', m.title], ['Date & Time', when], ['Venue', m.venue], ['Chaired by', m.chair_name], ['Coordinator', m.coordinator_name]]);
     r.heading('Agenda');
     r.table(['S.No', 'Agenda item'], (m.agenda || []).map((a: any, i: number) => [i + 1, a.item]), { 0: { cellWidth: 14 } });
     r.heading('Members');
@@ -45,7 +45,7 @@ export async function meetingPdf(m: any, kind: 'minutes' | 'notice') {
   r.title('Minutes of the Meeting', `${m.meeting_type} — ${m.title}`);
   const present = (m.attendees || []).filter((a: any) => a.present === true);
   const absent = (m.attendees || []).filter((a: any) => a.present === false);
-  r.keyValues([['Date & Time', when], ['Venue', m.venue], ['Chaired by', m.chair_name], ['Members present', `${present.length} of ${(m.attendees || []).length}`], ['Special invitees', m.special_invitees]]);
+  r.keyValues([['Date & Time', when], ['Venue', m.venue], ['Chaired by', m.chair_name], ['Coordinator', m.coordinator_name], ['Members present', `${present.length} of ${(m.attendees || []).length}`], ['Special invitees', m.special_invitees]]);
   r.heading('Members Present');
   r.table(['S.No', 'Name', 'Designation', 'Signature'], present.map((a: any, i: number) => [i + 1, a.name, a.designation || '', '']), { 0: { cellWidth: 14 }, 3: { cellWidth: 40, minCellHeight: 8 } });
   if (absent.length) { r.heading('Leave of Absence'); r.para(absent.map((a: any) => a.name).join(', ')); }
@@ -59,11 +59,12 @@ export async function meetingPdf(m: any, kind: 'minutes' | 'notice') {
   }
   if (m.notes) { r.heading('Other Points'); r.para(m.notes); }
   r.para('The meeting concluded with a vote of thanks.');
-  r.signatures([{ role: 'Convener', name: '' }, { role: 'HOD', name: `Department of ${m.department}` }, { role: 'Principal' }]);
+  r.signatures([{ role: 'Coordinator', name: m.coordinator_name || '' }, { role: 'HOD', name: `Department of ${m.department}` }, { role: 'Principal' }]);
   r.save(`Minutes - ${m.title} - ${d10(m.meeting_date)}.pdf`);
 }
 
-function MeetingEditor({ meeting, department, onBack }: { meeting: any | null; department: string | null; onBack: () => void }) {
+/** canManage: HOD / admin / principal / director. Otherwise the faculty coordinator — attendance, minutes, actions, publish. */
+function MeetingEditor({ meeting, department, onBack, canManage = true }: { meeting: any | null; department: string | null; onBack: () => void; canManage?: boolean }) {
   const qc = useQueryClient();
   const { user } = useAuth();
   const { data: meta } = useQuery({ queryKey: ['meetingMeta'], queryFn: () => api.getMeetingMeta() });
@@ -104,6 +105,18 @@ function MeetingEditor({ meeting, department, onBack }: { meeting: any | null; d
     mutationFn: () => api.cancelMeeting(savedId!),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['meetings'] }); onBack(); },
   });
+  const del = useMutation({
+    mutationFn: () => api.deleteMeeting(savedId!),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['meetings'] }); qc.invalidateQueries({ queryKey: ['myMeetingActions'] }); onBack(); },
+    onError: (e: any) => setMsg({ ok: false, text: e.message }),
+  });
+  const confirmDelete = () => {
+    const upcoming = m.status === 'scheduled' && d10(m.meeting_date) >= today();
+    const text = m.status === 'published'
+      ? `Delete "${m.title}" and its published minutes (${m.ref_no})?\n\nThe minutes, attendance and action items are removed permanently. Download the minutes PDF first if you need a copy.`
+      : `Delete "${m.title}"?${upcoming ? '\n\nInvited members will be told the meeting is cancelled.' : ''}\n\nThis cannot be undone.`;
+    if (window.confirm(text)) del.mutate();
+  };
 
   const agendaRow = (i: number, patch: any) => set({ agenda: m.agenda.map((a: any, j: number) => (j === i ? { ...a, ...patch } : a)) });
   const actionRow = (i: number, patch: any) => set({ action_items: m.action_items.map((a: any, j: number) => (j === i ? { ...a, ...patch } : a)) });
@@ -120,7 +133,13 @@ function MeetingEditor({ meeting, department, onBack }: { meeting: any | null; d
         {m.status && <Chip s={m.status} />}
         {savedId && <button className={btnGhost} onClick={() => meetingPdf({ ...m, department: dept }, 'notice')}><FileText className="w-3.5 h-3.5 inline mr-1" />Notice PDF</button>}
         {savedId && <button className={btnGhost} onClick={() => meetingPdf({ ...m, department: dept }, 'minutes')}><Download className="w-3.5 h-3.5 inline mr-1" />Minutes PDF</button>}
+        {savedId && canManage && (
+          <button className={`${btnGhost} text-rose-600 border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-950/30`} disabled={del.isPending} onClick={confirmDelete}>
+            <Trash2 className="w-3.5 h-3.5 inline mr-1" />{del.isPending ? 'Deleting…' : 'Delete'}
+          </button>
+        )}
       </div>
+      {!canManage && <p className="text-[11px] font-bold text-brand-primary">You are the coordinator of this meeting — record attendance and the minutes, then publish.</p>}
       {msg && <div className={`rounded-xl px-4 py-2.5 text-xs font-bold ${msg.ok ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'}`}>{msg.text}</div>}
 
       <div className="flex rounded-xl border border-borderLine overflow-hidden text-xs font-bold w-fit">
@@ -131,7 +150,7 @@ function MeetingEditor({ meeting, department, onBack }: { meeting: any | null; d
       {step === 'details' ? (
         <div className="space-y-4">
           <div className={`${card} p-4 grid md:grid-cols-3 gap-3`}>
-            {!department && (
+            {!department && canManage && (
               <div className="space-y-1"><p className={lbl}>Department</p>
                 <select className={`${input} w-full`} value={dept} disabled={!!savedId} onChange={e => { setDept(e.target.value); set({ attendees: [] }); }}>
                   <option value="">Choose…</option>{DEPTS.map(d => <option key={d}>{d}</option>)}</select></div>
@@ -143,6 +162,17 @@ function MeetingEditor({ meeting, department, onBack }: { meeting: any | null; d
             <div className="space-y-1"><p className={lbl}>Venue</p><input className={`${input} w-full`} value={m.venue || ''} onChange={e => set({ venue: e.target.value })} placeholder="HOD chamber / Seminar hall" /></div>
             <div className="space-y-1"><p className={lbl}>Chaired by</p><input className={`${input} w-full`} value={m.chair_name || ''} onChange={e => set({ chair_name: e.target.value })} /></div>
             <div className="space-y-1"><p className={lbl}>Special invitees</p><input className={`${input} w-full`} value={m.special_invitees || ''} onChange={e => set({ special_invitees: e.target.value })} placeholder="Industry expert, alumni…" /></div>
+            <div className="space-y-1 md:col-span-2"><p className={lbl}>Faculty coordinator <span className="normal-case font-semibold text-textMuted">— records attendance &amp; minutes</span></p>
+              {canManage ? (
+                <select className={`${input} w-full`} value={m.coordinator_email || ''} disabled={!dept} onChange={e => {
+                  const f = linked.find((x: any) => String(x.email).toLowerCase() === e.target.value);
+                  set({ coordinator_email: e.target.value || null, coordinator_name: f?.name || null });
+                }}>
+                  <option value="">{dept ? 'No coordinator (HOD records the minutes)' : 'Choose the department first'}</option>
+                  {linked.map((x: any) => <option key={x.email} value={String(x.email).toLowerCase()}>{x.name}{x.designation ? ` — ${x.designation}` : ''}</option>)}
+                </select>
+              ) : <p className="text-xs font-bold text-textPrimary py-1.5">{m.coordinator_name || 'You'}</p>}
+            </div>
           </div>
 
           <div className={`${card} p-4 space-y-2`}>
@@ -181,7 +211,7 @@ function MeetingEditor({ meeting, department, onBack }: { meeting: any | null; d
             </>) : (<>
               <button className={btnPrimary} disabled={save.isPending} onClick={() => save.mutate(false)}>Save</button>
               <button className={btnGhost} onClick={() => setStep('minutes')}>Next: attendance &amp; minutes →</button>
-              {m.status === 'scheduled' && <button className={`${btnGhost} text-rose-600 ml-auto`} onClick={() => window.confirm('Cancel this meeting and inform the members?') && cancel.mutate()}><XCircle className="w-3.5 h-3.5 inline mr-1" />Cancel meeting</button>}
+              {m.status === 'scheduled' && canManage && <button className={`${btnGhost} text-rose-600 ml-auto`} onClick={() => window.confirm('Cancel this meeting and inform the members?') && cancel.mutate()}><XCircle className="w-3.5 h-3.5 inline mr-1" />Cancel meeting</button>}
             </>)}
           </div>
         </div>
@@ -280,10 +310,13 @@ export default function MeetingsPage() {
   const [open, setOpen] = useState<any | 'new' | null>(null);
   const openActions = useMemo(() => meetings.filter(m => m.status === 'published').flatMap(m => (m.action_items || []).filter((a: any) => a.status !== 'done').map((a: any) => ({ ...a, meeting: m }))), [meetings]);
 
+  const iCoordinate = (m: any) => !!user?.email && String(m?.coordinator_email || '').toLowerCase() === user.email.toLowerCase();
   if (open) {
-    return editor
-      ? <MeetingEditor meeting={open === 'new' ? null : open} department={ownDept} onBack={() => setOpen(null)} />
-      : <MeetingView m={open} onBack={() => setOpen(null)} />;
+    if (editor) return <MeetingEditor meeting={open === 'new' ? null : open} department={ownDept} onBack={() => setOpen(null)} />;
+    if (open !== 'new' && iCoordinate(open) && open.status !== 'cancelled') {
+      return <MeetingEditor meeting={open} department={open.department} canManage={false} onBack={() => setOpen(null)} />;
+    }
+    return <MeetingView m={open} onBack={() => setOpen(null)} />;
   }
   const upcoming = meetings.filter(m => m.status === 'scheduled' && d10(m.meeting_date) >= today());
   return (
@@ -331,8 +364,9 @@ export default function MeetingsPage() {
                   <div className="w-12 text-center shrink-0"><p className="text-lg font-black text-textPrimary leading-none">{d10(m.meeting_date).slice(8)}</p>
                     <p className="text-[10px] font-bold text-textMuted uppercase">{new Date(d10(m.meeting_date) + 'T00:00:00').toLocaleDateString('en-IN', { month: 'short' })}</p></div>
                   <div className="flex-1 min-w-[200px]"><p className="text-sm font-bold text-textPrimary">{m.title}</p>
-                    <p className="text-[11px] text-textSecondary">{m.meeting_type}{!ownDept ? ` · ${m.department}` : ''} · <Users className="w-3 h-3 inline" /> {(m.attendees || []).length}{m.ref_no ? ` · ${m.ref_no}` : ''}</p></div>
-                  {minutesDue && editor && <span className="text-[10px] font-black text-amber-600">Record minutes</span>}
+                    <p className="text-[11px] text-textSecondary">{m.meeting_type}{!ownDept ? ` · ${m.department}` : ''} · <Users className="w-3 h-3 inline" /> {(m.attendees || []).length}{m.coordinator_name ? ` · Coordinator: ${m.coordinator_name}` : ''}{m.ref_no ? ` · ${m.ref_no}` : ''}</p></div>
+                  {iCoordinate(m) && !editor && <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-brand-soft text-brand-primary">You coordinate</span>}
+                  {minutesDue && (editor || iCoordinate(m)) && <span className="text-[10px] font-black text-amber-600">Record minutes</span>}
                   <Chip s={m.status} />
                 </button>
               );

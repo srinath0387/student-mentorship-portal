@@ -11109,7 +11109,9 @@ async function staffName(email: string): Promise<string> {
   return r.rows[0]?.name || email;
 }
 async function nextRefNo(table: 'dept_meetings' | 'dept_events', prefix: string, ay: string): Promise<string> {
-  const r = await db.query(`SELECT COUNT(*)::int AS n FROM ${table} WHERE ref_no LIKE $1`, [`${prefix}/%`]);
+  // Highest number used so far (not a count) — deleting a record must never make a number repeat
+  const r = await db.query(
+    `SELECT COALESCE(MAX(CAST(SUBSTRING(ref_no FROM '([0-9]+)$') AS INT)), 0)::int AS n FROM ${table} WHERE ref_no LIKE $1`, [`${prefix}/%`]);
   return `${prefix}/${String(Number(r.rows[0]?.n || 0) + 1).padStart(3, '0')}`;
 }
 
@@ -11139,6 +11141,8 @@ function ensureQualityTables(): Promise<void> {
         published_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_dept_meetings_dept ON dept_meetings (department, meeting_date DESC);
+      ALTER TABLE dept_meetings ADD COLUMN IF NOT EXISTS coordinator_email TEXT;
+      ALTER TABLE dept_meetings ADD COLUMN IF NOT EXISTS coordinator_name TEXT;
       CREATE TABLE IF NOT EXISTS dept_events (
         id SERIAL PRIMARY KEY,
         ref_no TEXT, academic_year TEXT, department TEXT NOT NULL,
@@ -11421,6 +11425,7 @@ function cleanMeeting(b: any) {
     start_time: /^\d{2}:\d{2}$/.test(String(b.start_time || '')) ? b.start_time : null,
     end_time: /^\d{2}:\d{2}$/.test(String(b.end_time || '')) ? b.end_time : null,
     venue: clip(b.venue, 160), chair_name: clip(b.chair_name, 120), special_invitees: clip(b.special_invitees, 1000), notes: clip(b.notes, 3000),
+    coordinator_email: String(b.coordinator_email || '').toLowerCase().trim() || null,
     agenda: (Array.isArray(b.agenda) ? b.agenda : []).slice(0, 40).map((x: any, i: number) => ({
       id: id(x?.id, 'g', i), item: clip(x?.item, 400) || '', discussion: clip(x?.discussion, 4000), resolution: clip(x?.resolution, 2000),
     })).filter((x: any) => x.item),
@@ -11449,8 +11454,10 @@ app.get('/meetings', requireRole(...QUALITY_STAFF), async (req: Request, res: Re
       const dept = own || (req.query.department && req.query.department !== 'All' ? String(req.query.department) : null);
       if (dept) { params.push(normDept(dept)); where.push(`LOWER(REGEXP_REPLACE(department, '[^a-zA-Z0-9]', '', 'g')) = $${params.length}`); }
     } else {
+      // Faculty: meetings they are invited to or coordinate
       params.push(JSON.stringify([{ email: String(a.email || '').toLowerCase() }]));
-      where.push(`attendees @> $${params.length}::jsonb AND status <> 'cancelled'`);
+      params.push(String(a.email || '').toLowerCase());
+      where.push(`(attendees @> $${params.length - 1}::jsonb OR LOWER(COALESCE(coordinator_email, '')) = $${params.length}) AND status <> 'cancelled'`);
     }
     const r = await db.query(`SELECT * FROM dept_meetings ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY meeting_date DESC, id DESC LIMIT 500`, params);
     res.json(r.rows);
@@ -11471,12 +11478,36 @@ app.get('/meetings/my-actions', requireRole(...QUALITY_STAFF), async (req: Reque
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-async function meetingForEdit(req: Request, id: number) {
+/**
+ * Who may change this meeting: a manager (HOD / admin / principal / director of that department) can do
+ * everything; the faculty coordinator can record attendance, minutes and action items and publish.
+ */
+async function meetingForEdit(req: Request, id: number, opts: { allowCoordinator?: boolean } = {}) {
   const m = (await db.query('SELECT * FROM dept_meetings WHERE id = $1', [id])).rows[0];
   if (!m) return { error: 404 as const };
-  const dept = await qualityDept(req);
-  if (dept && normDept(dept) !== normDept(m.department)) return { error: 403 as const };
-  return { m };
+  const me = String(req.auth!.email || '').toLowerCase();
+  const isCoordinator = !!me && String(m.coordinator_email || '').toLowerCase() === me;
+  let isManager = false;
+  if (MEETING_EDITORS.includes(req.auth!.role)) {
+    const dept = await qualityDept(req);
+    isManager = !dept || normDept(dept) === normDept(m.department);
+  }
+  if (!isManager && !(opts.allowCoordinator && isCoordinator)) return { error: 403 as const };
+  return { m, isManager, isCoordinator };
+}
+
+/** A faculty member to coordinate a meeting (must exist in the faculty list). */
+async function meetingCoordinator(email: string | null): Promise<{ email: string; name: string } | null | 'unknown'> {
+  if (!email) return null;
+  const f = await db.query('SELECT email, name FROM faculty WHERE LOWER(email) = LOWER($1) LIMIT 1', [email]);
+  return f.rows[0] ? { email: String(f.rows[0].email).toLowerCase(), name: f.rows[0].name } : 'unknown';
+}
+const meetingDateText = (m: any) => String(m.meeting_date instanceof Date ? m.meeting_date.toISOString() : m.meeting_date).slice(0, 10);
+async function notifyMeetingCoordinator(m: any, coordEmail: string) {
+  await notifyUsers([staffKey(coordEmail)], {
+    title: `You are the coordinator: ${m.title}`, url: '/meetings', tag: `meeting-coord-${m.id}`,
+    body: `${meetingDateText(m)}${m.start_time ? ` at ${m.start_time}` : ''}. Please record attendance and the minutes, then publish them.`,
+  });
 }
 
 // POST /meetings — schedule (HOD for own department; principal / admin pick a department)
@@ -11487,13 +11518,17 @@ app.post('/meetings', requireRole(...MEETING_EDITORS), async (req: Request, res:
     if (!dept) return res.status(400).json({ error: 'Choose the department' });
     const v = cleanMeeting(req.body || {});
     if (!v.title || !v.meeting_date) return res.status(400).json({ error: 'Title and date are required' });
+    const coord = await meetingCoordinator(v.coordinator_email);
+    if (coord === 'unknown') return res.status(400).json({ error: 'The coordinator must be a faculty member' });
     const r = await db.query(
       `INSERT INTO dept_meetings (department, academic_year, title, meeting_type, meeting_date, start_time, end_time, venue, chair_name, convened_by,
-         agenda, attendees, special_invitees, action_items, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+         agenda, attendees, special_invitees, action_items, notes, coordinator_email, coordinator_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
       [dept, currentAcademicYear(new Date(v.meeting_date + 'T00:00:00Z')), v.title, v.meeting_type, v.meeting_date, v.start_time, v.end_time, v.venue,
-        v.chair_name, req.auth!.email, JSON.stringify(v.agenda), JSON.stringify(v.attendees), v.special_invitees, JSON.stringify(v.action_items), v.notes]);
+        v.chair_name, req.auth!.email, JSON.stringify(v.agenda), JSON.stringify(v.attendees), v.special_invitees, JSON.stringify(v.action_items), v.notes,
+        coord?.email || null, coord?.name || null]);
     const m = r.rows[0];
+    if (coord) await notifyMeetingCoordinator(m, coord.email);
     if (req.body?.notify !== false) {
       await notifyUsers(v.attendees.filter((x: any) => x.email).map((x: any) => staffKey(x.email!)), {
         title: `Meeting: ${v.title}`, url: '/meetings', tag: `meeting-${m.id}`,
@@ -11505,28 +11540,37 @@ app.post('/meetings', requireRole(...MEETING_EDITORS), async (req: Request, res:
 });
 
 // PUT /meetings/:id — agenda, attendance, minutes, action items
-app.put('/meetings/:id', requireRole(...MEETING_EDITORS), async (req: Request, res: Response) => {
+app.put('/meetings/:id', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
   try {
     await ensureQualityTables();
-    const f = await meetingForEdit(req, Number(req.params.id));
-    if (f.error) return res.status(f.error).json({ error: f.error === 404 ? 'Meeting not found' : 'Not your department' });
+    const f = await meetingForEdit(req, Number(req.params.id), { allowCoordinator: true });
+    if (f.error) return res.status(f.error).json({ error: f.error === 404 ? 'Meeting not found' : 'Only the HOD or the meeting coordinator can edit this meeting' });
     const v = cleanMeeting(req.body || {});
     if (!v.title || !v.meeting_date) return res.status(400).json({ error: 'Title and date are required' });
+    // Only a manager can change who coordinates; the coordinator's own edits keep it as is
+    let coordEmail: string | null = f.m.coordinator_email || null;
+    let coordName: string | null = f.m.coordinator_name || null;
+    if (f.isManager && (v.coordinator_email || null) !== (f.m.coordinator_email || null)) {
+      const coord = await meetingCoordinator(v.coordinator_email);
+      if (coord === 'unknown') return res.status(400).json({ error: 'The coordinator must be a faculty member' });
+      coordEmail = coord?.email || null; coordName = coord?.name || null;
+    }
     const r = await db.query(
       `UPDATE dept_meetings SET title=$1, meeting_type=$2, meeting_date=$3, start_time=$4, end_time=$5, venue=$6, chair_name=$7, agenda=$8,
-         attendees=$9, special_invitees=$10, action_items=$11, notes=$12, updated_at=NOW() WHERE id=$13 RETURNING *`,
+         attendees=$9, special_invitees=$10, action_items=$11, notes=$12, coordinator_email=$13, coordinator_name=$14, updated_at=NOW() WHERE id=$15 RETURNING *`,
       [v.title, v.meeting_type, v.meeting_date, v.start_time, v.end_time, v.venue, v.chair_name, JSON.stringify(v.agenda), JSON.stringify(v.attendees),
-        v.special_invitees, JSON.stringify(v.action_items), v.notes, f.m.id]);
+        v.special_invitees, JSON.stringify(v.action_items), v.notes, coordEmail, coordName, f.m.id]);
+    if (coordEmail && coordEmail !== String(f.m.coordinator_email || '').toLowerCase()) await notifyMeetingCoordinator(r.rows[0], coordEmail);
     res.json(r.rows[0]);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 // POST /meetings/:id/publish — numbered minutes; attendees and action owners are told
-app.post('/meetings/:id/publish', requireRole(...MEETING_EDITORS), async (req: Request, res: Response) => {
+app.post('/meetings/:id/publish', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
   try {
     await ensureQualityTables();
-    const f = await meetingForEdit(req, Number(req.params.id));
-    if (f.error) return res.status(f.error).json({ error: f.error === 404 ? 'Meeting not found' : 'Not your department' });
+    const f = await meetingForEdit(req, Number(req.params.id), { allowCoordinator: true });
+    if (f.error) return res.status(f.error).json({ error: f.error === 404 ? 'Meeting not found' : 'Only the HOD or the meeting coordinator can publish the minutes' });
     const m = f.m;
     if (m.status === 'cancelled') return res.status(400).json({ error: 'Meeting was cancelled' });
     if (!(m.attendees || []).some((x: any) => x.present === true)) return res.status(400).json({ error: 'Mark who was present first' });
@@ -11563,6 +11607,25 @@ app.patch('/meetings/:id/status', requireRole(...MEETING_EDITORS), async (req: R
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+// DELETE /meetings/:id — HOD / admin / principal / director remove a meeting (and its minutes) for good
+app.delete('/meetings/:id', requireRole(...MEETING_EDITORS), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const f = await meetingForEdit(req, Number(req.params.id));
+    if (f.error) return res.status(f.error).json({ error: f.error === 404 ? 'Meeting not found' : 'Not your department' });
+    const m = f.m;
+    await db.query('DELETE FROM dept_meetings WHERE id = $1', [m.id]);
+    // An upcoming meeting that was announced: tell the invited members it is off
+    if (m.status === 'scheduled' && meetingDateText(m) >= todayIST()) {
+      const keys = (m.attendees || []).filter((x: any) => x.email).map((x: any) => staffKey(x.email));
+      if (m.coordinator_email) keys.push(staffKey(m.coordinator_email));
+      await notifyUsers(keys, { title: `Meeting cancelled: ${m.title}`, url: '/meetings', tag: `meeting-${m.id}`, body: `The meeting on ${meetingDateText(m)} has been cancelled.` });
+    }
+    console.log('[meetings] deleted', { id: m.id, ref: m.ref_no, title: m.title, by: req.auth!.email });
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 // PATCH /meetings/:id/actions/:actionId — owner (or HOD) marks an action item done / open
 app.patch('/meetings/:id/actions/:actionId', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
   try {
@@ -11571,7 +11634,8 @@ app.patch('/meetings/:id/actions/:actionId', requireRole(...QUALITY_STAFF), asyn
     if (!m) return res.status(404).json({ error: 'Meeting not found' });
     const me = String(req.auth!.email || '').toLowerCase();
     const dept = await qualityDept(req);
-    const isEditor = MEETING_EDITORS.includes(req.auth!.role) && (!dept || normDept(dept) === normDept(m.department));
+    const isEditor = (MEETING_EDITORS.includes(req.auth!.role) && (!dept || normDept(dept) === normDept(m.department)))
+      || (!!me && String(m.coordinator_email || '').toLowerCase() === me);
     const done = req.body?.status === 'done';
     let found = false;
     const items = (m.action_items || []).map((x: any) => {

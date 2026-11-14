@@ -123,13 +123,13 @@ describe('Meetings & minutes', () => {
     expect((await request(app).post('/meetings/7/publish').set('Authorization', HOD())).body.error).toMatch(/Mark who was present/);
     const calls = routeDb([HOD_ROW,
       ['SELECT * FROM dept_meetings WHERE id', [{ ...base, attendees: [{ name: 'A', email: 'a@x', present: true }], agenda: [{ item: 'x', resolution: 'Agreed' }], action_items: [] }]],
-      ['COUNT(*)::int AS n FROM dept_meetings', [{ n: 2 }]],
+      ['::int AS n FROM dept_meetings', [{ n: 2 }]],
       ["UPDATE dept_meetings SET status = 'published'", (_s, p) => [{ ...base, status: 'published', ref_no: p[0] }]],
     ]);
     const ok = await request(app).post('/meetings/7/publish').set('Authorization', HOD());
     expect(ok.status).toBe(200);
     expect(ok.body.ref_no).toBe('RGMCET/CSD/MoM/2026-27/003');
-    expect(calls.find(c => c.sql.includes('COUNT(*)::int AS n FROM dept_meetings'))!.params[0]).toBe('RGMCET/CSD/MoM/2026-27/%');
+    expect(calls.find(c => c.sql.includes('::int AS n FROM dept_meetings'))!.params[0]).toBe('RGMCET/CSD/MoM/2026-27/%');
   });
 
   it('only the owner (or HOD) can close an action item', async () => {
@@ -168,7 +168,7 @@ describe('Event reports', () => {
   });
 
   it('HOD approval assigns a numbered reference by event type', async () => {
-    routeDb([HOD_ROW, ['SELECT * FROM dept_events WHERE id', [{ ...ev, status: 'submitted' }]], ['COUNT(*)::int AS n FROM dept_events', [{ n: 0 }]]]);
+    routeDb([HOD_ROW, ['SELECT * FROM dept_events WHERE id', [{ ...ev, status: 'submitted' }]], ['::int AS n FROM dept_events', [{ n: 0 }]]]);
     const res = await request(app).patch('/events/9/review').set('Authorization', HOD()).send({ status: 'approved' });
     expect(res.status).toBe(200);
     expect(res.body.ref_no).toBe('RGMCET/CSD/IV/2026-27/001');
@@ -179,5 +179,61 @@ describe('Event reports', () => {
     await request(app).get('/events').set('Authorization', FAC());
     const q = calls.find(c => c.sql.includes('FROM dept_events'))!;
     expect(q.sql).toContain("status = 'approved' OR LOWER(submitted_by)");
+  });
+});
+
+describe('Meetings: delete and faculty coordinator', () => {
+  const base = { id: 7, department: 'CSE (Data Science)', academic_year: '2026–27', status: 'scheduled', title: 'Review', meeting_date: '2099-01-10',
+    attendees: [{ name: 'A', email: 'a@rgmcet.edu.in', present: true }], agenda: [{ item: 'x', resolution: 'Agreed' }], action_items: [],
+    coordinator_email: 'ramesh@rgmcet.edu.in', coordinator_name: 'Dr. K. Ramesh' };
+  const FAC_DEPT: Route = ['SELECT department FROM faculty', [{ department: 'CSE (Data Science)' }]];
+
+  it('HOD deletes a meeting; faculty (even the coordinator) cannot', async () => {
+    const calls = routeDb([HOD_ROW, ['SELECT * FROM dept_meetings WHERE id', [base]]]);
+    const ok = await request(app).delete('/meetings/7').set('Authorization', HOD());
+    expect(ok.status).toBe(200);
+    expect(calls.some(c => c.sql.startsWith('DELETE FROM dept_meetings WHERE id = $1') && c.params[0] === 7)).toBe(true);
+    routeDb([FAC_DEPT, ['SELECT * FROM dept_meetings WHERE id', [base]]]);
+    expect((await request(app).delete('/meetings/7').set('Authorization', FAC())).status).toBe(403);
+  });
+
+  it('HOD cannot delete another department\'s meeting', async () => {
+    routeDb([HOD_ROW, ['SELECT * FROM dept_meetings WHERE id', [{ ...base, department: 'ECE' }]]]);
+    expect((await request(app).delete('/meetings/7').set('Authorization', HOD())).status).toBe(403);
+  });
+
+  it('the coordinator records minutes and publishes; other faculty cannot', async () => {
+    let calls = routeDb([FAC_DEPT, ['SELECT * FROM dept_meetings WHERE id', [base]], ['UPDATE dept_meetings SET title', (_s, p) => [{ ...base, coordinator_email: p[12] }]]]);
+    const put = await request(app).put('/meetings/7').set('Authorization', FAC())
+      .send({ ...base, coordinator_email: 'someoneelse@rgmcet.edu.in', agenda: [{ item: 'x', discussion: 'Discussed', resolution: 'Agreed' }] });
+    expect(put.status).toBe(200);
+    const upd = calls.find(c => c.sql.startsWith('UPDATE dept_meetings SET title'))!;
+    expect(upd.params[12]).toBe('ramesh@rgmcet.edu.in'); // a coordinator cannot hand the role to someone else
+    calls = routeDb([FAC_DEPT, ['SELECT * FROM dept_meetings WHERE id', [base]], ['::int AS n FROM dept_meetings', [{ n: 4 }]],
+      ["UPDATE dept_meetings SET status = 'published'", (_s, p) => [{ ...base, status: 'published', ref_no: p[0] }]]]);
+    const pub = await request(app).post('/meetings/7/publish').set('Authorization', FAC());
+    expect(pub.status).toBe(200);
+    expect(pub.body.ref_no).toBe('RGMCET/CSD/MoM/2026-27/005');
+    routeDb([FAC_DEPT, ['SELECT * FROM dept_meetings WHERE id', [base]]]);
+    expect((await request(app).put('/meetings/7').set('Authorization', bearer('faculty', 'other@rgmcet.edu.in')).send({ ...base })).status).toBe(403);
+  });
+
+  it('HOD assigns a coordinator, who must be a faculty member', async () => {
+    routeDb([HOD_ROW]);
+    const bad = await request(app).post('/meetings').set('Authorization', HOD()).send({ title: 'T', meeting_date: '2099-01-10', coordinator_email: 'nobody@x.com' });
+    expect(bad.status).toBe(400);
+    const calls = routeDb([HOD_ROW, ['SELECT email, name FROM faculty', [{ email: 'Ramesh@rgmcet.edu.in', name: 'Dr. K. Ramesh' }]],
+      ['INSERT INTO dept_meetings', (_s, p) => [{ id: 9, title: p[2], meeting_date: p[4], coordinator_email: p[15] }]]]);
+    const ok = await request(app).post('/meetings').set('Authorization', HOD()).send({ title: 'T', meeting_date: '2099-01-10', coordinator_email: 'ramesh@rgmcet.edu.in' });
+    expect(ok.status).toBe(201);
+    const ins = calls.find(c => c.sql.includes('INSERT INTO dept_meetings'))!;
+    expect(ins.params.slice(15)).toEqual(['ramesh@rgmcet.edu.in', 'Dr. K. Ramesh']);
+  });
+
+  it('minutes numbers continue from the highest used number (no repeats after a delete)', async () => {
+    const calls = routeDb([HOD_ROW, ['SELECT * FROM dept_meetings WHERE id', [{ ...base, coordinator_email: null }]], ['::int AS n FROM dept_meetings', [{ n: 3 }]],
+      ["UPDATE dept_meetings SET status = 'published'", (_s, p) => [{ ...base, status: 'published', ref_no: p[0] }]]]);
+    await request(app).post('/meetings/7/publish').set('Authorization', HOD());
+    expect(calls.find(c => c.sql.includes('::int AS n FROM dept_meetings'))!.sql).toContain('MAX(');
   });
 });

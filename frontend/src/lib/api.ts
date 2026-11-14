@@ -1112,6 +1112,7 @@ export const api = {
   updateMeeting: async (id: number, body: any) => fetchWithAuth(`/meetings/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   publishMeeting: async (id: number) => fetchWithAuth(`/meetings/${id}/publish`, { method: 'POST' }),
   cancelMeeting: async (id: number) => fetchWithAuth(`/meetings/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled' }) }),
+  deleteMeeting: async (id: number) => fetchWithAuth(`/meetings/${id}`, { method: 'DELETE' }),
   setMeetingAction: async (id: number, actionId: string, status: 'done' | 'open') =>
     fetchWithAuth(`/meetings/${id}/actions/${actionId}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   getEventMeta: async (): Promise<{ types: string[] }> => fetchWithAuth('/events/meta'),
