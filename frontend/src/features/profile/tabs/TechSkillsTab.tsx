@@ -5,6 +5,7 @@ import { api } from '../../../lib/api';
 import { useAuth } from '../../../context/AuthContext';
 import { PillButton } from '../../../components/common/PillButton';
 
+import { BouncingDots } from '../../../components/common/BouncingDots';
 interface TechSkillsTabProps {
   skills: TechSkill[];
   readOnly?: boolean;
@@ -171,7 +172,7 @@ export const TechSkillsTab: React.FC<TechSkillsTabProps> = ({ skills, readOnly =
                               title={`Delete ${skill.specific_tool}`}
                             >
                               {isDeleting ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin text-red-500" />
+                                <BouncingDots size="xs" className="text-red-500" />
                               ) : (
                                 <Trash2 className="w-3.5 h-3.5" />
                               )}

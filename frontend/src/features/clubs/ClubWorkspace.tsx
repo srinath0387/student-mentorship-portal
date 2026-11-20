@@ -4,6 +4,7 @@ import { CalendarPlus, Check, Download, Loader2, Megaphone, Trash2, Users, X } f
 import { api } from '../../lib/api';
 import { RoleChip, StatusChip, btnGhost, btnPrimary, card, downloadCsv, fmtDate, fmtDateTime, input, label, todayIso, Empty } from './clubUi';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 type Mode = 'admin' | 'coordinator' | 'lead';
 
 /** Run a club: members (payment checks, roles), sessions & announcements, session attendance. */
@@ -90,7 +91,7 @@ function Members({ club, mode }: { club: any; mode: Mode }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-borderLine">
-            {isLoading ? <tr><td colSpan={7}><Empty><Loader2 className="w-4 h-4 animate-spin inline" /></Empty></td></tr>
+            {isLoading ? <tr><td colSpan={7}><Empty><BouncingDots size="sm" /></Empty></td></tr>
               : shown.length === 0 ? <tr><td colSpan={7}><Empty>No registrations here yet.</Empty></td></tr>
               : shown.map(m => (
                 <tr key={m.id} className="hover:bg-surface-2/60">
@@ -178,7 +179,7 @@ function Sessions({ club }: { club: any }) {
         </div>
       )}
 
-      {isLoading ? <Empty><Loader2 className="w-4 h-4 animate-spin inline" /></Empty> : sessions.length === 0 ? <Empty>Nothing posted yet.</Empty> : (
+      {isLoading ? <Empty><BouncingDots size="sm" /></Empty> : sessions.length === 0 ? <Empty>Nothing posted yet.</Empty> : (
         <div className="space-y-2">
           {sessions.map(s => {
             const due = s.kind === 'session' && s.session_date && String(s.session_date).slice(0, 10) <= todayIso();

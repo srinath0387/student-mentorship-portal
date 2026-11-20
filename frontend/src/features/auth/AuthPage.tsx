@@ -13,6 +13,7 @@ import { useLandingTheme } from '../../lib/pageTheme';
 import { deriveFromRegNo } from './RegisterPanel';
 import { UserRole } from '../../types';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 // Admin/HOD login is handled server-side via POST /auth/admin-login.
 // No admin email or password is stored in the frontend bundle.
 
@@ -1291,7 +1292,7 @@ export const AuthPage: React.FC = () => {
                       className="w-full px-3.5 py-2 text-sm rounded-lg border border-borderLine bg-background uppercase focus:outline-none focus:ring-2 focus:ring-brand-primary pr-10"
                     />
                     <div className="absolute right-3 top-2.5">
-                      {regNoStatus.loading && <Loader2 className="w-4 h-4 text-brand-primary animate-spin" />}
+                      {regNoStatus.loading && <BouncingDots size="sm" className="text-brand-primary" />}
                       {!regNoStatus.loading && regNoStatus.available === true && (
                         <CheckCircle2 className="w-4 h-4 text-success" />
                       )}
@@ -1363,7 +1364,7 @@ export const AuthPage: React.FC = () => {
                       }`}
                     />
                     <div className="absolute right-3 top-2.5">
-                      {emailStatus.loading && <Loader2 className="w-4 h-4 text-brand-primary animate-spin" />}
+                      {emailStatus.loading && <BouncingDots size="sm" className="text-brand-primary" />}
                       {!emailStatus.loading && emailStatus.available === true && (
                         <CheckCircle2 className="w-4 h-4 text-success" />
                       )}
@@ -2383,7 +2384,7 @@ export const AuthPage: React.FC = () => {
                     disabled={forgotLoading}
                     className="flex-1 py-2 text-xs font-bold rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
                   >
-                    {forgotLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                    {forgotLoading ? <BouncingDots size="xs" /> : null}
                     <span>{forgotLoading ? 'Sending OTP...' : 'Send OTP Code'}</span>
                   </button>
                 </div>
@@ -2450,7 +2451,7 @@ export const AuthPage: React.FC = () => {
                     disabled={forgotLoading}
                     className="flex-1 py-2 text-xs font-bold rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
                   >
-                    {forgotLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                    {forgotLoading ? <BouncingDots size="xs" /> : null}
                     <span>{forgotLoading ? 'Resetting...' : 'Reset Password'}</span>
                   </button>
                 </div>

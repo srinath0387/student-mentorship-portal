@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Calendar, User, Tag, FileText, ChevronDown, ChevronUp, MessageSquare } from 'lucide-react';
 
+import { BouncingDots } from '../components/common/BouncingDots';
 interface MeetingLog {
   id: number;
   meeting_date: string;
@@ -58,7 +59,7 @@ export const MeetingLogsView: React.FC<Props> = ({
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12 text-slate-400">
-        <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mr-2" />
+        <BouncingDots size="md" className="text-blue-500 mr-2" />
         Loading meeting logs...
       </div>
     );

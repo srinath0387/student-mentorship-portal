@@ -5,6 +5,7 @@ import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { VALID_DEPARTMENT_NAMES } from '../../lib/validation/auth';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 const card = 'bg-surface border border-borderLine rounded-2xl shadow-sm';
 const input = 'px-3 py-2 text-xs rounded-xl border border-borderLine bg-background font-semibold focus:outline-none';
 const STATUS = ['Eligible', 'Applied', 'Shortlisted', 'Selected', 'Rejected'];
@@ -146,7 +147,7 @@ function StaffDrives({ isAdmin, canEdit }: { isAdmin: boolean; canEdit: boolean 
         : <button onClick={() => setCreating(true)} className="px-3 py-2 text-xs font-bold rounded-xl bg-brand-primary text-white inline-flex items-center gap-1.5"><Plus className="w-3.5 h-3.5" />New placement drive</button>)}
       <div className="grid grid-cols-1 md:grid-cols-[300px_minmax(0,1fr)] gap-4 items-start">
         <div className="space-y-2">
-          {isLoading ? <p className="text-xs text-textMuted">Loading…</p>
+          {isLoading ? <p className="text-xs text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading…" /></p>
             : drives.length === 0 ? <div className={`${card} p-6 text-center text-xs text-textMuted`}>No drives yet.</div>
             : drives.map(d => (
               <button key={d.id} onClick={() => setSelected(d.id)} className={`${card} w-full p-3 text-left ${active?.id === d.id ? 'ring-2 ring-brand-primary' : ''}`}>
@@ -189,7 +190,7 @@ function StudentDrives() {
     onSuccess: (r: any) => { setMsg({ ok: true, text: r?.message || 'Applied.' }); qc.invalidateQueries({ queryKey: ['myPlacementDrives'] }); },
     onError: (e: any) => setMsg({ ok: false, text: e.message || 'Could not apply.' }),
   });
-  if (isLoading) return <div className={`${card} p-8 text-center text-xs text-textMuted`}>Loading drives…</div>;
+  if (isLoading) return <div className={`${card} p-8 text-center text-xs text-textMuted`}><BouncingDots size="sm" className="text-brand-primary" label="Loading drives…" /></div>;
   return (
     <div className="space-y-3">
       {msg && <div className={`px-4 py-2.5 rounded-xl text-xs font-semibold ${msg.ok ? 'bg-emerald-500/10 text-emerald-700' : 'bg-red-500/10 text-red-700'}`}>{msg.text}</div>}
@@ -203,7 +204,7 @@ function StudentDrives() {
             </div>
             {d.my_status === 'Eligible'
               ? <button disabled={apply.isPending} onClick={() => apply.mutate(d.id)} className="px-3 py-2 text-xs font-bold rounded-xl bg-brand-primary text-white inline-flex items-center gap-1.5">
-                  {apply.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}Apply</button>
+                  {apply.isPending && <BouncingDots size="xs" />}Apply</button>
               : <span className={`text-xs font-bold inline-flex items-center gap-1 ${statusTone[d.my_status]}`}><CheckCircle2 className="w-3.5 h-3.5" />{d.my_status}</span>}
           </div>
         ))}

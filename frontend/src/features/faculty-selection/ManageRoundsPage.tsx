@@ -15,6 +15,7 @@ import {
   card, input, label, btnPrimary, btnGhost, DEPARTMENTS, SEMESTERS, RoundStatus, SeatMeter, Notice, Empty, th, td, errText,
 } from './fsUi';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 const schema = z.object({
   title: z.string().trim().min(3, 'At least 3 characters'),
   semester_label: z.string().regex(/^[1-4]-[12]$/, 'Pick a semester'),
@@ -97,7 +98,7 @@ export default function ManageRoundsPage() {
       {showForm && <NewRoundForm superAdmin={superAdmin} onClose={() => setShowForm(false)}
         onDone={id => { qc.invalidateQueries({ queryKey: ['fs'] }); navigate(`/faculty-selection/manage/${id}`); }} />}
 
-      {rounds.isLoading ? <p className="text-xs text-textMuted">Loading rounds…</p>
+      {rounds.isLoading ? <p className="text-xs text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading rounds…" /></p>
         : rounds.error ? <Notice msg={{ ok: false, text: errText(rounds.error) }} />
         : !rounds.data?.length ? <Empty title="No selection rounds yet" text="Create a round for a semester, e.g. 4-1, to get started." />
         : (

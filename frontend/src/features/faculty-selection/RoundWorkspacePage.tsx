@@ -18,6 +18,7 @@ import {
   card, input, label, btnPrimary, btnGhost, RoundStatus, SeatMeter, Notice, Empty, th, td, errText, chipOk, chipBad, chipWarn, chipMuted, chipBrand,
 } from './fsUi';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 type Msg = { ok: boolean; text: string } | null;
 type Tab = 'details' | 'eligible' | 'seats' | 'live' | 'audit';
 const TABS: { key: Tab; text: string }[] = [
@@ -51,7 +52,7 @@ export default function RoundWorkspacePage() {
     } catch (e) { setMsg({ ok: false, text: errText(e) }); } finally { setExporting(false); }
   };
 
-  if (round.isLoading) return <p className="p-6 text-xs text-textMuted">Loading round…</p>;
+  if (round.isLoading) return <p className="p-6 text-xs text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading round…" /></p>;
   if (round.error || !round.data) return <div className="p-6"><Notice msg={{ ok: false, text: errText(round.error) }} /></div>;
   const r = round.data;
 
@@ -407,7 +408,7 @@ function LiveTab({ r }: { r: FsRoundDetail }) {
     try { await fn(); setMsg({ ok: true, text: ok }); setMove(null); refresh(); } catch (e) { setMsg({ ok: false, text: errText(e) }); }
   };
   const d = dash.data;
-  if (dash.isLoading) return <p className="text-xs text-textMuted">Loading live data…</p>;
+  if (dash.isLoading) return <p className="text-xs text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading live data…" /></p>;
   if (!d) return <Notice msg={{ ok: false, text: errText(dash.error) }} />;
   const offerings: FsOffering[] = d.offerings;
   const all = (sels.data || []).filter((s: any) => (!subjectFilter || s.subject_id === subjectFilter) && (!q || `${s.roll_number} ${s.student_name} ${s.faculty_name}`.toLowerCase().includes(q.toLowerCase())));
@@ -536,7 +537,7 @@ const ACTION_TEXT: Record<string, string> = {
 };
 function AuditTab({ roundId }: { roundId: string }) {
   const a = useQuery({ queryKey: ['fs', 'audit', roundId], queryFn: () => fsApi.audit(roundId) });
-  if (a.isLoading) return <p className="text-xs text-textMuted">Loading…</p>;
+  if (a.isLoading) return <p className="text-xs text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading…" /></p>;
   if (!a.data?.length) return <Empty title="Nothing recorded yet" />;
   const detail = (x: any) => {
     const v = x.details || {};

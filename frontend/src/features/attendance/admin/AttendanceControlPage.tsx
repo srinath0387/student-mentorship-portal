@@ -8,6 +8,7 @@ import { api } from '../../../lib/api';
 import { VALID_DEPARTMENT_NAMES } from '../../../lib/validation/auth';
 import { useAuth } from '../../../context/AuthContext';
 
+import { BouncingDots } from '../../../components/common/BouncingDots';
 /**
  * Admin attendance control centre.
  *   ?view=posted       Attendance Posted   (view / edit / delete any posted class)
@@ -115,7 +116,7 @@ function SessionEditor({ slot, onClose }: { slot: DaySlot; onClose: () => void }
         </div>
         <div className="flex-1 overflow-auto">
           {isLoading ? (
-            <div className="p-10 text-center text-xs text-textMuted"><Loader2 className="w-4 h-4 animate-spin inline mr-2" />Loading students…</div>
+            <div className="p-10 text-center text-xs text-textMuted"><BouncingDots size="sm" className="mr-2" />Loading students…</div>
           ) : records.length === 0 ? (
             <div className="p-10 text-center text-xs text-textMuted">No student records in this session.</div>
           ) : (
@@ -150,7 +151,7 @@ function SessionEditor({ slot, onClose }: { slot: DaySlot; onClose: () => void }
             <button onClick={onClose} className="px-3 py-2 text-xs font-bold rounded-xl border border-borderLine">Cancel</button>
             <button disabled={!changed.length || save.isPending} onClick={() => save.mutate()}
               className="px-3 py-2 text-xs font-bold rounded-xl bg-brand-primary text-white disabled:opacity-40 inline-flex items-center gap-1.5">
-              {save.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Save changes
+              {save.isPending ? <BouncingDots size="xs" /> : <Save className="w-3.5 h-3.5" />} Save changes
             </button>
           </div>
         </div>
@@ -214,7 +215,7 @@ function LatePostApprovals() {
               </tr>
             </thead>
             <tbody className="divide-y divide-borderLine">
-              {isLoading ? <tr><td colSpan={6} className="py-8 text-center text-textMuted">Loading…</td></tr>
+              {isLoading ? <tr><td colSpan={6} className="py-8 text-center text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading…" /></td></tr>
                 : requests.length === 0 ? <tr><td colSpan={6} className="py-8 text-center text-textMuted">No {status === 'all' ? '' : status.toLowerCase()} requests.</td></tr>
                 : requests.map(r => (
                   <tr key={r.id}>
@@ -286,7 +287,7 @@ function ParentDispatch() {
           <thead><tr className="bg-surface-2 border-b border-borderLine text-textMuted font-bold uppercase text-[10px] tracking-wider">
             <th className="py-2.5 px-4">Student</th><th className="py-2.5 px-3">Parent phone</th><th className="py-2.5 px-3">Message</th></tr></thead>
           <tbody className="divide-y divide-borderLine">
-            {!result ? <tr><td colSpan={3} className="py-8 text-center text-textMuted">Loading…</td></tr>
+            {!result ? <tr><td colSpan={3} className="py-8 text-center text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading…" /></td></tr>
               : result.preview.length === 0 ? <tr><td colSpan={3} className="py-8 text-center text-textMuted">No absences recorded on {date}.</td></tr>
               : result.preview.map((m: any) => (
                 <tr key={m.roll_number}>
@@ -406,7 +407,7 @@ export const AttendanceControlPage: React.FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-borderLine">
-            {isLoading ? <tr><td colSpan={5} className="py-10 text-center text-textMuted"><Loader2 className="w-4 h-4 animate-spin inline mr-2" />Loading…</td></tr>
+            {isLoading ? <tr><td colSpan={5} className="py-10 text-center text-textMuted"><BouncingDots size="sm" className="mr-2" />Loading…</td></tr>
               : isError ? <tr><td colSpan={5} className="py-10 text-center text-red-600">{(error as Error)?.message || 'Could not load attendance.'}</td></tr>
               : rows.length === 0 ? <tr><td colSpan={5} className="py-10 text-center text-textMuted">{empty}</td></tr>
               : rows.map(s => slotRow(s, actions(s)))}
@@ -549,7 +550,7 @@ export const AttendanceControlPage: React.FC = () => {
                 </label>
                 <button disabled={cancel.isPending} onClick={submitRemove}
                   className="w-full px-3 py-2.5 text-xs font-bold rounded-xl bg-brand-primary text-white inline-flex items-center justify-center gap-1.5 disabled:opacity-50">
-                  {cancel.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CalendarX className="w-3.5 h-3.5" />} Remove class
+                  {cancel.isPending ? <BouncingDots size="xs" /> : <CalendarX className="w-3.5 h-3.5" />} Remove class
                 </button>
               </div>
               <div className="space-y-2">

@@ -5,6 +5,7 @@ import { saveAs } from 'file-saver';
 import { api } from '../../lib/api';
 import { STUDENT_DOC_TYPES } from '../../types';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 const ACADEMIC_YEARS = ['1st Year', '2nd Year', '3rd Year', '4th Year'];
 
 interface Props {
@@ -148,7 +149,7 @@ export function BulkDocumentDownload({ department, showDeptFilter = false }: Pro
           >
             {status === 'fetching' || status === 'downloading' ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <BouncingDots size="sm" />
                 {status === 'fetching' ? 'Fetching file list…' : `Downloading ${progress.current}/${progress.total}…`}
               </>
             ) : (

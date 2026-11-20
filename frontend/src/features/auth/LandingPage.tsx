@@ -33,6 +33,7 @@ import { VALID_DEPARTMENT_NAMES, getDeptFromRollNumber, RGMCET_EMAIL_REGEX, isSt
 import { RoleCarousel, IdCardHeader } from './RoleCarousel';
 import { RegisterPanel } from './RegisterPanel';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 interface RoleOption {
   id: UserRole;
   title: string;
@@ -761,7 +762,7 @@ export const LandingPage: React.FC = () => {
               >
                 {isLoading ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <BouncingDots size="sm" />
                     <span>Signing In...</span>
                   </>
                 ) : (
@@ -906,7 +907,7 @@ export const LandingPage: React.FC = () => {
                     disabled={forgotLoading}
                     className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5"
                   >
-                    {forgotLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />}
+                    {forgotLoading ? <BouncingDots size="xs" /> : <Mail className="w-3.5 h-3.5" />}
                     {forgotLoading ? 'Sending…' : 'Try OTP Anyway'}
                   </button>
                   <button
@@ -943,7 +944,7 @@ export const LandingPage: React.FC = () => {
                   disabled={forgotLoading}
                   className="w-full py-3 rounded-xl bg-brand-primary hover:bg-brand-primary/95 disabled:opacity-60 text-white text-sm font-bold neu-accent transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  {forgotLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+                  {forgotLoading ? <BouncingDots size="sm" /> : <Mail className="w-4 h-4" />}
                   {forgotLoading ? 'Sending OTP...' : 'Send OTP'}
                 </button>
               </form>
@@ -1009,7 +1010,7 @@ export const LandingPage: React.FC = () => {
                     disabled={forgotLoading}
                     className="flex-1 py-3 rounded-xl bg-brand-primary hover:bg-brand-primary/95 disabled:opacity-60 text-white text-sm font-bold neu-accent transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    {forgotLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                    {forgotLoading ? <BouncingDots size="sm" /> : null}
                     {forgotLoading ? 'Resetting...' : 'Reset Password'}
                   </button>
                 </div>

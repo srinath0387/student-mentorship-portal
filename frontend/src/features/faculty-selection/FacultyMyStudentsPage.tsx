@@ -11,6 +11,7 @@ import { exportFacultyWisePdf } from './exportRound';
 import { useAuth } from '../../context/AuthContext';
 import { card, btnGhost, Empty, Notice, th, td, chipBrand } from './fsUi';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 type Row = { round_id: string; round_title: string; semester_label: string; department: string; round_status: string; subject_name: string; subject_type: string;
   section: string; group_name: string | null; roll_number: string; student_name: string | null; created_at: string };
 
@@ -40,7 +41,7 @@ export default function FacultyMyStudentsPage() {
         </div>
         <span className={chipBrand}>{rows.length} students</span>
       </div>
-      {q.isLoading ? <p className="text-xs text-textMuted">Loading…</p> : q.error ? <Notice msg={{ ok: false, text: (q.error as any).message }} /> :
+      {q.isLoading ? <p className="text-xs text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading…" /></p> : q.error ? <Notice msg={{ ok: false, text: (q.error as any).message }} /> :
         !rows.length ? <Empty title="No students have chosen you yet" /> :
         Array.from(tree.entries()).sort((a, b) => b[0].localeCompare(a[0])).map(([sem, subjects]) => (
           <section key={sem} className="space-y-3">

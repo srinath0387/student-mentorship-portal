@@ -8,6 +8,7 @@ import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { DutySubmissionModal } from './DutySubmissionModal';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 function deadlineBadge(deadline: string | null) {
   if (!deadline) return null;
   const days = Math.ceil((new Date(deadline).getTime() - Date.now()) / 86400000);
@@ -96,7 +97,7 @@ export default function MyDutiesPage() {
   if (isLoading) return (
     <div className="p-6 flex items-center justify-center min-h-64">
       <div className="text-center">
-        <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-3" />
+        <div className="flex justify-center mb-3"><BouncingDots size="lg" className="text-indigo-600" /></div>
         <p className="text-sm text-gray-500">Loading your duties…</p>
       </div>
     </div>

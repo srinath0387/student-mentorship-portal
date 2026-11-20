@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, Download, TrendingUp, Calendar, BookOpen, Clock, ShieldCheck, XCircle } from 'lucide-react';
 import { api } from '../../../lib/api';
 
+import { BouncingDots } from '../../../components/common/BouncingDots';
 interface Props {
   rollNumber?: string;
 }
@@ -59,7 +60,7 @@ export const StudentAttendanceView: React.FC<Props> = ({ rollNumber }) => {
   };
 
   if (isSummaryLoading) {
-    return <div className="p-12 text-center text-textMuted text-xs animate-pulse">Loading your attendance records...</div>;
+    return <div className="p-12 text-center text-textMuted text-xs animate-pulse"><BouncingDots size="sm" className="text-brand-primary" label="Loading your attendance records…" /></div>;
   }
 
   if (!rollNumber) {
@@ -257,7 +258,7 @@ export const StudentAttendanceView: React.FC<Props> = ({ rollNumber }) => {
       {/* ── TAB 2: DAYWISE ATTENDANCE LOG ── */}
       {activeTab === 'daywise' && (
         isDaywiseLoading ? (
-          <div className="p-12 text-center text-textMuted text-xs animate-pulse">Loading daily attendance records...</div>
+          <div className="p-12 text-center text-textMuted text-xs animate-pulse"><BouncingDots size="sm" className="text-brand-primary" label="Loading daily attendance records…" /></div>
         ) : !daywiseData?.days || daywiseData.days.length === 0 ? (
           <div className="bg-surface border border-borderLine rounded-2xl p-12 text-center space-y-3">
             <Clock className="w-12 h-12 text-textMuted mx-auto opacity-40" />

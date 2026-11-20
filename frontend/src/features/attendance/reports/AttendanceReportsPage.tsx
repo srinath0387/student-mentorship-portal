@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
+import { BouncingDots } from '../../../components/common/BouncingDots';
 type TabType = 'not-posted' | 'monthly-report' | 'pending-requests';
 
 const statusColor = (s: string) =>
@@ -246,7 +247,7 @@ export const AttendanceReportsPage: React.FC = () => {
             </div>
           )}
 
-          {npQuery.isLoading && <p className="text-center text-muted text-sm py-8">Loading…</p>}
+          {npQuery.isLoading && <p className="text-center text-muted text-sm py-8"><BouncingDots size="sm" className="text-brand-primary" label="Loading…" /></p>}
 
           {/* Date groups */}
           <div className="space-y-2">
@@ -375,7 +376,7 @@ export const AttendanceReportsPage: React.FC = () => {
             </div>
           )}
 
-          {mrQuery.isLoading && <p className="text-center text-muted text-sm py-8">Loading report…</p>}
+          {mrQuery.isLoading && <p className="text-center text-muted text-sm py-8"><BouncingDots size="sm" className="text-brand-primary" label="Loading report…" /></p>}
 
           {mrStudents.length > 0 && (
             <div className="rounded-2xl border border-borderLine overflow-hidden bg-surface">
@@ -424,7 +425,7 @@ export const AttendanceReportsPage: React.FC = () => {
       {tab === 'pending-requests' && (
         <div className="space-y-3">
           <p className="text-xs text-muted">Faculty-submitted requests to mark a slot as "No Class Held" for a specific date. Approve to remove it from the not-posted count.</p>
-          {prQuery.isLoading && <p className="text-center text-muted text-sm py-8">Loading…</p>}
+          {prQuery.isLoading && <p className="text-center text-muted text-sm py-8"><BouncingDots size="sm" className="text-brand-primary" label="Loading…" /></p>}
           {!prQuery.isLoading && pendingRequests.length === 0 && (
             <div className="text-center py-12 text-muted text-sm">
               <CheckCircle className="h-10 w-10 mx-auto mb-2 text-green-400" />

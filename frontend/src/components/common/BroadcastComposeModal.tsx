@@ -17,6 +17,7 @@ import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { BroadcastPriority, BroadcastTargetRole } from '../../types';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 interface BroadcastComposeModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -408,7 +409,7 @@ export const BroadcastComposeModal: React.FC<BroadcastComposeModalProps> = ({
             >
               {isSubmitting ? (
                 <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <BouncingDots size="xs" />
                   Publishing...
                 </>
               ) : (

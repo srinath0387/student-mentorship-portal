@@ -58,6 +58,7 @@ import { calculateFacultyProfileCompletion } from '../../lib/facultyUtils';
 import { FacultyAttendancePage } from '../attendance/faculty/FacultyAttendancePage';
 import { FacultyLeaveTab } from '../leave/FacultyLeaveTab';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 // Helper: compute academic standing from CGPA
 const getStanding = (cgpa: number | string | undefined | null) => {
   const val = Number(cgpa) || 0;
@@ -1131,7 +1132,7 @@ export const FacultyDashboardPage: React.FC = () => {
                   {inchargeAnalyticsLoading ? (
                     <tr>
                       <td colSpan={7} className="py-10 text-center text-textMuted">
-                        Loading section analytics...
+                        <BouncingDots size="sm" className="text-brand-primary" label="Loading section analytics…" />
                       </td>
                     </tr>
                   ) : !inchargeAnalytics?.students || inchargeAnalytics.students.length === 0 ? (

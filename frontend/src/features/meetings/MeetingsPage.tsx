@@ -5,6 +5,7 @@ import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { ReportPdf, fmtD } from '../../lib/pdfReport';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 const card = 'bg-surface border border-borderLine rounded-2xl shadow-sm';
 const input = 'px-2.5 py-1.5 text-xs rounded-lg border border-borderLine bg-background text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary/30';
 const btn = 'px-3 py-2 rounded-xl text-xs font-bold disabled:opacity-50';
@@ -353,7 +354,7 @@ export default function MeetingsPage() {
         </div>
       )}
 
-      {isLoading ? <div className="p-10 text-center"><Loader2 className="w-5 h-5 animate-spin inline text-textMuted" /></div>
+      {isLoading ? <div className="p-10 text-center"><BouncingDots size="md" className="text-textMuted" /></div>
         : meetings.length === 0 ? <div className={`${card} p-10 text-center text-xs text-textMuted`}>No meetings yet.</div>
         : (
           <div className={`${card} divide-y divide-borderLine`}>

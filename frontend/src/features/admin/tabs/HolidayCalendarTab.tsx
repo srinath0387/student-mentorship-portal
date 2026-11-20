@@ -20,6 +20,7 @@ import { api } from '../../../lib/api';
 import { HolidayCalendarEntry, AcademicCalendarEntry } from '../../../types';
 import { useAuth } from '../../../context/AuthContext';
 
+import { BouncingDots } from '../../../components/common/BouncingDots';
 export const HolidayCalendarTab: React.FC = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -246,7 +247,7 @@ export const HolidayCalendarTab: React.FC = () => {
           </div>
 
           {isLoadingAcademic ? (
-            <div className="py-12 text-center text-xs text-textMuted">Loading academic calendars...</div>
+            <div className="py-12 text-center text-xs text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading academic calendars…" /></div>
           ) : academicCalendars.length === 0 ? (
             <div className="py-10 text-center text-xs text-textMuted bg-surface-2/30 rounded-xl border border-dashed border-borderLine space-y-2">
               <BookOpen className="w-8 h-8 text-textMuted mx-auto" />
@@ -343,7 +344,7 @@ export const HolidayCalendarTab: React.FC = () => {
           </div>
 
           {isLoadingHolidays ? (
-            <div className="py-12 text-center text-xs text-textMuted">Loading holiday calendar...</div>
+            <div className="py-12 text-center text-xs text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading holiday calendar…" /></div>
           ) : holidays.length === 0 ? (
             <div className="py-10 text-center text-xs text-textMuted bg-surface-2/30 rounded-xl border border-dashed border-borderLine space-y-2">
               <Calendar className="w-8 h-8 text-textMuted mx-auto" />

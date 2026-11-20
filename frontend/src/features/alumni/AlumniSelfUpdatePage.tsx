@@ -4,6 +4,7 @@ import { GraduationCap, Loader2, CheckCircle2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useLandingTheme } from '../../lib/pageTheme';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 const STATUSES = ['Employed', 'Higher Studies', 'Entrepreneur', 'Preparing', 'Other'];
 const input = 'w-full px-3.5 py-2.5 rounded-xl neu-inset border border-transparent text-slate-800 text-sm focus:outline-none';
 
@@ -37,7 +38,7 @@ export const AlumniSelfUpdatePage: React.FC = () => {
         {err && <div className="p-3 rounded-xl bg-red-50 text-red-700 text-xs font-semibold">{err}</div>}
         {done ? (
           <div className="text-center space-y-2 py-6"><CheckCircle2 className="w-10 h-10 mx-auto text-emerald-600" /><p className="text-sm font-bold text-slate-800">Thank you! Your details have been updated.</p></div>
-        ) : !a ? (!err && <p className="text-center text-xs text-slate-500">Loading…</p>) : (
+        ) : !a ? (!err && <p className="text-center text-xs text-slate-500"><BouncingDots size="sm" className="text-brand-primary" label="Loading…" /></p>) : (
           <>
             <p className="text-sm text-slate-700 text-center"><b>{a.name}</b><br /><span className="text-xs text-slate-500">{a.department} · Batch {a.batch}</span></p>
             <label className="block"><span className="text-xs font-bold text-slate-600">What are you doing now?</span>
@@ -49,7 +50,7 @@ export const AlumniSelfUpdatePage: React.FC = () => {
             <div className="grid sm:grid-cols-2 gap-3">{f('email', 'Email', 'email')}{f('phone', 'Phone', 'tel')}</div>
             {f('linkedin_url', 'LinkedIn profile URL')}
             <button onClick={save} disabled={saving} className="w-full py-3 rounded-xl bg-brand-primary text-white font-black text-sm neu-accent inline-flex items-center justify-center gap-2">
-              {saving && <Loader2 className="w-4 h-4 animate-spin" />}Save my details</button>
+              {saving && <BouncingDots size="sm" />}Save my details</button>
           </>
         )}
       </div>

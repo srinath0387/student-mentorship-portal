@@ -6,6 +6,7 @@ import { uploadAcademicFile } from '../../lib/academicFiles';
 import { fmtD } from '../../lib/pdfReport';
 import { CoverageBar, StatusChip, Topic, autoSchedule, btnGhost, btnPrimary, card, input, lessonPlanPdf, todayIso } from './lessonPlanShared';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const newId = () => `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
@@ -105,7 +106,7 @@ export function LessonPlanEditor({ allotmentId, onBack }: { allotmentId: string;
     setMsg({ ok: true, text: `Dates filled from ${fmtD(sched.start)}${end ? ` (semester ends ${fmtD(end)})` : ''}, skipping Sundays & holidays. Save to keep them.` });
   };
 
-  if (isLoading) return <div className="p-10 text-center"><Loader2 className="w-5 h-5 animate-spin inline text-textMuted" /></div>;
+  if (isLoading) return <div className="p-10 text-center"><BouncingDots size="md" className="text-textMuted" /></div>;
   if (error || !data) return <div className={`${card} p-6 text-sm text-rose-600`}>{(error as any)?.message || 'Could not load'} <button className={btnGhost} onClick={onBack}>Back</button></div>;
   const a = data.allotment; const p = data.plan; const canEdit = data.can_edit;
   const status = p?.status || 'not_started';

@@ -18,6 +18,7 @@ import * as XLSX from 'xlsx';
 import { api } from '../../../lib/api';
 import { FacultySubjectHandledRecord } from '../../../types';
 
+import { BouncingDots } from '../../../components/common/BouncingDots';
 interface SubjectsHandledSectionProps {
   facultyEmail: string;
   isReadOnly?: boolean;
@@ -256,8 +257,8 @@ export const SubjectsHandledSection: React.FC<SubjectsHandledSectionProps> = ({
       {/* Table */}
       {isLoading ? (
         <div className="py-12 text-center text-xs text-textMuted">
-          <div className="w-6 h-6 border-2 border-brand-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-          Loading subjects handled records...
+          <div className="flex justify-center mb-2"><BouncingDots size="md" className="text-brand-primary" /></div>
+          Loading subjects handled records…
         </div>
       ) : records.length === 0 ? (
         <div className="py-10 text-center text-xs text-textMuted bg-surface-2/40 rounded-xl border border-dashed border-borderLine space-y-2">

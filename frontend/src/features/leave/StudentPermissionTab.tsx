@@ -25,6 +25,7 @@ import {
 import { PermissionLetterModal } from './PermissionLetterModal';
 import { ProofViewerModal } from './ProofViewerModal';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 interface StudentPermissionTabProps {
   rollNumber?: string;
 }
@@ -180,7 +181,7 @@ export const StudentPermissionTab: React.FC<StudentPermissionTabProps> = ({ roll
 
         {/* History Table */}
         {isLoading ? (
-          <div className="py-12 text-center text-xs text-textMuted">Loading permission history...</div>
+          <div className="py-12 text-center text-xs text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading permission history…" /></div>
         ) : permissions.length === 0 ? (
           <div className="py-10 text-center text-xs text-textMuted bg-surface-2/30 rounded-xl border border-dashed border-borderLine space-y-2">
             <Calendar className="w-8 h-8 text-textMuted mx-auto" />

@@ -20,6 +20,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { FacultyLeaveCredit, FacultyLeaveCreditLog } from '../../../types';
 import { normalizeDepartmentName, VALID_DEPARTMENT_NAMES } from '../../../lib/validation/auth';
 
+import { BouncingDots } from '../../../components/common/BouncingDots';
 export const LeaveCreditManagementTab: React.FC = () => {
   const queryClient = useQueryClient();
   const printRef = useRef<HTMLDivElement>(null);
@@ -178,7 +179,7 @@ export const LeaveCreditManagementTab: React.FC = () => {
               {isLoadingCredits ? (
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-textMuted">
-                    Loading faculty leave credits...
+                    <BouncingDots size="sm" className="text-brand-primary" label="Loading faculty leave credits…" />
                   </td>
                 </tr>
               ) : filteredCredits.length === 0 ? (
@@ -384,7 +385,7 @@ export const LeaveCreditManagementTab: React.FC = () => {
             <p className="text-xs font-mono text-textSecondary">Audit logs for {viewingLogsEmail}</p>
 
             {isLoadingLogs ? (
-              <div className="py-8 text-center text-xs text-textMuted">Loading audit logs...</div>
+              <div className="py-8 text-center text-xs text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading audit logs…" /></div>
             ) : creditLogs.length === 0 ? (
               <div className="py-8 text-center text-xs text-textMuted bg-surface-2 rounded-xl">
                 No manual credit adjustments on record (running on default annual quotas).

@@ -11,6 +11,7 @@ import { useAuth } from '../../context/AuthContext';
 import { api } from '../../lib/api';
 import { STUDENT_DOC_TYPES } from '../../types';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface StudentDoc {
   id: number;
@@ -203,7 +204,7 @@ export function DocumentsManagementPage() {
             disabled={zipDownloading || filtered.length === 0}
             className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
           >
-            {zipDownloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            {zipDownloading ? <BouncingDots size="xs" /> : <Download className="w-3.5 h-3.5" />}
             Download ZIP ({filtered.length})
           </button>
         </div>
@@ -291,7 +292,7 @@ export function DocumentsManagementPage() {
       <div className="bg-surface border border-borderLine rounded-2xl overflow-hidden shadow-sm">
         {isLoading ? (
           <div className="p-16 text-center">
-            <Loader2 className="w-8 h-8 animate-spin text-brand-primary mx-auto mb-3" />
+            <div className="flex justify-center mb-3"><BouncingDots size="lg" className="text-brand-primary" /></div>
             <p className="text-sm text-textSecondary">Loading documents…</p>
           </div>
         ) : filtered.length === 0 ? (
@@ -490,7 +491,7 @@ export function DocumentsManagementPage() {
                     actionDoc.action === 'approve' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
                   }`}
                 >
-                  {actionLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {actionLoading && <BouncingDots size="sm" />}
                   {actionDoc.action === 'approve' ? 'Confirm Approve' : 'Confirm Reject'}
                 </button>
               </div>

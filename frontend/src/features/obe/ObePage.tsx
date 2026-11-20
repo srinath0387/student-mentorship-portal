@@ -4,6 +4,7 @@ import { Target, Plus, Trash2, Save, Loader2, Table2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 const OUTCOMES = [...Array.from({ length: 12 }, (_, i) => `PO${i + 1}`), 'PSO1', 'PSO2', 'PSO3'];
 const DEFAULTS = { target_pct: 60, l1: 50, l2: 60, l3: 70, direct_weight: 80 };
 const card = 'bg-surface border border-borderLine rounded-2xl shadow-sm';
@@ -48,7 +49,7 @@ function CourseEditor({ allotmentId }: { allotmentId: string }) {
     onError: (e: any) => setMsg({ ok: false, text: e.message || 'Could not save' }),
   });
   const result = useMemo(() => (cfg ? compute(cfg) : null), [cfg]);
-  if (isLoading || !cfg || !result) return <div className={`${card} p-8 text-center text-xs text-textMuted`}>Loading course…</div>;
+  if (isLoading || !cfg || !result) return <div className={`${card} p-8 text-center text-xs text-textMuted`}><BouncingDots size="sm" className="text-brand-primary" label="Loading course…" /></div>;
   const edit = data.can_edit;
   const renumber = (cos: Cfg['cos']) => cos.map((c, i) => ({ ...c, id: `CO${i + 1}` }));
   const setMap = (co: string, o: string, v: number) => setCfg({ ...cfg, mapping: { ...cfg.mapping, [co]: { ...(cfg.mapping[co] || {}), [o]: v } } });
@@ -63,7 +64,7 @@ function CourseEditor({ allotmentId }: { allotmentId: string }) {
           <div className="text-[11px] text-textMuted">{data.course.department} · {data.course.faculty_name}</div>
         </div>
         {edit && <button disabled={save.isPending} onClick={() => save.mutate()} className="px-3 py-2 text-xs font-bold rounded-xl bg-brand-primary text-white inline-flex items-center gap-1.5">
-          {save.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}Save</button>}
+          {save.isPending ? <BouncingDots size="xs" /> : <Save className="w-3.5 h-3.5" />}Save</button>}
       </div>
       {msg && <div className={`px-3 py-2 rounded-xl text-xs font-semibold ${msg.ok ? 'bg-emerald-500/10 text-emerald-700' : 'bg-red-500/10 text-red-700'}`}>{msg.text}</div>}
 
@@ -197,7 +198,7 @@ export const ObePage: React.FC = () => {
           </div>
         )}
       </div>
-      {isLoading ? <div className={`${card} p-8 text-center text-xs text-textMuted`}>Loading courses…</div>
+      {isLoading ? <div className={`${card} p-8 text-center text-xs text-textMuted`}><BouncingDots size="sm" className="text-brand-primary" label="Loading courses…" /></div>
         : courses.length === 0 ? <div className={`${card} p-8 text-center text-xs text-textMuted`}>No subject allotments found.</div>
         : mode === 'summary' ? <DepartmentSummary courses={courses} />
         : (

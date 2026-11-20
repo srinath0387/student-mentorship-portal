@@ -5,6 +5,7 @@ import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { DutyOrder, OfficeOrderModal, bodyLabel, fmtLong } from './OfficeOrderModal';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 const card = 'bg-surface border border-borderLine rounded-2xl shadow-sm';
 const input = 'px-3 py-2 text-xs rounded-xl border border-borderLine bg-background font-semibold text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary/30';
 const today = () => new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
@@ -121,7 +122,7 @@ function AssignForm({ catalog, onIssued, onClose }: { catalog: Catalog; onIssued
       <div className="flex justify-end">
         <button disabled={!ready || issue.isPending} onClick={() => { setErr(null); issue.mutate(); }}
           className="px-4 py-2 rounded-xl bg-brand-primary text-white text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-50">
-          {issue.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}Issue office order
+          {issue.isPending ? <BouncingDots size="xs" /> : <FileText className="w-3.5 h-3.5" />}Issue office order
         </button>
       </div>
     </div>
@@ -241,7 +242,7 @@ export default function DutiesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-borderLine">
-              {isLoading && <tr><td colSpan={7} className="py-10 text-center text-textMuted">Loading…</td></tr>}
+              {isLoading && <tr><td colSpan={7} className="py-10 text-center text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading…" /></td></tr>}
               {!isLoading && rows.length === 0 && (
                 <tr><td colSpan={7} className="py-10 text-center text-textMuted">{orders.length ? 'No orders match the filters.' : canIssue ? 'No duties assigned yet — use “Assign duty” to issue the first office order.' : 'No duties assigned yet.'}</td></tr>
               )}

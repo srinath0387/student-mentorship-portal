@@ -63,6 +63,7 @@ import { FacultyApiScoreCard } from '../FacultyApiScoreCard';
 import { VALID_DEPARTMENT_NAMES } from '../../../lib/validation/auth';
 import { importFromOrcid, refreshCitations, lookupDoi, fetchAuthorMetrics, computeMetrics, ResearchMetrics } from '../../../lib/scholarly';
 
+import { BouncingDots } from '../../../components/common/BouncingDots';
 const BLOOD_GROUPS: BloodGroup[] = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'];
 const DESIGNATIONS: FacultyDesignation[] = ['Assistant Professor', 'Associate Professor', 'Professor'];
 const ACTIVITY_TYPES: ActivityType[] = ['Conference', 'Workshop', 'FDP'];
@@ -802,8 +803,8 @@ export const FacultyProfileTab: React.FC = () => {
   if (isLoading) {
     return (
       <div className="p-12 text-center flex flex-col items-center justify-center space-y-3 bg-surface border border-borderLine rounded-2xl">
-        <Loader2 className="w-8 h-8 text-brand-primary animate-spin" />
-        <p className="text-sm font-semibold text-textSecondary">Loading Faculty 360° Profile...</p>
+        <BouncingDots size="lg" className="text-brand-primary" />
+        <p className="text-sm font-semibold text-textSecondary">Loading Faculty 360° Profile…</p>
       </div>
     );
   }
@@ -1232,7 +1233,7 @@ export const FacultyProfileTab: React.FC = () => {
         {/* OCR Parsing Progress Indicator */}
         {isParsingCert && (
           <div className="p-4 rounded-xl bg-brand-soft/60 border border-brand-primary/30 flex items-center gap-3 animate-pulse">
-            <Loader2 className="w-5 h-5 text-brand-primary animate-spin shrink-0" />
+            <BouncingDots size="md" className="text-brand-primary shrink-0" />
             <div className="flex-1">
               <p className="text-xs font-bold text-brand-primary">
                 Parsing document (OCR + text extraction in progress)... {parsingProgress}%
@@ -1469,7 +1470,7 @@ export const FacultyProfileTab: React.FC = () => {
                 >
                   {isFetchingOrcid ? (
                     <>
-                      <Loader2 className="w-3 h-3 animate-spin" />
+                      <BouncingDots size="xs" />
                       <span>Fetching publications…</span>
                     </>
                   ) : (
@@ -1898,7 +1899,7 @@ export const FacultyProfileTab: React.FC = () => {
               {isParsingActivity ? (
                 <div className="p-4 rounded-xl border border-sky-300 dark:border-sky-800 bg-sky-50/50 dark:bg-sky-950/30 text-center space-y-2">
                   <div className="flex items-center justify-center gap-2 text-xs font-bold text-sky-700 dark:text-sky-300">
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <BouncingDots size="sm" />
                     <span>{activityParsingStatus || 'Scanning document & extracting details...'} {activityParsingProgress}%</span>
                   </div>
                   <div className="w-full bg-sky-200 dark:bg-sky-900 h-2 rounded-full overflow-hidden">

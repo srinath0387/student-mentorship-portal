@@ -6,6 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { uploadAcademicFile } from '../../lib/academicFiles';
 import { ReportPdf, fmtD } from '../../lib/pdfReport';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 const card = 'bg-surface border border-borderLine rounded-2xl shadow-sm';
 const input = 'px-2.5 py-1.5 text-xs rounded-lg border border-borderLine bg-background text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary/30';
 const btn = 'px-3 py-2 rounded-xl text-xs font-bold disabled:opacity-50';
@@ -184,7 +185,7 @@ function EventForm({ initial, department, onDone, onCancel }: { initial: any | n
         <div className="flex items-center justify-between"><p className="text-sm font-black text-textPrimary">Photos ({e.photos.length}/12) *</p>
           <label className={`${btnGhost} cursor-pointer ${e.photos.length >= 12 ? 'opacity-40 pointer-events-none' : ''}`}><ImagePlus className="w-3.5 h-3.5 inline mr-1" />Add photos
             <input type="file" accept="image/*" multiple className="hidden" onChange={ev => { if (ev.target.files) addPhotos(ev.target.files); ev.target.value = ''; }} /></label></div>
-        {busy > 0 && <p className="text-[11px] font-bold text-sky-600"><Loader2 className="w-3 h-3 inline animate-spin mr-1" />Uploading {busy}…</p>}
+        {busy > 0 && <p className="text-[11px] font-bold text-sky-600"><BouncingDots size="xs" className="mr-1" />Uploading {busy}…</p>}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {e.photos.map((p: any, i: number) => (
             <div key={p.key} className="space-y-1">
@@ -224,7 +225,7 @@ function EventDetail({ id, onBack, onEdit }: { id: number; onBack: () => void; o
   const review = useMutation({ mutationFn: (s: 'approved' | 'returned') => api.reviewEvent(id, s, remarks), onSuccess: refresh });
   const submit = useMutation({ mutationFn: () => api.submitEvent(id), onSuccess: refresh });
   const del = useMutation({ mutationFn: () => api.deleteEvent(id), onSuccess: () => { qc.invalidateQueries({ queryKey: ['events'] }); onBack(); } });
-  if (isLoading || !e) return <div className="p-10 text-center"><Loader2 className="w-5 h-5 animate-spin inline text-textMuted" /></div>;
+  if (isLoading || !e) return <div className="p-10 text-center"><BouncingDots size="md" className="text-textMuted" /></div>;
   const iv = e.event_type === 'Industrial Visit';
   const err = (review.error || submit.error || del.error) as any;
   return (
@@ -236,7 +237,7 @@ function EventDetail({ id, onBack, onEdit }: { id: number; onBack: () => void; o
         <Chip s={e.status} />
         {e.can_edit && <button className={btnGhost} onClick={() => onEdit(e)}><Pencil className="w-3.5 h-3.5 inline mr-1" />Edit</button>}
         <button className={btnPrimary} disabled={pdfBusy} onClick={async () => { setPdfBusy(true); try { await eventPdf(e); } finally { setPdfBusy(false); } }}>
-          {pdfBusy ? <Loader2 className="w-3.5 h-3.5 inline animate-spin mr-1" /> : <Download className="w-3.5 h-3.5 inline mr-1" />}Report PDF</button>
+          {pdfBusy ? <BouncingDots size="xs" className="mr-1" /> : <Download className="w-3.5 h-3.5 inline mr-1" />}Report PDF</button>
       </div>
       {e.hod_remarks && <div className="rounded-xl px-4 py-2.5 text-xs bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200"><b>HOD's remarks:</b> {e.hod_remarks}</div>}
       {err && <div className="rounded-xl px-4 py-2.5 text-xs font-bold bg-rose-50 text-rose-700">{err.message}</div>}
@@ -334,7 +335,7 @@ export default function EventsPage() {
           <select className={input} value={f.year} onChange={e => setF({ ...f, year: e.target.value })}><option value="All">All years</option>{years.map(y => <option key={y} value={y}>{y}</option>)}</select>
           <select className={input} value={f.status} onChange={e => setF({ ...f, status: e.target.value })}><option value="All">Any status</option>{Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v.t}</option>)}</select>
         </div>
-        {isLoading ? <div className="p-10 text-center"><Loader2 className="w-5 h-5 animate-spin inline text-textMuted" /></div>
+        {isLoading ? <div className="p-10 text-center"><BouncingDots size="md" className="text-textMuted" /></div>
           : events.length === 0 ? <div className="p-10 text-center text-xs text-textMuted">No reports yet. Click “New report” after a workshop, FDP, guest lecture or industrial visit.</div>
           : (
             <div className="divide-y divide-borderLine">

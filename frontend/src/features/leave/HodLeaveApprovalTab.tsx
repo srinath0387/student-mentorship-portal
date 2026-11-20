@@ -28,6 +28,7 @@ import { LeaveLetterModal } from './LeaveLetterModal';
 import { PermissionLetterModal } from './PermissionLetterModal';
 import { ProofViewerModal } from './ProofViewerModal';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 export const HodLeaveApprovalTab: React.FC<{ studentsOnly?: boolean }> = ({ studentsOnly = false }) => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -270,7 +271,7 @@ export const HodLeaveApprovalTab: React.FC<{ studentsOnly?: boolean }> = ({ stud
         {activeSubTab === 'faculty' && (
           <div className="space-y-4">
             {isLoadingFaculty ? (
-              <div className="py-12 text-center text-xs text-textMuted">Loading faculty leave applications...</div>
+              <div className="py-12 text-center text-xs text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading faculty leave applications…" /></div>
             ) : filteredFacultyLeaves.length === 0 ? (
               <div className="py-12 text-center text-xs text-textMuted bg-surface-2/30 rounded-xl border border-dashed border-borderLine space-y-1">
                 <Calendar className="w-8 h-8 text-textMuted mx-auto" />
@@ -557,7 +558,7 @@ export const HodLeaveApprovalTab: React.FC<{ studentsOnly?: boolean }> = ({ stud
         {activeSubTab === 'students' && (
           <div className="space-y-4">
             {isLoadingStudents ? (
-              <div className="py-12 text-center text-xs text-textMuted">Loading student permissions...</div>
+              <div className="py-12 text-center text-xs text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading student permissions…" /></div>
             ) : filteredStudentPermissions.length === 0 ? (
               <div className="py-12 text-center text-xs text-textMuted bg-surface-2/30 rounded-xl border border-dashed border-borderLine space-y-1">
                 <GraduationCap className="w-8 h-8 text-textMuted mx-auto" />

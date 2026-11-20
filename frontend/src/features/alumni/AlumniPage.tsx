@@ -5,6 +5,7 @@ import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { VALID_DEPARTMENT_NAMES } from '../../lib/validation/auth';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 const card = 'bg-surface border border-borderLine rounded-2xl shadow-sm';
 const input = 'px-3 py-2 text-xs rounded-xl border border-borderLine bg-background font-semibold focus:outline-none';
 export const ALUMNI_STATUSES = ['Employed', 'Higher Studies', 'Entrepreneur', 'Preparing', 'Other'];
@@ -122,7 +123,7 @@ export const AlumniPage: React.FC = () => {
               <th className="py-2.5 px-4">Alumni</th><th className="py-2.5 px-3">Batch</th><th className="py-2.5 px-3">Status</th><th className="py-2.5 px-3">Where</th><th className="py-2.5 px-3">Location</th>{canEdit && <th className="py-2.5 px-3 text-right">Actions</th>}
             </tr></thead>
             <tbody className="divide-y divide-borderLine">
-              {isLoading ? <tr><td colSpan={6} className="py-8 text-center text-textMuted">Loading…</td></tr>
+              {isLoading ? <tr><td colSpan={6} className="py-8 text-center text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading…" /></td></tr>
                 : rows.length === 0 ? <tr><td colSpan={6} className="py-8 text-center text-textMuted">No alumni yet. Import a passed-out batch to get started.</td></tr>
                 : rows.map(a => (
                   <tr key={a.id}>

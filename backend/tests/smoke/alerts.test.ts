@@ -161,6 +161,39 @@ describe('Faculty selection', () => {
   });
 });
 
+describe('Broadcast notices (HOD / principal / admin notice board)', () => {
+  it('a posted notice is pushed to its audience: roles, department and year', async () => {
+    const calls: { sql: string; params: any[] }[] = [];
+    routeDb([
+      ['FROM hod_credentials', [{ email: 'hodcse@rgmcet.edu.in', department: 'CSE' }]],
+      ['INSERT INTO notices', [{ id: 42, title: 'Lab exam postponed', message: 'Now on Monday.', priority: 'urgent' }]],
+      [/SELECT channel, address, keys FROM notify_subscriptions WHERE user_key NOT LIKE 'P:%'/, (sql, p) => {
+        calls.push({ sql, params: p });
+        return [{ channel: 'telegram', address: 'S:22091A0501' }, { channel: 'push', address: 'E:ramesh@rgmcet.edu.in' }];
+      }],
+    ]);
+    const res = await request(app).post('/notices/broadcast').set('Authorization', HOD())
+      .send({ title: 'Lab exam postponed', message: 'Now on Monday.', priority: 'urgent', target_department: 'CSE', target_year: '4th Year', target_roles: ['student', 'faculty'] });
+    expect(res.status).toBe(201);
+    expect(res.body.pushed_to).toBe(2);
+    expect(calls[0].params).toEqual([['student', 'faculty'], 'cse', '4th Year']);
+    expect(calls[0].sql).toMatch(/FROM students WHERE year = \$3/);
+    expect(alerts()).toEqual([{ to: ['S:22091A0501', 'E:ramesh@rgmcet.edu.in'], title: '🔴 Lab exam postponed', body: 'Now on Monday.\n— HOD' }]);
+  });
+
+  it('the main broadcast (announcements) still pushes too', async () => {
+    routeDb([
+      ['FROM hod_credentials', [{ email: 'hodcse@rgmcet.edu.in', department: 'CSE' }]],
+      ['INSERT INTO broadcast_notifications', (_s, p) => [{ id: p[0], title: p[5], message: p[6], priority: p[7], target_role: p[8], target_department: p[9], sender_name: p[2] }]],
+      [/SELECT channel, address, keys FROM notify_subscriptions WHERE user_key LIKE 'S:%'/, [{ channel: 'telegram', address: 'S:22091A0501' }]],
+    ]);
+    const res = await request(app).post('/notifications/broadcast').set('Authorization', HOD())
+      .send({ title: 'Holiday tomorrow', message: 'College closed.', target_role: 'students', sender_name: 'HOD CSE' });
+    expect(res.status).toBe(201);
+    expect(alerts()).toEqual([{ to: ['S:22091A0501'], title: 'Holiday tomorrow', body: 'College closed.\n— HOD CSE' }]);
+  });
+});
+
 describe('Daily job', () => {
   const run = async () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -192,6 +225,10 @@ describe('Daily job', () => {
     const out = await run();
     expect(out.low_attendance).toBe(0);
     expect(out.selection_reminders).toBe(1);
-    expect(alerts()).toEqual([{ to: ['S:22091A0502'], title: 'Faculty selection closes soon', body: '4-1 Electives closes 18 Nov, 05:00 pm. You have not chosen all your faculty yet.' }]);
+    const a = alerts();
+    expect(a).toHaveLength(1);
+    expect(a[0]).toMatchObject({ to: ['S:22091A0502'], title: 'Faculty selection closes soon' });
+    // "pm" vs "PM" depends on the Node/ICU version
+    expect(a[0].body).toMatch(/^4-1 Electives closes 18 Nov, 05:00 pm\. You have not chosen all your faculty yet\.$/i);
   });
 });

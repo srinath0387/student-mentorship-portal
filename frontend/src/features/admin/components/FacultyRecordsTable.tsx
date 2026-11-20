@@ -4,6 +4,7 @@ import { api } from '../../../lib/api';
 import { Mail, Users, Pencil, Check, X, Trash2, AlertTriangle, Link, Eye, Sparkles } from 'lucide-react';
 import { FacultyProfileInspectionModal } from '../../faculty/components/FacultyProfileInspectionModal';
 
+import { BouncingDots } from '../../../components/common/BouncingDots';
 interface Props {
   onLinkEmail: (facultyId: string) => void;
   /** Oversight (principal / director / management): view only — no rename, link, merge or delete. */
@@ -74,7 +75,7 @@ export const FacultyRecordsTable: React.FC<Props> = ({ onLinkEmail, readOnly = f
   if (isLoading) {
     return (
       <div className="bg-surface border border-borderLine rounded-xl p-6 text-center text-xs text-textSecondary">
-        Loading faculty records...
+        <BouncingDots size="sm" className="text-brand-primary" label="Loading faculty records…" />
       </div>
     );
   }

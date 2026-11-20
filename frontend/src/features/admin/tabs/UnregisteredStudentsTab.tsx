@@ -20,6 +20,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { UnregisteredStudent } from '../../../types';
 import { normalizeDepartmentName, VALID_DEPARTMENT_NAMES, getDeptFromRollNumber } from '../../../lib/validation/auth';
 
+import { BouncingDots } from '../../../components/common/BouncingDots';
 export const UnregisteredStudentsTab: React.FC = () => {
   const { user } = useAuth();
 
@@ -295,7 +296,7 @@ export const UnregisteredStudentsTab: React.FC = () => {
         {isLoading ? (
           <div className="p-12 text-center">
             <RefreshCw className="w-8 h-8 animate-spin text-brand-primary mx-auto mb-3" />
-            <p className="text-xs font-semibold text-textSecondary">Loading unregistered students...</p>
+            <p className="text-xs font-semibold text-textSecondary"><BouncingDots size="sm" className="text-brand-primary" label="Loading unregistered students…" /></p>
           </div>
         ) : filteredStudents.length === 0 ? (
           <div className="p-12 text-center">

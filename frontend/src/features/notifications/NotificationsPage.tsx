@@ -5,6 +5,7 @@ import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { currentPushSubscription, deviceLabel, isIos, isStandalone, pushSupported, subscribePush, unsubscribePush } from '../../lib/pushClient';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 const card = 'bg-surface border border-borderLine rounded-2xl shadow-sm';
 const btn = 'px-3.5 py-2 rounded-xl text-xs font-bold disabled:opacity-50';
 
@@ -114,7 +115,7 @@ export default function NotificationsPage() {
   const pushSubs = subs.filter(s => s.channel === 'push');
   const roleList = WHAT_YOU_GET[user?.role || ''] || WHAT_YOU_GET.faculty;
 
-  if (isLoading) return <div className="p-10 text-center"><Loader2 className="w-5 h-5 animate-spin inline text-textMuted" /></div>;
+  if (isLoading) return <div className="p-10 text-center"><BouncingDots size="md" className="text-textMuted" /></div>;
 
   return (
     <div className="space-y-5 max-w-4xl">
@@ -135,7 +136,7 @@ export default function NotificationsPage() {
             <p className="text-[11px] font-bold text-amber-600">Telegram alerts are not switched on by the college yet.</p>
           ) : tgWaiting ? (
             <div className="rounded-xl bg-sky-50 dark:bg-sky-950/40 p-3 text-xs text-sky-800 dark:text-sky-200 space-y-1">
-              <p className="font-bold flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" />Waiting for Telegram…</p>
+              <p className="font-bold flex items-center gap-2"><BouncingDots size="xs" />Waiting for Telegram…</p>
               <p>In Telegram, open <b>@{cfg.telegram.bot}</b> and press <b>Start</b>. This page updates by itself.</p>
             </div>
           ) : (

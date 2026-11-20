@@ -7,6 +7,7 @@ import {
   CATEGORY_EMOJI, Empty, RoleChip, SeatBar, StatusChip, WindowChip, btnGhost, btnPrimary, card, fmtDate, fmtDateTime, input, money, todayIso,
 } from './clubUi';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 /** Payment step: QR + UPI ID, then the student enters the transaction ID (UTR). */
 function PayModal({ clubId, membership, onClose, onDone }: { clubId: number; membership: any; onClose: () => void; onDone: () => void }) {
   const { data: pay, isLoading } = useQuery({ queryKey: ['clubPayment', clubId], queryFn: () => api.getClubPayment(clubId) });
@@ -27,7 +28,7 @@ function PayModal({ clubId, membership, onClose, onDone }: { clubId: number; mem
           </div>
           <button onClick={onClose} className="p-1 text-textMuted" aria-label="Close"><X className="w-4 h-4" /></button>
         </div>
-        {isLoading ? <Empty><Loader2 className="w-4 h-4 animate-spin inline" /></Empty> : (
+        {isLoading ? <Empty><BouncingDots size="sm" /></Empty> : (
           <div className="text-center space-y-2">
             {pay?.payment_qr
               ? <img src={pay.payment_qr} alt="Payment QR code" className="mx-auto w-56 h-56 object-contain bg-white rounded-xl border border-borderLine p-2" />
@@ -192,7 +193,7 @@ export default function ClubsPage() {
             <div className="relative ml-auto"><Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-textMuted" />
               <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search clubs" className={`${input} pl-8 w-56`} /></div>
           </div>
-          {isLoading ? <Empty><Loader2 className="w-4 h-4 animate-spin inline" /></Empty> : shown.length === 0 ? (
+          {isLoading ? <Empty><BouncingDots size="sm" /></Empty> : shown.length === 0 ? (
             <div className={card}><Empty>No clubs are listed yet. Check back soon.</Empty></div>
           ) : (
             <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">

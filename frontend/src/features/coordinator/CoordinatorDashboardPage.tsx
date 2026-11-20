@@ -42,6 +42,7 @@ import { AchievementsTab } from '../profile/tabs/AchievementsTab';
 import { PlacementPreferencesTab } from '../profile/tabs/PlacementPreferencesTab';
 import { FirstYearOnboardingTab } from './FirstYearOnboardingTab';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 export const CoordinatorDashboardPage: React.FC = () => {
   const queryClient = useQueryClient();
   const { user } = useAuth();  // must be before any useState that uses user?.department
@@ -712,7 +713,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
                   {freshersLoading ? (
                     <tr>
                       <td colSpan={10} className="py-12 text-center text-textMuted">
-                        Loading 1st-year freshers directory...
+                        <BouncingDots size="sm" className="text-brand-primary" label="Loading 1st-year freshers directory…" />
                       </td>
                     </tr>
                   ) : freshers.length === 0 ? (
@@ -861,7 +862,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
                 {inchargesLoading ? (
                   <tr>
                     <td colSpan={7} className="py-10 text-center text-textMuted">
-                      Loading Class Incharges...
+                      <BouncingDots size="sm" className="text-brand-primary" label="Loading Class Incharges…" />
                     </td>
                   </tr>
                 ) : incharges.length === 0 ? (
@@ -1025,7 +1026,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
             {subjectsLoading ? (
               <div className="py-12 text-center text-xs text-textSecondary flex items-center justify-center gap-2">
                 <RefreshCw className="w-4 h-4 animate-spin text-pink-400" />
-                <span>Loading assigned subjects...</span>
+                <span><BouncingDots size="sm" className="text-brand-primary" label="Loading assigned subjects…" /></span>
               </div>
             ) : sectionSubjects.filter((s: any) => s.section === subjSection || s.section === 'All').length === 0 ? (
               <div className="py-12 text-center text-textSecondary text-xs space-y-2">

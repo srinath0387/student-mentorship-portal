@@ -5,6 +5,7 @@ import { api } from '../../../lib/api';
 import { useAuth } from '../../../context/AuthContext';
 import { AttendanceSetupPage } from '../admin/AttendanceSetupPage';
 
+import { BouncingDots } from '../../../components/common/BouncingDots';
 type TabId = 'setup' | 'summary' | 'defaulters' | 'daily' | 'reports';
 
 export const HodAttendancePage: React.FC = () => {
@@ -159,7 +160,7 @@ export const HodAttendancePage: React.FC = () => {
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
             {isAllotLoading ? (
               <div className="col-span-full bg-surface border border-borderLine rounded-2xl p-12 text-center text-textMuted text-xs animate-pulse">
-                Loading subject allotments...
+                <BouncingDots size="sm" className="text-brand-primary" label="Loading subject allotments…" />
               </div>
             ) : filteredAllotments.length === 0 ? (
               <div className="col-span-full bg-surface border border-borderLine rounded-2xl p-12 text-center text-textMuted text-xs">

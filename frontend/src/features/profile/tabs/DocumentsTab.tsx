@@ -4,6 +4,7 @@ import { Upload, FileText, Trash2, Eye, CheckCircle2, XCircle, Clock } from 'luc
 import { api } from '../../../lib/api';
 import { StudentDocument, STUDENT_DOC_TYPES, STUDENT_SEMESTERS } from '../../../types';
 
+import { BouncingDots } from '../../../components/common/BouncingDots';
 const MAX_FILE_SIZE_MB = 20;
 
 const STATUS_CONFIG = {
@@ -115,7 +116,7 @@ export const DocumentsTab: React.FC<Props> = ({ rollNumber, readOnly = false, is
   };
 
   if (isLoading) {
-    return <div className="p-8 text-center text-sm text-gray-400">Loading documents...</div>;
+    return <div className="p-8 text-center text-sm text-gray-400"><BouncingDots size="sm" className="text-brand-primary" label="Loading documents…" /></div>;
   }
 
   return (

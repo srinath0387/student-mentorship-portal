@@ -8,6 +8,7 @@ import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { VALID_DEPARTMENT_NAMES } from '../../lib/validation/auth';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface ApiScore {
   email: string;
@@ -161,7 +162,7 @@ export function FacultyApiPage() {
 
       {scoresLoading ? (
         <div className="p-16 text-center">
-          <Loader2 className="w-8 h-8 animate-spin text-brand-primary mx-auto mb-3" />
+          <div className="flex justify-center mb-3"><BouncingDots size="lg" className="text-brand-primary" /></div>
           <p className="text-sm text-textSecondary">Loading scores…</p>
         </div>
       ) : scores.length === 0 ? (
@@ -281,7 +282,7 @@ export function FacultyApiPage() {
 
       {pendingLoading ? (
         <div className="p-16 text-center">
-          <Loader2 className="w-8 h-8 animate-spin text-brand-primary mx-auto mb-3" />
+          <div className="flex justify-center mb-3"><BouncingDots size="lg" className="text-brand-primary" /></div>
           <p className="text-sm text-textSecondary">Loading pending duties…</p>
         </div>
       ) : (pending as PendingDuty[]).length === 0 ? (
@@ -336,7 +337,7 @@ export function FacultyApiPage() {
                     <div className="flex items-center justify-center gap-2">
                       {/* Approve */}
                       {approvingId === duty.id ? (
-                        <Loader2 className="w-4 h-4 animate-spin text-green-500" />
+                        <BouncingDots size="sm" className="text-green-500" />
                       ) : (
                         <button
                           onClick={() => {

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../lib/api';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 interface ProfilePhotoUploadModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -276,7 +277,7 @@ export const ProfilePhotoUploadModal: React.FC<ProfilePhotoUploadModalProps> = (
             >
               {isProcessing ? (
                 <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <BouncingDots size="xs" />
                   <span>Processing Image...</span>
                 </>
               ) : previewUrl ? (
@@ -336,7 +337,7 @@ export const ProfilePhotoUploadModal: React.FC<ProfilePhotoUploadModalProps> = (
           >
             {isSaving ? (
               <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <BouncingDots size="xs" />
                 <span>Saving Photo...</span>
               </>
             ) : isSuccess ? (

@@ -5,6 +5,7 @@ import { api } from '../../../lib/api';
 import { LeaderboardEntry } from '../../../types';
 import { useAuth } from '../../../context/AuthContext';
 
+import { BouncingDots } from '../../../components/common/BouncingDots';
 const LEVEL_COLORS: Record<number, string> = {
   1: 'bg-gray-100 text-gray-600',
   2: 'bg-green-100 text-green-700',
@@ -210,7 +211,7 @@ const DeptScoreboard: React.FC = () => {
       {isLoading ? (
         <div className="flex items-center justify-center h-32">
           <RefreshCw className="w-5 h-5 text-brand-primary animate-spin" />
-          <span className="ml-2 text-sm text-textSecondary">Loading department scores…</span>
+          <span className="ml-2 text-sm text-textSecondary"><BouncingDots size="sm" className="text-brand-primary" label="Loading department scores…" /></span>
         </div>
       ) : filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-32 text-center">

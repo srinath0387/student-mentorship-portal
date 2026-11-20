@@ -5,6 +5,7 @@ import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { VALID_DEPARTMENT_NAMES } from '../../lib/validation/auth';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 const card = 'bg-surface border border-borderLine rounded-2xl shadow-sm';
 const input = 'px-3 py-2 text-xs rounded-xl border border-borderLine bg-background font-semibold focus:outline-none';
 
@@ -77,7 +78,7 @@ export const AccreditationPage: React.FC = () => {
             <option value="All">All departments</option>{VALID_DEPARTMENT_NAMES.map(d => <option key={d} value={d}>{d}</option>)}
           </select>
           <button onClick={download} disabled={!data || busy} className="px-3 py-2 text-xs font-bold rounded-xl bg-brand-primary text-white inline-flex items-center gap-1.5 disabled:opacity-40">
-            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}Download Excel
+            {busy ? <BouncingDots size="xs" /> : <Download className="w-3.5 h-3.5" />}Download Excel
           </button>
         </div>
       </div>

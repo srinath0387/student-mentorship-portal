@@ -7,6 +7,7 @@ import { useAuth } from '../../context/AuthContext';
 import { LessonPlanEditor } from './LessonPlanEditor';
 import { CoverageBar, StatusChip, btnGhost, card, input } from './lessonPlanShared';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 const DEPTS = ['CSE', 'CSE (Data Science)', 'CSE (AI & ML)', 'CSE (BS)', 'CSE (CS)', 'ECE', 'EEE', 'Mechanical', 'Civil', 'MCA', 'MBA'];
 
 /** Faculty: "My Lesson Plans" — every subject allotted to me, with plan status and coverage. */
@@ -23,7 +24,7 @@ export default function LessonPlansPage() {
         <p className="text-xs text-textSecondary">One plan per allotted subject. Prepare it, submit it to the HOD, then tick topics as you teach them.</p>
       </div>
       {pending > 0 && <div className="rounded-xl px-4 py-2.5 text-xs font-bold bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">{pending} subject{pending === 1 ? '' : 's'} still need a lesson plan.</div>}
-      {isLoading ? <div className="p-10 text-center"><Loader2 className="w-5 h-5 animate-spin inline text-textMuted" /></div>
+      {isLoading ? <div className="p-10 text-center"><BouncingDots size="md" className="text-textMuted" /></div>
         : rows.length === 0 ? <div className={`${card} p-10 text-center text-xs text-textMuted`}>No subjects are allotted to you yet. Lesson plans appear here once the HOD allots subjects.</div>
         : (
           <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -113,7 +114,7 @@ export function LessonPlanReviewPage() {
               <tr><th className="px-3 py-2">Subject</th><th className="px-3 py-2">Class</th><th className="px-3 py-2">Faculty</th><th className="px-3 py-2">Plan</th><th className="px-3 py-2">Coverage</th><th className="px-3 py-2" /></tr>
             </thead>
             <tbody className="divide-y divide-borderLine">
-              {isLoading ? <tr><td colSpan={6} className="p-8 text-center"><Loader2 className="w-4 h-4 animate-spin inline text-textMuted" /></td></tr>
+              {isLoading ? <tr><td colSpan={6} className="p-8 text-center"><BouncingDots size="sm" className="text-textMuted" /></td></tr>
                 : shown.length === 0 ? <tr><td colSpan={6} className="p-8 text-center text-textMuted">Nothing here.</td></tr>
                 : shown.map(r => (
                   <tr key={r.allotment_id} className="hover:bg-surface-2/60 cursor-pointer" onClick={() => nav(`/lesson-plans/review?allotment=${r.allotment_id}`)}>

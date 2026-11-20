@@ -6,6 +6,7 @@ import { api } from '../../../lib/api';
 import { useAuth } from '../../../context/AuthContext';
 import { VALID_DEPARTMENT_NAMES } from '../../../lib/validation/auth';
 
+import { BouncingDots } from '../../../components/common/BouncingDots';
 const DEPARTMENTS = ['All', ...VALID_DEPARTMENT_NAMES];
 const SEMESTERS = ['', '1-1','1-2','2-1','2-2','3-1','3-2','4-1','4-2'];
 const SECTIONS = ['', 'A','B','C','D','E'];
@@ -250,7 +251,7 @@ export const FacultyWorkloadPage: React.FC = () => {
       <div className="bg-surface border border-borderLine rounded-2xl overflow-x-auto">
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
-            <div className="w-8 h-8 border-3 border-brand-primary border-t-transparent rounded-full animate-spin" />
+            <BouncingDots size="lg" className="text-brand-primary" />
           </div>
         ) : workload.length === 0 ? (
           <div className="text-center py-12 text-textMuted text-sm">

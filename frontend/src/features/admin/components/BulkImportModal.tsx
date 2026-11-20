@@ -4,6 +4,7 @@ import { api } from '../../../lib/api';
 import { getDeptFromRollNumber } from '../../../lib/validation/auth';
 import { PillButton } from '../../../components/common/PillButton';
 
+import { BouncingDots } from '../../../components/common/BouncingDots';
 interface BulkImportModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -296,7 +297,7 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({ isOpen, onClos
           <PillButton variant="outline" size="sm" onClick={onClose} disabled={loading}>
             Cancel
           </PillButton>
-          <PillButton variant="primary" size="sm" onClick={handleImportSubmit} disabled={loading || parsedRows.length === 0} icon={loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}>
+          <PillButton variant="primary" size="sm" onClick={handleImportSubmit} disabled={loading || parsedRows.length === 0} icon={loading ? <BouncingDots size="sm" /> : <Upload className="w-4 h-4" />}>
             {loading ? 'Importing Roster...' : `Import ${parsedRows.length} Students`}
           </PillButton>
         </div>

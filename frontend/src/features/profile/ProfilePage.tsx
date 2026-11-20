@@ -31,6 +31,7 @@ import { DocumentsTab } from './tabs/DocumentsTab';
 import { PlacementTrackerSection } from '../placement/PlacementTrackerSection';
 import { MeetingLogsView } from '../../components/MeetingLogsView';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 export const ProfilePage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
@@ -94,8 +95,8 @@ export const ProfilePage: React.FC = () => {
   if (isStudentLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-96 text-textSecondary text-sm space-y-3">
-        <div className="w-8 h-8 border-3 border-brand-primary border-t-transparent rounded-full animate-spin" />
-        <p className="font-semibold text-textPrimary">Loading student profile...</p>
+        <BouncingDots size="lg" className="text-brand-primary" />
+        <p className="font-semibold text-textPrimary">Loading student profile…</p>
       </div>
     );
   }

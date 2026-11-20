@@ -8,7 +8,9 @@ import { AuthPage } from './features/auth/AuthPage';
 import { LandingPage } from './features/auth/LandingPage';
 import { Sidebar } from './components/layout/Sidebar';
 import { TopBar } from './components/layout/TopBar';
-import { DashboardSkeleton } from './components/layout/DashboardSkeleton';
+import { BouncingDots, PageLoader } from './components/common/BouncingDots';
+import { GlobalLoadingDots } from './components/common/GlobalLoadingDots';
+import { AlertsAutoEnable } from './components/common/AlertsAutoEnable';
 import { Footer } from './components/layout/Footer';
 import { api } from './lib/api';
 import { ProfilePhotoUploadModal } from './components/common/ProfilePhotoUploadModal';
@@ -123,8 +125,8 @@ const RootRedirect: React.FC = () => {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
-          <div className="w-10 h-10 border-4 border-brand-primary border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-          <p className="text-sm text-textSecondary font-medium">Loading...</p>
+          <div className="flex justify-center mb-3"><BouncingDots size="lg" className="text-brand-primary" /></div>
+          <p className="text-sm text-textSecondary font-medium">Loading…</p>
         </div>
       </div>
     );
@@ -142,7 +144,7 @@ const RootRedirect: React.FC = () => {
  */
 const ProtectedRoute: React.FC<{ allowedRoles: string[] }> = ({ allowedRoles }) => {
   const { isAuthenticated, isLoading, role } = useAuth();
-  if (isLoading) return <DashboardSkeleton />;
+  if (isLoading) return <PageLoader />;
   if (!isAuthenticated) return <Navigate to="/" replace />;
   if (role && !allowedRoles.includes(role)) {
     // Send the user to their own role's dashboard
@@ -283,13 +285,19 @@ const MainLayout: React.FC = () => {
         />
         <main ref={mainRef} className="flex-1 overflow-y-auto p-4 md:p-8 print:overflow-visible print:p-0">
           <div className="max-w-7xl w-full mx-auto">
-            <Suspense fallback={<DashboardSkeleton />}>
+            <Suspense fallback={<PageLoader />}>
               <Outlet />
             </Suspense>
           </div>
         </main>
         <Footer />
       </div>
+
+      <GlobalLoadingDots />
+      {/* One-tap "turn on alerts" (or silent reconnect) — waits until other login pop-ups are done */}
+      {!isPhotoRequired && !isStudentOnboardingRequired && (popupNoticesDismissed || pendingNotices.length === 0) && (
+        <AlertsAutoEnable userKey={`${role}:${role === 'student' || role === 'parent' ? (user?.rollNumber || '') : (user?.email || '')}`} />
+      )}
 
       {/* Mandatory / Enforced Profile Photo Upload on Login */}
       {isPhotoRequired && (

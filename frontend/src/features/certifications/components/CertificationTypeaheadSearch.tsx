@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Search, Award, Users, Loader2 } from 'lucide-react';
 import { api } from '../../../lib/api';
 
+import { BouncingDots } from '../../../components/common/BouncingDots';
 export interface CertResult {
   display_name: string;
   canonical_name: string;
@@ -85,7 +86,7 @@ export const CertificationTypeaheadSearch: React.FC<Props> = ({
           className="w-full pl-10 pr-10 py-2.5 bg-surface border border-borderLine rounded-2xl text-xs text-textPrimary placeholder:text-textMuted focus:outline-none focus:border-brand-primary font-medium transition-all shadow-xs"
         />
         {isLoading && (
-          <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-primary animate-spin" />
+          <BouncingDots size="sm" className="absolute right-3.5 top-1/2 -translate-y-1/2 text-brand-primary" />
         )}
       </div>
 

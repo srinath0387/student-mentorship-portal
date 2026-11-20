@@ -10520,6 +10520,32 @@ async function notifyBroadcast(b: any): Promise<number> {
   } catch (err: any) { console.warn('[notify] broadcast failed:', err.message); return 0; }
 }
 
+/** Push a notice-board post (HOD / principal / admin "Broadcast Notice") to its audience's devices. */
+async function notifyNotice(n: any, targeting: { department?: string | null; year?: string | null; roles?: string[] }, senderName: string): Promise<number> {
+  try {
+    if (db.isMock) return 0;
+    await ensureNotifyTables();
+    const roles = (Array.isArray(targeting.roles) && targeting.roles.length ? targeting.roles : ['student', 'faculty', 'hod'])
+      .map(r => String(r).toLowerCase());
+    const params: any[] = [roles];
+    const where = [`user_key NOT LIKE 'P:%'`, `LOWER(COALESCE(role, '')) = ANY($1::text[])`];
+    const dept = String(targeting.department || '');
+    if (dept && !['all', '*'].includes(dept.toLowerCase())) {
+      params.push(normDept(dept));
+      where.push(`LOWER(REGEXP_REPLACE(COALESCE(department, ''), '[^a-zA-Z0-9]', '', 'g')) = $${params.length}`);
+    }
+    if (targeting.year) {
+      params.push(String(targeting.year));
+      where.push(`(user_key NOT LIKE 'S:%' OR SUBSTRING(user_key FROM 3) IN (SELECT UPPER(roll_number) FROM students WHERE year = $${params.length}))`);
+    }
+    const subs = await db.query(`SELECT channel, address, keys FROM notify_subscriptions WHERE ${where.join(' AND ')}`, params);
+    return await queueNotifyTargets(subs.rows, {
+      title: `${n.priority === 'urgent' || n.priority === 'high' ? '🔴 ' : ''}${n.title}`,
+      body: `${n.message}${senderName ? `\n— ${senderName}` : ''}`, url: '/dashboard', tag: `notice-${n.id}`,
+    });
+  } catch (err: any) { console.warn('[notify] notice failed:', err.message); return 0; }
+}
+
 // ============================================================================
 // Clubs — registration window, seat limit, payment (QR + UTR), waitlist,
 // lead / co-lead roles, sessions & announcements, session attendance.
@@ -13087,7 +13113,9 @@ app.post('/notices/broadcast', requireRole('hod', 'admin', 'principal', 'directo
       );
     });
 
-    res.status(201).json(result.rows[0]);
+    const senderName = (req.auth as any)?.name || ({ hod: 'HOD', principal: 'Principal', director: 'Director', admin: 'Admin', management: 'Management', program_chair: 'Program Chair', coordinator: 'Coordinator' } as Record<string, string>)[senderRole] || '';
+    const pushed = await notifyNotice(result.rows[0], targeting, senderName);
+    res.status(201).json({ ...result.rows[0], pushed_to: pushed });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

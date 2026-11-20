@@ -5,6 +5,7 @@ import { api } from '../../../lib/api';
 import { useAuth } from '../../../context/AuthContext';
 import { CertificationTypeaheadSearch, CertResult } from './CertificationTypeaheadSearch';
 
+import { BouncingDots } from '../../../components/common/BouncingDots';
 export const CertificationAnalyticsView: React.FC = () => {
   const { user } = useAuth();
   const [selectedCertName, setSelectedCertName] = useState<string | null>(null);
@@ -147,7 +148,7 @@ export const CertificationAnalyticsView: React.FC = () => {
             Top Certifications Breakdown
           </div>
           {isSummaryLoading ? (
-            <div className="p-6 text-center text-xs text-textMuted animate-pulse">Loading certification counts...</div>
+            <div className="p-6 text-center text-xs text-textMuted animate-pulse"><BouncingDots size="sm" className="text-brand-primary" label="Loading certification counts…" /></div>
           ) : summary.length === 0 ? (
             <div className="p-6 text-center text-xs text-textMuted bg-surface-2/40 rounded-xl border border-dashed border-borderLine">
               No certifications recorded yet. As students upload or sync Credly certificates, their counts will appear here.
@@ -252,7 +253,7 @@ export const CertificationAnalyticsView: React.FC = () => {
 
           {isStudentsLoading ? (
             <div className="p-12 text-center text-xs text-textMuted animate-pulse flex items-center justify-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin text-brand-primary" /> Loading student list...
+              <BouncingDots size="sm" className="text-brand-primary" /> Loading student list...
             </div>
           ) : filteredStudents.length === 0 ? (
             <div className="p-10 text-center text-xs text-textMuted">
@@ -301,7 +302,7 @@ export const CertificationAnalyticsView: React.FC = () => {
                           >
                             {openingRollNo === `${s.roll_number}-${s.certificate_name}` ? (
                               <>
-                                <Loader2 className="w-3 h-3 animate-spin" />
+                                <BouncingDots size="xs" />
                                 Opening...
                               </>
                             ) : (

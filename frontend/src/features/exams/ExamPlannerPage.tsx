@@ -5,6 +5,7 @@ import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { VALID_DEPARTMENT_NAMES } from '../../lib/validation/auth';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 const card = 'bg-surface border border-borderLine rounded-2xl shadow-sm print:shadow-none print:border-slate-300';
 const input = 'px-3 py-2 text-xs rounded-xl border border-borderLine bg-background font-semibold focus:outline-none';
 const YEARS = ['1st Year', '2nd Year', '3rd Year', '4th Year'];
@@ -80,7 +81,7 @@ function NewSession({ onDone }: { onDone: (id?: number) => void }) {
       {err && <p className="text-[11px] text-red-600">{err}</p>}
       <button disabled={!f.title.trim() || !f.exam_date || !groups.length || !roomIds.length || create.isPending} onClick={() => create.mutate()}
         className="px-3 py-2 text-xs font-bold rounded-xl bg-brand-primary text-white disabled:opacity-40 inline-flex items-center gap-1.5">
-        {create.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}Create & allocate</button>
+        {create.isPending && <BouncingDots size="xs" />}Create & allocate</button>
     </div>
   );
 }
@@ -90,7 +91,7 @@ function SessionDetail({ id, onBack, canDelete }: { id: number; onBack: () => vo
   const { data, isLoading } = useQuery({ queryKey: ['examSession', id], queryFn: () => api.getExamSession(id) });
   const del = useMutation({ mutationFn: () => api.deleteExamSession(id), onSuccess: () => { qc.invalidateQueries({ queryKey: ['examSessions'] }); onBack(); } });
   const [confirm, setConfirm] = useState(false);
-  if (isLoading || !data) return <div className={`${card} p-8 text-center text-xs text-textMuted`}>Loading…</div>;
+  if (isLoading || !data) return <div className={`${card} p-8 text-center text-xs text-textMuted`}><BouncingDots size="sm" className="text-brand-primary" label="Loading…" /></div>;
   const s = data.session;
   return (
     <div className="space-y-4">
@@ -132,7 +133,7 @@ function MyExams({ role }: { role: string }) {
   return (
     <div className={`${card} overflow-x-auto`}>
       <div className="px-4 py-3 border-b border-borderLine text-xs font-black uppercase tracking-wider text-textSecondary">{role === 'student' ? 'My exam seats' : 'My invigilation duties'}</div>
-      {isLoading ? <div className="p-6 text-center text-xs text-textMuted">Loading…</div>
+      {isLoading ? <div className="p-6 text-center text-xs text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading…" /></div>
         : list.length === 0 ? <div className="p-6 text-center text-xs text-textMuted">Nothing scheduled.</div>
         : <table className="w-full text-xs"><tbody className="divide-y divide-borderLine">
           {list.map((x, i) => (
@@ -177,7 +178,7 @@ export const ExamPlannerPage: React.FC = () => {
               <thead><tr className="bg-surface-2 border-b border-borderLine text-textMuted font-bold uppercase text-[10px] tracking-wider">
                 <th className="py-2.5 px-4">Date</th><th className="py-2.5 px-3">Session</th><th className="py-2.5 px-3 text-center">Students</th><th className="py-2.5 px-3 text-center">Rooms</th><th className="py-2.5 px-3 text-center">Invigilators</th></tr></thead>
               <tbody className="divide-y divide-borderLine">
-                {isLoading ? <tr><td colSpan={5} className="py-8 text-center text-textMuted">Loading…</td></tr>
+                {isLoading ? <tr><td colSpan={5} className="py-8 text-center text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading…" /></td></tr>
                   : sessions.length === 0 ? <tr><td colSpan={5} className="py-8 text-center text-textMuted">No exam sessions yet.</td></tr>
                   : sessions.map(s => (
                     <tr key={s.id} onClick={() => setOpen(s.id)} className="hover:bg-surface-2/50 cursor-pointer">

@@ -34,6 +34,7 @@ import { LeaveLetterModal } from './LeaveLetterModal';
 import { LeaveBalanceTable } from './LeaveBalanceTable';
 import { LeaveStatementModal } from './LeaveStatementModal';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 const AVAILABLE_PERIODS = [
   { id: 'Period 1', label: 'Period 1 (09:00 - 09:50 AM)' },
   { id: 'Period 2', label: 'Period 2 (09:50 - 10:40 AM)' },
@@ -457,7 +458,7 @@ export const FacultyLeaveTab: React.FC = () => {
         {activeSubTab === 'my-leaves' && (
           <div>
             {isLoadingSummary ? (
-              <div className="py-12 text-center text-xs text-textMuted">Loading leave records...</div>
+              <div className="py-12 text-center text-xs text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading leave records…" /></div>
             ) : !summary?.leaves || summary.leaves.length === 0 ? (
               <div className="py-12 text-center text-xs text-textMuted bg-surface-2/30 rounded-xl border border-dashed border-borderLine space-y-1">
                 <Calendar className="w-8 h-8 text-textMuted mx-auto" />
@@ -623,7 +624,7 @@ export const FacultyLeaveTab: React.FC = () => {
         {activeSubTab === 'reassigned-duties' && (
           <div>
             {isLoadingDuties ? (
-              <div className="py-12 text-center text-xs text-textMuted">Loading reassigned duties...</div>
+              <div className="py-12 text-center text-xs text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading reassigned duties…" /></div>
             ) : reassignedDuties.length === 0 ? (
               <div className="py-12 text-center text-xs text-textMuted bg-surface-2/30 rounded-xl border border-dashed border-borderLine space-y-1">
                 <Briefcase className="w-8 h-8 text-textMuted mx-auto" />

@@ -7,6 +7,7 @@ import {
 import { api } from '../../lib/api';
 import { DutyLogModal } from './DutyLogModal';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Pillar {
   label: string;
@@ -137,7 +138,7 @@ export function FacultyApiScoreCard({ facultyEmail, readOnly = false }: Props) {
     return (
       <div className="bg-white dark:bg-surface rounded-2xl border border-gray-200 dark:border-borderLine shadow-sm p-8 flex items-center justify-center">
         <div className="text-center">
-          <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-3" />
+          <div className="flex justify-center mb-3"><BouncingDots size="lg" className="text-indigo-600" /></div>
           <p className="text-sm text-gray-500">Loading API Score…</p>
         </div>
       </div>
@@ -280,7 +281,7 @@ export function FacultyApiScoreCard({ facultyEmail, readOnly = false }: Props) {
           {showDuties && (
             <div className="px-6 pb-6">
               {dutiesLoading ? (
-                <div className="text-center py-6 text-sm text-gray-400">Loading duties…</div>
+                <div className="text-center py-6 text-sm text-gray-400"><BouncingDots size="sm" className="text-brand-primary" label="Loading duties…" /></div>
               ) : duties.length === 0 ? (
                 <div className="text-center py-8 text-gray-400">
                   <Award className="w-10 h-10 mx-auto mb-2 opacity-30" />

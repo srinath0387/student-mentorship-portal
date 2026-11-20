@@ -8,6 +8,7 @@ import { api } from '../../../lib/api';
 import { VALID_DEPARTMENT_NAMES } from '../../../lib/validation/auth';
 import { useAuth } from '../../../context/AuthContext';
 
+import { BouncingDots } from '../../../components/common/BouncingDots';
 const DEPARTMENTS = VALID_DEPARTMENT_NAMES;
 const SEMESTERS = ['1-1','1-2','2-1','2-2','3-1','3-2','4-1','4-2'];
 const SECTIONS = ['A','B','C','D','E'];
@@ -398,7 +399,7 @@ export const AttendanceSetupPage: React.FC = () => {
                 <button type="button" onClick={()=>{setMasterFetchTs(Date.now());refetchMaster();}} className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-borderLine hover:bg-surface-2 text-textSecondary font-bold text-[11px]" title="Refresh Catalog">
                   <RotateCcw className={`w-3 h-3 ${isMasterLoading?'animate-spin text-brand-primary':''}`}/> Refresh
                 </button>
-                {isMasterLoading && <span className="text-blue-500 font-bold animate-pulse">Loading…</span>}
+                {isMasterLoading && <span className="text-blue-500 font-bold animate-pulse"><BouncingDots size="sm" className="text-brand-primary" label="Loading…" /></span>}
                 {masterError && <span className="text-red-500 font-bold">Error: {String(masterError)}</span>}
                 <span className="text-textMuted font-semibold">Total: <strong className="text-textPrimary">{masterSubjects.length}</strong> · Shown: <strong className="text-textPrimary">{filteredSubjects.length}</strong></span>
               </div>

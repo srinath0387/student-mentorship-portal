@@ -7,6 +7,7 @@ import { VALID_DEPARTMENT_NAMES, normalizeDepartmentName } from '../../lib/valid
 import { AddMenteeModal } from './components/AddMenteeModal';
 import { FacultyProfileInspectionModal } from '../faculty/components/FacultyProfileInspectionModal';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 interface FacultyRow {
   faculty_id: string;
   name: string;
@@ -374,7 +375,7 @@ export default function FacultyManagementPage() {
           </div>
           <div className="overflow-y-auto flex-1">
             {facLoading
-              ? <div className="p-10 text-center text-textSecondary text-sm">Loading...</div>
+              ? <div className="p-10 text-center text-textSecondary text-sm"><BouncingDots size="sm" className="text-brand-primary" label="Loading…" /></div>
               : filtered.length === 0
               ? <div className="p-10 text-center text-textSecondary text-sm">No faculty found</div>
               : filtered.map(f => {
@@ -658,7 +659,7 @@ export default function FacultyManagementPage() {
               })()}
               <div className="overflow-y-auto flex-1">
                 {menteesLoading
-                  ? <div className="p-10 text-center text-textSecondary text-sm">Loading mentees...</div>
+                  ? <div className="p-10 text-center text-textSecondary text-sm"><BouncingDots size="sm" className="text-brand-primary" label="Loading mentees…" /></div>
                   : mentees.length === 0
                   ? <div className="p-10 text-center text-textSecondary text-sm">No mentees assigned.</div>
                   : mentees.map(m => (

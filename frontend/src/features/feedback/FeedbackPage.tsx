@@ -5,6 +5,7 @@ import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { VALID_DEPARTMENT_NAMES } from '../../lib/validation/auth';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 interface Question { id: string; text: string }
 interface Cycle {
   id: number; title: string; department: string; semester_label: string; start_date: string; end_date: string;
@@ -42,7 +43,7 @@ function StudentFeedback() {
     onError: (e: any) => setMsg({ ok: false, text: e.message || 'Could not submit.' }),
   });
 
-  if (isLoading) return <div className={`${card} p-8 text-center text-xs text-textMuted`}>Loading…</div>;
+  if (isLoading) return <div className={`${card} p-8 text-center text-xs text-textMuted`}><BouncingDots size="sm" className="text-brand-primary" label="Loading…" /></div>;
   if (!active) return <div className={`${card} p-8 text-center text-xs text-textMuted`}>No feedback window is open right now.</div>;
   const subjects: any[] = mine?.subjects || [];
   const questions = active.questions || [];
@@ -109,7 +110,7 @@ function StudentFeedback() {
               <button onClick={() => setForm(null)} className="px-3 py-2 text-xs font-bold rounded-xl border border-borderLine">Cancel</button>
               <button disabled={!complete || submit.isPending} onClick={() => submit.mutate()}
                 className="px-3 py-2 text-xs font-bold rounded-xl bg-brand-primary text-white disabled:opacity-40 inline-flex items-center gap-1.5">
-                {submit.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}Submit anonymously
+                {submit.isPending && <BouncingDots size="xs" />}Submit anonymously
               </button>
             </div>
           </div>
@@ -125,7 +126,7 @@ function CycleResults({ cycle }: { cycle: Cycle }) {
   const [open, setOpen] = useState<string | null>(null);
   const questions: Question[] = data?.questions || cycle.questions || [];
   const rows: any[] = data?.rows || [];
-  if (isLoading) return <div className="p-6 text-center text-xs text-textMuted">Loading results…</div>;
+  if (isLoading) return <div className="p-6 text-center text-xs text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading results…" /></div>;
   if (isError) return <div className="p-6 text-center text-xs text-amber-700">{(error as Error)?.message}</div>;
   if (rows.length === 0) return <div className="p-6 text-center text-xs text-textMuted">No responses yet.</div>;
   return (
@@ -220,7 +221,7 @@ function StaffFeedback({ isAdmin }: { isAdmin: boolean }) {
       )}
 
       <div className="flex flex-wrap gap-2">
-        {isLoading ? <span className="text-xs text-textMuted">Loading…</span>
+        {isLoading ? <span className="text-xs text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading…" /></span>
           : cycles.length === 0 ? <span className="text-xs text-textMuted">No feedback windows yet.</span>
           : cycles.map(c => (
             <button key={c.id} onClick={() => setSelected(c.id)}

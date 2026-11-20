@@ -4,6 +4,7 @@ import { ClipboardCheck, Printer, RefreshCw, ArrowLeft, Loader2, Undo2 } from 'l
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 const card = 'bg-surface border border-borderLine rounded-2xl shadow-sm print:shadow-none print:border-slate-300';
 const input = 'px-3 py-2 text-xs rounded-xl border border-borderLine bg-background font-semibold focus:outline-none';
 const RATINGS = ['Outstanding', 'Very Good', 'Good', 'Satisfactory', 'Needs Improvement'];
@@ -101,7 +102,7 @@ function AppraisalDetail({ email, ay, onBack }: { email: string; ay: string; onB
             <div className="flex gap-2 print:hidden">
               <button disabled={act.isPending} onClick={() => act.mutate({ action: 'save_self', ...self })} className="px-3 py-2 text-xs font-bold rounded-xl border border-borderLine">Save draft</button>
               <button disabled={act.isPending || !self.self_remarks.trim()} onClick={() => act.mutate({ action: 'submit', ...self })} className="px-3 py-2 text-xs font-bold rounded-xl bg-brand-primary text-white disabled:opacity-40 inline-flex items-center gap-1.5">
-                {act.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}Submit to HOD</button>
+                {act.isPending && <BouncingDots size="xs" />}Submit to HOD</button>
             </div>
           </>
         ) : (
@@ -192,7 +193,7 @@ export const AppraisalPage: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-borderLine">
-                    {isLoading ? <tr><td colSpan={6} className="py-8 text-center text-textMuted">Loading…</td></tr>
+                    {isLoading ? <tr><td colSpan={6} className="py-8 text-center text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading…" /></td></tr>
                       : rows.length === 0 ? <tr><td colSpan={6} className="py-8 text-center text-textMuted">No faculty found.</td></tr>
                       : rows.map(r => (
                         <tr key={r.faculty_email} onClick={() => setOpen(String(r.faculty_email).toLowerCase())} className="hover:bg-surface-2/50 cursor-pointer">

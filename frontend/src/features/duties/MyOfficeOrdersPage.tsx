@@ -4,6 +4,7 @@ import { BadgeCheck, FileText } from 'lucide-react';
 import { api } from '../../lib/api';
 import { DutyOrder, OfficeOrderModal, bodyLabel, fmtLong } from './OfficeOrderModal';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 /** Faculty / HOD: office orders appointing me to institutional bodies, ready to print. */
 export default function MyOfficeOrdersPage() {
   const { data: orders = [], isLoading } = useQuery<DutyOrder[]>({ queryKey: ['myOfficeOrders'], queryFn: () => api.getMyOfficeOrders() });
@@ -39,7 +40,7 @@ export default function MyOfficeOrdersPage() {
         <h1 className="text-2xl font-extrabold text-textPrimary">My Office Orders</h1>
         <p className="text-xs text-textSecondary mt-1">Appointments issued to you by the Principal — IIC, ISTE, NSS, NCC, IQAC and other bodies.</p>
       </div>
-      {isLoading ? <p className="text-xs text-textMuted">Loading…</p> : orders.length === 0 ? (
+      {isLoading ? <p className="text-xs text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading…" /></p> : orders.length === 0 ? (
         <div className="bg-surface border border-dashed border-borderLine rounded-2xl p-10 text-center text-sm text-textMuted">No office orders have been issued to you yet.</div>
       ) : (
         <>

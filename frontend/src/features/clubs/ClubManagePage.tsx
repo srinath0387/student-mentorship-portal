@@ -7,6 +7,7 @@ import {
   CATEGORY_EMOJI, DEPARTMENTS, Empty, SeatBar, WindowChip, YEARS, btnGhost, btnPrimary, card, input, label, money,
 } from './clubUi';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 const CATEGORIES = ['Technical', 'Coding', 'Cultural', 'Literary', 'Sports', 'Social Service', 'Entrepreneurship', 'Arts', 'Other'];
 
 /** datetime-local value in the browser's zone */
@@ -209,7 +210,7 @@ export default function ClubManagePage() {
       )}
       {working && <ClubWorkspace key={working.id} club={working} mode="admin" onClose={() => setWorking(null)} />}
 
-      {isLoading ? <Empty>Loading clubs…</Empty> : clubs.length === 0 ? (
+      {isLoading ? <Empty><BouncingDots size="sm" className="text-brand-primary" label="Loading clubs…" /></Empty> : clubs.length === 0 ? (
         <div className={card}><Empty>No clubs yet. Click “New club” to add the first one.</Empty></div>
       ) : (
         <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">

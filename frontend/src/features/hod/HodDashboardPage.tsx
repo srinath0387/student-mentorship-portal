@@ -57,6 +57,7 @@ const SECTIONS = ['Section A', 'Section B', 'Section C'] as const;
 const STANDINGS = ['Distinction', 'First Class', 'Second Class', 'Pass'] as const;
 import { VALID_DEPARTMENT_NAMES } from '../../lib/validation/auth';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 const CODING_LEVELS = ['All Coders', 'Top Coders (>300 LC)', 'Active GitHub (>20 repos)'] as const;
 
 
@@ -990,7 +991,7 @@ export const HodDashboardPage: React.FC = () => {
                 {progressionLoading ? (
                   <div className="h-full flex items-center justify-center">
                     <div className="flex flex-col items-center gap-2">
-                      <div className="w-6 h-6 border-2 border-brand-primary border-t-transparent rounded-full animate-spin" />
+                      <BouncingDots size="md" className="text-brand-primary" />
                       <p className="text-xs text-textSecondary">Fetching academic records for {progressionYear}...</p>
                     </div>
                   </div>
@@ -1663,8 +1664,8 @@ export const HodDashboardPage: React.FC = () => {
                 inspectProfileLoading ? (
                   <div className="flex items-center justify-center py-16">
                     <div className="flex flex-col items-center gap-3">
-                      <div className="w-8 h-8 border-2 border-brand-primary border-t-transparent rounded-full animate-spin" />
-                      <p className="text-xs text-textSecondary">Loading profile data...</p>
+                      <BouncingDots size="lg" className="text-brand-primary" />
+                      <p className="text-xs text-textSecondary">Loading profile data…</p>
                     </div>
                   </div>
                 ) : (

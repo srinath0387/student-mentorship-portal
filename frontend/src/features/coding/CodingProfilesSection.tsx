@@ -14,6 +14,7 @@ import { Plus, Loader2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 interface CodingProfilesSectionProps {
   onRefreshAll?: () => void;
   studentName?: string;
@@ -460,7 +461,7 @@ export const CodingProfilesSection: React.FC<CodingProfilesSectionProps> = ({
       <div className="flex-1 min-w-0 w-full">
         {loadingPlatform && !currentSnapshot ? (
           <div className="bg-surface border border-borderLine rounded-2xl p-12 text-center shadow-xs flex flex-col items-center justify-center gap-3">
-            <Loader2 className="w-8 h-8 text-[#1E65FF] animate-spin" />
+            <BouncingDots size="lg" className="text-[#1E65FF]" />
             <p className="text-sm font-semibold text-textPrimary">
               Fetching real-time data for {currentConfig.name}...
             </p>

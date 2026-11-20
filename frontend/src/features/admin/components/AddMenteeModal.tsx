@@ -15,6 +15,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 
+import { BouncingDots } from '../../../components/common/BouncingDots';
 interface FacultyTarget {
   faculty_id: string;
   name: string;
@@ -313,7 +314,7 @@ export const AddMenteeModal: React.FC<AddMenteeModalProps> = ({
                     className="w-full pl-10 pr-10 py-2.5 bg-background border border-borderLine rounded-xl text-xs text-textPrimary placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
                   />
                   {isSearching && (
-                    <Loader2 className="w-4 h-4 text-brand-primary animate-spin absolute right-3.5 top-1/2 -translate-y-1/2" />
+                    <BouncingDots size="sm" className="text-brand-primary absolute right-3.5 top-1/2 -translate-y-1/2" />
                   )}
                 </div>
 
@@ -510,7 +511,7 @@ export const AddMenteeModal: React.FC<AddMenteeModalProps> = ({
               >
                 {assignMutation.isPending ? (
                   <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Assigning…
+                    <BouncingDots size="xs" /> Assigning…
                   </>
                 ) : (
                   <>

@@ -3,6 +3,7 @@ import { CheckCircle2, Eye, EyeOff, KeyRound, Loader2, ShieldCheck, XCircle } fr
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 const DEFAULTS = ['hod@2026', 'admin@2026', 'coordinator@2026', 'director@2026', 'principal@2026', 'management@2026', 'chair@2026', 'cseds@2026', 'password', 'password1', '12345678', '123456789', 'rgmcet@123', 'rgmcet123'];
 const input = 'w-full px-3.5 py-2.5 pr-10 text-sm rounded-xl border border-borderLine bg-background text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary/30';
 
@@ -81,7 +82,7 @@ export default function ChangePasswordPage() {
           ))}
         </ul>
         <button type="submit" disabled={!ready || busy} className="w-full py-2.5 rounded-xl bg-brand-primary text-white text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
-          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}Change password
+          {busy ? <BouncingDots size="sm" /> : <KeyRound className="w-4 h-4" />}Change password
         </button>
       </form>
       <p className="text-[11px] text-textMuted">Forgot your password? Ask a super admin to reset it — the old one stops working the moment it is reset.</p>

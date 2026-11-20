@@ -20,6 +20,7 @@ import type {
   OversightPublication
 } from '../../types';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 type MainTab = 'home' | 'students' | 'faculty' | 'certifications' | 'research' | 'placements';
 type ViewMode = 'grid' | 'powerbi';
 type CadreFilter = 'all' | 'professors' | 'associate' | 'assistant' | 'doctorates';
@@ -1379,7 +1380,7 @@ export const OversightDashboardPage: React.FC = () => {
           {isLoading ? (
             <div className="flex items-center justify-center py-20 text-textMuted text-sm">
               <div className="text-center">
-                <div className="animate-spin w-8 h-8 border-4 border-brand-primary border-t-transparent rounded-full mx-auto mb-3" />
+                <div className="flex justify-center mb-3"><BouncingDots size="lg" className="text-brand-primary" /></div>
                 Loading real-time institutional data…
               </div>
             </div>
@@ -1448,7 +1449,7 @@ export const OversightDashboardPage: React.FC = () => {
               {cadreLoading ? (
                 <div className="flex items-center justify-center py-16 text-textMuted text-xs">
                   <div className="text-center">
-                    <div className="animate-spin w-6 h-6 border-4 border-brand-primary border-t-transparent rounded-full mx-auto mb-2" />
+                    <div className="flex justify-center mb-2"><BouncingDots size="md" className="text-brand-primary" /></div>
                     Loading faculty profiles…
                   </div>
                 </div>
@@ -1550,7 +1551,7 @@ export const OversightDashboardPage: React.FC = () => {
               {pubLoading ? (
                 <div className="flex items-center justify-center py-20 text-textMuted text-xs">
                   <div className="text-center">
-                    <div className="animate-spin w-7 h-7 border-4 border-amber-500 border-t-transparent rounded-full mx-auto mb-2" />
+                    <div className="flex justify-center mb-2"><BouncingDots size="md" className="text-amber-500" /></div>
                     Loading research publications for {pubDrawerYear}…
                   </div>
                 </div>

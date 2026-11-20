@@ -9,6 +9,7 @@ import {
   getDeptFromRollNumber, isLateralEntry,
 } from '../../lib/validation/auth';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 const field = 'w-full pl-10 pr-4 py-2.5 rounded-xl neu-inset border border-transparent text-slate-800 placeholder-slate-400 text-xs sm:text-sm font-medium focus:outline-none';
 const label = 'block text-xs font-bold text-slate-700 mb-1.5';
 const YEARS = ['1st Year', '2nd Year', '3rd Year', '4th Year'] as const;
@@ -213,7 +214,7 @@ export const RegisterPanel: React.FC<{ kind: 'student' | 'faculty'; onBack: () =
 
       <button type="submit" disabled={busy}
         className="w-full py-3 rounded-xl bg-brand-primary text-white font-black text-sm neu-accent flex items-center justify-center gap-2 disabled:opacity-50">
-        {busy ? <><Loader2 className="w-4 h-4 animate-spin" />Creating account…</> : <><UserPlus className="w-4 h-4" />{kind === 'student' ? 'Create student account' : 'Register & login'}</>}
+        {busy ? <><BouncingDots size="sm" />Creating account…</> : <><UserPlus className="w-4 h-4" />{kind === 'student' ? 'Create student account' : 'Register & login'}</>}
       </button>
       <p className="text-center text-xs text-slate-500">
         Already registered? <button type="button" onClick={onBack} className="font-bold text-brand-primary hover:underline">Back to login</button>

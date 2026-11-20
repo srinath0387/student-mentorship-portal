@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Radio, X, Loader2, Users } from 'lucide-react';
 import { api } from '../../../lib/api';
 
+import { BouncingDots } from '../../../components/common/BouncingDots';
 interface Props {
   allotmentId: string;
   sessionDate: string;
@@ -89,7 +90,7 @@ export const LiveCodePanel: React.FC<Props> = ({ allotmentId, sessionDate, perio
               </div>
             )}
             <button onClick={stop} disabled={stopping} className="px-5 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-bold inline-flex items-center gap-2">
-              {stopping && <Loader2 className="w-4 h-4 animate-spin" />}Stop and fill attendance
+              {stopping && <BouncingDots size="sm" />}Stop and fill attendance
             </button>
             <p className="text-[10px] text-textMuted">Students who checked in are marked present, everyone else absent — you can still change anyone before submitting.</p>
           </>

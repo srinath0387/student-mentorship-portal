@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ExternalLink, Loader2, AlertCircle, RefreshCw, Github, Star, GitFork } from 'lucide-react';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 export interface GitHubRepo {
   name: string;
   description: string | null;
@@ -197,7 +198,7 @@ export const GitHubCard: React.FC<GitHubCardProps> = ({ initialUsername = '', on
             disabled={loading || !inputVal.trim()}
             className="px-4 py-2 text-sm font-bold rounded-xl bg-textPrimary text-surface transition-all hover:opacity-80 disabled:opacity-50"
           >
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Connect'}
+            {loading ? <BouncingDots size="sm" /> : 'Connect'}
           </button>
         </div>
 
@@ -210,7 +211,7 @@ export const GitHubCard: React.FC<GitHubCardProps> = ({ initialUsername = '', on
 
         {loading && !profile && (
           <div className="flex items-center justify-center py-8 gap-2 text-textSecondary">
-            <Loader2 className="w-5 h-5 animate-spin" />
+            <BouncingDots size="md" />
             <span className="text-sm">Fetching GitHub profile...</span>
           </div>
         )}

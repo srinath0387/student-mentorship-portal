@@ -4,6 +4,7 @@ import { ExternalLink, Loader2, RefreshCw, TrendingUp } from 'lucide-react';
 import { api } from '../../lib/api';
 import { fetchCitationCounts, normalizeDoi } from '../../lib/scholarly';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 const hIndex = (cites: number[]) => {
   const c = [...cites].sort((a, b) => b - a);
   let h = 0;
@@ -58,12 +59,12 @@ export function ResearchImpactPanel({ department, canRefresh }: { department: st
         <h3 className="font-black text-textPrimary text-sm flex items-center gap-2"><TrendingUp className="w-4 h-4 text-sky-600" />Research impact · {department === 'All' ? 'all departments' : department}</h3>
         {canRefresh && (
           <button onClick={refresh} disabled={busy || isLoading || !s.withDoi} className="px-3 py-1.5 rounded-lg border border-borderLine text-xs font-bold text-textSecondary hover:bg-surface-2 disabled:opacity-50">
-            {busy ? <Loader2 className="w-3.5 h-3.5 inline animate-spin mr-1" /> : <RefreshCw className="w-3.5 h-3.5 inline mr-1" />}Update citations from Crossref
+            {busy ? <BouncingDots size="xs" className="mr-1" /> : <RefreshCw className="w-3.5 h-3.5 inline mr-1" />}Update citations from Crossref
           </button>
         )}
       </div>
       {note && <p className="text-[11px] font-bold text-sky-700 dark:text-sky-300">{note}</p>}
-      {isLoading ? <div className="py-6 text-center"><Loader2 className="w-4 h-4 animate-spin inline text-textMuted" /></div> : (
+      {isLoading ? <div className="py-6 text-center"><BouncingDots size="sm" className="text-textMuted" /></div> : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[

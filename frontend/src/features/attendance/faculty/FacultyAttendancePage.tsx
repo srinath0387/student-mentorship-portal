@@ -6,6 +6,7 @@ import { SubjectAllotment, SubjectRosterEntry, TimetableEntry, SemesterLabel } f
 import { useAuth } from '../../../context/AuthContext';
 import { LiveCodePanel } from './LiveCodePanel';
 
+import { BouncingDots } from '../../../components/common/BouncingDots';
 const ALL_SEMESTERS: SemesterLabel[] = ['1-1','1-2','2-1','2-2','3-1','3-2','4-1','4-2'];
 const PERIOD_TIMES: Record<number,string> = {
   1:'09:00–09:50',2:'09:50–10:40',3:'10:55–11:45',
@@ -752,7 +753,7 @@ export const FacultyAttendancePage: React.FC = () => {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-borderLine">
-                          {rosterLoading?<tr><td colSpan={6} className="p-8 text-center text-textMuted">Loading students...</td></tr>:records.length===0?<tr><td colSpan={6} className="p-8 text-center text-textMuted">No students enrolled for this subject.</td></tr>:records.map((r,idx)=>(
+                          {rosterLoading?<tr><td colSpan={6} className="p-8 text-center text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading students…" /></td></tr>:records.length===0?<tr><td colSpan={6} className="p-8 text-center text-textMuted">No students enrolled for this subject.</td></tr>:records.map((r,idx)=>(
                             <tr key={r.roll_number} className={`hover:bg-surface-2 transition-colors ${r.is_on_od ? 'bg-indigo-50/50 dark:bg-indigo-950/30' : (!r.h1 || (hour2 && !r.h2) || (hour3 && !r.h3))?'bg-rose-50/60 dark:bg-rose-950/20':''}`}>
                               <td className="px-4 py-3 text-center text-textMuted font-bold">{idx+1}</td>
                               <td className="px-4 py-3 font-mono font-black text-textPrimary">{r.roll_number}</td>
@@ -1262,7 +1263,7 @@ function MyStudentsPanel({ subjects }: { subjects: SubjectAllotment[] }) {
               <tr><th className="px-4 py-2.5">#</th><th className="px-4 py-2.5">Roll No.</th><th className="px-4 py-2.5">Name</th><th className="px-4 py-2.5">On roll from</th></tr>
             </thead>
             <tbody className="divide-y divide-borderLine">
-              {isLoading ? <tr><td colSpan={4} className="p-8 text-center text-textMuted">Loading students…</td></tr>
+              {isLoading ? <tr><td colSpan={4} className="p-8 text-center text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading students…" /></td></tr>
                 : shown.length === 0 ? <tr><td colSpan={4} className="p-8 text-center text-textMuted">{roster.length === 0 ? 'No students on this roll yet. Ask the admin to assign students.' : 'No match.'}</td></tr>
                 : shown.map((r, i) => (
                   <tr key={r.roll_number} className="hover:bg-surface-2">

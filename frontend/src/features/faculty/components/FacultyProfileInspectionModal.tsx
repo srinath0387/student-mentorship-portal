@@ -33,6 +33,7 @@ import { SubjectsHandledSection } from './SubjectsHandledSection';
 import { VALID_DEPARTMENT_NAMES } from '../../../lib/validation/auth';
 import { FacultyApiScoreCard } from '../FacultyApiScoreCard';
 
+import { BouncingDots } from '../../../components/common/BouncingDots';
 interface Props {
   faculty: {
     faculty_id: string;
@@ -230,8 +231,8 @@ export const FacultyProfileInspectionModal: React.FC<Props> = ({ faculty, onClos
 
         {isLoading ? (
           <div className="py-12 text-center flex flex-col items-center justify-center gap-2">
-            <Loader2 className="w-7 h-7 text-brand-primary animate-spin" />
-            <p className="text-xs font-semibold text-textSecondary">Loading complete faculty profile...</p>
+            <BouncingDots size="lg" className="text-brand-primary" />
+            <p className="text-xs font-semibold text-textSecondary">Loading complete faculty profile…</p>
           </div>
         ) : (
           <div className="space-y-6">

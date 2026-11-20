@@ -10,13 +10,14 @@ import { AlertTriangle, CheckCircle2, Lock, X } from 'lucide-react';
 import { fsApi, fmtTime, type FsPickResult, type FsStudentView } from './fsApi';
 import { card, btnPrimary, btnGhost, Notice, Empty, RoundStatus, SeatMeter, th, td, chipBrand, chipMuted, chipOk, chipWarn } from './fsUi';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 export default function StudentSelectionPage() {
   const me = useQuery({ queryKey: ['fs', 'me'], queryFn: fsApi.me });
   const rounds = (me.data?.rounds || []).filter(r => r.status === 'open');
   const [roundId, setRoundId] = useState<string | null>(null);
   useEffect(() => { if (!roundId && rounds.length) setRoundId(rounds[0].id); }, [rounds, roundId]);
 
-  if (me.isLoading) return <p className="p-6 text-xs text-textMuted">Loading…</p>;
+  if (me.isLoading) return <p className="p-6 text-xs text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading…" /></p>;
   if (me.error) return <div className="p-6"><Notice msg={{ ok: false, text: (me.error as any).message }} /></div>;
   return (
     <div className="space-y-5 p-4 md:p-6 max-w-5xl mx-auto">
@@ -66,7 +67,7 @@ function RoundPicker({ roundId }: { roundId: string }) {
     onError: (e: any) => { setResults([{ subject_id: '', offering_id: '', subject_name: null, ok: false, status: 409, message: e.message }]); setConfirming(false); },
   });
 
-  if (view.isLoading) return <p className="text-xs text-textMuted">Loading subjects…</p>;
+  if (view.isLoading) return <p className="text-xs text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading subjects…" /></p>;
   if (!v) return <Notice msg={{ ok: false, text: 'You are not on this round\'s list. Contact your department admin if this is wrong.' }} />;
 
   const draftGroups = new Set(Object.entries(picks).map(([sid, oid]) => v.subjects.find(s => s.id === sid)?.options.find(o => o.id === oid)?.group_id));
@@ -188,7 +189,7 @@ export function MyAllottedPage() {
         <h1 className="text-xl font-black text-textPrimary tracking-tight">My Allotted Faculty</h1>
         <Link to="/faculty-selection" className={btnGhost}>Choose faculty</Link>
       </div>
-      {q.isLoading ? <p className="text-xs text-textMuted">Loading…</p> : !rows.length ? <Empty title="No faculty allotted yet" text="Your choices appear here once you confirm them." /> :
+      {q.isLoading ? <p className="text-xs text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading…" /></p> : !rows.length ? <Empty title="No faculty allotted yet" text="Your choices appear here once you confirm them." /> :
         Array.from(bySem.entries()).map(([k, list]) => (
           <div key={k} className={`${card} p-4 space-y-2 overflow-x-auto`}>
             <p className="text-sm font-black text-textPrimary">{list[0].round_title} · Semester {list[0].semester_label}</p>

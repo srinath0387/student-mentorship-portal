@@ -6,6 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { ClubWorkspace } from './ClubWorkspace';
 import { CATEGORY_EMOJI, DEPARTMENTS, Empty, RoleChip, StatusChip, btnGhost, btnPrimary, card, downloadCsv, input } from './clubUi';
 
+import { BouncingDots } from '../../components/common/BouncingDots';
 const CHAIR_DEPTS = ['CSE', 'CSE (AI & ML)', 'CSE (Data Science)', 'CSE (BS)', 'CSE (CS)'];
 
 /** Club participation of the students a staff member is responsible for (mentees / department / institution). */
@@ -129,7 +130,7 @@ export default function ClubStudentsPage() {
                 <tr><th className="px-3 py-2">Student</th><th className="px-3 py-2">Class</th><th className="px-3 py-2">Clubs</th></tr>
               </thead>
               <tbody className="divide-y divide-borderLine">
-                {isLoading ? <tr><td colSpan={3}><Empty><Loader2 className="w-4 h-4 animate-spin inline" /></Empty></td></tr>
+                {isLoading ? <tr><td colSpan={3}><Empty><BouncingDots size="sm" /></Empty></td></tr>
                   : shown.length === 0 ? <tr><td colSpan={3}><Empty>{rows.length ? 'No student matches these filters.' : 'None of these students has joined a club yet.'}</Empty></td></tr>
                   : shown.map(s => (
                     <tr key={s.roll_number} className="align-top hover:bg-surface-2/60">
