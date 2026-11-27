@@ -293,7 +293,7 @@ describe('Course Execution Plan', () => {
     ]);
     const res = await request(app).put(`/exec-plans/allotment/${AID}`).set('Authorization', FAC()).send({
       data: {
-        initial: { faculty_name: 'Ramesh', short_code: 'OS', teaching_weeks: 13, hacked: 'x', vision: 'v'.repeat(5000) },
+        initial: { faculty_name: 'Ramesh', short_code: 'O\u0000S\u0007', teaching_weeks: 13, hacked: 'x', vision: 'v'.repeat(5000) },
         brief: [{ unit: 'Unit 1', heading: 'Intro', topics: 'a, b', hours: '10', evil: '<script>' }],
         weekly: Array.from({ length: 40 }, (_, i) => ({ week: String(i + 1), topic: 'T' })),
         experts: [{ name: 'S. Rao' }, { name: 'B' }, { name: 'third one is dropped' }],
@@ -307,6 +307,7 @@ describe('Course Execution Plan', () => {
     expect(Object.keys(data).sort()).toEqual(['brief', 'experts', 'initial', 'teams', 'weekly']);
     expect(data.initial.hacked).toBeUndefined();
     expect(data.initial.teaching_weeks).toBe('13');
+    expect(data.initial.short_code).toBe('OS');   // control characters pasted from PDFs are dropped
     expect(data.initial.vision.length).toBe(3000);
     expect(data.brief[0].evil).toBeUndefined();
     expect(data.weekly).toHaveLength(30);

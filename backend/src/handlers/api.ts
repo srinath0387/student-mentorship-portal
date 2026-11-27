@@ -12113,7 +12113,9 @@ const CEP_ROWS: Record<string, { keys: string[]; max: number }> = {
   teams: { keys: ['week', 'date', 'duration', 'tool', 's1', 's2', 's3', 'feature', 'objective', 'evidence', 'feedback'], max: 30 },
 };
 const CEP_CATALOG_KEYS = ['semester', 'short_code', 'subject', 'syllabus_code', 'key_topics', 'tools'];
-const cepText = (v: any, n = 3000) => String(v ?? '').replace(/\r\n?/g, '\n').slice(0, n).trim();
+// Text pasted from PDFs / Word can carry control characters; Postgres rejects \u0000 in JSONB, which would fail the whole save
+// eslint-disable-next-line no-control-regex
+const cepText = (v: any, n = 3000) => String(v ?? '').replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').slice(0, n).trim();
 
 /** Whitelist the plan's shape and work out how much of it is filled (teams are filled during the semester, so they don't count). */
 function cleanExecPlan(raw: any): { data: any; progress: number } {

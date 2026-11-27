@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, CalendarCheck2, Check, Download, FileSpreadsheet, FileText, Loader2, Paperclip, Plus, Trash2, Undo2, Upload, Wand2 } from 'lucide-react';
 import { api } from '../../lib/api';
@@ -19,6 +19,9 @@ export function LessonPlanEditor({ allotmentId, onBack, initialTab }: { allotmen
   const qc = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ['lessonPlan', allotmentId], queryFn: () => api.getLessonPlan(allotmentId) });
   const [tab, setTab] = useState<'syllabus' | 'plan' | 'coverage' | 'execution'>(initialTab || 'plan');
+  const tabChosen = useRef(false);
+  const [execOpened, setExecOpened] = useState(initialTab === 'execution');
+  useEffect(() => { if (tab === 'execution') setExecOpened(true); }, [tab]);
   const [confirmGen, setConfirmGen] = useState<any | null>(null);
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [f, setF] = useState<{ objectives: string; outcomes: { code: string; text: string }[]; topics: Topic[]; text_books: string; references_text: string; file_key: string | null }>(
@@ -41,9 +44,11 @@ export function LessonPlanEditor({ allotmentId, onBack, initialTab }: { allotmen
     const semStart = data.semester?.start_date;
     setSched(s => ({ ...s, days, start: semStart && semStart > todayIso() ? semStart : (semStart || todayIso()) }));
     setDirty(false);
-    if (initialTab) { /* opened straight on the execution plan */ }
+    // choose the starting tab once; later reloads of the plan must never move the faculty off the tab they are on
+    if (initialTab || tabChosen.current) { /* keep the current tab */ }
     else if (data.can_edit === false && data.plan) setTab(data.plan.status === 'approved' ? 'coverage' : 'plan');
     else if (data.can_edit && !p?.topics?.some((t: Topic) => t.topic)) setTab('syllabus'); // nothing planned yet: start from the syllabus
+    tabChosen.current = true;
   }, [data]);
 
   /** Fill the plan from the syllabus, and the dates from the timetable when the class days are known. */
@@ -182,9 +187,9 @@ export function LessonPlanEditor({ allotmentId, onBack, initialTab }: { allotmen
         <button onClick={() => setTab('execution')} className={`px-4 py-2 ${tab === 'execution' ? 'bg-brand-primary text-white' : 'text-textSecondary hover:bg-surface-2'}`}>Execution Plan</button>
       </div>
 
-      {tab === 'execution' ? (
-        <ExecutionPlanTab allotmentId={allotmentId} lp={data} />
-      ) : tab === 'syllabus' ? (
+      {/* kept mounted once opened, so moving between tabs never drops what was typed */}
+      {execOpened && <div hidden={tab !== 'execution'}><ExecutionPlanTab allotmentId={allotmentId} lp={data} /></div>}
+      {tab === 'execution' ? null : tab === 'syllabus' ? (
         <SyllabusEditor allotmentId={allotmentId} onGenerate={canEdit ? onGenerate : () => setMsg({ ok: false, text: 'Only the subject faculty can generate the lesson plan.' })} />
       ) : tab === 'plan' ? (
         <div className="space-y-4">

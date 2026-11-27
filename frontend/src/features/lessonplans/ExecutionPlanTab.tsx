@@ -2,9 +2,9 @@
  * Course Execution Plan tab — the department's 6-sheet workbook as a form, prefilled from the portal.
  * Faculty fill it in, save, and download the same Excel template with their data in it.
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Download, Plus, RotateCcw, Save, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Check, Download, Plus, RotateCcw, Save, Trash2, X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { BouncingDots } from '../../components/common/BouncingDots';
 import { btnGhost, btnPrimary, card, input } from './lessonPlanShared';
@@ -47,6 +47,21 @@ const Area = ({ value, onChange, disabled, rows = 2, placeholder, ariaLabel }: {
     className={`${cellIn} resize-y`} placeholder={placeholder} value={value} onChange={e => onChange(e.target.value)} />
 );
 
+/** Height of the app footer, so a bar fixed to the bottom of the screen sits just above it */
+function useFooterHeight() {
+  const [h, setH] = useState(64);
+  useEffect(() => {
+    const f = document.querySelector('footer');
+    if (!f) return;
+    const update = () => setH(f.getBoundingClientRect().height || 64);
+    update();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
+    ro?.observe(f);
+    return () => ro?.disconnect();
+  }, []);
+  return h;
+}
+
 export function ExecutionPlanTab({ allotmentId, lp }: { allotmentId: string; lp: any }) {
   const qc = useQueryClient();
   const ex = useQuery({ queryKey: ['execPlan', allotmentId], queryFn: () => api.getExecPlan(allotmentId) });
@@ -54,9 +69,16 @@ export function ExecutionPlanTab({ allotmentId, lp }: { allotmentId: string; lp:
   const [plan, setPlan] = useState<ExecPlan | null>(null);
   const [sheet, setSheet] = useState<Sheet>('initial');
   const [dirty, setDirty] = useState(false);
-  const [busy, setBusy] = useState<'save' | 'download' | null>(null);
+  const [busy, setBusy] = useState<'download' | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+  // saving: automatic (shortly after typing stops), on every sheet's Save button, and before leaving
+  const [saveState, setSaveState] = useState<{ s: 'idle' | 'saving' | 'saved' | 'error'; at?: string; err?: string }>({ s: 'idle' });
+  const planRef = useRef<ExecPlan | null>(null);
+  const dirtyRef = useRef(false);
+  const inFlight = useRef<Promise<boolean> | null>(null);
+  const draftKey = `cep-draft:${allotmentId}`;
+  const footerH = useFooterHeight();
 
   const catalog: CatalogRow[] = ex.data?.catalog || [];
   const students = useMemo(() => (ex.data?.students || []).map(s => s.name), [ex.data]);
@@ -68,9 +90,60 @@ export function ExecutionPlanTab({ allotmentId, lp }: { allotmentId: string; lp:
 
   useEffect(() => {
     if (!ex.data || sy.isLoading || plan) return;
-    setPlan(normalizePlan(ex.data.plan?.data, fresh()));
+    const server = normalizePlan(ex.data.plan?.data, fresh());
+    // Entries kept on this device that never reached the server (closed tab, expired login, no network) come back
+    let draft: { at: number; plan: any } | null = null;
+    try { draft = JSON.parse(localStorage.getItem(draftKey) || 'null'); } catch { draft = null; }
+    const savedAt = ex.data.plan?.updated_at ? Date.parse(ex.data.plan.updated_at) : 0;
+    if (ex.data.can_edit && draft?.plan && draft.at > savedAt) {
+      const restored = normalizePlan(draft.plan, server);
+      setPlan(restored); planRef.current = restored; setDirty(true); dirtyRef.current = true;
+      setMsg({ ok: true, text: 'Your unsaved entries from last time were brought back. They are being saved now.' });
+    } else {
+      setPlan(server); planRef.current = server;
+      try { localStorage.removeItem(draftKey); } catch { /* storage unavailable */ }
+    }
+    if (ex.data.plan?.updated_at) setSaveState({ s: 'saved', at: ex.data.plan.updated_at });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ex.data, sy.isLoading]);
+
+  /** Save what is on screen now. Returns true when the server has it. */
+  const saveNow = async (force = false): Promise<boolean> => {
+    if (!ex.data?.can_edit || !planRef.current) return false;
+    if (inFlight.current) await inFlight.current;
+    if (!dirtyRef.current && !force) return true;
+    const sent = planRef.current;
+    setSaveState({ s: 'saving' });
+    const job = (async () => {
+      try {
+        await api.saveExecPlan(allotmentId, sent);
+        if (planRef.current === sent) {   // nothing typed while saving
+          dirtyRef.current = false; setDirty(false);
+          try { localStorage.removeItem(draftKey); } catch { /* storage unavailable */ }
+        }
+        setSaveState({ s: 'saved', at: new Date().toISOString() });
+        qc.invalidateQueries({ queryKey: ['deptExecPlans'] });
+        return true;
+      } catch (e: any) {
+        setSaveState({ s: 'error', err: e?.message || 'Could not reach the server' });
+        return false;
+      } finally { inFlight.current = null; }
+    })();
+    inFlight.current = job;
+    return job;
+  };
+
+  // autosave 2.5 s after the last change
+  useEffect(() => {
+    if (!dirty || !ex.data?.can_edit) return;
+    const t = setTimeout(() => { void saveNow(); }, 2500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan, dirty]);
+  // leaving the tab or the page: save what is pending (through a ref, so the latest save function runs)
+  const saveRef = useRef(saveNow);
+  saveRef.current = saveNow;
+  useEffect(() => () => { if (dirtyRef.current) void saveRef.current(); }, []);
 
   useEffect(() => {
     if (!dirty) return;
@@ -84,7 +157,10 @@ export function ExecutionPlanTab({ allotmentId, lp }: { allotmentId: string; lp:
     return <div className="p-10 text-center"><BouncingDots size="md" className="text-textMuted" /></div>;
   }
 
-  const set = (next: ExecPlan) => { setPlan(next); setDirty(true); setMsg(null); };
+  const set = (next: ExecPlan) => {
+    setPlan(next); planRef.current = next; setDirty(true); dirtyRef.current = true; setMsg(null);
+    try { localStorage.setItem(draftKey, JSON.stringify({ at: Date.now(), plan: next })); } catch { /* storage full or blocked */ }
+  };
   const setI = (k: InitialKey, v: string) => set({ ...plan, initial: { ...plan.initial, [k]: v } });
   const setRow = <K extends 'brief' | 'weekly' | 'teams' | 'experts'>(list: K, i: number, patch: Partial<ExecPlan[K][number]>) =>
     set({ ...plan, [list]: (plan[list] as any[]).map((r, j) => (j === i ? { ...r, ...patch } : r)) });
@@ -96,24 +172,39 @@ export function ExecutionPlanTab({ allotmentId, lp }: { allotmentId: string; lp:
   const cos = coCodes.length ? coCodes : ['CO1', 'CO2', 'CO3', 'CO4', 'CO5'];
   const ro = !canEdit;
 
-  const save = async () => {
-    setBusy('save');
-    try {
-      const r = await api.saveExecPlan(allotmentId, plan);
-      setDirty(false);
-      qc.invalidateQueries({ queryKey: ['execPlan', allotmentId] });
-      qc.invalidateQueries({ queryKey: ['deptExecPlans'] });
-      setMsg({ ok: true, text: `Saved. The plan is ${r.progress}% filled.` });
-    } catch (e: any) { setMsg({ ok: false, text: e.message || 'Could not save' }); } finally { setBusy(null); }
-  };
+  const neverSaved = !saveState.at;
+  // Save also works on a fresh, untouched draft (it has never been stored)
+  const save = async () => { if (await saveNow(neverSaved)) setMsg(null); };
+  const saveAndGo = async (next: Sheet) => { await saveNow(neverSaved); setSheet(next); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+  // Download always uses what is on screen; a failed save never blocks it
   const download = async () => {
     setBusy('download');
     try {
-      if (canEdit && dirty) { await api.saveExecPlan(allotmentId, plan); setDirty(false); qc.invalidateQueries({ queryKey: ['deptExecPlans'] }); }
+      const saved = canEdit && (dirtyRef.current || neverSaved) ? await saveNow(neverSaved) : true;
       await downloadExecPlan(plan, catalog, lp.allotment);
-      setMsg({ ok: true, text: canEdit && dirty ? 'Saved and downloaded.' : 'Downloaded in the department template.' });
+      setMsg(saved ? { ok: true, text: 'Downloaded: all six sheets with everything on screen.' }
+        : { ok: false, text: 'Downloaded with everything on screen, but saving to the portal failed. Your entries are kept on this device; press Save to try again.' });
     } catch (e: any) { setMsg({ ok: false, text: e.message || 'Could not build the Excel file' }); } finally { setBusy(null); }
   };
+  const idx = SHEETS.findIndex(([k]) => k === sheet);
+  const nextSheet = SHEETS[idx + 1];
+  const status = !canEdit ? null
+    : saveState.s === 'saving' ? <span className="inline-flex items-center gap-1 text-textSecondary"><BouncingDots size="xs" /> Saving…</span>
+    : saveState.s === 'error' ? <span className="text-rose-600">Not saved: {saveState.err}. Kept on this device; press Save to try again.</span>
+    : dirty ? <span className="text-amber-700 dark:text-amber-300">Unsaved changes (saving automatically)</span>
+    : saveState.at ? <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300"><Check className="w-3 h-3" />All changes saved · {new Date(saveState.at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}</span>
+    : <span className="text-textMuted">Not saved yet</span>;
+  /** The same save bar under every sheet */
+  const saveBar = canEdit ? (
+    // fixed above the footer (the content area can't hold a sticky bar), on every sheet
+    <div style={{ bottom: footerH + 10 }}
+      className={`${card} fixed right-3 sm:right-6 z-30 max-w-[calc(100vw-1.5rem)] p-2.5 flex flex-wrap items-center justify-end gap-2 shadow-lg`}>
+      <span className="text-[11px] font-bold max-w-[16rem]">{status}</span>
+      <button className={btnGhost} disabled={saveState.s === 'saving' || (!dirty && !neverSaved && saveState.s !== 'error')} onClick={save}><Save className="w-3.5 h-3.5 inline mr-1" />Save</button>
+      {nextSheet ? <button className={btnPrimary} disabled={saveState.s === 'saving'} onClick={() => saveAndGo(nextSheet[0])}>Save &amp; next: {nextSheet[1]}<ArrowRight className="w-3.5 h-3.5 inline ml-1" /></button>
+        : <button className={btnPrimary} disabled={!!busy} onClick={download}>{busy === 'download' ? <BouncingDots size="xs" /> : <Download className="w-3.5 h-3.5 inline mr-1" />}Save &amp; download Excel</button>}
+    </div>
+  ) : null;
   const split7030 = () => {
     const t = (Number(plan.initial.teaching_weeks) || 0) * (Number(plan.initial.hours_per_week) || 0);
     if (!t) { setMsg({ ok: false, text: 'Enter the teaching weeks and hours per week first.' }); return; }
@@ -131,18 +222,19 @@ export function ExecutionPlanTab({ allotmentId, lp }: { allotmentId: string; lp:
   const pct = progressOf(plan);
 
   return (
-    <div className="space-y-3">
+    <div className={`space-y-3 ${canEdit ? 'pb-24 sm:pb-16' : ''}`}>
       <div className={`${card} p-3 flex flex-wrap items-center gap-3`}>
         <div className="flex-1 min-w-[220px]">
           <p className="text-sm font-black text-textPrimary">Course Execution Plan</p>
           <div className="flex items-center gap-2 mt-1">
             <div className="h-1.5 w-32 rounded-full bg-surface-2 overflow-hidden"><div className="h-full rounded-full bg-brand-primary" style={{ width: `${pct}%` }} /></div>
-            <span className="text-[11px] font-bold text-textSecondary">{pct}% filled{dirty ? ' · unsaved changes' : ex.data?.plan?.updated_at ? ` · saved ${new Date(ex.data.plan.updated_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}` : ' · not saved yet'}</span>
+            <span className="text-[11px] font-bold text-textSecondary">{pct}% filled</span>
+            <span className="text-[11px] font-bold">{status}</span>
             {ex.data?.due_date && <span className="text-[11px] font-bold text-amber-700 dark:text-amber-300">Due {new Date(ex.data.due_date + 'T00:00:00').toLocaleDateString('en-IN', { dateStyle: 'medium' })}</span>}
           </div>
         </div>
         {canEdit && <button className={btnGhost} disabled={!!busy} onClick={() => setConfirmReset(true)}><RotateCcw className="w-3.5 h-3.5 inline mr-1" />Refill from syllabus</button>}
-        {canEdit && <button className={btnGhost} disabled={!!busy || !dirty} onClick={save}>{busy === 'save' ? <BouncingDots size="xs" /> : <Save className="w-3.5 h-3.5 inline mr-1" />}Save</button>}
+        {canEdit && <button className={btnGhost} disabled={saveState.s === 'saving' || (!dirty && !neverSaved && saveState.s !== 'error')} onClick={save}>{saveState.s === 'saving' ? <BouncingDots size="xs" /> : <Save className="w-3.5 h-3.5 inline mr-1" />}Save</button>}
         <button className={btnPrimary} disabled={!!busy} onClick={download}>{busy === 'download' ? <BouncingDots size="xs" /> : <Download className="w-3.5 h-3.5 inline mr-1" />}Download Excel</button>
       </div>
 
@@ -162,7 +254,7 @@ export function ExecutionPlanTab({ allotmentId, lp }: { allotmentId: string; lp:
 
       <div className="flex flex-wrap gap-1.5" role="tablist">
         {SHEETS.map(([k, l]) => (
-          <button key={k} role="tab" aria-selected={sheet === k} onClick={() => setSheet(k)}
+          <button key={k} role="tab" aria-selected={sheet === k} onClick={() => { if (dirtyRef.current) void saveNow(); setSheet(k); }}
             className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border ${sheet === k ? 'bg-brand-primary text-white border-brand-primary' : 'border-borderLine text-textSecondary hover:bg-surface-2'}`}>{l}</button>
         ))}
       </div>
@@ -364,6 +456,8 @@ export function ExecutionPlanTab({ allotmentId, lp }: { allotmentId: string; lp:
           )}
         </div>
       )}
+
+      {saveBar}
     </div>
   );
 }
