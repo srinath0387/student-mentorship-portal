@@ -1,14 +1,15 @@
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Check, Download, FileSpreadsheet, ImagePlus, Loader2, Paperclip, Pencil, Plus, Send, Trash2, Undo2, X } from 'lucide-react';
+import { ArrowLeft, Check, Download, FileSpreadsheet, FileText, ImagePlus, Loader2, Paperclip, Pencil, Plus, Send, Trash2, Undo2, X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { uploadAcademicFile } from '../../lib/academicFiles';
-import { ReportPdf, fmtD } from '../../lib/pdfReport';
+import { fmtD } from '../../lib/pdfReport';
 
 import { BouncingDots } from '../../components/common/BouncingDots';
 import { NumberedListInput } from '../../components/common/NumberedListInput';
 import { EventRequestsView } from './EventRequests';
+import { eventReportTablePdf, eventReportWord } from './eventReportTabular';
 const card = 'bg-surface border border-borderLine rounded-2xl shadow-sm';
 const input = 'px-2.5 py-1.5 text-xs rounded-lg border border-borderLine bg-background text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary/30';
 const btn = 'px-3 py-2 rounded-xl text-xs font-bold disabled:opacity-50';
@@ -35,38 +36,6 @@ const ParticipationChip = ({ e }: { e: any }) => attendedOf(e)
   : <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">Organized</span>;
 const participants = (e: any) => [e.student_count != null ? `${e.student_count} students` : '', e.faculty_count != null ? `${e.faculty_count} faculty` : '', e.external_count != null ? `${e.external_count} external` : ''].filter(Boolean).join(' · ');
 
-export async function eventPdf(e: any) {
-  const urls: Record<string, string> = e.urls || await api.getAcademicViewUrls([...(e.photos || [])].map((p: any) => p.key)).catch(() => ({}));
-  const r = await ReportPdf.create(e.department);
-  r.refLine(e.ref_no ? `Ref: ${e.ref_no}` : e.status === 'approved' ? '' : 'DRAFT', `Date: ${fmtD(e.reviewed_at || e.end_date)}`);
-  const att = attendedOf(e);
-  r.title(`Report on ${e.event_type}${att ? ' Attended' : ''}`, e.title);
-  const dates = d10(e.start_date) === d10(e.end_date) ? fmtD(e.start_date) : `${fmtD(e.start_date)} to ${fmtD(e.end_date)}`;
-  const iv = e.event_type === 'Industrial Visit';
-  r.keyValues([
-    ['Type of event', e.event_type], ['Participation', att ? 'Attended (organised by another institution / organisation)' : 'Organised by the department'],
-    ['Title', e.title], ['Organised by', e.organized_by || (att ? null : `Department of ${e.department}`)],
-    ['Date(s)', dates], ['Duration', e.duration_hours ? `${e.duration_hours} hours` : null], ['Mode', e.mode],
-    [iv ? 'Place visited' : 'Venue', iv ? [e.visit?.company, e.visit?.location].filter(Boolean).join(', ') : e.venue],
-    ...(iv ? [['Contact person at industry', e.visit?.contact_person], ['Faculty accompanied', e.visit?.faculty_accompanied]] as [string, any][] : []),
-    [att ? 'Attended by' : 'Coordinator(s)', (e.coordinators || []).map((c: any) => c.name + (c.designation ? ` (${c.designation})` : '')).join(', ')],
-    ...(att ? [] : [['Target audience', e.target_audience], ['Participants', participants(e)],
-      ['Budget / expenditure', e.budget != null ? `Rs. ${Number(e.budget).toLocaleString('en-IN')}/-` : null]] as [string, any][]),
-  ]);
-  if (!iv && (e.resource_persons || []).length) {
-    r.heading('Resource Person(s)');
-    r.table(['S.No', 'Name', 'Designation & Organisation', 'Topic'], e.resource_persons.map((p: any, i: number) => [i + 1, p.name, [p.designation, p.organization].filter(Boolean).join(', '), p.topic || '']), { 0: { cellWidth: 12 } });
-  }
-  if (e.objectives) { r.heading('Objectives'); r.para(e.objectives); }
-  if (e.expected_outcomes) { r.heading('Expected Outcomes'); r.para(e.expected_outcomes); }
-  if (e.summary) { r.heading(iv ? 'About the Visit' : 'Summary of the Event'); r.para(e.summary); }
-  if (e.outcomes) { r.heading('Achieved Outcomes'); r.para(e.outcomes); }
-  if (e.feedback) { r.heading(att ? 'Takeaways for the Department' : 'Participant Feedback'); r.para(e.feedback); }
-  const photos = (e.photos || []).filter((p: any) => urls[p.key]).map((p: any) => ({ url: urls[p.key], caption: p.caption }));
-  if (photos.length) { r.heading('Photographs', 95); await r.photos(photos); }
-  r.signatures([{ role: att ? 'Faculty' : 'Coordinator', name: e.coordinators?.[0]?.name || e.submitted_by_name }, { role: 'HOD', name: `Dept. of ${e.department}` }, { role: 'Principal' }]);
-  r.save(`${e.event_type} Report - ${e.title} - ${d10(e.start_date)}.pdf`);
-}
 
 function People({ label, rows, onChange, fields }: { label: string; rows: any[]; onChange: (r: any[]) => void; fields: [string, string][] }) {
   return (
@@ -251,7 +220,8 @@ function EventDetail({ id, onBack, onEdit }: { id: number; onBack: () => void; o
   const qc = useQueryClient();
   const { data: e, isLoading } = useQuery({ queryKey: ['event', id], queryFn: () => api.getEvent(id) });
   const [remarks, setRemarks] = useState('');
-  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState<'word' | 'pdf' | null>(null);
+  const [dlErr, setDlErr] = useState<string | null>(null);
   const refresh = () => { qc.invalidateQueries({ queryKey: ['event', id] }); qc.invalidateQueries({ queryKey: ['events'] }); };
   const review = useMutation({ mutationFn: (s: 'approved' | 'returned') => api.reviewEvent(id, s, remarks), onSuccess: refresh });
   const submit = useMutation({ mutationFn: () => api.submitEvent(id), onSuccess: refresh });
@@ -268,11 +238,14 @@ function EventDetail({ id, onBack, onEdit }: { id: number; onBack: () => void; o
         <ParticipationChip e={e} />
         <Chip s={e.status} />
         {e.can_edit && <button className={btnGhost} onClick={() => onEdit(e)}><Pencil className="w-3.5 h-3.5 inline mr-1" />Edit</button>}
-        <button className={btnPrimary} disabled={pdfBusy} onClick={async () => { setPdfBusy(true); try { await eventPdf(e); } finally { setPdfBusy(false); } }}>
-          {pdfBusy ? <BouncingDots size="xs" className="mr-1" /> : <Download className="w-3.5 h-3.5 inline mr-1" />}Report PDF</button>
+        <button className={btnGhost} disabled={!!pdfBusy} onClick={async () => { setPdfBusy('word'); try { await eventReportWord(e); } catch (x: any) { setDlErr(x?.message || 'Could not build the Word file'); } finally { setPdfBusy(null); } }}>
+          {pdfBusy === 'word' ? <BouncingDots size="xs" className="mr-1" /> : <FileText className="w-3.5 h-3.5 inline mr-1" />}Report (Word)</button>
+        <button className={btnPrimary} disabled={!!pdfBusy} onClick={async () => { setPdfBusy('pdf'); try { await eventReportTablePdf(e); } catch (x: any) { setDlErr(x?.message || 'Could not build the PDF'); } finally { setPdfBusy(null); } }}>
+          {pdfBusy === 'pdf' ? <BouncingDots size="xs" className="mr-1" /> : <Download className="w-3.5 h-3.5 inline mr-1" />}Report PDF</button>
       </div>
       {e.hod_remarks && <div className="rounded-xl px-4 py-2.5 text-xs bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200"><b>HOD's remarks:</b> {e.hod_remarks}</div>}
       {err && <div className="rounded-xl px-4 py-2.5 text-xs font-bold bg-rose-50 text-rose-700">{err.message}</div>}
+      {dlErr && <div role="status" className="rounded-xl px-4 py-2.5 text-xs font-bold bg-rose-50 text-rose-700">{dlErr}</div>}
       {e.can_review && (
         <div className={`${card} p-4 flex flex-wrap items-end gap-3`}>
           <div className="flex-1 min-w-[220px] space-y-1"><p className={lbl}>Remarks (required to return)</p><input className={`${input} w-full`} value={remarks} onChange={ev => setRemarks(ev.target.value)} /></div>

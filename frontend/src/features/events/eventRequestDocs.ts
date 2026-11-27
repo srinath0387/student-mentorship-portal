@@ -56,18 +56,18 @@ export function inWords(v: number): string {
 export const totalLine = (r: EventRequest) => { const t = budgetTotal(r); return t ? `${rupees(t)} (Rupees ${inWords(t)} Only)` : ''; };
 
 // ── Word XML helpers ──
-const esc = (s: string) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+export const esc = (s: string) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
   .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
-const PARA = /<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>|<w:p\/>/g;
-const textOf = (xml: string) => [...xml.matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g)].map(m => m[1]).join('').replace(/&amp;/g, '&');
-const pPrOf = (p: string) => p.match(/<w:pPr>[\s\S]*?<\/w:pPr>/)?.[0] || '';
+export const PARA = /<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>|<w:p\/>/g;
+export const textOf = (xml: string) => [...xml.matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g)].map(m => m[1]).join('').replace(/&amp;/g, '&');
+export const pPrOf = (p: string) => p.match(/<w:pPr>[\s\S]*?<\/w:pPr>/)?.[0] || '';
 const runPrOf = (pPr: string) => pPr.match(/<w:rPr>[\s\S]*?<\/w:rPr>/)?.[0] || '';
 // values are written plain (some template cells carry bold on the empty paragraph mark)
-const para = (pPr: string, text: string, bold = false) => {
+export const para = (pPr: string, text: string, bold = false) => {
   const rPr = bold ? runPrOf(pPr) : runPrOf(pPr).replace(/<w:b\/>|<w:bCs\/>/g, '');
   return `<w:p>${pPr}${text ? `<w:r>${rPr}<w:t xml:space="preserve">${esc(text)}</w:t></w:r>` : ''}</w:p>`;
 };
-const dmy = (iso: string) => (/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}` : iso);
+export const dmy = (iso: string) => (/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}` : iso);
 const time12 = (hm: string) => {
   if (!/^\d{2}:\d{2}$/.test(hm)) return hm;
   const [h, m] = hm.split(':').map(Number);
@@ -75,7 +75,7 @@ const time12 = (hm: string) => {
 };
 
 /** Replace a cell's paragraphs with one paragraph per line, in the cell's own paragraph style. `minParas` keeps blank lines (signature space). */
-function setLines(cell: string, lines: string[], minParas = 0): string {
+export function setLines(cell: string, lines: string[], minParas = 0): string {
   const paras = cell.match(PARA) || [];
   const first = paras[0]; const last = paras[paras.length - 1];
   if (!first || !last || !lines.filter(Boolean).length) return cell;
@@ -95,7 +95,7 @@ function setFromTo(cell: string, from: string, to: string): string {
   return cell.replace(target, para(pPrOf(target), `From ${from || '—'}${to ? ` To ${to}` : ''}`));
 }
 /** Tick the chosen boxes; fill the "Other: ____" blank */
-function tick(cell: string, chosen: string[], other = ''): string {
+export function tick(cell: string, chosen: string[], other = ''): string {
   let out = cell.replace(/(<w:t(?:\s[^>]*)?>)☐(<\/w:t>[\s\S]*?<w:t(?:\s[^>]*)?>)([^<]*)/g, (m, a, b, label: string) => {
     const name = label.replace(/:.*$/, '').trim();
     return chosen.some(c => c.toLowerCase() === name.toLowerCase()) ? `${a}☒${b}${label}` : m;
