@@ -1100,6 +1100,8 @@ export const api = {
   },
   getLessonPlan: async (allotmentId: string): Promise<any> => fetchWithAuth(`/lesson-plans/allotment/${allotmentId}`),
   saveLessonPlan: async (allotmentId: string, body: any) => fetchWithAuth(`/lesson-plans/allotment/${allotmentId}`, { method: 'PUT', body: JSON.stringify(body) }),
+  saveLessonSessions: async (allotmentId: string, body: { rows: { kind: string; unit: number; text: string }[]; settings: any }) =>
+    fetchWithAuth(`/lesson-plans/allotment/${allotmentId}/sessions`, { method: 'PUT', body: JSON.stringify(body) }),
   submitLessonPlan: async (allotmentId: string) => fetchWithAuth(`/lesson-plans/allotment/${allotmentId}/submit`, { method: 'POST' }),
   reviewLessonPlan: async (planId: number, status: 'approved' | 'returned', remarks?: string) =>
     fetchWithAuth(`/lesson-plans/${planId}/review`, { method: 'PATCH', body: JSON.stringify({ status, remarks }) }),

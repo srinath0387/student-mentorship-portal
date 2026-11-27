@@ -11432,6 +11432,8 @@ function ensureQualityTables(): Promise<void> {
       );
       CREATE INDEX IF NOT EXISTS idx_dept_events_dept ON dept_events (department, start_date DESC);
       ALTER TABLE dept_events ADD COLUMN IF NOT EXISTS participation TEXT NOT NULL DEFAULT 'organized';
+      ALTER TABLE lesson_plans ADD COLUMN IF NOT EXISTS session_plan JSONB;
+      ALTER TABLE lesson_plans ADD COLUMN IF NOT EXISTS session_settings JSONB;
       ALTER TABLE dept_events ADD COLUMN IF NOT EXISTS expected_outcomes TEXT;
       CREATE TABLE IF NOT EXISTS subject_syllabi (
         id SERIAL PRIMARY KEY,
@@ -11626,6 +11628,33 @@ app.put('/lesson-plans/allotment/:aid', requireRole(...QUALITY_STAFF), async (re
         clip(b.objectives, 3000), JSON.stringify(outcomes), JSON.stringify(topics), clip(b.text_books, 2000), clip(b.references_text, 2000),
         b.file_key || null, status]);
     res.json({ ...r.rows[0], resubmitted: cur?.status === 'approved' });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /lesson-plans/allotment/:aid/sessions — the college-format session plan (Session / Discussion rows).
+// Presentation only: saving it never changes the plan's approval status.
+app.put('/lesson-plans/allotment/:aid/sessions', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const a = await lpAllotment(req.params.aid);
+    if (!a) return res.status(404).json({ error: 'Subject allotment not found' });
+    if (!lpIsOwner(req, a)) return res.status(403).json({ error: 'Only the faculty of this subject can edit its lesson plan' });
+    const b = req.body || {};
+    const rows = (Array.isArray(b.rows) ? b.rows : []).slice(0, 300).map((r: any) => ({
+      kind: r?.kind === 'discussion' ? 'discussion' : 'session',
+      unit: Math.max(1, Math.min(20, parseInt(r?.unit, 10) || 1)),
+      text: clip(r?.text, 1500) || '',
+    })).filter((r: any) => r.text);
+    const s = b.settings || {};
+    const settings = {
+      periods_per_session: Math.max(1, Math.min(4, parseInt(s.periods_per_session, 10) || 2)),
+      discussion_every: Math.max(0, Math.min(4, parseInt(s.discussion_every, 10) || 0)),
+      topics_key: clip(s.topics_key, 64) || null,
+    };
+    const r = await db.query(`UPDATE lesson_plans SET session_plan = $2, session_settings = $3, updated_at = NOW() WHERE allotment_id = $1 RETURNING id`,
+      [a.id, JSON.stringify(rows), JSON.stringify(settings)]);
+    if (!r.rows.length) return res.status(400).json({ error: 'Save the lesson plan first' });
+    res.json({ saved: rows.length });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 

@@ -6,6 +6,7 @@ import { uploadAcademicFile } from '../../lib/academicFiles';
 import { fmtD } from '../../lib/pdfReport';
 import { CoverageBar, StatusChip, Topic, autoSchedule, btnGhost, btnPrimary, card, input, lessonPlanExcel, lessonPlanPdf, lessonPlanWord, todayIso } from './lessonPlanShared';
 import { SyllabusEditor } from './SyllabusEditor';
+import { SessionPlanDialog } from './SessionPlanDialog';
 import { NumberedListInput } from '../../components/common/NumberedListInput';
 
 import { BouncingDots } from '../../components/common/BouncingDots';
@@ -18,6 +19,7 @@ export function LessonPlanEditor({ allotmentId, onBack }: { allotmentId: string;
   const { data, isLoading, error } = useQuery({ queryKey: ['lessonPlan', allotmentId], queryFn: () => api.getLessonPlan(allotmentId) });
   const [tab, setTab] = useState<'syllabus' | 'plan' | 'coverage'>('plan');
   const [confirmGen, setConfirmGen] = useState<any | null>(null);
+  const [sessionsOpen, setSessionsOpen] = useState(false);
   const [f, setF] = useState<{ objectives: string; outcomes: { code: string; text: string }[]; topics: Topic[]; text_books: string; references_text: string; file_key: string | null }>(
     { objectives: '', outcomes: [], topics: [], text_books: '', references_text: '', file_key: null });
   const [dirty, setDirty] = useState(false);
@@ -51,7 +53,7 @@ export function LessonPlanEditor({ allotmentId, onBack }: { allotmentId: string;
     setTab('plan');
     const what = `${topics.length} topics, ${topics.reduce((n, t) => n + (t.periods || 1), 0)} periods${classDays.length ? `, dates from ${fmtD(sched.start)} following the timetable` : ' (use Auto-fill dates to add dates)'}`;
     setMsg({ ok: true, text: g.source === 'pdf'
-      ? `Lesson plan ready from the syllabus PDF: ${what}. Download it as Word or PDF above, or check it and Save draft to keep it in the portal.`
+      ? `Lesson plan ready from the syllabus PDF: ${what}. Press “Download lesson plan” above for Word or PDF in the college format, or check it and Save draft to keep it in the portal.`
       : `Lesson plan generated: ${what}. Check it, then Save draft.` });
   };
   const onGenerate = (g: any, source?: 'pdf') => {
@@ -144,10 +146,13 @@ export function LessonPlanEditor({ allotmentId, onBack }: { allotmentId: string;
           <p className="text-xs text-textSecondary">{a.semester_label} · Section {a.section || '—'} · {a.department} · {a.faculty_name}{a.co_faculty_name ? ` & ${a.co_faculty_name}` : ''}</p>
         </div>
         <StatusChip s={status} />
-        <button className={btnGhost} disabled={!p && !f.topics.some(t => t.topic)} onClick={() => lessonPlanPdf(a, { ...p, ...(canEdit ? f : {}) })}><Download className="w-3.5 h-3.5 inline mr-1" />PDF</button>
-        <button className={btnGhost} disabled={!p && !f.topics.some(t => t.topic)} onClick={() => lessonPlanWord(a, { ...p, ...(canEdit ? f : {}) })}><FileText className="w-3.5 h-3.5 inline mr-1" />Word</button>
-        <button className={btnGhost} disabled={!p && !f.topics.some(t => t.topic)} onClick={() => lessonPlanExcel(a, { ...p, ...(canEdit ? f : {}) })}><FileSpreadsheet className="w-3.5 h-3.5 inline mr-1" />Excel</button>
+        <button className={btnPrimary} disabled={!p?.topics?.some((t: Topic) => t.topic) && !f.topics.some(t => t.topic)} onClick={() => setSessionsOpen(true)}>
+          <Download className="w-3.5 h-3.5 inline mr-1" />Download lesson plan</button>
       </div>
+      {sessionsOpen && (
+        <SessionPlanDialog allotmentId={allotmentId} allot={a} plan={p} draft={{ ...p, ...(canEdit ? f : {}) }} canEdit={canEdit}
+          ensureSaved={async () => { if (!p || dirty) await save.mutateAsync(); }} onClose={() => setSessionsOpen(false)} />
+      )}
       {confirmGen && (
         <div className={`${card} p-4 flex flex-wrap items-center gap-3 border-amber-300`}>
           <p className="text-xs font-bold text-textPrimary flex-1 min-w-[220px]">This subject already has a lesson plan ({f.topics.length} topics). Replace it with the one generated from the syllabus?</p>

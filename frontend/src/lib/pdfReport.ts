@@ -20,7 +20,7 @@ export async function urlToDataUrl(url: string): Promise<string | null> {
 }
 
 /** Re-encode an image at a smaller size (the crest PNG is large; photos are capped too). */
-async function shrink(dataUrl: string, maxSide: number, type: 'image/png' | 'image/jpeg'): Promise<string> {
+export async function shrink(dataUrl: string, maxSide: number, type: 'image/png' | 'image/jpeg'): Promise<string> {
   return new Promise(res => {
     const i = new Image();
     i.onload = () => {

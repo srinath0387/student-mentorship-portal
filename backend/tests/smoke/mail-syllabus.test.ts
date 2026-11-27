@@ -246,3 +246,34 @@ describe('Event reports — organized / attended, expected and achieved outcomes
     expect(calls.find(c => c.sql.includes('INSERT INTO dept_events'))!.params[26]).toBe('organized');
   });
 });
+
+describe('College-format session plan', () => {
+  const allot = { id: '11111111-2222-3333-4444-555555555555', subject_name: 'Introduction to Data Science', semester_label: '2-1', section: '2', department: 'CSE (Data Science)', faculty_email: 'ramesh@rgmcet.edu.in', co_faculty_email: null };
+  it('the subject faculty saves session rows without touching the approval status', async () => {
+    const calls = routeDb([
+      ['FROM subject_allotments', [allot]],
+      [/FROM faculty WHERE LOWER\(email\)/, [{ department: 'CSE (Data Science)', name: 'G. Vikram Chandra' }]],
+      ['UPDATE lesson_plans SET session_plan', [{ id: 1 }]],
+    ]);
+    const res = await request(app).put('/lesson-plans/allotment/11111111-2222-3333-4444-555555555555/sessions').set('Authorization', FAC()).send({
+      rows: [{ kind: 'session', unit: 1, text: 'Introduction to Data science, Benefits and uses' }, { kind: 'bogus', unit: 99, text: 'Why…?' }, { kind: 'session', unit: 1, text: '' }],
+      settings: { periods_per_session: 9, discussion_every: 2, topics_key: '40-abc' },
+    });
+    expect(res.status).toBe(200);
+    const upd = calls.find(c => c.sql.includes('UPDATE lesson_plans SET session_plan'))!;
+    expect(upd.sql).not.toMatch(/status/);
+    expect(JSON.parse(upd.params[1])).toEqual([
+      { kind: 'session', unit: 1, text: 'Introduction to Data science, Benefits and uses' },
+      { kind: 'session', unit: 20, text: 'Why…?' },
+    ]);
+    expect(JSON.parse(upd.params[2])).toEqual({ periods_per_session: 4, discussion_every: 2, topics_key: '40-abc' });
+  });
+
+  it('other faculty cannot save it', async () => {
+    routeDb([
+      ['FROM subject_allotments', [{ ...allot, faculty_email: 'someone@rgmcet.edu.in' }]],
+      [/FROM faculty WHERE LOWER\(email\)/, [{ department: 'CSE (Data Science)' }]],
+    ]);
+    expect((await request(app).put('/lesson-plans/allotment/11111111-2222-3333-4444-555555555555/sessions').set('Authorization', FAC()).send({ rows: [] })).status).toBe(403);
+  });
+});
