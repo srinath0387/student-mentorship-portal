@@ -1122,6 +1122,19 @@ export const api = {
     fetchWithAuth(`/syllabus/${encodeURIComponent(allotmentId)}`),
   saveSyllabus: async (allotmentId: string, body: any) =>
     fetchWithAuth(`/syllabus/${encodeURIComponent(allotmentId)}`, { method: 'PUT', body: JSON.stringify(body) }),
+  getExecPlan: async (allotmentId: string): Promise<{ plan: { data: any; progress: number; updated_at: string } | null; can_edit: boolean; strength: number;
+    students: { roll_number: string; name: string }[]; catalog: any[]; due_date: string | null }> =>
+    fetchWithAuth(`/exec-plans/allotment/${encodeURIComponent(allotmentId)}`),
+  saveExecPlan: async (allotmentId: string, data: any): Promise<{ progress: number; updated_at: string }> =>
+    fetchWithAuth(`/exec-plans/allotment/${encodeURIComponent(allotmentId)}`, { method: 'PUT', body: JSON.stringify({ data }) }),
+  getDeptExecPlans: async (department?: string, full = false): Promise<{ department: string; catalog: any[]; due_date: string | null; rows: any[] }> => {
+    const q = new URLSearchParams();
+    if (department && department !== 'All') q.set('department', department);
+    if (full) q.set('full', '1');
+    return fetchWithAuth(`/exec-plans/department${q.toString() ? `?${q}` : ''}`);
+  },
+  saveExecSettings: async (body: { department?: string; catalog: any[]; due_date: string | null }) =>
+    fetchWithAuth('/exec-plans/settings', { method: 'PUT', body: JSON.stringify(body) }),
   getMailMeta: async (department?: string): Promise<{ configured: boolean; scope: string; faculty: { name: string; email: string; department: string }[] }> =>
     fetchWithAuth(`/mail/meta${department && department !== 'All' ? `?department=${encodeURIComponent(department)}` : ''}`),
   getMailUploadUrl: async (file: File): Promise<{ uploadUrl: string; fileKey: string }> =>

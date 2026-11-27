@@ -277,3 +277,100 @@ describe('College-format session plan', () => {
     expect((await request(app).put('/lesson-plans/allotment/11111111-2222-3333-4444-555555555555/sessions').set('Authorization', FAC()).send({ rows: [] })).status).toBe(403);
   });
 });
+
+describe('Course Execution Plan', () => {
+  const AID = '11111111-2222-3333-4444-555555555555';
+  const allot = { id: AID, subject_name: 'Operating Systems', semester_label: '2-2', section: 'A', department: 'CSE', faculty_email: 'ramesh@rgmcet.edu.in', faculty_name: 'Ramesh', co_faculty_email: null };
+  const HOD_CSE = () => `Bearer ${signSessionToken({ role: 'hod', email: 'hodcse@rgmcet.edu.in', department: 'CSE' })}`;
+  const HOD_ECE = () => `Bearer ${signSessionToken({ role: 'hod', email: 'hodece@rgmcet.edu.in', department: 'ECE' })}`;
+  const HODS: Route = ['FROM hod_credentials', (_s, p) => [{ email: p.find((x: any) => /hod/.test(String(x))), department: /hodece/i.test(JSON.stringify(p)) ? 'ECE' : 'CSE' }]];
+
+  it('the subject faculty saves it; only known fields are kept and progress is worked out on the server', async () => {
+    const calls = routeDb([
+      ['FROM subject_allotments', [allot]],
+      [/FROM faculty WHERE LOWER\(email\)/, [{ department: 'CSE', name: 'Ramesh' }]],
+      ['INSERT INTO course_exec_plans', (_s, p) => [{ progress: p[8], updated_at: '2026-11-27T10:00:00Z' }]],
+    ]);
+    const res = await request(app).put(`/exec-plans/allotment/${AID}`).set('Authorization', FAC()).send({
+      data: {
+        initial: { faculty_name: 'Ramesh', short_code: 'OS', teaching_weeks: 13, hacked: 'x', vision: 'v'.repeat(5000) },
+        brief: [{ unit: 'Unit 1', heading: 'Intro', topics: 'a, b', hours: '10', evil: '<script>' }],
+        weekly: Array.from({ length: 40 }, (_, i) => ({ week: String(i + 1), topic: 'T' })),
+        experts: [{ name: 'S. Rao' }, { name: 'B' }, { name: 'third one is dropped' }],
+        teams: [{ week: '1', s1: 'Ravi' }],
+        extra_sheet: [{ a: 1 }],
+      },
+    });
+    expect(res.status).toBe(200);
+    const ins = calls.find(c => c.sql.includes('INSERT INTO course_exec_plans'))!;
+    const data = JSON.parse(ins.params[7]);
+    expect(Object.keys(data).sort()).toEqual(['brief', 'experts', 'initial', 'teams', 'weekly']);
+    expect(data.initial.hacked).toBeUndefined();
+    expect(data.initial.teaching_weeks).toBe('13');
+    expect(data.initial.vision.length).toBe(3000);
+    expect(data.brief[0].evil).toBeUndefined();
+    expect(data.weekly).toHaveLength(30);
+    expect(data.experts).toHaveLength(2);
+    expect(ins.params[8]).toBeGreaterThan(0);
+    expect(ins.params[8]).toBeLessThan(100);
+    expect(res.body.progress).toBe(ins.params[8]);
+  });
+
+  it('other faculty cannot save it', async () => {
+    routeDb([
+      ['FROM subject_allotments', [{ ...allot, faculty_email: 'someone@rgmcet.edu.in' }]],
+      [/FROM faculty WHERE LOWER\(email\)/, [{ department: 'CSE' }]],
+    ]);
+    expect((await request(app).put(`/exec-plans/allotment/${AID}`).set('Authorization', FAC()).send({ data: {} })).status).toBe(403);
+  });
+
+  it('loads the saved plan with class strength, student names and the department catalog', async () => {
+    routeDb([
+      ['FROM subject_allotments', [allot]],
+      [/FROM faculty WHERE LOWER\(email\)/, [{ department: 'CSE' }]],
+      ['FROM course_exec_plans WHERE allotment_id', [{ data: { initial: { short_code: 'OS' } }, progress: 40, updated_at: '2026-11-27' }]],
+      ['FROM subject_rosters r', [{ roll_number: '23091A0501', name: 'Ravi Kumar' }, { roll_number: '23091A0502', name: 'Sita Devi' }]],
+      ['FROM course_exec_settings', [{ catalog: [{ semester: 'II-II', short_code: 'OS', subject: 'Operating Systems' }], due_date: '2026-11-30' }]],
+    ]);
+    const res = await request(app).get(`/exec-plans/allotment/${AID}`).set('Authorization', FAC());
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ can_edit: true, strength: 2, due_date: '2026-11-30', plan: { progress: 40 } });
+    expect(res.body.students.map((s: any) => s.name)).toEqual(['Ravi Kumar', 'Sita Devi']);
+    expect(res.body.catalog[0].short_code).toBe('OS');
+  });
+
+  it('the HOD of the department can view it but not edit; another department’s HOD cannot see it', async () => {
+    routeDb([HODS, ['FROM subject_allotments', [allot]]]);
+    const own = await request(app).get(`/exec-plans/allotment/${AID}`).set('Authorization', HOD_CSE());
+    expect(own.status).toBe(200);
+    expect(own.body.can_edit).toBe(false);
+    expect((await request(app).put(`/exec-plans/allotment/${AID}`).set('Authorization', HOD_CSE()).send({ data: {} })).status).toBe(403);
+    expect((await request(app).get(`/exec-plans/allotment/${AID}`).set('Authorization', HOD_ECE())).status).toBe(403);
+  });
+
+  it('the HOD saves the subject catalog and due date for their own department only', async () => {
+    const calls = routeDb([HODS]);
+    const res = await request(app).put('/exec-plans/settings').set('Authorization', HOD_CSE()).send({
+      department: 'ECE', due_date: '2026-11-30',
+      catalog: [{ semester: 'II-II', short_code: 'OS', subject: 'Operating Systems', tools: 'Linux; VirtualBox', junk: 1 }, { semester: '', short_code: '', subject: '' }],
+    });
+    expect(res.status).toBe(200);
+    const ins = calls.find(c => c.sql.includes('INSERT INTO course_exec_settings'))!;
+    expect(ins.params[0]).toBe('cse');
+    expect(JSON.parse(ins.params[2])).toEqual([{ semester: 'II-II', short_code: 'OS', subject: 'Operating Systems', syllabus_code: '', key_topics: '', tools: 'Linux; VirtualBox' }]);
+    expect(ins.params[3]).toBe('2026-11-30');
+    expect((await request(app).put('/exec-plans/settings').set('Authorization', FAC()).send({ catalog: [] })).status).toBe(403);
+  });
+
+  it('the department list is scoped to the HOD’s department; full=1 returns only saved plans with their data', async () => {
+    const calls = routeDb([HODS, ['FROM subject_allotments a LEFT JOIN course_exec_plans', [{ allotment_id: AID, subject_name: 'Operating Systems', progress: 55, data: {} }]]]);
+    const res = await request(app).get('/exec-plans/department?department=ECE&full=1').set('Authorization', HOD_CSE());
+    expect(res.status).toBe(200);
+    expect(res.body.department).toBe('CSE');
+    const q = calls.find(c => c.sql.includes('LEFT JOIN course_exec_plans'))!;
+    expect(q.params[0]).toBe('cse');
+    expect(q.sql).toMatch(/p\.data/);
+    expect(q.sql).toMatch(/p\.allotment_id IS NOT NULL/);
+    expect((await request(app).get('/exec-plans/department').set('Authorization', FAC())).status).toBe(403);
+  });
+});

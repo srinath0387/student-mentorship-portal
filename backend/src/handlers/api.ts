@@ -11444,6 +11444,16 @@ function ensureQualityTables(): Promise<void> {
         updated_by TEXT, updated_by_name TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
       );
       CREATE UNIQUE INDEX IF NOT EXISTS uq_subject_syllabi ON subject_syllabi (dept_key, semester_label, LOWER(subject_name));
+      CREATE TABLE IF NOT EXISTS course_exec_plans (
+        allotment_id UUID PRIMARY KEY,
+        department TEXT, semester_label TEXT, section TEXT, subject_name TEXT, faculty_email TEXT, faculty_name TEXT,
+        data JSONB NOT NULL DEFAULT '{}', progress INT NOT NULL DEFAULT 0,
+        updated_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS course_exec_settings (
+        dept_key TEXT PRIMARY KEY, department TEXT, catalog JSONB NOT NULL DEFAULT '[]', due_date TEXT,
+        updated_by TEXT, updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
     `).then(() => undefined).catch((err: any) => { qualityTablesReady = null; throw err; });
   }
   return qualityTablesReady;
@@ -12080,6 +12090,127 @@ app.put('/syllabus/:allotmentId', requireRole(...QUALITY_STAFF), async (req: Req
       [acc.a.department, normDept(acc.a.department), acc.a.semester_label, acc.a.subject_name, v.subject_code, v.regulation, v.credits, v.objectives,
         JSON.stringify(v.outcomes), JSON.stringify(v.units), v.text_books, v.references_text, v.file_key, String(req.auth!.email || '').toLowerCase(), name]);
     res.json(r.rows[0]);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Course Execution Plan — the department's 6-sheet planning workbook (Initial / Brief / Weekly plan,
+// industry experts, student teams), one per subject allotment. Faculty fill it in the portal and download
+// it as the same Excel template; HOD sees progress across the department and keeps the subject catalog.
+const CEP_INITIAL = ['faculty_name', 'short_code', 'subject_title', 'class_section', 'strength', 'sem_start', 'sem_end', 'teaching_weeks',
+  'hours_per_week', 'classroom_hours', 'online_hours', 'vision', 'competencies', 'industry_problem', 'faculty_tool', 'tool_a', 'tool_b', 'tool_c',
+  'assessment', 'support', 'submission_date'];
+const CEP_ROWS: Record<string, { keys: string[]; max: number }> = {
+  brief: { keys: ['unit', 'heading', 'topics', 'cos', 'hours', 'classroom', 'online', 'tool', 'evidence'], max: 12 },
+  weekly: { keys: ['week', 'topic', 'co', 'method', 'classroom', 'online', 'activity', 'tool', 'group_a', 'group_b', 'deliverable'], max: 30 },
+  experts: { keys: ['name', 'alumni', 'company', 'role', 'specialization', 'linkedin', 'email', 'date', 'topic', 'mode', 'outcomes'], max: 2 },
+  teams: { keys: ['week', 'date', 'duration', 'tool', 's1', 's2', 's3', 'feature', 'objective', 'evidence', 'feedback'], max: 30 },
+};
+const CEP_CATALOG_KEYS = ['semester', 'short_code', 'subject', 'syllabus_code', 'key_topics', 'tools'];
+const cepText = (v: any, n = 3000) => String(v ?? '').replace(/\r\n?/g, '\n').slice(0, n).trim();
+
+/** Whitelist the plan's shape and work out how much of it is filled (teams are filled during the semester, so they don't count). */
+function cleanExecPlan(raw: any): { data: any; progress: number } {
+  const b = raw && typeof raw === 'object' ? raw : {};
+  const initial: Record<string, string> = {};
+  for (const k of CEP_INITIAL) initial[k] = cepText(b.initial?.[k]);
+  const data: any = { initial };
+  for (const [name, spec] of Object.entries(CEP_ROWS)) {
+    data[name] = (Array.isArray(b[name]) ? b[name] : []).slice(0, spec.max).map((r: any) => {
+      const o: Record<string, string> = {};
+      for (const k of spec.keys) o[k] = cepText(r?.[k], 2000);
+      return o;
+    });
+  }
+  let filled = 0; let total = 0;
+  const count = (v: string) => { total++; if (v) filled++; };
+  CEP_INITIAL.forEach(k => count(initial[k]));
+  data.brief.forEach((r: any) => ['heading', 'topics', 'cos', 'hours', 'tool', 'evidence'].forEach(k => count(r[k])));
+  data.weekly.forEach((r: any) => ['topic', 'co', 'method', 'classroom', 'activity', 'deliverable'].forEach(k => count(r[k])));
+  data.experts.forEach((r: any) => ['name', 'company', 'role', 'date', 'topic', 'outcomes'].forEach(k => count(r[k])));
+  return { data, progress: total ? Math.round((filled / total) * 100) : 0 };
+}
+async function cepSettings(department: string) {
+  const r = await db.query('SELECT catalog, due_date, department FROM course_exec_settings WHERE dept_key = $1', [normDept(department)]);
+  return { catalog: r.rows[0]?.catalog || [], due_date: r.rows[0]?.due_date || null };
+}
+
+// GET /exec-plans/allotment/:aid — saved plan + what the form prefills from (class strength, student names, department catalog)
+app.get('/exec-plans/allotment/:aid', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const a = await lpAllotment(req.params.aid);
+    if (!a) return res.status(404).json({ error: 'Subject allotment not found' });
+    if (!(await lpCanView(req, a))) return res.status(403).json({ error: 'Not your subject' });
+    const [plan, students, settings] = await Promise.all([
+      db.query('SELECT data, progress, updated_at FROM course_exec_plans WHERE allotment_id = $1', [a.id]),
+      db.query(`SELECT r.roll_number, COALESCE(st.name, r.roll_number) AS name FROM subject_rosters r
+                LEFT JOIN students st ON UPPER(st.roll_number) = UPPER(r.roll_number)
+                WHERE r.allotment_id = $1 ORDER BY r.roll_number`, [a.id]).catch(() => ({ rows: [] as any[] })),
+      cepSettings(a.department),
+    ]);
+    res.json({ plan: plan.rows[0] || null, can_edit: lpIsOwner(req, a), strength: students.rows.length, students: students.rows, ...settings });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /exec-plans/allotment/:aid — save (faculty of the subject only)
+app.put('/exec-plans/allotment/:aid', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const a = await lpAllotment(req.params.aid);
+    if (!a) return res.status(404).json({ error: 'Subject allotment not found' });
+    if (!lpIsOwner(req, a)) return res.status(403).json({ error: 'Only the faculty of this subject can edit its execution plan' });
+    const { data, progress } = cleanExecPlan(req.body?.data);
+    const r = await db.query(
+      `INSERT INTO course_exec_plans (allotment_id, department, semester_label, section, subject_name, faculty_email, faculty_name, data, progress, updated_by, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+       ON CONFLICT (allotment_id) DO UPDATE SET data = EXCLUDED.data, progress = EXCLUDED.progress, updated_by = EXCLUDED.updated_by,
+         faculty_name = EXCLUDED.faculty_name, updated_at = NOW()
+       RETURNING progress, updated_at`,
+      [a.id, a.department, a.semester_label, a.section, a.subject_name, String(a.faculty_email || '').toLowerCase(), a.faculty_name,
+        JSON.stringify(data), progress, String(req.auth!.email || '').toLowerCase()]);
+    res.json(r.rows[0]);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /exec-plans/department?department=&semester=&full=1 — every allotted subject with how far its plan is filled
+app.get('/exec-plans/department', requireRole('hod', ...QUALITY_OVERSIGHT), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const own = await qualityDept(req);
+    const dept = own || (req.query.department && req.query.department !== 'All' ? String(req.query.department) : null);
+    const full = req.query.full === '1';
+    const params: any[] = []; const where: string[] = [];
+    if (dept) { params.push(normDept(dept)); where.push(`LOWER(REGEXP_REPLACE(a.department, '[^a-zA-Z0-9]', '', 'g')) = $${params.length}`); }
+    if (req.query.semester) { params.push(String(req.query.semester)); where.push(`a.semester_label = $${params.length}`); }
+    if (full) where.push('p.allotment_id IS NOT NULL');
+    const r = await db.query(
+      `SELECT a.id AS allotment_id, a.subject_name, a.subject_type, a.semester_label, a.department, a.section, a.faculty_email, a.faculty_name,
+              a.co_faculty_name, p.progress, p.updated_at${full ? ', p.data' : ''}
+       FROM subject_allotments a LEFT JOIN course_exec_plans p ON p.allotment_id = a.id
+       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+       ORDER BY a.semester_label, a.section, a.subject_name LIMIT ${full ? 400 : 3000}`, params);
+    res.json({ department: dept || 'All', ...(dept ? await cepSettings(dept) : { catalog: [], due_date: null }), rows: r.rows });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /exec-plans/settings — the department's subject catalog (sheet 1) and the submission date (HOD / admin)
+app.put('/exec-plans/settings', requireRole('hod', 'admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const own = await qualityDept(req);
+    const dept = own || (req.body?.department && req.body.department !== 'All' ? String(req.body.department) : null);
+    if (!dept) return res.status(400).json({ error: 'Pick a department' });
+    const catalog = (Array.isArray(req.body?.catalog) ? req.body.catalog : []).slice(0, 120).map((r: any) => {
+      const o: Record<string, string> = {};
+      for (const k of CEP_CATALOG_KEYS) o[k] = cepText(r?.[k], 600);
+      return o;
+    }).filter((r: any) => r.subject || r.short_code);
+    const due = cepText(req.body?.due_date, 40) || null;
+    await db.query(
+      `INSERT INTO course_exec_settings (dept_key, department, catalog, due_date, updated_by, updated_at) VALUES ($1,$2,$3,$4,$5,NOW())
+       ON CONFLICT (dept_key) DO UPDATE SET catalog = EXCLUDED.catalog, due_date = EXCLUDED.due_date, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+      [normDept(dept), dept, JSON.stringify(catalog), due, String(req.auth!.email || '').toLowerCase()]);
+    res.json({ department: dept, catalog, due_date: due });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 

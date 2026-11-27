@@ -192,6 +192,7 @@ const adminNav: NavGroup[] = [
       { label: 'Faculty Workload', path: '/attendance/workload', icon: BarChart2 },
       { label: 'Holiday Calendar', path: '/admin/dashboard?tab=holidays', icon: Calendar },
       { label: 'Lesson Plan Register', path: '/lesson-plans/review', icon: BookOpenCheck },
+      { label: 'Course Execution Plans', path: '/lesson-plans/execution', icon: ClipboardList },
       { label: 'Events & Activities', path: '/events', icon: Presentation },
       { label: 'Meetings & Minutes', path: '/meetings', icon: NotebookPen },
       { label: 'Email Faculty', path: '/mail', icon: Mail },
@@ -301,6 +302,7 @@ const hodNav: NavGroup[] = [
     icon: BookOpenCheck,
     items: [
       { label: 'Lesson Plans & Coverage', path: '/lesson-plans/review', icon: BookOpenCheck },
+      { label: 'Course Execution Plans', path: '/lesson-plans/execution', icon: ClipboardList },
       { label: 'My Lesson Plans', path: '/lesson-plans', icon: NotebookPen },
       { label: 'Faculty Selection', path: '/faculty-selection/manage', icon: Vote },
       { label: 'My Selected Students', path: '/faculty-selection/my-students', icon: Users },
@@ -413,6 +415,7 @@ const oversightNav: NavGroup[] = [
     items: [
       { label: 'Duties & Office Orders', path: '/duties', icon: FileCheck },
       { label: 'Lesson Plan Coverage', path: '/lesson-plans/review', icon: BookOpenCheck },
+      { label: 'Course Execution Plans', path: '/lesson-plans/execution', icon: ClipboardList },
       { label: 'Events & Activities', path: '/events', icon: Presentation },
       { label: 'Meetings & Minutes', path: '/meetings', icon: NotebookPen },
       { label: 'Email Faculty', path: '/mail', icon: Mail },
