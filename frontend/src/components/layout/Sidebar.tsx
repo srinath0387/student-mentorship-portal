@@ -191,6 +191,7 @@ const adminNav: NavGroup[] = [
       { label: 'Editing of Attendance', path: '/admin/attendance?view=edit', icon: FileCheck },
       { label: 'Faculty Workload', path: '/attendance/workload', icon: BarChart2 },
       { label: 'Holiday Calendar', path: '/admin/dashboard?tab=holidays', icon: Calendar },
+      { label: 'Department Progress', path: '/quality/overview', icon: BarChart2 },
       { label: 'Lesson Plan Register', path: '/lesson-plans/review', icon: BookOpenCheck },
       { label: 'Course Execution Plans', path: '/lesson-plans/execution', icon: ClipboardList },
       { label: 'Events & Activities', path: '/events', icon: Presentation },
@@ -301,6 +302,7 @@ const hodNav: NavGroup[] = [
     title: 'Academic Quality',
     icon: BookOpenCheck,
     items: [
+      { label: 'Department Progress', path: '/quality/overview', icon: BarChart2 },
       { label: 'Lesson Plans & Coverage', path: '/lesson-plans/review', icon: BookOpenCheck },
       { label: 'Course Execution Plans', path: '/lesson-plans/execution', icon: ClipboardList },
       { label: 'My Lesson Plans', path: '/lesson-plans', icon: NotebookPen },
@@ -413,6 +415,7 @@ const oversightNav: NavGroup[] = [
     title: 'Institutional Oversight',
     icon: LayoutDashboard,
     items: [
+      { label: 'Department Progress', path: '/quality/overview', icon: BarChart2 },
       { label: 'Duties & Office Orders', path: '/duties', icon: FileCheck },
       { label: 'Lesson Plan Coverage', path: '/lesson-plans/review', icon: BookOpenCheck },
       { label: 'Course Execution Plans', path: '/lesson-plans/execution', icon: ClipboardList },

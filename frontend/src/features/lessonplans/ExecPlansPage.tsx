@@ -40,7 +40,7 @@ export default function ExecPlansPage() {
   const loc = useLocation(); const nav = useNavigate(); const qc = useQueryClient();
   const open = new URLSearchParams(loc.search).get('allotment');
   const locked = user?.role === 'hod';
-  const [dept, setDept] = useState('All');
+  const [dept, setDept] = useState(() => new URLSearchParams(loc.search).get('department') || 'All');
   const [filter, setFilter] = useState<'all' | 'missing' | 'progress' | 'ready'>('all');
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -122,7 +122,7 @@ export default function ExecPlansPage() {
         <div className="flex flex-wrap items-center gap-2">
           {!locked && (
             <select aria-label="Department" className={input} value={dept} onChange={e => setDept(e.target.value)}>
-              <option value="All">All departments</option>{DEPTS.map(d => <option key={d} value={d}>{d}</option>)}
+              <option value="All">All departments</option>{(DEPTS.includes(dept) || dept === 'All' ? DEPTS : [dept, ...DEPTS]).map(d => <option key={d} value={d}>{d}</option>)}
             </select>
           )}
           <button className={btnPrimary} disabled={!!busy || !rows.some(r => r.progress != null)} onClick={downloadAll}>

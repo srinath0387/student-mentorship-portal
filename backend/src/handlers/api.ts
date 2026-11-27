@@ -12223,6 +12223,79 @@ app.put('/exec-plans/settings', requireRole('hod', 'admin'), async (req: Request
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Department progress — one row per department for the principal, director, management, program chair and
+// college admin: execution plans, lesson plans & syllabus coverage, events (this academic year). HOD / dept admin
+// get their own department only. Counts only; the detail stays on the existing pages.
+app.get('/quality/overview', requireRole('hod', ...QUALITY_OVERSIGHT), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const own = await qualityDept(req);
+    const ay = currentAcademicYear();
+    const range = academicYearRange(ay);
+    const today = todayIST();
+    const KEY = (col: string) => `LOWER(REGEXP_REPLACE(COALESCE(${col}, ''), '[^a-zA-Z0-9]', '', 'g'))`;
+    const params: any[] = own ? [normDept(own)] : [];
+    const deptWhere = (col: string, joiner = 'WHERE') => (own ? `${joiner} ${KEY(col)} = $1` : '');
+    const p = (n: number) => `$${params.length + n}`;   // placeholders after the optional department one
+
+    const [plans, lessons, settings, events, requests] = await Promise.all([
+      db.query(
+        `SELECT ${KEY('a.department')} AS k, MIN(a.department) AS name, COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE p.allotment_id IS NULL)::int AS not_started,
+                COUNT(*) FILTER (WHERE p.progress < 90)::int AS in_progress,
+                COUNT(*) FILTER (WHERE p.progress >= 90)::int AS ready
+         FROM subject_allotments a LEFT JOIN course_exec_plans p ON p.allotment_id = a.id
+         ${deptWhere('a.department')} GROUP BY 1`, params),
+      db.query(
+        `SELECT ${KEY('a.department')} AS k, MIN(a.department) AS name, COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE lp.status = 'approved')::int AS approved,
+                COUNT(*) FILTER (WHERE lp.status = 'submitted')::int AS submitted,
+                COUNT(*) FILTER (WHERE lp.id IS NULL OR lp.status IN ('draft', 'returned'))::int AS missing,
+                COALESCE(SUM(jsonb_array_length(COALESCE(lp.topics, '[]'::jsonb))), 0)::int AS topics,
+                COALESCE(SUM((SELECT COUNT(*) FROM jsonb_array_elements(COALESCE(lp.topics, '[]'::jsonb)) t WHERE COALESCE(t->>'covered_on', '') <> '')), 0)::int AS covered,
+                COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(lp.topics, '[]'::jsonb)) t
+                                               WHERE COALESCE(t->>'planned_date', '') <> '' AND t->>'planned_date' <= ${p(1)} AND COALESCE(t->>'covered_on', '') = ''))::int AS behind
+         FROM subject_allotments a LEFT JOIN lesson_plans lp ON lp.allotment_id = a.id
+         ${deptWhere('a.department')} GROUP BY 1`, [...params, today]),
+      db.query(`SELECT dept_key AS k, due_date FROM course_exec_settings ${own ? 'WHERE dept_key = $1' : ''}`, params),
+      db.query(
+        `SELECT ${KEY('department')} AS k, MIN(department) AS name, COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE status = 'approved')::int AS approved,
+                COUNT(*) FILTER (WHERE status = 'submitted')::int AS awaiting_hod,
+                COUNT(*) FILTER (WHERE status IN ('draft', 'returned'))::int AS drafts,
+                COUNT(*) FILTER (WHERE status = 'approved' AND participation = 'attended')::int AS attended,
+                COALESCE(SUM(budget) FILTER (WHERE status = 'approved'), 0)::float AS spent
+         FROM dept_events WHERE academic_year = ${p(1)} ${deptWhere('department', 'AND')} GROUP BY 1`, [...params, ay]),
+      db.query(
+        `SELECT ${KEY('department')} AS k, MIN(department) AS name, COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE event_id IS NULL AND COALESCE(NULLIF(data->>'to_date', ''), NULLIF(data->>'from_date', '')) < ${p(1)})::int AS reports_due,
+                COUNT(*) FILTER (WHERE COALESCE(NULLIF(data->>'from_date', ''), '9999') >= ${p(1)})::int AS upcoming,
+                COALESCE(SUM(COALESCE(NULLIF(data->>'honorarium', '')::numeric, 0) + COALESCE(NULLIF(data->>'travel', '')::numeric, 0)
+                             + COALESCE(NULLIF(data->>'lodging', '')::numeric, 0)), 0)::float AS requested
+         FROM event_requests WHERE COALESCE(start_date, created_at::date) >= ${p(2)}::date ${deptWhere('department', 'AND')} GROUP BY 1`,
+        [...params, today, range?.from || `${today.slice(0, 4)}-06-01`]),
+    ]);
+
+    const rows = new Map<string, any>();
+    const row = (k: string, name: string) => {
+      if (!k) return null;
+      if (!rows.has(k)) rows.set(k, { key: k, department: name, plans: null, lessons: null, events: null, requests: null, plans_due: null });
+      return rows.get(k);
+    };
+    for (const r of plans.rows) { const x = row(r.k, r.name); if (x) x.plans = { total: r.total, not_started: r.not_started, in_progress: r.in_progress, ready: r.ready }; }
+    for (const r of lessons.rows) {
+      const x = row(r.k, r.name);
+      if (x) x.lessons = { total: r.total, approved: r.approved, submitted: r.submitted, missing: r.missing, behind: r.behind,
+        coverage_pct: r.topics ? Math.round((r.covered / r.topics) * 100) : 0 };
+    }
+    for (const r of events.rows) { const x = row(r.k, r.name); if (x) x.events = { total: r.total, approved: r.approved, awaiting_hod: r.awaiting_hod, drafts: r.drafts, attended: r.attended, spent: r.spent }; }
+    for (const r of requests.rows) { const x = row(r.k, r.name); if (x) x.requests = { total: r.total, reports_due: r.reports_due, upcoming: r.upcoming, requested: r.requested }; }
+    for (const s of settings.rows) { const x = rows.get(s.k); if (x) x.plans_due = s.due_date || null; }
+    const list = [...rows.values()].sort((a, b) => String(a.department).localeCompare(String(b.department)));
+    res.json({ academic_year: ay, today, scope: own || 'All', departments: list });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Event requests — the department's pre-event forms (Permission & Venue, Budget). Faculty fill one request
 // and download either form in the department's Word template; after the event it prefills the event report.
 const ER_TYPES = ['FDP', 'Workshop', 'Seminar', 'Guest Lecture', 'Industry Orientation', 'Training Program', 'Hands-on Session', 'Hackathon',

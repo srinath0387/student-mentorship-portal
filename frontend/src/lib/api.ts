@@ -1132,6 +1132,7 @@ export const api = {
     fetchWithAuth(`/exec-plans/allotment/${encodeURIComponent(allotmentId)}`),
   saveExecPlan: async (allotmentId: string, data: any): Promise<{ progress: number; updated_at: string }> =>
     fetchWithAuth(`/exec-plans/allotment/${encodeURIComponent(allotmentId)}`, { method: 'PUT', body: JSON.stringify({ data }) }),
+  getQualityOverview: async (): Promise<{ academic_year: string; today: string; scope: string; departments: any[] }> => fetchWithAuth('/quality/overview'),
   getDeptExecPlans: async (department?: string, full = false): Promise<{ department: string; catalog: any[]; due_date: string | null; rows: any[] }> => {
     const q = new URLSearchParams();
     if (department && department !== 'All') q.set('department', department);

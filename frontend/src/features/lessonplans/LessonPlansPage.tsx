@@ -57,8 +57,8 @@ export function LessonPlanReviewPage() {
   const loc = useLocation(); const nav = useNavigate();
   const open = new URLSearchParams(loc.search).get('allotment');
   const locked = user?.role === 'hod';
-  const [dept, setDept] = useState('All');
-  const [filter, setFilter] = useState<'all' | 'submitted' | 'missing' | 'behind'>('all');
+  const [dept, setDept] = useState(() => new URLSearchParams(loc.search).get('department') || 'All');
+  const [filter, setFilter] = useState<'all' | 'submitted' | 'missing' | 'behind'>(() => (['submitted', 'missing', 'behind'].includes(new URLSearchParams(loc.search).get('filter') || '') ? new URLSearchParams(loc.search).get('filter') as any : 'all'));
   const [q, setQ] = useState('');
   const { data, isLoading } = useQuery({ queryKey: ['deptLessonPlans', locked ? 'own' : dept], queryFn: () => api.getDepartmentLessonPlans(locked ? undefined : dept) });
   const rows: any[] = data?.rows || [];
@@ -90,7 +90,7 @@ export function LessonPlanReviewPage() {
         </div>
         {!locked && (
           <select className={input} value={dept} onChange={e => setDept(e.target.value)}>
-            <option value="All">All departments</option>{DEPTS.map(d => <option key={d} value={d}>{d}</option>)}
+            <option value="All">All departments</option>{(DEPTS.includes(dept) || dept === 'All' ? DEPTS : [dept, ...DEPTS]).map(d => <option key={d} value={d}>{d}</option>)}
           </select>
         )}
       </div>

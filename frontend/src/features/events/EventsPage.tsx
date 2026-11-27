@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useLocation } from 'react-router-dom';
 import { ArrowLeft, Check, Download, FileSpreadsheet, FileText, ImagePlus, Loader2, Paperclip, Pencil, Plus, Send, Trash2, Undo2, X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
@@ -321,9 +322,11 @@ export default function EventsPage() {
   const qc = useQueryClient();
   const role = user?.role || '';
   const ownDept = ['hod', 'faculty', 'coordinator'].includes(role) ? user?.department || null : null;
-  const [f, setF] = useState({ department: 'All', type: 'All', year: 'All', status: 'All', participation: 'All' });
+  // opened from Department Progress: ?department=…&tab=requests&status=…
+  const qs = new URLSearchParams(useLocation().search);
+  const [f, setF] = useState({ department: qs.get('department') || 'All', type: 'All', year: 'All', status: qs.get('status') || 'All', participation: 'All' });
   const [view, setView] = useState<{ mode: 'list' } | { mode: 'new'; prefill?: any } | { mode: 'edit'; e: any } | { mode: 'detail'; id: number }>({ mode: 'list' });
-  const [tab, setTab] = useState<'reports' | 'requests'>('reports');
+  const [tab, setTab] = useState<'reports' | 'requests'>(qs.get('tab') === 'requests' ? 'requests' : 'reports');
   const { data: events = [], isLoading } = useQuery<any[]>({ queryKey: ['events', f, ownDept], queryFn: () => api.getEvents({ ...f, department: ownDept ? undefined : f.department }) });
   const years = useMemo(() => Array.from(new Set(events.map(e => ayOf(d10(e.start_date))))).sort().reverse(), [events]);
   const byType = useMemo(() => { const m: Record<string, number> = {}; events.filter(e => e.status === 'approved').forEach(e => { m[e.event_type] = (m[e.event_type] || 0) + 1; }); return m; }, [events]);
@@ -365,7 +368,7 @@ export default function EventsPage() {
         <button role="tab" aria-selected={tab === 'requests'} onClick={() => setTab('requests')} className={`px-4 py-2 ${tab === 'requests' ? 'bg-brand-primary text-white' : 'text-textSecondary hover:bg-surface-2'}`}>Requests (before the event)</button>
       </div>
 
-      {tab === 'requests' ? <EventRequestsView onReport={prefill => setView({ mode: 'new', prefill })} onOpenReport={id => { setTab('reports'); setView({ mode: 'detail', id }); }} /> : (<>
+      {tab === 'requests' ? <EventRequestsView initialDept={f.department} onReport={prefill => setView({ mode: 'new', prefill })} onOpenReport={id => { setTab('reports'); setView({ mode: 'detail', id }); }} /> : (<>
 
       <div className="flex flex-wrap gap-2">
         {Object.entries(byType).sort((a, b) => b[1] - a[1]).map(([t, n]) => (
@@ -376,7 +379,7 @@ export default function EventsPage() {
 
       <div className={`${card} overflow-hidden`}>
         <div className="p-3 border-b border-borderLine flex flex-wrap gap-2">
-          {!ownDept && <select className={input} value={f.department} onChange={e => setF({ ...f, department: e.target.value })}><option value="All">All departments</option>{DEPTS.map(d => <option key={d}>{d}</option>)}</select>}
+          {!ownDept && <select className={input} value={f.department} onChange={e => setF({ ...f, department: e.target.value })}><option value="All">All departments</option>{(DEPTS.includes(f.department) || f.department === 'All' ? DEPTS : [f.department, ...DEPTS]).map(d => <option key={d}>{d}</option>)}</select>}
           <select className={input} value={f.type} onChange={e => setF({ ...f, type: e.target.value })}><option value="All">All types</option>{TYPES.map(t => <option key={t}>{t}</option>)}</select>
           <select className={input} value={f.year} onChange={e => setF({ ...f, year: e.target.value })}><option value="All">All years</option>{years.map(y => <option key={y} value={y}>{y}</option>)}</select>
           <select className={input} value={f.status} onChange={e => setF({ ...f, status: e.target.value })}><option value="All">Any status</option>{Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v.t}</option>)}</select>

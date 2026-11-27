@@ -205,12 +205,12 @@ function ReportState({ x, r, onReport, onOpenReport }: { x: any; r: EventRequest
 }
 
 /** The Requests view inside Events & Activities */
-export function EventRequestsView({ onReport, onOpenReport }: { onReport: (prefill: any) => void; onOpenReport: (id: number) => void }) {
+export function EventRequestsView({ onReport, onOpenReport, initialDept = 'All' }: { onReport: (prefill: any) => void; onOpenReport: (id: number) => void; initialDept?: string }) {
   const { user } = useAuth();
   const qc = useQueryClient();
   const role = user?.role || '';
   const ownDept = ['hod', 'faculty', 'coordinator'].includes(role) ? user?.department || null : null;
-  const [dept, setDept] = useState('All');
+  const [dept, setDept] = useState(initialDept);
   const [open, setOpen] = useState<{ mode: 'new' } | { mode: 'edit'; r: any } | null>(null);
   const [confirmDel, setConfirmDel] = useState<number | null>(null);
   const { data: list = [], isLoading, error } = useQuery<any[]>({ queryKey: ['eventRequests', ownDept ? 'own' : dept], queryFn: () => api.getEventRequests(ownDept ? undefined : dept) });
@@ -225,7 +225,7 @@ export function EventRequestsView({ onReport, onOpenReport }: { onReport: (prefi
     <div className={`${card} overflow-hidden`}>
       <div className="p-3 border-b border-borderLine flex flex-wrap items-center gap-2">
         <p className="text-xs text-textSecondary flex-1 min-w-[220px]">Before an event: fill the request once and download the <b>Permission &amp; Venue</b> and <b>Budget</b> forms in the department format.</p>
-        {!ownDept && <select aria-label="Department" className={input} value={dept} onChange={e => setDept(e.target.value)}><option value="All">All departments</option>{DEPTS.map(d => <option key={d}>{d}</option>)}</select>}
+        {!ownDept && <select aria-label="Department" className={input} value={dept} onChange={e => setDept(e.target.value)}><option value="All">All departments</option>{(DEPTS.includes(dept) || dept === 'All' ? DEPTS : [dept, ...DEPTS]).map(d => <option key={d}>{d}</option>)}</select>}
         {canCreate && <button className={btnPrimary} onClick={() => setOpen({ mode: 'new' })}><Plus className="w-3.5 h-3.5 inline mr-1" />New request</button>}
       </div>
       {isLoading ? <div className="p-10 text-center"><BouncingDots size="md" className="text-textMuted" /></div>
