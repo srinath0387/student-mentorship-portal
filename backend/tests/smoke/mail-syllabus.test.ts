@@ -374,3 +374,62 @@ describe('Course Execution Plan', () => {
     expect((await request(app).get('/exec-plans/department').set('Authorization', FAC())).status).toBe(403);
   });
 });
+
+describe('Event requests (Permission & Venue / Budget forms)', () => {
+  const HOD_CSE = () => `Bearer ${signSessionToken({ role: 'hod', email: 'hodcse@rgmcet.edu.in', department: 'CSE' })}`;
+  const HODS: Route = ['FROM hod_credentials', [{ email: 'hodcse@rgmcet.edu.in', department: 'CSE' }]];
+  const row = { id: 7, department: 'CSE', title: 'GenAI Workshop', start_date: '2026-12-12', data: {}, created_by: 'ramesh@rgmcet.edu.in', created_by_name: 'Ramesh' };
+
+  it('faculty create a request in their own department; only known fields and values are kept', async () => {
+    const calls = routeDb([
+      [/FROM faculty WHERE LOWER\(email\)/, [{ department: 'CSE', name: 'Ramesh' }]],
+      ['INSERT INTO event_requests', (_s, p) => [{ ...row, data: JSON.parse(p[3]) }]],
+    ]);
+    const res = await request(app).post('/event-requests').set('Authorization', FAC()).send({
+      department: 'ECE', title: 'GenAI Workshop', types: ['Workshop', 'Party', 'Workshop'], participants: ['Students', 'Aliens'],
+      from_date: '2026-12-12', to_date: 'tomorrow', from_time: '09:30', to_time: '4pm', honorarium: '10,000', travel: '-5', lodging: 'abc',
+      organizers: [{ name: 'Ramesh', designation: 'AP', department: 'CSE', evil: 1 }], hacked: true,
+    });
+    expect(res.status).toBe(201);
+    const ins = calls.find(c => c.sql.includes('INSERT INTO event_requests'))!;
+    expect(ins.params[0]).toBe('CSE');
+    expect(ins.params[2]).toBe('2026-12-12');
+    const d = JSON.parse(ins.params[3]);
+    expect(d.types).toEqual(['Workshop']);
+    expect(d.participants).toEqual(['Students']);
+    expect(d.to_date).toBe('');
+    expect(d.to_time).toBe('');
+    expect([d.honorarium, d.travel, d.lodging]).toEqual(['10000', '5', '']);
+    expect(d.organizers).toHaveLength(2);
+    expect(d.organizers[0].evil).toBeUndefined();
+    expect(d.hacked).toBeUndefined();
+  });
+
+  it('a request needs a name', async () => {
+    routeDb([[/FROM faculty WHERE LOWER\(email\)/, [{ department: 'CSE' }]]]);
+    expect((await request(app).post('/event-requests').set('Authorization', FAC()).send({ title: '  ' })).status).toBe(400);
+  });
+
+  it('faculty list only their own; the HOD lists the department', async () => {
+    let calls = routeDb([[/FROM faculty WHERE LOWER\(email\)/, [{ department: 'CSE' }]], ['FROM event_requests', [row]]]);
+    const mine = await request(app).get('/event-requests').set('Authorization', FAC());
+    expect(mine.status).toBe(200);
+    expect(mine.body[0].can_edit).toBe(true);
+    expect(calls.find(c => c.sql.includes('FROM event_requests'))!.sql).toMatch(/LOWER\(created_by\) = \$1/);
+    calls = routeDb([HODS, ['FROM event_requests', [row]]]);
+    const dept = await request(app).get('/event-requests?department=ECE').set('Authorization', HOD_CSE());
+    expect(dept.body[0].can_edit).toBe(false);
+    const q = calls.find(c => c.sql.includes('FROM event_requests'))!;
+    expect(q.params[0]).toBe('cse');
+  });
+
+  it('only the author edits; the author or the HOD deletes', async () => {
+    routeDb([[/FROM faculty WHERE LOWER\(email\)/, [{ department: 'CSE' }]], ['SELECT * FROM event_requests', [{ ...row, created_by: 'other@rgmcet.edu.in' }]]]);
+    expect((await request(app).put('/event-requests/7').set('Authorization', FAC()).send({ title: 'x' })).status).toBe(403);
+    expect((await request(app).delete('/event-requests/7').set('Authorization', FAC())).status).toBe(403);
+    const calls = routeDb([HODS, ['SELECT * FROM event_requests', [{ ...row, created_by: 'other@rgmcet.edu.in' }]]]);
+    expect((await request(app).put('/event-requests/7').set('Authorization', HOD_CSE()).send({ title: 'x' })).status).toBe(403);
+    expect((await request(app).delete('/event-requests/7').set('Authorization', HOD_CSE())).status).toBe(200);
+    expect(calls.some(c => c.sql.includes('DELETE FROM event_requests'))).toBe(true);
+  });
+});

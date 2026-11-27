@@ -1122,6 +1122,11 @@ export const api = {
     fetchWithAuth(`/syllabus/${encodeURIComponent(allotmentId)}`),
   saveSyllabus: async (allotmentId: string, body: any) =>
     fetchWithAuth(`/syllabus/${encodeURIComponent(allotmentId)}`, { method: 'PUT', body: JSON.stringify(body) }),
+  getEventRequests: async (department?: string): Promise<any[]> =>
+    fetchWithAuth(`/event-requests${department && department !== 'All' ? `?department=${encodeURIComponent(department)}` : ''}`),
+  createEventRequest: async (body: any) => fetchWithAuth('/event-requests', { method: 'POST', body: JSON.stringify(body) }),
+  updateEventRequest: async (id: number, body: any) => fetchWithAuth(`/event-requests/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteEventRequest: async (id: number) => fetchWithAuth(`/event-requests/${id}`, { method: 'DELETE' }),
   getExecPlan: async (allotmentId: string): Promise<{ plan: { data: any; progress: number; updated_at: string } | null; can_edit: boolean; strength: number;
     students: { roll_number: string; name: string }[]; catalog: any[]; due_date: string | null }> =>
     fetchWithAuth(`/exec-plans/allotment/${encodeURIComponent(allotmentId)}`),

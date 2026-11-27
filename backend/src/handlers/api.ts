@@ -11454,6 +11454,12 @@ function ensureQualityTables(): Promise<void> {
         dept_key TEXT PRIMARY KEY, department TEXT, catalog JSONB NOT NULL DEFAULT '[]', due_date TEXT,
         updated_by TEXT, updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+      CREATE TABLE IF NOT EXISTS event_requests (
+        id SERIAL PRIMARY KEY,
+        department TEXT NOT NULL, title TEXT NOT NULL, start_date DATE, data JSONB NOT NULL DEFAULT '{}',
+        created_by TEXT NOT NULL, created_by_name TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_event_requests_dept ON event_requests (department, start_date DESC);
     `).then(() => undefined).catch((err: any) => { qualityTablesReady = null; throw err; });
   }
   return qualityTablesReady;
@@ -12211,6 +12217,109 @@ app.put('/exec-plans/settings', requireRole('hod', 'admin'), async (req: Request
        ON CONFLICT (dept_key) DO UPDATE SET catalog = EXCLUDED.catalog, due_date = EXCLUDED.due_date, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
       [normDept(dept), dept, JSON.stringify(catalog), due, String(req.auth!.email || '').toLowerCase()]);
     res.json({ department: dept, catalog, due_date: due });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Event requests — the department's pre-event forms (Permission & Venue, Budget). Faculty fill one request
+// and download either form in the department's Word template; after the event it prefills the event report.
+const ER_TYPES = ['FDP', 'Workshop', 'Seminar', 'Guest Lecture', 'Industry Orientation', 'Training Program', 'Hands-on Session', 'Hackathon',
+  'Competition', 'Technical Symposium', 'Industry Interaction', 'Alumni Interaction', 'Career Guidance', 'Research Orientation', 'Other'];
+const ER_PARTICIPANTS = ['Students', 'Faculty', 'Both', 'External Participants'];
+function cleanEventRequest(b: any) {
+  const t = (v: any, n = 300) => cepText(v, n);
+  const ymd = (v: any) => (isYmd(v) ? String(v) : '');
+  const hm = (v: any) => (/^\d{2}:\d{2}$/.test(String(v || '')) ? String(v) : '');
+  const money = (v: any) => { const n = Math.round(Number(String(v ?? '').replace(/[^\d.]/g, ''))); return Number.isFinite(n) && n > 0 ? String(Math.min(n, 99999999)) : ''; };
+  const list = (v: any, allowed: string[]) => [...new Set((Array.isArray(v) ? v : []).filter((x: any) => allowed.includes(x)))];
+  const two = (arr: any, keys: string[]) => [0, 1].map(i => Object.fromEntries(keys.map(k => [k, t(arr?.[i]?.[k], 300)])));
+  return {
+    title: t(b.title, 300), types: list(b.types, ER_TYPES), other_type: t(b.other_type, 120),
+    from_date: ymd(b.from_date), to_date: ymd(b.to_date), from_time: hm(b.from_time), to_time: hm(b.to_time),
+    organizers: two(b.organizers, ['name', 'designation', 'department']),
+    objectives: t(b.objectives, 3000), participants: list(b.participants, ER_PARTICIPANTS), target: t(b.target, 300), expected_count: t(b.expected_count, 20),
+    resource_persons: two(b.resource_persons, ['name', 'designation', 'organization', 'contact']), experience: t(b.experience, 60),
+    topics: t(b.topics, 2000), venue: t(b.venue, 300),
+    venue_from_date: ymd(b.venue_from_date), venue_to_date: ymd(b.venue_to_date), venue_from_time: hm(b.venue_from_time), venue_to_time: hm(b.venue_to_time),
+    expected_outcomes: t(b.expected_outcomes, 3000),
+    honorarium: money(b.honorarium), travel: money(b.travel), lodging: money(b.lodging),
+  };
+}
+/** Who may see / change a request: its author; the HOD and admins of its department; institution-wide roles (view) */
+async function erAccess(req: Request, r: any) {
+  const me = String(req.auth!.email || '').toLowerCase();
+  const own = String(r.created_by || '').toLowerCase() === me;
+  const dept = await qualityDept(req);
+  const sameDept = !dept || normDept(dept) === normDept(r.department);
+  const head = ['hod', 'admin'].includes(req.auth!.role) && sameDept;
+  const oversee = QUALITY_OVERSIGHT.includes(req.auth!.role) && sameDept;
+  return { view: own || head || oversee, edit: own, remove: own || head };
+}
+
+// GET /event-requests?department= — faculty: their own; HOD / admin: the department's; oversight: all or one department
+app.get('/event-requests', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const a = req.auth!;
+    const params: any[] = []; const where: string[] = [];
+    const own = await qualityDept(req);
+    if (a.role === 'faculty' || a.role === 'coordinator') {
+      params.push(String(a.email || '').toLowerCase()); where.push(`LOWER(created_by) = $${params.length}`);
+    } else {
+      const dept = own || (req.query.department && req.query.department !== 'All' ? String(req.query.department) : null);
+      if (dept) { params.push(normDept(dept)); where.push(`LOWER(REGEXP_REPLACE(department, '[^a-zA-Z0-9]', '', 'g')) = $${params.length}`); }
+    }
+    const r = await db.query(
+      `SELECT id, department, title, start_date::text AS start_date, data, created_by, created_by_name, created_at, updated_at FROM event_requests
+       ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY COALESCE(start_date, created_at::date) DESC, id DESC LIMIT 500`, params);
+    res.json(r.rows.map((x: any) => ({ ...x, can_edit: String(x.created_by).toLowerCase() === String(a.email || '').toLowerCase() })));
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /event-requests — anyone who organises events; the department is the author's own
+app.post('/event-requests', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const v = cleanEventRequest(req.body || {});
+    if (!v.title) return res.status(400).json({ error: 'Enter the name of the event' });
+    const dept = (await qualityDept(req)) || clip(req.body?.department, 80);
+    if (!dept) return res.status(400).json({ error: 'Pick the department' });
+    const email = String(req.auth!.email || '').toLowerCase();
+    const r = await db.query(
+      `INSERT INTO event_requests (department, title, start_date, data, created_by, created_by_name) VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING id, department, title, start_date::text AS start_date, data, created_by, created_by_name, created_at, updated_at`,
+      [dept, v.title, v.from_date || null, JSON.stringify(v), email, await staffName(email)]);
+    res.status(201).json({ ...r.rows[0], can_edit: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /event-requests/:id — the author edits it
+app.put('/event-requests/:id', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const id = parseInt(req.params.id, 10);
+    const cur = Number.isFinite(id) ? (await db.query('SELECT * FROM event_requests WHERE id = $1', [id])).rows[0] : null;
+    if (!cur) return res.status(404).json({ error: 'Request not found' });
+    if (!(await erAccess(req, cur)).edit) return res.status(403).json({ error: 'Only the faculty who created this request can edit it' });
+    const v = cleanEventRequest(req.body || {});
+    if (!v.title) return res.status(400).json({ error: 'Enter the name of the event' });
+    const r = await db.query(
+      `UPDATE event_requests SET title = $2, start_date = $3, data = $4, updated_at = NOW() WHERE id = $1
+       RETURNING id, department, title, start_date::text AS start_date, data, created_by, created_by_name, created_at, updated_at`,
+      [id, v.title, v.from_date || null, JSON.stringify(v)]);
+    res.json({ ...r.rows[0], can_edit: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /event-requests/:id — the author, or the department's HOD / admin
+app.delete('/event-requests/:id', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const id = parseInt(req.params.id, 10);
+    const cur = Number.isFinite(id) ? (await db.query('SELECT * FROM event_requests WHERE id = $1', [id])).rows[0] : null;
+    if (!cur) return res.status(404).json({ error: 'Request not found' });
+    if (!(await erAccess(req, cur)).remove) return res.status(403).json({ error: 'You cannot delete this request' });
+    await db.query('DELETE FROM event_requests WHERE id = $1', [id]);
+    res.json({ deleted: id });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 

@@ -8,6 +8,7 @@ import { ReportPdf, fmtD } from '../../lib/pdfReport';
 
 import { BouncingDots } from '../../components/common/BouncingDots';
 import { NumberedListInput } from '../../components/common/NumberedListInput';
+import { EventRequestsView } from './EventRequests';
 const card = 'bg-surface border border-borderLine rounded-2xl shadow-sm';
 const input = 'px-2.5 py-1.5 text-xs rounded-lg border border-borderLine bg-background text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary/30';
 const btn = 'px-3 py-2 rounded-xl text-xs font-bold disabled:opacity-50';
@@ -82,13 +83,17 @@ function People({ label, rows, onChange, fields }: { label: string; rows: any[];
   );
 }
 
-function EventForm({ initial, department, onDone, onCancel }: { initial: any | null; department: string | null; onDone: (e: any) => void; onCancel: () => void }) {
+function EventForm({ initial, department, onDone, onCancel, prefill }: { initial: any | null; department: string | null; onDone: (e: any) => void; onCancel: () => void; prefill?: any }) {
   const { user } = useAuth();
   const [e, setE] = useState<any>(() => initial ? { ...initial, start_date: d10(initial.start_date), end_date: d10(initial.end_date), visit: initial.visit || {} } : {
     event_type: 'Workshop', title: '', organized_by: department ? `Department of ${department}` : '', start_date: today(), end_date: today(), duration_hours: '', mode: 'Offline', venue: '',
     coordinators: [{ name: user?.name || '', designation: '', email: user?.email || '' }], resource_persons: [{}], visit: {},
     student_count: '', faculty_count: '', external_count: '', target_audience: '', objectives: '', summary: '', outcomes: '', feedback: '', budget: '', photos: [], attachments: [],
     department: department || '', participation: 'organized', expected_outcomes: '',
+    // started from an event request: carry its details over
+    ...(prefill || {}),
+    ...(prefill?.coordinators?.length ? {} : { coordinators: [{ name: user?.name || '', designation: '', email: user?.email || '' }] }),
+    ...(prefill?.resource_persons?.length ? {} : { resource_persons: [{}] }),
   });
   const [previews, setPreviews] = useState<Record<string, string>>(initial?.urls || {});
   const [busy, setBusy] = useState(0);
@@ -314,13 +319,14 @@ export default function EventsPage() {
   const role = user?.role || '';
   const ownDept = ['hod', 'faculty', 'coordinator'].includes(role) ? user?.department || null : null;
   const [f, setF] = useState({ department: 'All', type: 'All', year: 'All', status: 'All', participation: 'All' });
-  const [view, setView] = useState<{ mode: 'list' } | { mode: 'new' } | { mode: 'edit'; e: any } | { mode: 'detail'; id: number }>({ mode: 'list' });
+  const [view, setView] = useState<{ mode: 'list' } | { mode: 'new'; prefill?: any } | { mode: 'edit'; e: any } | { mode: 'detail'; id: number }>({ mode: 'list' });
+  const [tab, setTab] = useState<'reports' | 'requests'>('reports');
   const { data: events = [], isLoading } = useQuery<any[]>({ queryKey: ['events', f, ownDept], queryFn: () => api.getEvents({ ...f, department: ownDept ? undefined : f.department }) });
   const years = useMemo(() => Array.from(new Set(events.map(e => ayOf(d10(e.start_date))))).sort().reverse(), [events]);
   const byType = useMemo(() => { const m: Record<string, number> = {}; events.filter(e => e.status === 'approved').forEach(e => { m[e.event_type] = (m[e.event_type] || 0) + 1; }); return m; }, [events]);
 
   if (view.mode === 'new' || view.mode === 'edit') {
-    return <EventForm initial={view.mode === 'edit' ? view.e : null} department={ownDept} onCancel={() => setView({ mode: 'list' })} onDone={saved => setView({ mode: 'detail', id: saved.id })} />;
+    return <EventForm initial={view.mode === 'edit' ? view.e : null} prefill={view.mode === 'new' ? view.prefill : undefined} department={ownDept} onCancel={() => setView({ mode: 'list' })} onDone={saved => { setTab('reports'); setView({ mode: 'detail', id: saved.id }); }} />;
   }
   if (view.mode === 'detail') return <EventDetail id={view.id} onBack={() => setView({ mode: 'list' })} onEdit={e => setView({ mode: 'edit', e })} />;
 
@@ -346,10 +352,17 @@ export default function EventsPage() {
         <div><h1 className="text-xl font-black text-textPrimary">Events &amp; Activities</h1>
           <p className="text-xs text-textSecondary">Workshops, FDPs, guest lectures, industrial visits… Submit the report once, the HOD approves, and the PDF and NAAC list are ready.</p></div>
         <div className="flex gap-2">
-          <button className={btnGhost} disabled={!approved.length} onClick={exportExcel}><FileSpreadsheet className="w-3.5 h-3.5 inline mr-1" />Excel (NAAC)</button>
-          {role !== 'principal' && role !== 'director' && role !== 'management' && <button className={btnPrimary} onClick={() => setView({ mode: 'new' })}><Plus className="w-3.5 h-3.5 inline mr-1" />New report</button>}
+          {tab === 'reports' && <button className={btnGhost} disabled={!approved.length} onClick={exportExcel}><FileSpreadsheet className="w-3.5 h-3.5 inline mr-1" />Excel (NAAC)</button>}
+          {tab === 'reports' && role !== 'principal' && role !== 'director' && role !== 'management' && <button className={btnPrimary} onClick={() => setView({ mode: 'new' })}><Plus className="w-3.5 h-3.5 inline mr-1" />New report</button>}
         </div>
       </div>
+
+      <div className="flex rounded-xl border border-borderLine overflow-hidden text-xs font-bold w-fit" role="tablist">
+        <button role="tab" aria-selected={tab === 'reports'} onClick={() => setTab('reports')} className={`px-4 py-2 ${tab === 'reports' ? 'bg-brand-primary text-white' : 'text-textSecondary hover:bg-surface-2'}`}>Event reports</button>
+        <button role="tab" aria-selected={tab === 'requests'} onClick={() => setTab('requests')} className={`px-4 py-2 ${tab === 'requests' ? 'bg-brand-primary text-white' : 'text-textSecondary hover:bg-surface-2'}`}>Requests (before the event)</button>
+      </div>
+
+      {tab === 'requests' ? <EventRequestsView onReport={prefill => setView({ mode: 'new', prefill })} /> : (<>
 
       <div className="flex flex-wrap gap-2">
         {Object.entries(byType).sort((a, b) => b[1] - a[1]).map(([t, n]) => (
@@ -384,6 +397,7 @@ export default function EventsPage() {
             </div>
           )}
       </div>
+      </>)}
     </div>
   );
 }
