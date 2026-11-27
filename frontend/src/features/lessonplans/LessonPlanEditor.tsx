@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, CalendarCheck2, Check, Download, FileSpreadsheet, Loader2, Paperclip, Plus, Trash2, Undo2, Upload, Wand2 } from 'lucide-react';
+import { ArrowLeft, CalendarCheck2, Check, Download, FileSpreadsheet, FileText, Loader2, Paperclip, Plus, Trash2, Undo2, Upload, Wand2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { uploadAcademicFile } from '../../lib/academicFiles';
 import { fmtD } from '../../lib/pdfReport';
-import { CoverageBar, StatusChip, Topic, autoSchedule, btnGhost, btnPrimary, card, input, lessonPlanExcel, lessonPlanPdf, todayIso } from './lessonPlanShared';
+import { CoverageBar, StatusChip, Topic, autoSchedule, btnGhost, btnPrimary, card, input, lessonPlanExcel, lessonPlanPdf, lessonPlanWord, todayIso } from './lessonPlanShared';
 import { SyllabusEditor } from './SyllabusEditor';
 import { NumberedListInput } from '../../components/common/NumberedListInput';
 
@@ -43,17 +43,21 @@ export function LessonPlanEditor({ allotmentId, onBack }: { allotmentId: string;
   }, [data]);
 
   /** Fill the plan from the syllabus, and the dates from the timetable when the class days are known. */
-  const applyGenerated = (g: { objectives: string; outcomes: { code: string; text: string }[]; topics: Topic[]; text_books: string; references_text: string }) => {
+  const applyGenerated = (g: { objectives: string; outcomes: { code: string; text: string }[]; topics: Topic[]; text_books: string; references_text: string; source?: 'pdf' }) => {
     const classDays = Object.entries(sched.days).filter(([, n]) => n > 0).map(([day, periods]) => ({ day, periods }));
     const topics = classDays.length ? autoSchedule(g.topics, classDays, sched.start, data?.holidays || []) : g.topics;
     upd({ objectives: g.objectives, outcomes: g.outcomes.length ? g.outcomes : f.outcomes, topics, text_books: g.text_books, references_text: g.references_text });
     setConfirmGen(null);
     setTab('plan');
-    setMsg({ ok: true, text: `Lesson plan generated: ${topics.length} topics, ${topics.reduce((n, t) => n + (t.periods || 1), 0)} periods${classDays.length ? `, dates from ${fmtD(sched.start)} following the timetable` : ' (use Auto-fill dates to add dates)'}. Check it, then Save draft.` });
+    const what = `${topics.length} topics, ${topics.reduce((n, t) => n + (t.periods || 1), 0)} periods${classDays.length ? `, dates from ${fmtD(sched.start)} following the timetable` : ' (use Auto-fill dates to add dates)'}`;
+    setMsg({ ok: true, text: g.source === 'pdf'
+      ? `Lesson plan ready from the syllabus PDF: ${what}. Download it as Word or PDF above, or check it and Save draft to keep it in the portal.`
+      : `Lesson plan generated: ${what}. Check it, then Save draft.` });
   };
-  const onGenerate = (g: any) => {
-    if (f.topics.some(t => t.topic.trim())) setConfirmGen(g);
-    else applyGenerated(g);
+  const onGenerate = (g: any, source?: 'pdf') => {
+    const withSource = { ...g, source };
+    if (f.topics.some(t => t.topic.trim())) setConfirmGen(withSource);
+    else applyGenerated(withSource);
   };
 
   const refresh = () => { qc.invalidateQueries({ queryKey: ['lessonPlan', allotmentId] }); qc.invalidateQueries({ queryKey: ['myLessonPlans'] }); qc.invalidateQueries({ queryKey: ['deptLessonPlans'] }); };
@@ -141,6 +145,7 @@ export function LessonPlanEditor({ allotmentId, onBack }: { allotmentId: string;
         </div>
         <StatusChip s={status} />
         <button className={btnGhost} disabled={!p && !f.topics.some(t => t.topic)} onClick={() => lessonPlanPdf(a, { ...p, ...(canEdit ? f : {}) })}><Download className="w-3.5 h-3.5 inline mr-1" />PDF</button>
+        <button className={btnGhost} disabled={!p && !f.topics.some(t => t.topic)} onClick={() => lessonPlanWord(a, { ...p, ...(canEdit ? f : {}) })}><FileText className="w-3.5 h-3.5 inline mr-1" />Word</button>
         <button className={btnGhost} disabled={!p && !f.topics.some(t => t.topic)} onClick={() => lessonPlanExcel(a, { ...p, ...(canEdit ? f : {}) })}><FileSpreadsheet className="w-3.5 h-3.5 inline mr-1" />Excel</button>
       </div>
       {confirmGen && (

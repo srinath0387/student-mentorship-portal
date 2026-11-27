@@ -1,5 +1,5 @@
 import React from 'react';
-import { ReportPdf, fmtD } from '../../lib/pdfReport';
+import { COLLEGE, COLLEGE_SUB, ReportPdf, fmtD } from '../../lib/pdfReport';
 
 export const card = 'bg-surface border border-borderLine rounded-2xl shadow-sm';
 export const input = 'px-2.5 py-1.5 text-xs rounded-lg border border-borderLine bg-background text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary/30';
@@ -71,6 +71,12 @@ export function autoSchedule(topics: Topic[], classDays: { day: string; periods:
   });
 }
 
+/** e.g. "2026-27" (the academic year starts in June) */
+export const currentAy = (d = new Date(Date.now() + 5.5 * 3600000)) => {
+  const y = d.getUTCMonth() >= 5 ? d.getUTCFullYear() : d.getUTCFullYear() - 1;
+  return `${y}-${String((y + 1) % 100).padStart(2, '0')}`;
+};
+
 export async function lessonPlanPdf(allot: any, plan: any) {
   const topics: Topic[] = plan?.topics || [];
   const r = await ReportPdf.create(allot.department);
@@ -79,7 +85,7 @@ export async function lessonPlanPdf(allot: any, plan: any) {
     ['Name of the Faculty', allot.faculty_name + (allot.co_faculty_name ? ` (with ${allot.co_faculty_name})` : '')],
     ['Course', `${allot.subject_name}${allot.subject_type ? ` (${allot.subject_type})` : ''}`],
     ['Class', `${allot.semester_label} Semester · Section ${allot.section || '—'} · ${allot.department}`],
-    ['Academic Year', plan?.academic_year],
+    ['Academic Year', plan?.academic_year || currentAy()],
     ['Total topics / periods', `${topics.length} topics · ${topics.reduce((n, t) => n + (t.periods || 1), 0)} periods`],
     ['Status', plan?.status === 'approved' ? `Approved by HOD on ${fmtD(plan.reviewed_at)}` : (plan?.status || 'draft').replace(/^./, (c: string) => c.toUpperCase())],
   ]);
@@ -98,6 +104,40 @@ export async function lessonPlanPdf(allot: any, plan: any) {
   if (plan?.references_text) { r.heading('Reference Books / Resources'); r.para(plan.references_text); }
   r.signatures([{ role: 'Faculty', name: allot.faculty_name }, { role: 'HOD', name: `Dept. of ${allot.department}` }, { role: 'Principal' }]);
   r.save(`Lesson Plan - ${allot.subject_name} - ${allot.semester_label} ${allot.section}.pdf`);
+}
+
+/** Lesson plan as an editable Word document (same content as the PDF). */
+export async function lessonPlanWord(allot: any, plan: any) {
+  const { para, heading, numbered, table, saveDocx } = await import('../../lib/docxWriter');
+  const topics: Topic[] = plan?.topics || [];
+  const periods = topics.reduce((n, t) => n + (t.periods || 1), 0);
+  let lastUnit = -1;
+  const blocks = [
+    para({ text: COLLEGE, bold: true, size: 13 }, { align: 'center', spaceAfter: 0 }),
+    para({ text: COLLEGE_SUB, size: 9 }, { align: 'center', spaceAfter: 0 }),
+    para({ text: `Department of ${allot.department}`, bold: true, size: 10 }, { align: 'center', spaceAfter: 160 }),
+    para({ text: 'LESSON PLAN', bold: true, size: 14 }, { align: 'center', spaceAfter: 40 }),
+    para({ text: allot.subject_name, size: 11 }, { align: 'center', spaceAfter: 160 }),
+    table(null, [
+      ['Name of the Faculty', allot.faculty_name + (allot.co_faculty_name ? ` (with ${allot.co_faculty_name})` : '')],
+      ['Course', `${allot.subject_name}${allot.subject_type ? ` (${allot.subject_type})` : ''}`],
+      ['Class', `${allot.semester_label} Semester · Section ${allot.section || '—'} · ${allot.department}`],
+      ['Academic Year', plan?.academic_year || currentAy()],
+      ['Total topics / periods', `${topics.length} topics · ${periods} periods`],
+    ], [3400, 11300], { size: 10, boldFirstCol: true }),
+  ];
+  if (plan?.objectives) blocks.push(heading('Course Objectives'), numbered(plan.objectives));
+  if (plan?.outcomes?.length) blocks.push(heading('Course Outcomes'), table(['CO', 'After completing the course, the student will be able to'], plan.outcomes.map((o: any) => [o.code, o.text]), [1200, 13500], { size: 10, boldFirstCol: true }));
+  blocks.push(heading('Unit-wise Lesson Plan'), table(['S.No', 'Unit', 'Topic', 'Periods', 'Planned Date', 'CO', 'Teaching Method', 'Covered On', 'Remarks'],
+    topics.map((t, i) => {
+      const unitCell = t.unit !== lastUnit ? `Unit ${t.unit}${t.unit_title ? `\n${t.unit_title}` : ''}` : '';
+      lastUnit = t.unit;
+      return [i + 1, unitCell, t.topic, t.periods, fmtD(t.planned_date), t.co || '', t.method || '', t.covered_on ? fmtD(t.covered_on) : '', ''];
+    }), [650, 2100, 5000, 850, 1400, 700, 1600, 1400, 1000]));
+  if (plan?.text_books) blocks.push(heading('Text Books'), numbered(plan.text_books));
+  if (plan?.references_text) blocks.push(heading('Reference Books / Resources'), numbered(plan.references_text));
+  blocks.push(para('', { spaceAfter: 600 }), table(null, [['Faculty', 'HOD', 'Principal'], [allot.faculty_name, `Dept. of ${allot.department}`, '']], [4900, 4900, 4900], { size: 10 }));
+  await saveDocx(`Lesson Plan - ${allot.subject_name} - ${allot.semester_label} ${allot.section}.docx`, blocks, { landscape: true });
 }
 
 /** Lesson plan as an Excel sheet (same columns as the import template, so it can be edited and re-imported). */

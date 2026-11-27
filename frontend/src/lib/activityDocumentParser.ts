@@ -118,7 +118,7 @@ async function getOcrWorker(): Promise<any> {
  * Small, low-resolution certificate photos are upscaled (Tesseract needs ~20px+ glyphs);
  * huge camera photos are downscaled for speed.
  */
-function prepareCanvasForOcr(source: CanvasImageSource, width: number, height: number): HTMLCanvasElement {
+export function prepareCanvasForOcr(source: CanvasImageSource, width: number, height: number): HTMLCanvasElement {
   const target = 2000;
   const scale = Math.min(3, target / Math.max(width, height));
   const canvas = document.createElement('canvas');
@@ -144,7 +144,7 @@ function loadImage(file: File): Promise<HTMLImageElement> {
   });
 }
 
-async function ocrCanvas(canvas: HTMLCanvasElement, onProgress?: ProgressFn): Promise<string> {
+export async function ocrCanvas(canvas: HTMLCanvasElement, onProgress?: ProgressFn): Promise<string> {
   onProgress?.(55, 'Loading OCR engine...');
   const worker = await getOcrWorker();
   onProgress?.(65, 'Recognizing text...');
@@ -166,7 +166,7 @@ export async function performClientOcr(file: File, onProgress?: ProgressFn): Pro
 }
 
 let pdfjsPromise: Promise<any> | null = null;
-function loadPdfJs(): Promise<any> {
+export function loadPdfJs(): Promise<any> {
   if (!pdfjsPromise) {
     pdfjsPromise = import('pdfjs-dist/legacy/build/pdf.mjs').then((pdfjs) => {
       // Vite bundles this worker as a .js asset (served with a JavaScript MIME type from S3/CloudFront)

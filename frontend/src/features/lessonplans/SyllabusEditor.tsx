@@ -4,7 +4,8 @@
  */
 import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ClipboardPaste, FileText, Paperclip, Plus, Trash2, Wand2, X } from 'lucide-react';
+import { ClipboardPaste, FileText, FileUp, Paperclip, Plus, Trash2, Wand2, X } from 'lucide-react';
+import { parseSyllabusDocument, readPdfText } from '../../lib/syllabusPdf';
 import { api } from '../../lib/api';
 import { uploadAcademicFile } from '../../lib/academicFiles';
 import { BouncingDots } from '../../components/common/BouncingDots';
@@ -45,9 +46,17 @@ export function parseSyllabusText(text: string): Unit[] {
 export function topicsFromSyllabus(units: Unit[], outcomes: { code: string }[]): Topic[] {
   const rows: Topic[] = [];
   units.forEach((u, ui) => {
-    const items = listItems(u.topics);
-    if (!items.length) return;
-    const hours = Math.max(items.length, parseInt(u.hours, 10) || items.length);
+    const raw = listItems(u.topics);
+    if (!raw.length) return;
+    const given = parseInt(u.hours, 10) || 0;
+    // More topics than hours: combine neighbouring topics so the unit fits its hours
+    let items = raw;
+    if (given && raw.length > given) {
+      const per = Math.ceil(raw.length / given);
+      items = [];
+      for (let i = 0; i < raw.length; i += per) items.push(raw.slice(i, i + per).join(', '));
+    }
+    const hours = Math.max(items.length, given || items.length);
     const base = Math.floor(hours / items.length);
     const extra = hours - base * items.length;
     const co = outcomes[ui]?.code || outcomes[outcomes.length - 1]?.code || null;
@@ -61,7 +70,7 @@ export function topicsFromSyllabus(units: Unit[], outcomes: { code: string }[]):
 
 export function SyllabusEditor({ allotmentId, onGenerate }: {
   allotmentId: string;
-  onGenerate: (plan: { objectives: string; outcomes: { code: string; text: string }[]; topics: Topic[]; text_books: string; references_text: string }) => void;
+  onGenerate: (plan: { objectives: string; outcomes: { code: string; text: string }[]; topics: Topic[]; text_books: string; references_text: string }, source?: 'pdf') => void;
 }) {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ['syllabus', allotmentId], queryFn: () => api.getSyllabus(allotmentId) });
@@ -70,6 +79,48 @@ export function SyllabusEditor({ allotmentId, onGenerate }: {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [paste, setPaste] = useState<string | null>(null);
   const [busyFile, setBusyFile] = useState(false);
+  const [reading, setReading] = useState<string | null>(null);
+
+  /** Upload the university syllabus PDF → syllabus filled and saved → lesson plan generated */
+  const fromPdf = async (file: File) => {
+    setMsg(null);
+    if (file.type && file.type !== 'application/pdf') { setMsg({ ok: false, text: 'Choose a PDF file.' }); return; }
+    try {
+      setReading('Opening the PDF…');
+      const { text, scanned } = await readPdfText(file, setReading);
+      setReading('Finding units and topics…');
+      const p = parseSyllabusDocument(text, data?.allotment?.subject_name || '', scanned);
+      if (!p.units.length) { setMsg({ ok: false, text: p.warnings.join(' ') || 'Could not find the units in this PDF.' }); return; }
+      const next: Form = {
+        subject_code: p.subject_code || f.subject_code, regulation: p.regulation || f.regulation, credits: p.credits || f.credits,
+        objectives: p.objectives.length ? numbered(p.objectives) : f.objectives,
+        outcomes: p.outcomes.length ? p.outcomes : f.outcomes,
+        units: p.units.map(u => ({ title: u.title, hours: u.hours, topics: numbered(u.topics) })),
+        text_books: p.text_books.length ? numbered(p.text_books) : f.text_books,
+        references_text: p.references.length ? numbered(p.references) : f.references_text,
+        file_key: f.file_key,
+      };
+      if (canEdit) {
+        setReading('Saving the syllabus…');
+        try { next.file_key = (await uploadAcademicFile('lesson-plans', file)).key; } catch { /* the PDF copy is optional */ }
+        const payload = {
+          ...next, outcomes: next.outcomes.filter(o => o.text.trim()),
+          units: next.units.map(u => ({ title: u.title, hours: u.hours ? Number(u.hours) : null, topics: listItems(u.topics) })),
+        };
+        await api.saveSyllabus(allotmentId, payload);
+        qc.invalidateQueries({ queryKey: ['syllabus', allotmentId] });
+      }
+      setF(next); setDirty(false);
+      const topicCount = next.units.reduce((n, u) => n + listItems(u.topics).length, 0);
+      setMsg({ ok: true, text: `Read ${next.units.length} units and ${topicCount} topics from the PDF.${p.warnings.length ? ' ' + p.warnings.join(' ') : ''}` });
+      if (canEdit) {
+        const outcomes = next.outcomes.filter(o => o.text.trim());
+        onGenerate({ objectives: next.objectives, outcomes, topics: topicsFromSyllabus(next.units, outcomes), text_books: next.text_books, references_text: next.references_text }, 'pdf');
+      }
+    } catch (e: any) {
+      setMsg({ ok: false, text: `Could not read this PDF (${e?.message || 'unknown error'}). Use "Paste syllabus" instead.` });
+    } finally { setReading(null); }
+  };
 
   useEffect(() => {
     const s = data?.syllabus;
@@ -105,7 +156,22 @@ export function SyllabusEditor({ allotmentId, onGenerate }: {
   return (
     <div className="space-y-4">
       {msg && <div role="status" className={`rounded-xl px-4 py-2.5 text-xs font-bold ${msg.ok ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'}`}>{msg.text}</div>}
-      {!data?.syllabus && <p className="text-xs text-textSecondary">No syllabus yet for {a?.subject_name}. Paste it from the university syllabus PDF or type the units below, then generate the lesson plan.</p>}
+      {canEdit && (
+        <div className={`${card} p-4 flex flex-wrap items-center gap-3 border-brand-primary/40`}>
+          <div className="rounded-xl bg-brand-soft p-2.5 text-brand-primary dark:bg-brand-primary/15"><FileUp className="w-5 h-5" /></div>
+          <div className="flex-1 min-w-[220px]">
+            <p className="text-sm font-black text-textPrimary">Only need the lesson plan?</p>
+            <p className="text-xs text-textSecondary">Upload the university syllabus PDF for {a?.subject_name}. The units and topics are read from it and the semester's lesson plan is ready to download as Word or PDF.</p>
+          </div>
+          {reading ? <BouncingDots size="sm" className="text-brand-primary" label={reading} /> : (
+            <label className="px-3.5 py-2 rounded-xl bg-brand-primary text-white text-xs font-bold cursor-pointer hover:opacity-90">
+              <FileUp className="w-3.5 h-3.5 inline mr-1" />Upload syllabus PDF
+              <input type="file" accept="application/pdf,.pdf" className="hidden" onChange={e => { const x = e.target.files?.[0]; e.target.value = ''; if (x) fromPdf(x); }} />
+            </label>
+          )}
+        </div>
+      )}
+      {!data?.syllabus && <p className="text-xs text-textSecondary">No syllabus yet for {a?.subject_name}. Upload the PDF above, paste the text, or type the units below, then generate the lesson plan.</p>}
       {data?.syllabus?.updated_by_name && <p className="text-[11px] text-textMuted">Last updated by {data.syllabus.updated_by_name}. Shared with every section of {a?.subject_name} in {a?.semester_label}.</p>}
 
       <div className={`${card} p-4 space-y-3`}>
