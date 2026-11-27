@@ -18,7 +18,11 @@ export type ReportRow =
   | { kind: 'pair'; label: string; a: [string, string]; b: [string, string] }
   | { kind: 'photos'; label: string; photos: Photo[] }
   | { kind: 'sign'; label: string; names: string[] }
-  | { kind: 'hod' } | { kind: 'principal' };
+  // HOD / Principal rows: blank for hand signatures, or filled with the portal decision (signature space kept)
+  | { kind: 'hod'; lines?: string[]; stamp?: string[] } | { kind: 'principal'; lines?: string[]; stamp?: string[] };
+
+/** Another document in the same tabular layout (e.g. the request to attend): its own rows, title and file name */
+export type TabularDoc = { rows: ReportRow[]; title: string; fileName: string; author?: string };
 
 const TYPE_BOX: Record<string, string> = {
   'Faculty Development Programme (FDP)': 'FDP', Workshop: 'Workshop', Seminar: 'Seminar', 'Guest Lecture': 'Guest Lecture',
@@ -110,7 +114,7 @@ function setLabel(cell: string, text: string): string {
   return cell.slice(0, cell.indexOf(first)) + p + cell.slice(cell.lastIndexOf(last) + last.length);
 }
 
-export async function eventReportWord(e: any) {
+export async function eventReportWord(e: any, custom?: TabularDoc) {
   const res = await fetch('/templates/event-request-permission.docx');
   if (!res.ok) throw new Error('Could not load the Word template');
   const zip = await JSZip.loadAsync(await res.arrayBuffer());
@@ -164,7 +168,7 @@ export async function eventReportWord(e: any) {
   };
 
   // photos → media parts
-  const photos = await loadPhotos(await photosOf(e));
+  const photos = custom ? [] : await loadPhotos(await photosOf(e));
   let rels = await zip.file('word/_rels/document.xml.rels')!.async('string');
   let types = await zip.file('[Content_Types].xml')!.async('string');
   if (photos.length && !/Extension="jpeg"/.test(types)) types = types.replace('<Default Extension="xml"', '<Default Extension="jpeg" ContentType="image/jpeg"/><Default Extension="xml"');
@@ -182,10 +186,17 @@ export async function eventReportWord(e: any) {
     rels = rels.replace('</Relationships>', `<Relationship Id="rIdEvPhoto${i}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/evphoto${i}.jpeg"/></Relationships>`);
   });
 
-  const rows = reportRows(e, photos.map(p => ({ url: '', caption: p.caption })));   // photos are placed from the loaded list
+  const rows = custom ? custom.rows : reportRows(e, photos.map(p => ({ url: '', caption: p.caption })));   // photos are placed from the loaded list
   const built = rows.map(r => {
-    if (r.kind === 'hod') return P.hod;
-    if (r.kind === 'principal') return P.principal;
+    if (r.kind === 'hod' || r.kind === 'principal') {
+      const proto = r.kind === 'hod' ? P.hod : P.principal;
+      if (!r.lines?.length && !r.stamp?.length) return proto;
+      const c = cellsOf(proto);
+      const keep = (cell: string) => (cell.match(PARA) || []).length;
+      return withCells(proto, [c[0]!, c[1]!,
+        setLines(c[2]!, [r.kind === 'hod' ? 'Recommendations:' : 'Remarks:', ...(r.lines || [])], keep(c[2]!)),
+        setLines(c[3]!, ['Signature & Date:', '', '', ...(r.stamp || [])], keep(c[3]!))]);
+    }
     if (r.kind === 'text') { const c = cellsOf(P.text); return withCells(P.text, [c[0]!, setLabel(c[1]!, r.label), setLines(c[2]!, r.lines)]); }
     if (r.kind === 'numbered') {
       const id = newList();
@@ -219,7 +230,7 @@ export async function eventReportWord(e: any) {
   const lastRow = tpl[tpl.length - 1]!;
   const end = doc.lastIndexOf(lastRow) + lastRow.length;
   doc = doc.slice(0, firstRow) + finalRows.join('') + doc.slice(end);
-  doc = doc.replace(/DEPARTMENT EVENT PROPOSAL &amp; APPROVAL FORM/, title(e));
+  doc = doc.replace(/DEPARTMENT EVENT PROPOSAL &amp; APPROVAL FORM/, esc(custom ? custom.title : title(e)));
   zip.file('word/document.xml', doc);
   zip.file('word/numbering.xml', numbering);
   zip.file('word/_rels/document.xml.rels', rels);
@@ -230,7 +241,7 @@ export async function eventReportWord(e: any) {
     const p = (h.match(PARA) || []).find(x => /Department of/.test(textOf(x)));
     if (p && e.department) zip.file(path, h.replace(p, para(pPrOf(p), `Department of ${e.department}`, true)));
   }
-  const author = e.coordinators?.[0]?.name || e.submitted_by_name || 'RGMCET';
+  const author = custom?.author || e.coordinators?.[0]?.name || e.submitted_by_name || 'RGMCET';
   const core = zip.file('docProps/core.xml');
   if (core) zip.file('docProps/core.xml', (await core.async('string'))
     .replace(/<dc:creator>[\s\S]*?<\/dc:creator>/, `<dc:creator>${esc(author)}</dc:creator>`)
@@ -238,19 +249,19 @@ export async function eventReportWord(e: any) {
     .replace(/<dc:description>[\s\S]*?<\/dc:description>/, '<dc:description></dc:description>')
     .replace(/(<dcterms:modified[^>]*>)[\s\S]*?(<\/dcterms:modified>)/, `$1${new Date().toISOString().replace(/\.\d+Z$/, 'Z')}$2`));
   const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
-  saveAs(blob, fileName(e, 'docx'));
+  saveAs(blob, custom ? `${custom.fileName}.docx` : fileName(e, 'docx'));
   return blob;
 }
 
 // ───────────────────────────── PDF ─────────────────────────────
 
-export async function eventReportTablePdf(e: any) {
+export async function eventReportTablePdf(e: any, custom?: TabularDoc) {
   const { jsPDF } = await import('jspdf');
   const autoTable = (await import('jspdf-autotable')).default as any;
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth(); const M = 15;
-  const photos = await loadPhotos(await photosOf(e));
-  const rows = reportRows(e, photos.map(p => ({ url: '', caption: p.caption })));
+  const photos = custom ? [] : await loadPhotos(await photosOf(e));
+  const rows = custom ? custom.rows : reportRows(e, photos.map(p => ({ url: '', caption: p.caption })));
   const NO = 11; const LABEL = 52; const VAL = W - 2 * M - NO - LABEL;
   const FONT = 'times'; const SIZE = 10.5;
 
@@ -279,7 +290,8 @@ export async function eventReportTablePdf(e: any) {
   for (const r of rows) {
     if (r.kind === 'hod' || r.kind === 'principal') {
       body.push([{ content: `${++n}.` }, label(r.kind === 'hod' ? 'Head of the Department' : 'Principal’s Approval'),
-        { content: r.kind === 'hod' ? 'Recommendations:' : 'Remarks:', styles: { minCellHeight: 26 } }, { content: 'Signature & Date:' }]);
+        { content: [r.kind === 'hod' ? 'Recommendations:' : 'Remarks:', ...(r.lines || [])].join('\n'), styles: { minCellHeight: 26, valign: 'top' } },
+        { content: ['Signature & Date:', ...(r.stamp?.length ? ['', ...r.stamp] : [])].join('\n'), styles: { valign: 'top' } }]);
     } else if (r.kind === 'pair') {
       body.push([{ content: `${++n}.` }, label(r.label), { content: r.a.join('\n') }, { content: r.b.join('\n') }]);
     } else if (r.kind === 'ticks') {
@@ -300,7 +312,7 @@ export async function eventReportTablePdf(e: any) {
 
   header();
   doc.setFont(FONT, 'bold'); doc.setFontSize(11.5);
-  doc.text(title(e), W / 2, 28, { align: 'center' });
+  doc.text(custom ? custom.title : title(e), W / 2, 28, { align: 'center' });
   autoTable(doc, {
     // a row never splits across pages (photos and tick boxes are drawn inside their cell)
     startY: 32, margin: { left: M, right: M, top: 26, bottom: 16 }, theme: 'grid', body, rowPageBreak: 'avoid',
@@ -343,5 +355,5 @@ export async function eventReportTablePdf(e: any) {
     doc.setPage(i); doc.setFont(FONT, 'normal'); doc.setFontSize(8.5); doc.setTextColor(90);
     doc.text(`Page ${i} of ${pages}`, W / 2, doc.internal.pageSize.getHeight() - 8, { align: 'center' });
   }
-  doc.save(fileName(e, 'pdf'));
+  doc.save(custom ? `${custom.fileName}.pdf` : fileName(e, 'pdf'));
 }

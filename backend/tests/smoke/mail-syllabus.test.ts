@@ -468,3 +468,82 @@ describe('Event report written from an event request', () => {
     expect(calls.some(c => c.sql.includes('event_requests'))).toBe(false);
   });
 });
+
+describe('Event request approval: HOD recommends, Principal approves', () => {
+  const HOD_CSE = () => `Bearer ${signSessionToken({ role: 'hod', email: 'hodcse@rgmcet.edu.in', department: 'CSE' })}`;
+  const HOD_ECE = () => `Bearer ${signSessionToken({ role: 'hod', email: 'hodece@rgmcet.edu.in', department: 'ECE' })}`;
+  const PRINCIPAL = () => `Bearer ${signSessionToken({ role: 'principal', email: 'principal@rgmcet.edu.in' })}`;
+  const HODS: Route = ['FROM hod_credentials', (_s, p) => [{ email: 'x', department: /hodece/i.test(JSON.stringify(p)) ? 'ECE' : 'CSE' }]];
+  const base = { id: 7, department: 'CSE', title: 'GenAI Workshop', kind: 'organize', data: { from_date: '2026-12-12' }, created_by: 'ramesh@rgmcet.edu.in', created_by_name: 'Ramesh' };
+  const at = (status: string, extra: any = {}): Route => ['SELECT * FROM event_requests', [{ ...base, status, ...extra }]];
+  const update = (calls: any[]) => calls.find(c => c.sql.trim().startsWith('UPDATE event_requests SET status'));
+
+  it('the author sends a draft to the HOD', async () => {
+    const calls = routeDb([[/FROM faculty WHERE LOWER\(email\)/, [{ department: 'CSE', name: 'Ramesh' }]], at('draft')]);
+    const res = await request(app).post('/event-requests/7/submit').set('Authorization', FAC());
+    expect(res.status).toBe(200);
+    expect(update(calls)!.params[1]).toBe('submitted');
+  });
+  it('dates are needed before sending', async () => {
+    routeDb([[/FROM faculty WHERE LOWER\(email\)/, [{ department: 'CSE' }]], at('draft', { data: {} })]);
+    expect((await request(app).post('/event-requests/7/submit').set('Authorization', FAC())).status).toBe(400);
+  });
+  it('a request with the HOD can no longer be edited or re-sent by the author', async () => {
+    routeDb([[/FROM faculty WHERE LOWER\(email\)/, [{ department: 'CSE' }]], at('submitted')]);
+    const put = await request(app).put('/event-requests/7').set('Authorization', FAC()).send({ title: 'Changed' });
+    expect(put.status).toBe(403);
+    expect(put.body.error).toMatch(/HOD \/ Principal/);
+    expect((await request(app).post('/event-requests/7/submit').set('Authorization', FAC())).status).toBe(403);
+  });
+  it('the HOD of the department recommends it to the Principal; returning needs remarks', async () => {
+    let calls = routeDb([HODS, at('submitted')]);
+    const ok = await request(app).post('/event-requests/7/review').set('Authorization', HOD_CSE()).send({ action: 'recommend', remarks: 'Relevant to electives' });
+    expect(ok.status).toBe(200);
+    const u = calls.find(c => c.sql.includes('hod_remarks = $3'))!;
+    expect(u.params.slice(1, 3)).toEqual(['recommended', 'Relevant to electives']);
+    calls = routeDb([HODS, at('submitted')]);
+    expect((await request(app).post('/event-requests/7/review').set('Authorization', HOD_CSE()).send({ action: 'return' })).status).toBe(400);
+  });
+  it('another department’s HOD cannot decide', async () => {
+    routeDb([HODS, at('submitted')]);
+    expect((await request(app).post('/event-requests/7/review').set('Authorization', HOD_ECE()).send({ action: 'recommend' })).status).toBe(403);
+  });
+  it('the Principal acts only after the HOD has recommended', async () => {
+    routeDb([at('submitted')]);
+    const early = await request(app).post('/event-requests/7/review').set('Authorization', PRINCIPAL()).send({ action: 'approve' });
+    expect(early.status).toBe(403);
+    expect(early.body.error).toMatch(/HOD/);
+    const calls = routeDb([at('recommended')]);
+    const res = await request(app).post('/event-requests/7/review').set('Authorization', PRINCIPAL()).send({ action: 'approve', remarks: 'Approved' });
+    expect(res.status).toBe(200);
+    const u = calls.find(c => c.sql.includes('principal_remarks = $3'))!;
+    expect(u.params.slice(1, 3)).toEqual(['approved', 'Approved']);
+  });
+  it('not approving or returning needs a reason', async () => {
+    routeDb([at('recommended')]);
+    expect((await request(app).post('/event-requests/7/review').set('Authorization', PRINCIPAL()).send({ action: 'reject' })).status).toBe(400);
+    const calls = routeDb([at('recommended')]);
+    const res = await request(app).post('/event-requests/7/review').set('Authorization', PRINCIPAL()).send({ action: 'return', remarks: 'Reduce the budget' });
+    expect(res.status).toBe(200);
+    const u = calls.find(c => c.sql.includes('principal_remarks = $3'))!;
+    expect(u.params[1]).toBe('returned');
+    expect(u.params[5]).toBe('Principal');
+  });
+  it('a HOD’s own request goes straight to the Principal', async () => {
+    const calls = routeDb([HODS, at('draft', { created_by: 'hodcse@rgmcet.edu.in' })]);
+    const res = await request(app).post('/event-requests/7/submit').set('Authorization', HOD_CSE());
+    expect(res.status).toBe(200);
+    expect(update(calls)!.params[1]).toBe('recommended');
+  });
+  it('requests to attend are stored as such, with their own fields', async () => {
+    const calls = routeDb([[/FROM faculty WHERE LOWER\(email\)/, [{ department: 'CSE', name: 'Ramesh' }]], ['INSERT INTO event_requests', [{ id: 9 }]]]);
+    const res = await request(app).post('/event-requests').set('Authorization', FAC()).send({
+      kind: 'attend', title: 'ATAL FDP on GenAI', host: 'NIT Warangal', place: 'Warangal', mode: 'Teleport', registration_fee: '1,500', od_days: '5',
+    });
+    expect(res.status).toBe(201);
+    const ins = calls.find(c => c.sql.includes('INSERT INTO event_requests'))!;
+    expect(ins.params[6]).toBe('attend');
+    const d = JSON.parse(ins.params[3]);
+    expect([d.host, d.place, d.mode, d.registration_fee, d.od_days]).toEqual(['NIT Warangal', 'Warangal', '', '1500', '5']);
+  });
+});

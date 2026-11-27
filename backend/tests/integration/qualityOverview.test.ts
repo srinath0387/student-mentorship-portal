@@ -76,7 +76,15 @@ d('Department progress overview (real Postgres)', () => {
     expect(by.ece.lessons).toMatchObject({ total: 2, approved: 1, behind: 0, coverage_pct: 100 });
     expect(by.cse.events).toMatchObject({ total: 2, approved: 1, awaiting_hod: 1, spent: 5000 });   // the 2019–20 event is not counted
     expect(by.ece.events).toMatchObject({ approved: 1, attended: 1, spent: 1200 });
-    expect(by.cse.requests).toEqual({ total: 2, reports_due: 1, upcoming: 1, requested: 13500 });
+    expect(by.cse.requests).toEqual({ total: 2, reports_due: 1, upcoming: 1, requested: 13500, awaiting_hod: 0, awaiting_principal: 0, approved: 0 });
+  });
+
+  it('counts requests waiting for the HOD and the Principal', async () => {
+    await pool.query(`UPDATE event_requests SET status = 'recommended' WHERE title = 'future'`);
+    await pool.query(`UPDATE event_requests SET status = 'submitted' WHERE title = 'past, no report'`);
+    const res = await request(app).get('/quality/overview').set('Authorization', `Bearer ${signSessionToken({ role: 'principal', email: 'principal@rgmcet.edu.in' })}`);
+    const cse = res.body.departments.find((x: any) => x.key === 'cse');
+    expect(cse.requests).toMatchObject({ awaiting_hod: 1, awaiting_principal: 1, approved: 0 });
   });
 
   it('a HOD sees only their own department', async () => {

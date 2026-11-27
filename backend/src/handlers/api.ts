@@ -11461,6 +11461,18 @@ function ensureQualityTables(): Promise<void> {
       );
       CREATE INDEX IF NOT EXISTS idx_event_requests_dept ON event_requests (department, start_date DESC);
       ALTER TABLE event_requests ADD COLUMN IF NOT EXISTS event_id INT;
+      ALTER TABLE event_requests ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'organize';
+      ALTER TABLE event_requests ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'draft';
+      ALTER TABLE event_requests ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ;
+      ALTER TABLE event_requests ADD COLUMN IF NOT EXISTS returned_by TEXT;
+      ALTER TABLE event_requests ADD COLUMN IF NOT EXISTS hod_remarks TEXT;
+      ALTER TABLE event_requests ADD COLUMN IF NOT EXISTS hod_by TEXT;
+      ALTER TABLE event_requests ADD COLUMN IF NOT EXISTS hod_name TEXT;
+      ALTER TABLE event_requests ADD COLUMN IF NOT EXISTS hod_at TIMESTAMPTZ;
+      ALTER TABLE event_requests ADD COLUMN IF NOT EXISTS principal_remarks TEXT;
+      ALTER TABLE event_requests ADD COLUMN IF NOT EXISTS principal_by TEXT;
+      ALTER TABLE event_requests ADD COLUMN IF NOT EXISTS principal_name TEXT;
+      ALTER TABLE event_requests ADD COLUMN IF NOT EXISTS principal_at TIMESTAMPTZ;
     `).then(() => undefined).catch((err: any) => { qualityTablesReady = null; throw err; });
   }
   return qualityTablesReady;
@@ -12268,6 +12280,9 @@ app.get('/quality/overview', requireRole('hod', ...QUALITY_OVERSIGHT), async (re
          FROM dept_events WHERE academic_year = ${p(1)} ${deptWhere('department', 'AND')} GROUP BY 1`, [...params, ay]),
       db.query(
         `SELECT ${KEY('department')} AS k, MIN(department) AS name, COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE status = 'submitted')::int AS awaiting_hod,
+                COUNT(*) FILTER (WHERE status = 'recommended')::int AS awaiting_principal,
+                COUNT(*) FILTER (WHERE status = 'approved')::int AS approved,
                 COUNT(*) FILTER (WHERE event_id IS NULL AND COALESCE(NULLIF(data->>'to_date', ''), NULLIF(data->>'from_date', '')) < ${p(1)})::int AS reports_due,
                 COUNT(*) FILTER (WHERE COALESCE(NULLIF(data->>'from_date', ''), '9999') >= ${p(1)})::int AS upcoming,
                 COALESCE(SUM(COALESCE(NULLIF(data->>'honorarium', '')::numeric, 0) + COALESCE(NULLIF(data->>'travel', '')::numeric, 0)
@@ -12289,7 +12304,11 @@ app.get('/quality/overview', requireRole('hod', ...QUALITY_OVERSIGHT), async (re
         coverage_pct: r.topics ? Math.round((r.covered / r.topics) * 100) : 0 };
     }
     for (const r of events.rows) { const x = row(r.k, r.name); if (x) x.events = { total: r.total, approved: r.approved, awaiting_hod: r.awaiting_hod, drafts: r.drafts, attended: r.attended, spent: r.spent }; }
-    for (const r of requests.rows) { const x = row(r.k, r.name); if (x) x.requests = { total: r.total, reports_due: r.reports_due, upcoming: r.upcoming, requested: r.requested }; }
+    for (const r of requests.rows) {
+      const x = row(r.k, r.name);
+      if (x) x.requests = { total: r.total, reports_due: r.reports_due, upcoming: r.upcoming, requested: r.requested,
+        awaiting_hod: r.awaiting_hod, awaiting_principal: r.awaiting_principal, approved: r.approved };
+    }
     for (const s of settings.rows) { const x = rows.get(s.k); if (x) x.plans_due = s.due_date || null; }
     const list = [...rows.values()].sort((a, b) => String(a.department).localeCompare(String(b.department)));
     res.json({ academic_year: ay, today, scope: own || 'All', departments: list });
@@ -12309,6 +12328,10 @@ function cleanEventRequest(b: any) {
   const list = (v: any, allowed: string[]) => [...new Set((Array.isArray(v) ? v : []).filter((x: any) => allowed.includes(x)))];
   const two = (arr: any, keys: string[]) => [0, 1].map(i => Object.fromEntries(keys.map(k => [k, t(arr?.[i]?.[k], 300)])));
   return {
+    kind: b.kind === 'attend' ? 'attend' : 'organize',
+    // attending an outside event
+    host: t(b.host, 300), place: t(b.place, 200), mode: ['Offline', 'Online', 'Hybrid'].includes(b.mode) ? b.mode : '',
+    registration_fee: money(b.registration_fee), od_days: t(b.od_days, 20),
     title: t(b.title, 300), types: list(b.types, ER_TYPES), other_type: t(b.other_type, 120),
     from_date: ymd(b.from_date), to_date: ymd(b.to_date), from_time: hm(b.from_time), to_time: hm(b.to_time),
     organizers: two(b.organizers, ['name', 'designation', 'department']),
@@ -12320,7 +12343,9 @@ function cleanEventRequest(b: any) {
     honorarium: money(b.honorarium), travel: money(b.travel), lodging: money(b.lodging),
   };
 }
-/** Who may see / change a request: its author; the HOD and admins of its department; institution-wide roles (view) */
+/** Who may see / change a request: its author; the HOD and admins of its department; the Principal; institution-wide roles (view) */
+const ER_PRINCIPAL_ROLES = ['principal', 'director'];
+const ER_EDITABLE = ['draft', 'returned'];
 async function erAccess(req: Request, r: any) {
   const me = String(req.auth!.email || '').toLowerCase();
   const own = String(r.created_by || '').toLowerCase() === me;
@@ -12328,10 +12353,31 @@ async function erAccess(req: Request, r: any) {
   const sameDept = !dept || normDept(dept) === normDept(r.department);
   const head = ['hod', 'admin'].includes(req.auth!.role) && sameDept;
   const oversee = QUALITY_OVERSIGHT.includes(req.auth!.role) && sameDept;
-  return { view: own || head || oversee, edit: own, remove: own || head };
+  const status = r.status || 'draft';
+  return {
+    view: own || head || oversee,
+    edit: own && ER_EDITABLE.includes(status),
+    remove: (own && status !== 'approved') || head,
+    hod: head && status === 'submitted',
+    principal: ER_PRINCIPAL_ROLES.includes(req.auth!.role) && status === 'recommended',
+  };
+}
+const ER_COLS = `r.id, r.kind, r.status, r.department, r.title, r.start_date::text AS start_date, r.data, r.created_by, r.created_by_name,
+  r.created_at, r.updated_at, r.submitted_at, r.returned_by, r.hod_remarks, r.hod_name, r.hod_at, r.principal_remarks, r.principal_name, r.principal_at`;
+/** Accounts with phone alerts for a role (the Principal is not tied to one department) */
+async function roleKeys(roles: string[]): Promise<string[]> {
+  const r = await db.query(`SELECT DISTINCT user_key FROM notify_subscriptions WHERE LOWER(COALESCE(role, '')) = ANY($1::text[])`, [roles]).catch(() => ({ rows: [] as any[] }));
+  return r.rows.map((x: any) => x.user_key);
+}
+async function erRow(req: Request, id: number) {
+  const x = (await db.query(`SELECT ${ER_COLS}, e.id AS event_id, e.status AS report_status FROM event_requests r LEFT JOIN dept_events e ON e.id = r.event_id WHERE r.id = $1`, [id])).rows[0];
+  if (!x) return null;
+  const acc = await erAccess(req, x);
+  return { ...x, can_edit: acc.edit, can_hod: acc.hod, can_principal: acc.principal, is_author: String(x.created_by).toLowerCase() === String(req.auth!.email || '').toLowerCase() };
 }
 
-// GET /event-requests?department= — faculty: their own; HOD / admin: the department's; oversight: all or one department
+// GET /event-requests?department=&awaiting=1 — faculty: their own; HOD / admin: the department's; Principal & oversight: all or one department.
+// awaiting=1: only what is waiting for the caller (HOD: submitted; Principal: recommended by the HOD)
 app.get('/event-requests', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
   try {
     await ensureQualityTables();
@@ -12343,18 +12389,23 @@ app.get('/event-requests', requireRole(...QUALITY_STAFF), async (req: Request, r
     } else {
       const dept = own || (req.query.department && req.query.department !== 'All' ? String(req.query.department) : null);
       if (dept) { params.push(normDept(dept)); where.push(`LOWER(REGEXP_REPLACE(r.department, '[^a-zA-Z0-9]', '', 'g')) = $${params.length}`); }
+      if (req.query.awaiting === '1') where.push(ER_PRINCIPAL_ROLES.includes(a.role) ? `r.status = 'recommended'` : `r.status = 'submitted'`);
     }
     const r = await db.query(
-      `SELECT r.id, r.department, r.title, r.start_date::text AS start_date, r.data, r.created_by, r.created_by_name, r.created_at, r.updated_at,
-              e.id AS event_id, e.status AS report_status
+      `SELECT ${ER_COLS}, e.id AS event_id, e.status AS report_status
        FROM event_requests r LEFT JOIN dept_events e ON e.id = r.event_id
        ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
        ORDER BY COALESCE(r.start_date, r.created_at::date) DESC, r.id DESC LIMIT 500`, params);
-    res.json(r.rows.map((x: any) => ({ ...x, can_edit: String(x.created_by).toLowerCase() === String(a.email || '').toLowerCase() })));
+    const out = [];
+    for (const x of r.rows) {
+      const acc = await erAccess(req, x);
+      out.push({ ...x, can_edit: acc.edit, can_hod: acc.hod, can_principal: acc.principal, is_author: String(x.created_by).toLowerCase() === String(a.email || '').toLowerCase() });
+    }
+    res.json(out);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-// POST /event-requests — anyone who organises events; the department is the author's own
+// POST /event-requests — a new request (draft); the department is the author's own
 app.post('/event-requests', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
   try {
     await ensureQualityTables();
@@ -12364,32 +12415,104 @@ app.post('/event-requests', requireRole(...QUALITY_STAFF), async (req: Request, 
     if (!dept) return res.status(400).json({ error: 'Pick the department' });
     const email = String(req.auth!.email || '').toLowerCase();
     const r = await db.query(
-      `INSERT INTO event_requests (department, title, start_date, data, created_by, created_by_name) VALUES ($1,$2,$3,$4,$5,$6)
-       RETURNING id, department, title, start_date::text AS start_date, data, created_by, created_by_name, created_at, updated_at`,
-      [dept, v.title, v.from_date || null, JSON.stringify(v), email, await staffName(email)]);
-    res.status(201).json({ ...r.rows[0], can_edit: true });
+      `INSERT INTO event_requests (department, title, start_date, data, created_by, created_by_name, kind) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+      [dept, v.title, v.from_date || null, JSON.stringify(v), email, await staffName(email), v.kind]);
+    res.status(201).json(await erRow(req, r.rows[0].id));
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-// PUT /event-requests/:id — the author edits it
+// PUT /event-requests/:id — the author edits it while it is a draft or has been returned
 app.put('/event-requests/:id', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
   try {
     await ensureQualityTables();
     const id = parseInt(req.params.id, 10);
     const cur = Number.isFinite(id) ? (await db.query('SELECT * FROM event_requests WHERE id = $1', [id])).rows[0] : null;
     if (!cur) return res.status(404).json({ error: 'Request not found' });
-    if (!(await erAccess(req, cur)).edit) return res.status(403).json({ error: 'Only the faculty who created this request can edit it' });
+    if (!(await erAccess(req, cur)).edit) {
+      return res.status(403).json({ error: ER_EDITABLE.includes(cur.status || 'draft') ? 'Only the faculty who created this request can edit it' : 'This request is with the HOD / Principal and can no longer be edited' });
+    }
     const v = cleanEventRequest(req.body || {});
     if (!v.title) return res.status(400).json({ error: 'Enter the name of the event' });
-    const r = await db.query(
-      `UPDATE event_requests SET title = $2, start_date = $3, data = $4, updated_at = NOW() WHERE id = $1
-       RETURNING id, department, title, start_date::text AS start_date, data, created_by, created_by_name, created_at, updated_at`,
-      [id, v.title, v.from_date || null, JSON.stringify(v)]);
-    res.json({ ...r.rows[0], can_edit: true });
+    await db.query(`UPDATE event_requests SET title = $2, start_date = $3, data = $4, kind = $5, updated_at = NOW() WHERE id = $1`,
+      [id, v.title, v.from_date || null, JSON.stringify(v), v.kind]);
+    res.json(await erRow(req, id));
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-// DELETE /event-requests/:id — the author, or the department's HOD / admin
+// POST /event-requests/:id/submit — the author sends it for approval (HOD first; a HOD's own request goes straight to the Principal)
+app.post('/event-requests/:id/submit', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const id = parseInt(req.params.id, 10);
+    const cur = Number.isFinite(id) ? (await db.query('SELECT * FROM event_requests WHERE id = $1', [id])).rows[0] : null;
+    if (!cur) return res.status(404).json({ error: 'Request not found' });
+    if (!(await erAccess(req, cur)).edit) return res.status(403).json({ error: 'Only the author can submit a draft or returned request' });
+    const d = cur.data || {};
+    if (!d.from_date) return res.status(400).json({ error: 'Enter the event dates before submitting' });
+    const byHod = ['hod', 'admin'].includes(req.auth!.role);
+    const name = cur.created_by_name || await staffName(req.auth!.email || '');
+    await db.query(
+      `UPDATE event_requests SET status = $2, submitted_at = NOW(), returned_by = NULL,
+         hod_remarks = CASE WHEN $3 THEN 'Submitted by the HOD' ELSE NULL END, hod_by = CASE WHEN $3 THEN $4 ELSE NULL END,
+         hod_name = CASE WHEN $3 THEN $5 ELSE NULL END, hod_at = CASE WHEN $3 THEN NOW() ELSE NULL END,
+         principal_remarks = NULL, principal_by = NULL, principal_name = NULL, principal_at = NULL, updated_at = NOW()
+       WHERE id = $1`, [id, byHod ? 'recommended' : 'submitted', byHod, String(req.auth!.email || '').toLowerCase(), name]);
+    const what = cur.kind === 'attend' ? 'attend' : 'organize';
+    if (byHod) {
+      await notifyUsers(await roleKeys(ER_PRINCIPAL_ROLES), { title: 'Event request to approve', url: '/events?tab=requests', tag: `er-${id}`,
+        body: `${cur.department}: ${name} requests to ${what} "${cur.title}".` });
+    } else {
+      await notifyUsers(await hodKeysFor(cur.department), { title: 'Event request to recommend', url: '/events?tab=requests', tag: `er-${id}`,
+        body: `${name} requests to ${what} "${cur.title}".` });
+    }
+    res.json(await erRow(req, id));
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /event-requests/:id/review { action, remarks } — HOD: recommend | return; Principal: approve | reject | return
+app.post('/event-requests/:id/review', requireRole('hod', 'admin', ...ER_PRINCIPAL_ROLES), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const id = parseInt(req.params.id, 10);
+    const cur = Number.isFinite(id) ? (await db.query('SELECT * FROM event_requests WHERE id = $1', [id])).rows[0] : null;
+    if (!cur) return res.status(404).json({ error: 'Request not found' });
+    const acc = await erAccess(req, cur);
+    const action = String(req.body?.action || '');
+    const remarks = clip(req.body?.remarks, 1000);
+    const me = String(req.auth!.email || '').toLowerCase();
+    const name = await staffName(me);
+    const author = [staffKey(cur.created_by)];
+    if (acc.hod) {
+      if (!['recommend', 'return'].includes(action)) return res.status(400).json({ error: 'Choose recommend or return' });
+      if (action === 'return' && !remarks) return res.status(400).json({ error: 'Write what needs to change' });
+      await db.query(
+        `UPDATE event_requests SET status = $2, hod_remarks = $3, hod_by = $4, hod_name = $5, hod_at = NOW(), returned_by = $6, updated_at = NOW() WHERE id = $1`,
+        [id, action === 'recommend' ? 'recommended' : 'returned', remarks, me, name, action === 'return' ? 'HOD' : null]);
+      if (action === 'recommend') {
+        await notifyUsers(await roleKeys(ER_PRINCIPAL_ROLES), { title: 'Event request to approve', url: '/events?tab=requests', tag: `er-${id}`,
+          body: `${cur.department}: "${cur.title}" by ${cur.created_by_name || cur.created_by}, recommended by the HOD.` });
+        await notifyUsers(author, { title: 'Recommended by the HOD', url: '/events?tab=requests', tag: `er-${id}`, body: `"${cur.title}" is now with the Principal.` });
+      } else {
+        await notifyUsers(author, { title: 'Event request returned', url: '/events?tab=requests', tag: `er-${id}`, body: `HOD: ${remarks}` });
+      }
+    } else if (acc.principal) {
+      if (!['approve', 'reject', 'return'].includes(action)) return res.status(400).json({ error: 'Choose approve, reject or return' });
+      if (action !== 'approve' && !remarks) return res.status(400).json({ error: action === 'reject' ? 'Give the reason for not approving' : 'Write what needs to change' });
+      const status = action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : 'returned';
+      await db.query(
+        `UPDATE event_requests SET status = $2, principal_remarks = $3, principal_by = $4, principal_name = $5, principal_at = NOW(), returned_by = $6, updated_at = NOW() WHERE id = $1`,
+        [id, status, remarks, me, name, action === 'return' ? 'Principal' : null]);
+      const title = status === 'approved' ? 'Event request approved ✅' : status === 'rejected' ? 'Event request not approved' : 'Event request returned';
+      await notifyUsers([...author, ...(await hodKeysFor(cur.department))], { title, url: '/events?tab=requests', tag: `er-${id}`,
+        body: `"${cur.title}"${remarks ? ` — Principal: ${remarks}` : ''}` });
+    } else {
+      return res.status(403).json({ error: cur.status === 'submitted' ? 'Waiting for the HOD of the department' : cur.status === 'recommended' ? 'Waiting for the Principal' : 'This request is not waiting for a decision' });
+    }
+    res.json(await erRow(req, id));
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /event-requests/:id — the author (unless approved), or the department's HOD / admin
 app.delete('/event-requests/:id', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
   try {
     await ensureQualityTables();
@@ -12439,7 +12562,10 @@ app.get('/events/:id', requireRole(...QUALITY_STAFF), async (req: Request, res: 
     const visible = e.status === 'approved' ? (!dept || normDept(dept) === normDept(e.department) || QUALITY_OVERSIGHT.includes(req.auth!.role)) : (f.isOwner || f.isHod);
     if (!visible) return res.status(403).json({ error: 'Not allowed' });
     const urls = await academicViewUrls([...(e.photos || []), ...(e.attachments || [])].map((p: any) => p.key)).catch(() => ({}));
-    res.json({ ...e, urls, can_edit: (f.isOwner && ['draft', 'returned'].includes(e.status)) || f.isHod, can_review: f.isHod && e.status === 'submitted' });
+    // the request this report was written from, with its approval
+    const request = (await db.query(
+      `SELECT id, kind, status, hod_name, hod_at, principal_name, principal_at, principal_remarks FROM event_requests WHERE event_id = $1 LIMIT 1`, [e.id]).catch(() => ({ rows: [] as any[] }))).rows[0] || null;
+    res.json({ ...e, urls, request, can_edit: (f.isOwner && ['draft', 'returned'].includes(e.status)) || f.isHod, can_review: f.isHod && e.status === 'submitted' });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 

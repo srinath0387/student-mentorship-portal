@@ -12,6 +12,9 @@ export const ER_TYPES = ['FDP', 'Workshop', 'Seminar', 'Guest Lecture', 'Industr
 export const ER_PARTICIPANTS = ['Students', 'Faculty', 'Both', 'External Participants'];
 
 export interface EventRequest {
+  kind: 'organize' | 'attend';
+  // attending an outside event: who hosts it, where, cost and on-duty days
+  host: string; place: string; mode: string; registration_fee: string; od_days: string;
   title: string; types: string[]; other_type: string;
   from_date: string; to_date: string; from_time: string; to_time: string;
   organizers: { name: string; designation: string; department: string }[];
@@ -20,7 +23,8 @@ export interface EventRequest {
   topics: string; venue: string; venue_from_date: string; venue_to_date: string; venue_from_time: string; venue_to_time: string;
   expected_outcomes: string; honorarium: string; travel: string; lodging: string;
 }
-export const emptyRequest = (name = '', department = ''): EventRequest => ({
+export const emptyRequest = (name = '', department = '', kind: 'organize' | 'attend' = 'organize'): EventRequest => ({
+  kind, host: '', place: '', mode: '', registration_fee: '', od_days: '',
   title: '', types: [], other_type: '', from_date: '', to_date: '', from_time: '', to_time: '',
   organizers: [{ name, designation: '', department }, { name: '', designation: '', department: '' }],
   objectives: '', participants: [], target: '', expected_count: '',
@@ -33,6 +37,7 @@ export const normalizeRequest = (d: any): EventRequest => {
   const x = { ...e, ...(d || {}) };
   return {
     ...x,
+    kind: x.kind === 'attend' ? 'attend' : 'organize',
     types: Array.isArray(x.types) ? x.types : [], participants: Array.isArray(x.participants) ? x.participants : [],
     organizers: [0, 1].map(i => ({ ...e.organizers[i], ...(x.organizers?.[i] || {}) })),
     resource_persons: [0, 1].map(i => ({ ...e.resource_persons[i], ...(x.resource_persons?.[i] || {}) })),
@@ -41,7 +46,7 @@ export const normalizeRequest = (d: any): EventRequest => {
 
 // ── money ──
 const n = (v: string) => Math.max(0, Math.round(Number(String(v || '').replace(/[^\d.]/g, '')) || 0));
-export const budgetTotal = (r: EventRequest) => n(r.honorarium) + n(r.travel) + n(r.lodging);
+export const budgetTotal = (r: EventRequest) => n(r.honorarium) + n(r.travel) + n(r.lodging) + (r.kind === 'attend' ? n(r.registration_fee) : 0);
 export const rupees = (v: number) => `Rs. ${v.toLocaleString('en-IN')}/-`;
 const ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
 const TENS = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
@@ -54,6 +59,23 @@ export function inWords(v: number): string {
   return [crore ? `${inWords(crore)} Crore` : '', lakh ? `${two(lakh)} Lakh` : '', thousand ? `${two(thousand)} Thousand` : '', three(rest)].filter(Boolean).join(' ');
 }
 export const totalLine = (r: EventRequest) => { const t = budgetTotal(r); return t ? `${rupees(t)} (Rupees ${inWords(t)} Only)` : ''; };
+
+// ── HOD / Principal decisions as printed on the forms (the signature space is kept) ──
+export type Approval = {
+  status?: string; hod_name?: string | null; hod_at?: string | null; hod_remarks?: string | null;
+  principal_name?: string | null; principal_at?: string | null; principal_remarks?: string | null;
+};
+const onDate = (ts?: string | null) => { if (!ts) return ''; const d = new Date(ts); return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`; };
+/** What goes into the HOD and Principal rows; nothing while the request is still a draft, with the HOD, or returned */
+export function approvalRows(a?: Approval | null): { hod: { lines: string[]; stamp: string[] }; principal: { lines: string[]; stamp: string[] } } {
+  const none = { lines: [] as string[], stamp: [] as string[] };
+  const out = { hod: { ...none }, principal: { ...none } };
+  if (!a || !['recommended', 'approved', 'rejected'].includes(a.status || '')) return out;
+  if (a.hod_at) out.hod = { lines: [a.hod_remarks || 'Recommended.'], stamp: [`Recommended in the portal by ${a.hod_name || 'the HOD'}, ${onDate(a.hod_at)}`] };
+  if (a.status === 'approved') out.principal = { lines: [a.principal_remarks || 'Approved.'], stamp: [`APPROVED in the portal by ${a.principal_name || 'the Principal'}, ${onDate(a.principal_at)}`] };
+  if (a.status === 'rejected') out.principal = { lines: [a.principal_remarks || ''], stamp: [`NOT APPROVED — ${a.principal_name || 'the Principal'}, ${onDate(a.principal_at)}`] };
+  return out;
+}
 
 // ── Word XML helpers ──
 export const esc = (s: string) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -106,7 +128,8 @@ export function tick(cell: string, chosen: string[], other = ''): string {
 
 const joinPerson = (p: Record<string, string>, keys: string[]) => keys.map(k => p[k]).filter(Boolean).join(', ');
 
-async function buildDoc(kind: 'permission' | 'budget', r: EventRequest, department: string, author: string): Promise<Blob> {
+async function buildDoc(kind: 'permission' | 'budget', r: EventRequest, department: string, author: string, approval?: Approval | null): Promise<Blob> {
+  const decided = approvalRows(approval);
   const res = await fetch(`/templates/event-request-${kind}.docx`);
   if (!res.ok) throw new Error('Could not load the Word template');
   const zip = await JSZip.loadAsync(await res.arrayBuffer());
@@ -153,7 +176,14 @@ async function buildDoc(kind: 'permission' | 'budget', r: EventRequest, departme
       const amt = cellsOf(rows[i + 1]).map((c, j) => (j >= 1 && j <= 3 && vals[j - 1] ? setLines(c, [vals[j - 1]]) : c));
       out[i + 1] = withCells(rows[i + 1], amt);
     } else if (label === 'total budget requested (rs), in words') put(2, totalLine(r));
-    else if (label === 'event organizer name(s) and signature(s)') {
+    else if ((label === 'head of the department' || label === 'principal’s approval') && cells[3]) {
+      const a = label === 'head of the department' ? decided.hod : decided.principal;
+      const keep = (c: string) => (c.match(PARA) || []).length;
+      if (a.lines.length || a.stamp.length) {
+        next[2] = setLines(cells[2], [label === 'head of the department' ? 'Recommendations:' : 'Remarks:', ...a.lines], keep(cells[2]));
+        next[3] = setLines(cells[3], ['Signature & Date:', '', '', ...a.stamp], keep(cells[3]));
+      }
+    } else if (label === 'event organizer name(s) and signature(s)') {
       next[2] = setLines(cells[2], r.organizers.map(o => o.name).filter(Boolean), (cells[2].match(PARA) || []).length);
     }
     if (next.some((c, j) => c !== cells[j])) out[i] = withCells(row, next);
@@ -182,8 +212,8 @@ export const requestFileName = (kind: 'permission' | 'budget', r: EventRequest) 
   `Event Request - ${kind === 'permission' ? 'Permission & Venue' : 'Budget'} - ${r.title || 'Event'}${r.from_date ? ` - ${dmy(r.from_date)}` : ''}.docx`.replace(/[^A-Za-z0-9._ ()&-]+/g, '_');
 
 export const buildRequestDoc = buildDoc;
-export async function downloadRequestDoc(kind: 'permission' | 'budget', r: EventRequest, department: string, author: string) {
-  saveAs(await buildDoc(kind, r, department, author), requestFileName(kind, r));
+export async function downloadRequestDoc(kind: 'permission' | 'budget', r: EventRequest, department: string, author: string, approval?: Approval | null) {
+  saveAs(await buildDoc(kind, r, department, author, approval), requestFileName(kind, r));
 }
 
 /** Map a request onto the event report form, for "write the report" after the event */
@@ -204,6 +234,15 @@ export function reportPrefill(r: EventRequest, department: string, requestId?: n
     'Training Program': 'Training Programme', Hackathon: 'Hackathon', 'Technical Symposium': 'Conference',
   };
   const t = r.types.find(x => TYPE[x]);
+  if (r.kind === 'attend') {
+    return {
+      request_id: requestId, duration_hours: durationHours(r), participation: 'attended',
+      title: r.title, event_type: t ? TYPE[t] : 'Other', start_date: r.from_date || undefined, end_date: r.to_date || r.from_date || undefined,
+      organized_by: [r.host, r.place].filter(Boolean).join(', '), mode: r.mode || 'Offline', venue: r.place,
+      coordinators: r.organizers.filter(o => o.name).map(o => ({ name: o.name, designation: o.designation, email: '' })),
+      objectives: r.objectives, expected_outcomes: r.expected_outcomes,
+    };
+  }
   return {
     request_id: requestId, duration_hours: durationHours(r),
     title: r.title, event_type: t ? TYPE[t] : 'Other', start_date: r.from_date || undefined, end_date: r.to_date || r.from_date || undefined,

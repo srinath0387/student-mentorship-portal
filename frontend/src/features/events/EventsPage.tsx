@@ -9,7 +9,7 @@ import { fmtD } from '../../lib/pdfReport';
 
 import { BouncingDots } from '../../components/common/BouncingDots';
 import { NumberedListInput } from '../../components/common/NumberedListInput';
-import { EventRequestsView } from './EventRequests';
+import { EventRequestsView, RequestChip } from './EventRequests';
 import { eventReportTablePdf, eventReportWord } from './eventReportTabular';
 const card = 'bg-surface border border-borderLine rounded-2xl shadow-sm';
 const input = 'px-2.5 py-1.5 text-xs rounded-lg border border-borderLine bg-background text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary/30';
@@ -273,6 +273,14 @@ function EventDetail({ id, onBack, onEdit }: { id: number; onBack: () => void; o
         <button className={btnPrimary} disabled={!!pdfBusy} onClick={async () => { setPdfBusy('pdf'); try { await eventReportTablePdf(e); } catch (x: any) { setDlErr(x?.message || 'Could not build the PDF'); } finally { setPdfBusy(null); } }}>
           {pdfBusy === 'pdf' ? <BouncingDots size="xs" className="mr-1" /> : <Download className="w-3.5 h-3.5 inline mr-1" />}Report PDF</button>
       </div>
+      {e.request && (
+        <div className="rounded-xl px-4 py-2.5 text-xs bg-surface-2/70 flex flex-wrap items-center gap-2">
+          <span className="font-bold text-textPrimary">{e.request.kind === 'attend' ? 'Request to attend:' : 'Event request:'}</span><RequestChip s={e.request.status} />
+          <span className="text-textSecondary">{e.request.status === 'approved' ? `Approved by ${e.request.principal_name || 'the Principal'}${e.request.principal_at ? ` on ${fmtD(e.request.principal_at)}` : ''}`
+            : e.request.status === 'rejected' ? `Not approved by ${e.request.principal_name || 'the Principal'}${e.request.principal_remarks ? ` — ${e.request.principal_remarks}` : ''}`
+            : e.request.status === 'recommended' ? `Recommended by ${e.request.hod_name || 'the HOD'}, waiting for the Principal` : 'Not yet approved'}</span>
+        </div>
+      )}
       {e.hod_remarks && <div className="rounded-xl px-4 py-2.5 text-xs bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200"><b>HOD's remarks:</b> {e.hod_remarks}</div>}
       {err && <div className="rounded-xl px-4 py-2.5 text-xs font-bold bg-rose-50 text-rose-700">{err.message}</div>}
       {dlErr && <div role="status" className="rounded-xl px-4 py-2.5 text-xs font-bold bg-rose-50 text-rose-700">{dlErr}</div>}
@@ -327,6 +335,10 @@ export default function EventsPage() {
   const [f, setF] = useState({ department: qs.get('department') || 'All', type: 'All', year: 'All', status: qs.get('status') || 'All', participation: 'All' });
   const [view, setView] = useState<{ mode: 'list' } | { mode: 'new'; prefill?: any } | { mode: 'edit'; e: any } | { mode: 'detail'; id: number }>({ mode: 'list' });
   const [tab, setTab] = useState<'reports' | 'requests'>(qs.get('tab') === 'requests' ? 'requests' : 'reports');
+  // HOD / Principal: how many requests are waiting for their decision (badge on the Requests tab)
+  const decides = ['hod', 'admin', 'principal', 'director'].includes(role);
+  const { data: reqs = [] } = useQuery<any[]>({ queryKey: ['eventRequests', ownDept ? 'own' : 'All'], queryFn: () => api.getEventRequests(ownDept ? undefined : 'All'), enabled: decides });
+  const waitingForMe = reqs.filter(x => x.can_hod || x.can_principal).length;
   const { data: events = [], isLoading } = useQuery<any[]>({ queryKey: ['events', f, ownDept], queryFn: () => api.getEvents({ ...f, department: ownDept ? undefined : f.department }) });
   const years = useMemo(() => Array.from(new Set(events.map(e => ayOf(d10(e.start_date))))).sort().reverse(), [events]);
   const byType = useMemo(() => { const m: Record<string, number> = {}; events.filter(e => e.status === 'approved').forEach(e => { m[e.event_type] = (m[e.event_type] || 0) + 1; }); return m; }, [events]);
@@ -365,7 +377,8 @@ export default function EventsPage() {
 
       <div className="flex rounded-xl border border-borderLine overflow-hidden text-xs font-bold w-fit" role="tablist">
         <button role="tab" aria-selected={tab === 'reports'} onClick={() => setTab('reports')} className={`px-4 py-2 ${tab === 'reports' ? 'bg-brand-primary text-white' : 'text-textSecondary hover:bg-surface-2'}`}>Event reports</button>
-        <button role="tab" aria-selected={tab === 'requests'} onClick={() => setTab('requests')} className={`px-4 py-2 ${tab === 'requests' ? 'bg-brand-primary text-white' : 'text-textSecondary hover:bg-surface-2'}`}>Requests (before the event)</button>
+        <button role="tab" aria-selected={tab === 'requests'} onClick={() => setTab('requests')} className={`px-4 py-2 ${tab === 'requests' ? 'bg-brand-primary text-white' : 'text-textSecondary hover:bg-surface-2'}`}>
+          Requests (before the event){waitingForMe > 0 && <span className={`ml-1.5 inline-block min-w-[1.25rem] px-1 rounded-full text-[10px] ${tab === 'requests' ? 'bg-white text-brand-primary' : 'bg-amber-500 text-white'}`}>{waitingForMe}</span>}</button>
       </div>
 
       {tab === 'requests' ? <EventRequestsView initialDept={f.department} onReport={prefill => setView({ mode: 'new', prefill })} onOpenReport={id => { setTab('reports'); setView({ mode: 'detail', id }); }} /> : (<>

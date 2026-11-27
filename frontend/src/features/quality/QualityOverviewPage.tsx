@@ -21,7 +21,7 @@ type Dept = {
   plans: { total: number; not_started: number; in_progress: number; ready: number } | null;
   lessons: { total: number; approved: number; submitted: number; missing: number; behind: number; coverage_pct: number } | null;
   events: { total: number; approved: number; awaiting_hod: number; drafts: number; attended: number; spent: number } | null;
-  requests: { total: number; reports_due: number; upcoming: number; requested: number } | null;
+  requests: { total: number; reports_due: number; upcoming: number; requested: number; awaiting_hod: number; awaiting_principal: number; approved: number } | null;
 };
 type Issue = { dept: string; level: 3 | 2 | 1; text: string; to: string };
 
@@ -46,6 +46,8 @@ function issuesOf(rows: Dept[], today: string): Issue[] {
       out.push({ dept: r.department, level: overdue ? 3 : r.plans.not_started ? 2 : 1, to: L.plans,
         text: `${pending} course execution plan${pending === 1 ? '' : 's'} not complete${overdue ? ` — due ${fmtDate(r.plans_due!)} has passed` : r.plans_due ? `, due ${fmtDate(r.plans_due)}` : ''}` });
     }
+    if (r.requests?.awaiting_principal) out.push({ dept: r.department, level: 3, to: L.requests, text: `${r.requests.awaiting_principal} event request${r.requests.awaiting_principal === 1 ? '' : 's'} recommended by the HOD, waiting for Principal approval` });
+    if (r.requests?.awaiting_hod) out.push({ dept: r.department, level: 1, to: L.requests, text: `${r.requests.awaiting_hod} event request${r.requests.awaiting_hod === 1 ? '' : 's'} waiting for the HOD's recommendation` });
     if (r.lessons?.behind) out.push({ dept: r.department, level: 3, to: L.behind, text: `${r.lessons.behind} class${r.lessons.behind === 1 ? ' is' : 'es are'} behind the lesson plan schedule` });
     if (r.requests?.reports_due) out.push({ dept: r.department, level: 2, to: L.requests, text: `${r.requests.reports_due} event report${r.requests.reports_due === 1 ? '' : 's'} not written after the event` });
     if (r.lessons?.missing) out.push({ dept: r.department, level: 2, to: L.lessons, text: `${r.lessons.missing} subject${r.lessons.missing === 1 ? '' : 's'} without a submitted lesson plan` });
@@ -109,7 +111,8 @@ export default function QualityOverviewPage() {
       'Lesson plans approved': r.lessons?.approved ?? 0, 'LP waiting for HOD': r.lessons?.submitted ?? 0, 'LP not submitted': r.lessons?.missing ?? 0,
       'Syllabus covered %': r.lessons?.coverage_pct ?? 0, 'Classes behind schedule': r.lessons?.behind ?? 0,
       'Event reports approved': r.events?.approved ?? 0, 'Of which attended': r.events?.attended ?? 0, 'Reports waiting for HOD': r.events?.awaiting_hod ?? 0,
-      'Event reports due': r.requests?.reports_due ?? 0, 'Upcoming events': r.requests?.upcoming ?? 0,
+      'Requests waiting for Principal': r.requests?.awaiting_principal ?? 0, 'Requests waiting for HOD': r.requests?.awaiting_hod ?? 0,
+      'Requests approved': r.requests?.approved ?? 0, 'Event reports due': r.requests?.reports_due ?? 0, 'Upcoming events': r.requests?.upcoming ?? 0,
       'Budget requested (Rs)': Math.round(r.requests?.requested || 0), 'Spent, approved reports (Rs)': Math.round(r.events?.spent || 0),
     }));
     const wb = XLSX.utils.book_new();
@@ -217,6 +220,8 @@ export default function QualityOverviewPage() {
                     </td>
                     <td className="px-3 py-3">
                       <div className="flex flex-col items-start">
+                        <Num n={r.requests?.awaiting_principal || 0} tone="bad" to={L.requests} label="waiting for Principal" />
+                        <Num n={r.requests?.awaiting_hod || 0} tone="warn" to={L.requests} label="waiting for HOD" />
                         <Num n={r.requests?.upcoming || 0} to={L.requests} label="upcoming" />
                         <Num n={r.requests?.reports_due || 0} tone="bad" to={L.requests} label="reports due" />
                         {!!r.requests?.requested && <span className="px-1.5 text-[11px] text-textSecondary tabular-nums">{rs(r.requests.requested)} requested</span>}
