@@ -187,13 +187,25 @@ export async function downloadRequestDoc(kind: 'permission' | 'budget', r: Event
 }
 
 /** Map a request onto the event report form, for "write the report" after the event */
-export function reportPrefill(r: EventRequest, department: string): Record<string, any> {
+/** Hours from the event's dates and daily times: 09:30–16:30 over 2 days → 14 */
+export function durationHours(r: Pick<EventRequest, 'from_date' | 'to_date' | 'from_time' | 'to_time'>): string {
+  const mins = (hm: string) => { const m = /^(\d{2}):(\d{2})$/.exec(hm || ''); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
+  const a = mins(r.from_time); const b = mins(r.to_time);
+  if (a === null || b === null || b <= a || !r.from_date) return '';
+  const days = r.to_date && r.to_date > r.from_date
+    ? Math.round((new Date(r.to_date + 'T00:00:00').getTime() - new Date(r.from_date + 'T00:00:00').getTime()) / 86400000) + 1 : 1;
+  const h = Math.round(((b - a) / 60) * days * 2) / 2;
+  return h > 0 ? String(h) : '';
+}
+
+export function reportPrefill(r: EventRequest, department: string, requestId?: number): Record<string, any> {
   const TYPE: Record<string, string> = {
     FDP: 'Faculty Development Programme (FDP)', Workshop: 'Workshop', 'Hands-on Session': 'Workshop', Seminar: 'Seminar', 'Guest Lecture': 'Guest Lecture',
     'Training Program': 'Training Programme', Hackathon: 'Hackathon', 'Technical Symposium': 'Conference',
   };
   const t = r.types.find(x => TYPE[x]);
   return {
+    request_id: requestId, duration_hours: durationHours(r),
     title: r.title, event_type: t ? TYPE[t] : 'Other', start_date: r.from_date || undefined, end_date: r.to_date || r.from_date || undefined,
     venue: r.venue, mode: 'Offline', organized_by: department ? `Department of ${department}` : '', participation: 'organized',
     coordinators: r.organizers.filter(o => o.name).map(o => ({ name: o.name, designation: o.designation, email: '' })),

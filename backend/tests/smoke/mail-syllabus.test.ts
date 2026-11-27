@@ -415,7 +415,7 @@ describe('Event requests (Permission & Venue / Budget forms)', () => {
     const mine = await request(app).get('/event-requests').set('Authorization', FAC());
     expect(mine.status).toBe(200);
     expect(mine.body[0].can_edit).toBe(true);
-    expect(calls.find(c => c.sql.includes('FROM event_requests'))!.sql).toMatch(/LOWER\(created_by\) = \$1/);
+    expect(calls.find(c => c.sql.includes('FROM event_requests'))!.sql).toMatch(/LOWER\(r\.created_by\) = \$1/);
     calls = routeDb([HODS, ['FROM event_requests', [row]]]);
     const dept = await request(app).get('/event-requests?department=ECE').set('Authorization', HOD_CSE());
     expect(dept.body[0].can_edit).toBe(false);
@@ -431,5 +431,39 @@ describe('Event requests (Permission & Venue / Budget forms)', () => {
     expect((await request(app).put('/event-requests/7').set('Authorization', HOD_CSE()).send({ title: 'x' })).status).toBe(403);
     expect((await request(app).delete('/event-requests/7').set('Authorization', HOD_CSE())).status).toBe(200);
     expect(calls.some(c => c.sql.includes('DELETE FROM event_requests'))).toBe(true);
+  });
+});
+
+describe('Event report written from an event request', () => {
+  const body = { title: 'GenAI Workshop', start_date: '2026-12-12', end_date: '2026-12-13', event_type: 'Workshop', request_id: 7 };
+  it('links the new report to the request', async () => {
+    const calls = routeDb([
+      [/FROM faculty WHERE LOWER\(email\)/, [{ department: 'CSE', name: 'Ramesh' }]],
+      ['FROM event_requests r LEFT JOIN dept_events', [{ id: 7, event_id: null, live: null }]],
+      ['INSERT INTO dept_events', [{ id: 55, title: 'GenAI Workshop' }]],
+    ]);
+    const res = await request(app).post('/events').set('Authorization', FAC()).send(body);
+    expect(res.status).toBe(201);
+    const link = calls.find(c => c.sql.startsWith('UPDATE event_requests SET event_id'))!;
+    expect(link.params).toEqual([55, 7, 'ramesh@rgmcet.edu.in']);
+  });
+  it('refuses a second report for the same request', async () => {
+    const calls = routeDb([
+      [/FROM faculty WHERE LOWER\(email\)/, [{ department: 'CSE' }]],
+      ['FROM event_requests r LEFT JOIN dept_events', [{ id: 7, event_id: 55, live: 55 }]],
+    ]);
+    const res = await request(app).post('/events').set('Authorization', FAC()).send(body);
+    expect(res.status).toBe(409);
+    expect(res.body.event_id).toBe(55);
+    expect(calls.some(c => c.sql.includes('INSERT INTO dept_events'))).toBe(false);
+  });
+  it('a report without a request is created as before, with no link', async () => {
+    const calls = routeDb([
+      [/FROM faculty WHERE LOWER\(email\)/, [{ department: 'CSE' }]],
+      ['INSERT INTO dept_events', [{ id: 56 }]],
+    ]);
+    const res = await request(app).post('/events').set('Authorization', FAC()).send({ ...body, request_id: undefined });
+    expect(res.status).toBe(201);
+    expect(calls.some(c => c.sql.includes('event_requests'))).toBe(false);
   });
 });

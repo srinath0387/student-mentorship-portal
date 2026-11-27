@@ -4,13 +4,13 @@
  */
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, FileText, NotebookPen, Pencil, Plus, Save, Trash2 } from 'lucide-react';
+import { ArrowLeft, ExternalLink, FileText, NotebookPen, Pencil, Plus, Save, Trash2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { fmtD } from '../../lib/pdfReport';
 import { BouncingDots } from '../../components/common/BouncingDots';
 import { NumberedListInput } from '../../components/common/NumberedListInput';
-import { ER_PARTICIPANTS, ER_TYPES, EventRequest, budgetTotal, downloadRequestDoc, emptyRequest, inWords, normalizeRequest, reportPrefill, rupees } from './eventRequestDocs';
+import { ER_PARTICIPANTS, ER_TYPES, EventRequest, budgetTotal, downloadRequestDoc, durationHours, emptyRequest, inWords, normalizeRequest, reportPrefill, rupees } from './eventRequestDocs';
 
 const card = 'bg-surface border border-borderLine rounded-2xl shadow-sm';
 const input = 'px-2.5 py-1.5 text-xs rounded-lg border border-borderLine bg-background text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary/30';
@@ -54,7 +54,7 @@ function DownloadButtons({ r, department, author, size = 'md' }: { r: EventReque
   );
 }
 
-function RequestForm({ initial, onDone, onCancel, onReport }: { initial: any | null; onDone: () => void; onCancel: () => void; onReport: (prefill: any) => void }) {
+function RequestForm({ initial, onDone, onCancel, onReport, onOpenReport }: { initial: any | null; onDone: () => void; onCancel: () => void; onReport: (prefill: any) => void; onOpenReport: (id: number) => void }) {
   const { user } = useAuth();
   const qc = useQueryClient();
   const ownDept = ['hod', 'faculty', 'coordinator'].includes(user?.role || '') ? user?.department || '' : '';
@@ -108,6 +108,7 @@ function RequestForm({ initial, onDone, onCancel, onReport }: { initial: any | n
             <Field id="er-ft" label="From time"><input id="er-ft" type="time" className={`${input} w-full`} value={r.from_time} onChange={e => set({ from_time: e.target.value })} /></Field>
             <Field id="er-tt" label="To time"><input id="er-tt" type="time" className={`${input} w-full`} value={r.to_time} onChange={e => set({ to_time: e.target.value })} /></Field>
           </div>
+          {durationHours(r) && <p className="text-[11px] text-textMuted -mt-2">Duration: {durationHours(r)} hours. This goes into the event report.</p>}
           {[0, 1].map(i => (
             <div key={i} className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <Field id={`er-o${i}n`} label={`Faculty organizer ${i + 1} — name`}><input id={`er-o${i}n`} className={`${input} w-full`} value={r.organizers[i].name} onChange={e => setOrg(i, { name: e.target.value })} /></Field>
@@ -170,15 +171,41 @@ function RequestForm({ initial, onDone, onCancel, onReport }: { initial: any | n
         {canEdit && <button className={btnPrimary} disabled={busy} onClick={save}>{busy ? <BouncingDots size="xs" /> : <Save className="w-3.5 h-3.5 inline mr-1" />}{saved ? 'Save changes' : 'Save request'}</button>}
         <span className="text-[11px] font-bold text-textSecondary">Download (Word):</span>
         <DownloadButtons r={r} department={department} author={r.organizers[0].name || user?.name || ''} />
-        {saved && canEdit && <button className={`${btnGhost} ml-auto`} onClick={() => onReport(reportPrefill(r, department))}><NotebookPen className="w-3.5 h-3.5 inline mr-1" />Write the event report</button>}
+        {saved?.event_id ? <button className={`${btnGhost} ml-auto`} onClick={() => onOpenReport(saved.event_id)}><ExternalLink className="w-3.5 h-3.5 inline mr-1" />Open the event report</button>
+          : saved && canEdit && <button className={`${btnGhost} ml-auto`} onClick={() => onReport(reportPrefill(r, department, saved.id))}><NotebookPen className="w-3.5 h-3.5 inline mr-1" />Write the event report</button>}
         {!canEdit && <button className={`${btnGhost} ml-auto`} onClick={onDone}>Close</button>}
       </div>
     </div>
   );
 }
 
+const REPORT_CHIP: Record<string, [string, string]> = {
+  draft: ['Report: draft', 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300'],
+  submitted: ['Report: with HOD', 'bg-sky-100 text-sky-800 dark:bg-sky-950/50 dark:text-sky-300'],
+  approved: ['Report approved', 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'],
+  returned: ['Report returned', 'bg-rose-100 text-rose-800 dark:bg-rose-950/50 dark:text-rose-300'],
+};
+const todayIso = () => new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
+
+/** The request's report: open it when written; otherwise "Write report" (author), flagged once the event is over */
+function ReportState({ x, r, onReport, onOpenReport }: { x: any; r: EventRequest; onReport: (prefill: any) => void; onOpenReport: (id: number) => void }) {
+  const small = 'px-2 py-1 rounded-lg text-[11px] font-bold';
+  if (x.event_id) {
+    const [t, c] = REPORT_CHIP[x.report_status] || REPORT_CHIP.draft!;
+    return <button className={`${small} ${c}`} onClick={ev => { ev.stopPropagation(); onOpenReport(x.event_id); }}>{t} <ExternalLink className="w-3 h-3 inline" /></button>;
+  }
+  const over = !!(r.to_date || r.from_date) && (r.to_date || r.from_date) < todayIso();
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {over && <span className={`${small} bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300`}>Report due</span>}
+      {x.can_edit && <button className={`${small} bg-brand-primary text-white`} onClick={ev => { ev.stopPropagation(); onReport(reportPrefill(r, x.department, x.id)); }}>
+        <NotebookPen className="w-3 h-3 inline mr-1" />Write report</button>}
+    </span>
+  );
+}
+
 /** The Requests view inside Events & Activities */
-export function EventRequestsView({ onReport }: { onReport: (prefill: any) => void }) {
+export function EventRequestsView({ onReport, onOpenReport }: { onReport: (prefill: any) => void; onOpenReport: (id: number) => void }) {
   const { user } = useAuth();
   const qc = useQueryClient();
   const role = user?.role || '';
@@ -189,7 +216,7 @@ export function EventRequestsView({ onReport }: { onReport: (prefill: any) => vo
   const { data: list = [], isLoading, error } = useQuery<any[]>({ queryKey: ['eventRequests', ownDept ? 'own' : dept], queryFn: () => api.getEventRequests(ownDept ? undefined : dept) });
   const canCreate = !['principal', 'director', 'management'].includes(role);
 
-  if (open) return <RequestForm initial={open.mode === 'edit' ? open.r : null} onCancel={() => setOpen(null)} onDone={() => setOpen(null)} onReport={onReport} />;
+  if (open) return <RequestForm initial={open.mode === 'edit' ? open.r : null} onCancel={() => setOpen(null)} onDone={() => setOpen(null)} onReport={onReport} onOpenReport={onOpenReport} />;
 
   const del = async (id: number) => {
     try { await api.deleteEventRequest(id); qc.invalidateQueries({ queryKey: ['eventRequests'] }); } finally { setConfirmDel(null); }
@@ -219,6 +246,7 @@ export function EventRequestsView({ onReport }: { onReport: (prefill: any) => vo
                       {!ownDept ? ` · ${x.department}` : ''} · by {x.created_by_name || x.created_by}
                     </p>
                   </div>
+                  <ReportState x={x} r={r} onReport={onReport} onOpenReport={onOpenReport} />
                   <DownloadButtons size="sm" r={r} department={x.department} author={r.organizers[0].name || x.created_by_name || ''} />
                   {x.can_edit && <button className="p-1.5 rounded-lg text-textSecondary hover:bg-surface-2" aria-label={`Edit ${x.title}`} onClick={e => { e.stopPropagation(); setOpen({ mode: 'edit', r: x }); }}><Pencil className="w-3.5 h-3.5" /></button>}
                   {(x.can_edit || role === 'hod' || role === 'admin') && (confirmDel === x.id ? (

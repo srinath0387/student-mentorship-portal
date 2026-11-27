@@ -52,6 +52,34 @@ function People({ label, rows, onChange, fields }: { label: string; rows: any[];
   );
 }
 
+/** Shown on a report started from an event request: what came across, and the few things left to add */
+function FromRequestChecklist({ e }: { e: any }) {
+  const att = e.participation === 'attended';
+  const has = (v: any) => v !== null && v !== undefined && String(v).trim() !== '';
+  const todo: [string, string, boolean][] = [
+    ...(att ? [] : [['Number of participants (students / faculty / external)', 'ev-student_count', has(e.student_count) || has(e.faculty_count) || has(e.external_count)]] as [string, string, boolean][]),
+    ['Summary of the event — what happened', 'ev-summary', has(e.summary)],
+    ['Achieved outcomes', 'ev-achieved', has(e.outcomes)],
+    [att ? 'Takeaways for the department' : 'Participant feedback', 'ev-feedback', has(e.feedback)],
+    ['Photos', 'ev-photos', (e.photos || []).length > 0],
+  ];
+  const go = (id: string) => { const el = document.getElementById(id); el?.scrollIntoView({ behavior: 'smooth', block: 'center' }); (el as HTMLInputElement | null)?.focus?.({ preventScroll: true }); };
+  const left = todo.filter(t => !t[2]).length;
+  return (
+    <div className="rounded-2xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/70 dark:bg-emerald-950/30 p-4 space-y-2">
+      <p className="text-xs font-black text-emerald-900 dark:text-emerald-200">Filled from your event request: title, type, dates, duration, venue, organisers, resource persons, audience, objectives and expected outcomes.</p>
+      <p className="text-xs text-emerald-900/80 dark:text-emerald-200/80">{left ? `Add what happened at the event (${left} left):` : 'Everything is filled. Check it and submit to the HOD.'}</p>
+      <ul className="grid sm:grid-cols-2 gap-1">
+        {todo.map(([label, id, done]) => (
+          <li key={id}><button type="button" onClick={() => go(id)} className="flex items-start gap-2 text-left text-xs font-bold text-textPrimary hover:underline">
+            <span className={`mt-0.5 inline-grid place-items-center w-4 h-4 rounded border text-[10px] ${done ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-emerald-700/50 bg-white dark:bg-transparent'}`}>{done ? '✓' : ''}</span>{label}</button></li>
+        ))}
+      </ul>
+      {!att && has(e.budget) && <p className="text-[11px] text-emerald-900/80 dark:text-emerald-200/80">The budget shows the amount you requested. <button type="button" onClick={() => go('ev-budget')} className="font-bold underline">Change it</button> to the amount actually spent.</p>}
+    </div>
+  );
+}
+
 function EventForm({ initial, department, onDone, onCancel, prefill }: { initial: any | null; department: string | null; onDone: (e: any) => void; onCancel: () => void; prefill?: any }) {
   const { user } = useAuth();
   const [e, setE] = useState<any>(() => initial ? { ...initial, start_date: d10(initial.start_date), end_date: d10(initial.end_date), visit: initial.visit || {} } : {
@@ -111,6 +139,7 @@ function EventForm({ initial, department, onDone, onCancel, prefill }: { initial
         <button onClick={onCancel} className="p-2 rounded-xl border border-borderLine text-textSecondary hover:bg-surface-2" aria-label="Back"><ArrowLeft className="w-4 h-4" /></button>
         <h1 className="text-lg font-black text-textPrimary">{initial ? 'Edit report' : 'New event report'}</h1>
       </div>
+      {!initial && e.request_id && <FromRequestChecklist e={e} />}
       {initial?.status === 'returned' && initial.hod_remarks && <div className="rounded-xl px-4 py-2.5 text-xs bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200"><b>HOD's remarks:</b> {initial.hod_remarks}</div>}
 
       <div className={`${card} p-4 space-y-3`}>
@@ -158,7 +187,7 @@ function EventForm({ initial, department, onDone, onCancel, prefill }: { initial
           <p className={lbl}>Participants</p>
           <div className="grid grid-cols-3 gap-2">
             {[['student_count', 'Students'], ['faculty_count', 'Faculty'], ['external_count', 'External']].map(([k, l]) => (
-              <label key={k} className="text-[10px] font-bold text-textMuted">{l}<input type="number" min={0} className={`${input} w-full mt-0.5`} value={e[k] ?? ''} onChange={ev => set({ [k]: ev.target.value })} /></label>
+              <label key={k} className="text-[10px] font-bold text-textMuted">{l}<input id={`ev-${k}`} type="number" min={0} className={`${input} w-full mt-0.5`} value={e[k] ?? ''} onChange={ev => set({ [k]: ev.target.value })} /></label>
             ))}
           </div>
           <input className={`${input} w-full`} value={e.target_audience || ''} onChange={ev => set({ target_audience: ev.target.value })} placeholder="Target audience, e.g. III B.Tech CSE (DS) A & B" />
@@ -174,14 +203,14 @@ function EventForm({ initial, department, onDone, onCancel, prefill }: { initial
           <div className="space-y-1"><label htmlFor="ev-achieved" className={lbl}>Achieved outcomes</label>
             <NumberedListInput id="ev-achieved" rows={4} className={`${input} w-full`} value={e.outcomes || ''} onChange={v => set({ outcomes: v })} placeholder="1. What was actually achieved…" /></div>
         </div>
-        <div className="space-y-1"><p className={lbl}>{iv ? 'About the visit' : 'Summary of the event'} *</p><textarea rows={5} className={`${input} w-full`} value={e.summary || ''} onChange={ev => set({ summary: ev.target.value })} placeholder={iv ? 'Departments visited, processes observed, interaction with engineers…' : 'Sessions conducted, hands-on activities, highlights…'} /></div>
+        <div className="space-y-1"><p className={lbl}>{iv ? 'About the visit' : 'Summary of the event'} *</p><textarea id="ev-summary" rows={5} className={`${input} w-full`} value={e.summary || ''} onChange={ev => set({ summary: ev.target.value })} placeholder={iv ? 'Departments visited, processes observed, interaction with engineers…' : 'Sessions conducted, hands-on activities, highlights…'} /></div>
         <div className={`grid gap-3 ${att ? '' : 'md:grid-cols-[1fr_200px]'}`}>
-          <div className="space-y-1"><p className={lbl}>{att ? 'Takeaways for the department (optional)' : 'Participant feedback (optional)'}</p><input className={`${input} w-full`} value={e.feedback || ''} onChange={ev => set({ feedback: ev.target.value })} placeholder={att ? 'e.g. Will introduce a lab on LLM fine-tuning next semester' : 'e.g. 92% rated the session excellent'} /></div>
-          {!att && <div className="space-y-1"><p className={lbl}>Budget / spent (₹)</p><input type="number" min={0} className={`${input} w-full`} value={e.budget ?? ''} onChange={ev => set({ budget: ev.target.value })} /></div>}
+          <div className="space-y-1"><p className={lbl}>{att ? 'Takeaways for the department (optional)' : 'Participant feedback (optional)'}</p><input id="ev-feedback" className={`${input} w-full`} value={e.feedback || ''} onChange={ev => set({ feedback: ev.target.value })} placeholder={att ? 'e.g. Will introduce a lab on LLM fine-tuning next semester' : 'e.g. 92% rated the session excellent'} /></div>
+          {!att && <div className="space-y-1"><p className={lbl}>Budget / spent (₹)</p><input id="ev-budget" type="number" min={0} className={`${input} w-full`} value={e.budget ?? ''} onChange={ev => set({ budget: ev.target.value })} /></div>}
         </div>
       </div>
 
-      <div className={`${card} p-4 space-y-3`}>
+      <div id="ev-photos" className={`${card} p-4 space-y-3`}>
         <div className="flex items-center justify-between"><p className="text-sm font-black text-textPrimary">Photos ({e.photos.length}/12) *</p>
           <label className={`${btnGhost} cursor-pointer ${e.photos.length >= 12 ? 'opacity-40 pointer-events-none' : ''}`}><ImagePlus className="w-3.5 h-3.5 inline mr-1" />Add photos
             <input type="file" accept="image/*" multiple className="hidden" onChange={ev => { if (ev.target.files) addPhotos(ev.target.files); ev.target.value = ''; }} /></label></div>
@@ -225,7 +254,7 @@ function EventDetail({ id, onBack, onEdit }: { id: number; onBack: () => void; o
   const refresh = () => { qc.invalidateQueries({ queryKey: ['event', id] }); qc.invalidateQueries({ queryKey: ['events'] }); };
   const review = useMutation({ mutationFn: (s: 'approved' | 'returned') => api.reviewEvent(id, s, remarks), onSuccess: refresh });
   const submit = useMutation({ mutationFn: () => api.submitEvent(id), onSuccess: refresh });
-  const del = useMutation({ mutationFn: () => api.deleteEvent(id), onSuccess: () => { qc.invalidateQueries({ queryKey: ['events'] }); onBack(); } });
+  const del = useMutation({ mutationFn: () => api.deleteEvent(id), onSuccess: () => { qc.invalidateQueries({ queryKey: ['events'] }); qc.invalidateQueries({ queryKey: ['eventRequests'] }); onBack(); } });
   if (isLoading || !e) return <div className="p-10 text-center"><BouncingDots size="md" className="text-textMuted" /></div>;
   const iv = e.event_type === 'Industrial Visit';
   const err = (review.error || submit.error || del.error) as any;
@@ -289,6 +318,7 @@ function EventDetail({ id, onBack, onEdit }: { id: number; onBack: () => void; o
 
 export default function EventsPage() {
   const { user } = useAuth();
+  const qc = useQueryClient();
   const role = user?.role || '';
   const ownDept = ['hod', 'faculty', 'coordinator'].includes(role) ? user?.department || null : null;
   const [f, setF] = useState({ department: 'All', type: 'All', year: 'All', status: 'All', participation: 'All' });
@@ -299,7 +329,7 @@ export default function EventsPage() {
   const byType = useMemo(() => { const m: Record<string, number> = {}; events.filter(e => e.status === 'approved').forEach(e => { m[e.event_type] = (m[e.event_type] || 0) + 1; }); return m; }, [events]);
 
   if (view.mode === 'new' || view.mode === 'edit') {
-    return <EventForm initial={view.mode === 'edit' ? view.e : null} prefill={view.mode === 'new' ? view.prefill : undefined} department={ownDept} onCancel={() => setView({ mode: 'list' })} onDone={saved => { setTab('reports'); setView({ mode: 'detail', id: saved.id }); }} />;
+    return <EventForm initial={view.mode === 'edit' ? view.e : null} prefill={view.mode === 'new' ? view.prefill : undefined} department={ownDept} onCancel={() => setView({ mode: 'list' })} onDone={saved => { qc.invalidateQueries({ queryKey: ['eventRequests'] }); setTab('reports'); setView({ mode: 'detail', id: saved.id }); }} />;
   }
   if (view.mode === 'detail') return <EventDetail id={view.id} onBack={() => setView({ mode: 'list' })} onEdit={e => setView({ mode: 'edit', e })} />;
 
@@ -335,7 +365,7 @@ export default function EventsPage() {
         <button role="tab" aria-selected={tab === 'requests'} onClick={() => setTab('requests')} className={`px-4 py-2 ${tab === 'requests' ? 'bg-brand-primary text-white' : 'text-textSecondary hover:bg-surface-2'}`}>Requests (before the event)</button>
       </div>
 
-      {tab === 'requests' ? <EventRequestsView onReport={prefill => setView({ mode: 'new', prefill })} /> : (<>
+      {tab === 'requests' ? <EventRequestsView onReport={prefill => setView({ mode: 'new', prefill })} onOpenReport={id => { setTab('reports'); setView({ mode: 'detail', id }); }} /> : (<>
 
       <div className="flex flex-wrap gap-2">
         {Object.entries(byType).sort((a, b) => b[1] - a[1]).map(([t, n]) => (

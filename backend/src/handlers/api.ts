@@ -11460,6 +11460,7 @@ function ensureQualityTables(): Promise<void> {
         created_by TEXT NOT NULL, created_by_name TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_event_requests_dept ON event_requests (department, start_date DESC);
+      ALTER TABLE event_requests ADD COLUMN IF NOT EXISTS event_id INT;
     `).then(() => undefined).catch((err: any) => { qualityTablesReady = null; throw err; });
   }
   return qualityTablesReady;
@@ -12263,14 +12264,17 @@ app.get('/event-requests', requireRole(...QUALITY_STAFF), async (req: Request, r
     const params: any[] = []; const where: string[] = [];
     const own = await qualityDept(req);
     if (a.role === 'faculty' || a.role === 'coordinator') {
-      params.push(String(a.email || '').toLowerCase()); where.push(`LOWER(created_by) = $${params.length}`);
+      params.push(String(a.email || '').toLowerCase()); where.push(`LOWER(r.created_by) = $${params.length}`);
     } else {
       const dept = own || (req.query.department && req.query.department !== 'All' ? String(req.query.department) : null);
-      if (dept) { params.push(normDept(dept)); where.push(`LOWER(REGEXP_REPLACE(department, '[^a-zA-Z0-9]', '', 'g')) = $${params.length}`); }
+      if (dept) { params.push(normDept(dept)); where.push(`LOWER(REGEXP_REPLACE(r.department, '[^a-zA-Z0-9]', '', 'g')) = $${params.length}`); }
     }
     const r = await db.query(
-      `SELECT id, department, title, start_date::text AS start_date, data, created_by, created_by_name, created_at, updated_at FROM event_requests
-       ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY COALESCE(start_date, created_at::date) DESC, id DESC LIMIT 500`, params);
+      `SELECT r.id, r.department, r.title, r.start_date::text AS start_date, r.data, r.created_by, r.created_by_name, r.created_at, r.updated_at,
+              e.id AS event_id, e.status AS report_status
+       FROM event_requests r LEFT JOIN dept_events e ON e.id = r.event_id
+       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+       ORDER BY COALESCE(r.start_date, r.created_at::date) DESC, r.id DESC LIMIT 500`, params);
     res.json(r.rows.map((x: any) => ({ ...x, can_edit: String(x.created_by).toLowerCase() === String(a.email || '').toLowerCase() })));
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -12373,6 +12377,15 @@ app.post('/events', requireRole(...QUALITY_STAFF), async (req: Request, res: Res
     const v = cleanEvent(req.body || {});
     if (!v.title || !v.start_date) return res.status(400).json({ error: 'Title and date are required' });
     if (v.end_date! < v.start_date) return res.status(400).json({ error: 'End date is before the start date' });
+    // Started from an event request: one report per request, and only the request's author links it
+    const me = String(req.auth!.email || '').toLowerCase();
+    const requestId = Number.isInteger(Number(req.body?.request_id)) && Number(req.body.request_id) > 0 ? Number(req.body.request_id) : null;
+    if (requestId) {
+      const er = (await db.query(
+        `SELECT r.id, r.event_id, e.id AS live FROM event_requests r LEFT JOIN dept_events e ON e.id = r.event_id WHERE r.id = $1 AND LOWER(r.created_by) = $2`,
+        [requestId, me])).rows[0];
+      if (er?.live) return res.status(409).json({ error: 'The report for this request is already written — open it from the request.', event_id: er.live });
+    }
     const name = await staffName(req.auth!.email || '');
     const r = await db.query(
       `INSERT INTO dept_events (academic_year, department, event_type, title, organized_by, start_date, end_date, duration_hours, mode, venue,
@@ -12383,6 +12396,7 @@ app.post('/events', requireRole(...QUALITY_STAFF), async (req: Request, res: Res
         JSON.stringify(v.coordinators), JSON.stringify(v.resource_persons), v.visit ? JSON.stringify(v.visit) : null, v.student_count, v.faculty_count, v.external_count,
         v.target_audience, v.objectives, v.summary, v.outcomes, v.feedback, v.budget, JSON.stringify(v.photos), JSON.stringify(v.attachments),
         String(req.auth!.email || '').toLowerCase(), name, v.participation, v.expected_outcomes]);
+    if (requestId) await db.query('UPDATE event_requests SET event_id = $1, updated_at = NOW() WHERE id = $2 AND LOWER(created_by) = $3', [r.rows[0].id, requestId, me]);
     res.status(201).json(r.rows[0]);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -12469,6 +12483,7 @@ app.delete('/events/:id', requireRole(...QUALITY_STAFF), async (req: Request, re
     if (f.error) return res.status(404).json({ error: 'Report not found' });
     if (!(f.isOwner || f.isHod) || f.e.status === 'approved') return res.status(403).json({ error: 'Approved reports cannot be deleted' });
     await db.query('DELETE FROM dept_events WHERE id = $1', [f.e.id]);
+    await db.query('UPDATE event_requests SET event_id = NULL WHERE event_id = $1', [f.e.id]).catch(() => undefined);   // the request can be reported again
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
