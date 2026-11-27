@@ -57,5 +57,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          # Verified Amazon SES sender for faculty emails, e.g. "RGMCET Portal <noreply@rgmcet.edu.in>" (repo variable)
+          MAIL_FROM: ${{ vars.MAIL_FROM }}
         run: ./deploy.sh
 

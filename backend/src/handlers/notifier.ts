@@ -12,6 +12,7 @@
 import { createHash } from 'crypto';
 import webpush from 'web-push';
 import { S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 
 const s3 = new S3Client({});
 const BUCKET = process.env.NOTIFY_BUCKET || '';
@@ -83,10 +84,107 @@ export async function deliver(job: NotifyJob): Promise<{ sent: number; gone: Not
   return { sent, gone };
 }
 
+// ─── Email (Amazon SES) ────────────────────────────────────────────────────────
+export interface MailJob {
+  kind: 'email'; mail_id: number; chunk: number; from_name: string; reply_to?: string;
+  subject: string; text: string; html: string;
+  to: { email: string; name?: string }[];
+  attachments: { key: string; name: string; type: string }[];
+}
+const MAIL_FROM = () => process.env.MAIL_FROM || '';
+let ses: SESv2Client | null = null;
+const b64 = (v: string | Buffer | Uint8Array) => Buffer.from(v as any).toString('base64');
+const wrap76 = (s: string) => s.replace(/.{1,76}/g, '$&\r\n');
+/** RFC 2047 encoded-word for headers that are not plain ASCII */
+const hdr = (s: string) => (/^[\x20-\x7e]*$/.test(s) ? s : `=?UTF-8?B?${b64(s)}?=`);
+const displayName = (n: string) => { const c = String(n || '').replace(/["\\\r\n]/g, '').trim(); return /^[\x20-\x7e]*$/.test(c) ? `"${c}"` : hdr(c); };
+const addressOf = (from: string) => (from.match(/<([^>]+)>/)?.[1] || from).trim();
+
+/** One multipart/mixed message: text + HTML alternative, then the attachments. */
+export function buildMime(o: { from: string; to: string; replyTo?: string; subject: string; text: string; html: string; files: { name: string; type: string; data: Buffer }[] }): string {
+  const tag = Math.random().toString(36).slice(2);
+  const mixed = `mixed_${tag}`; const alt = `alt_${tag}`;
+  const out: string[] = [
+    `From: ${o.from}`, `To: ${o.to}`, ...(o.replyTo ? [`Reply-To: ${o.replyTo}`] : []),
+    `Subject: ${hdr(o.subject)}`, `Date: ${new Date().toUTCString()}`, 'MIME-Version: 1.0',
+    `Content-Type: multipart/mixed; boundary="${mixed}"`, '',
+    `--${mixed}`, `Content-Type: multipart/alternative; boundary="${alt}"`, '',
+    `--${alt}`, 'Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', wrap76(b64(o.text)),
+    `--${alt}`, 'Content-Type: text/html; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', wrap76(b64(o.html)),
+    `--${alt}--`,
+  ];
+  for (const f of o.files) {
+    const name = hdr(f.name.replace(/["\r\n]/g, ''));
+    out.push(`--${mixed}`, `Content-Type: ${f.type}; name="${name}"`, `Content-Disposition: attachment; filename="${name}"`,
+      'Content-Transfer-Encoding: base64', '', wrap76(b64(f.data)));
+  }
+  out.push(`--${mixed}--`, '');
+  return out.join('\r\n');
+}
+
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+async function sendRaw(raw: string, to: string): Promise<void> {
+  if (!ses) ses = new SESv2Client({});
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await ses.send(new SendEmailCommand({
+        FromEmailAddress: addressOf(MAIL_FROM()),
+        Destination: { ToAddresses: [to] },
+        Content: { Raw: { Data: Buffer.from(raw) } },
+      }));
+      return;
+    } catch (err: any) {
+      const throttled = /Throttl|TooManyRequests|Maximum sending rate/i.test(`${err?.name} ${err?.message}`);
+      if (!throttled || attempt >= 3) throw err;
+      await sleep(800 * (attempt + 1));
+    }
+  }
+}
+const mailError = (err: any) => {
+  const m = String(err?.message || err || 'Send failed');
+  if (/not verified/i.test(m)) return `Address not verified in Amazon SES (sandbox). ${m}`;
+  return m.slice(0, 300);
+};
+
+/** Send one email per recipient; write per-recipient results for the API to collect. */
+export async function deliverMail(job: MailJob): Promise<{ email: string; status: 'sent' | 'failed'; error?: string }[]> {
+  const results: { email: string; status: 'sent' | 'failed'; error?: string }[] = [];
+  if (!MAIL_FROM()) return job.to.map(t => ({ email: t.email, status: 'failed' as const, error: 'Email sending is not set up (MAIL_FROM).' }));
+  const files: { name: string; type: string; data: Buffer }[] = [];
+  for (const a of job.attachments || []) {
+    const obj = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: a.key }));
+    files.push({ name: a.name, type: a.type || 'application/octet-stream', data: Buffer.from(await obj.Body!.transformToByteArray()) });
+  }
+  const from = `${displayName(job.from_name)} <${addressOf(MAIL_FROM())}>`;
+  const queue = [...job.to];
+  const worker = async () => {
+    for (let t = queue.shift(); t; t = queue.shift()) {
+      try {
+        const to = t.name ? `${displayName(t.name)} <${t.email}>` : t.email;
+        await sendRaw(buildMime({ from, to, replyTo: job.reply_to, subject: job.subject, text: job.text, html: job.html, files }), t.email);
+        results.push({ email: t.email, status: 'sent' });
+      } catch (err: any) {
+        results.push({ email: t.email, status: 'failed', error: mailError(err) });
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(5, job.to.length) }, worker)); // ~5 at a time stays under SES's rate
+  return results;
+}
+
 async function handleOutbox(record: any) {
   const key = decodeURIComponent(String(record.s3.object.key).replace(/\+/g, ' '));
   const obj = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
-  const job: NotifyJob = JSON.parse(await obj.Body!.transformToString());
+  const parsed = JSON.parse(await obj.Body!.transformToString());
+  if (parsed?.kind === 'email') {
+    const mail = parsed as MailJob;
+    const results = await deliverMail(mail).catch((err: any) => mail.to.map(t => ({ email: t.email, status: 'failed' as const, error: mailError(err) })));
+    await putJson(`notify/mail-status/${mail.mail_id}/${mail.chunk}.json`, { results });
+    await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
+    console.log(`[notifier] mail ${mail.mail_id}/${mail.chunk}: ${results.filter(r => r.status === 'sent').length}/${mail.to.length} sent`);
+    return;
+  }
+  const job = parsed as NotifyJob;
   const { sent, gone } = await deliver(job);
   for (const g of gone) {
     const h = createHash('sha1').update(`${g.channel}:${g.address}`).digest('hex');

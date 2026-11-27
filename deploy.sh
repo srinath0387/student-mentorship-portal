@@ -19,6 +19,7 @@ if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
 fi
 export TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}" TELEGRAM_BOT_USERNAME="${TELEGRAM_BOT_USERNAME:-}"
 export VAPID_PUBLIC_KEY="${VAPID_PUBLIC_KEY:-}" VAPID_PRIVATE_KEY="${VAPID_PRIVATE_KEY:-}"
+export MAIL_FROM="${MAIL_FROM:-}"
 
 # 2. Deploy AWS CDK Stack
 echo "â˜ï¸ Step 2: Deploying Infrastructure with AWS CDK..."

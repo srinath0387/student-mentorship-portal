@@ -10520,6 +10520,195 @@ async function notifyBroadcast(b: any): Promise<number> {
   } catch (err: any) { console.warn('[notify] broadcast failed:', err.message); return 0; }
 }
 
+// ============================================================================
+// Email to faculty — HOD (own department), department admin, principal / director / super admin (all).
+// The API Lambda has no internet, so a send is queued as notify/outbox/*.json jobs (chunks of 50) and
+// the notifier Lambda sends one email per faculty through Amazon SES, with attachments read from
+// notify/mail-files/. Per-recipient results come back as notify/mail-status/<id>/<chunk>.json and are
+// merged into staff_mails when the sender opens the Sent list.
+// ============================================================================
+const MAIL_SENDERS = ['hod', 'admin', 'principal', 'director'];
+const MAIL_MAX_BYTES = 25 * 1024 * 1024;             // total attachments (SES limit is 40 MB after encoding)
+const MAIL_FILE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/msword', 'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'application/vnd.ms-powerpoint', 'application/zip', 'text/plain', 'text/csv'];
+let mailTablesReady: Promise<void> | null = null;
+function ensureMailTables(): Promise<void> {
+  if (!mailTablesReady) {
+    mailTablesReady = db.query(`
+      CREATE TABLE IF NOT EXISTS staff_mails (
+        id SERIAL PRIMARY KEY,
+        department TEXT, sender_email TEXT NOT NULL, sender_name TEXT, sender_role TEXT,
+        subject TEXT NOT NULL, body TEXT NOT NULL,
+        recipients JSONB NOT NULL DEFAULT '[]', attachments JSONB NOT NULL DEFAULT '[]',
+        chunks INT NOT NULL DEFAULT 1, chunks_done INT NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'sending' CHECK (status IN ('sending','sent','partial','failed')),
+        created_at TIMESTAMPTZ DEFAULT NOW(), finished_at TIMESTAMPTZ
+      );
+      CREATE INDEX IF NOT EXISTS idx_staff_mails_sender ON staff_mails (LOWER(sender_email), created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_staff_mails_dept ON staff_mails (department, created_at DESC);
+    `).then(() => undefined).catch((err: any) => { mailTablesReady = null; throw err; });
+  }
+  return mailTablesReady;
+}
+/** Department the caller may email (null = every department). */
+async function mailScope(req: Request): Promise<string | null> {
+  const a = req.auth!;
+  if (['principal', 'director'].includes(a.role) || (a.role === 'admin' && (a.isSuperAdmin || !a.department || ['*', 'All', 'all'].includes(a.department)))) return null;
+  const dept = await qualityDept(req);
+  if (!dept) throw Object.assign(new Error('Your account has no department.'), { status: 403 });
+  return dept;
+}
+async function mailFaculty(scope: string | null, department?: string) {
+  const params: any[] = []; const where = [`f.email NOT LIKE 'pending\\_%'`, `f.email LIKE '%@%'`];
+  const d = scope || (department && department !== 'All' ? department : null);
+  if (d) { params.push(normDept(d)); where.push(`LOWER(REGEXP_REPLACE(COALESCE(f.department, ''), '[^a-zA-Z0-9]', '', 'g')) = $${params.length}`); }
+  const r = await db.query(`SELECT f.name, LOWER(f.email) AS email, f.department FROM faculty f WHERE ${where.join(' AND ')} ORDER BY f.name LIMIT 3000`, params);
+  return r.rows;
+}
+const mailHtml = (body: string, signature: string) => {
+  const e = (x: string) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#0f172a">${e(body).replace(/\n/g, '<br>')}`
+    + `<br><br><span style="color:#475569">${e(signature).replace(/\n/g, '<br>')}</span>`
+    + `<hr style="border:none;border-top:1px solid #e2e8f0;margin:20px 0 8px"><span style="font-size:11px;color:#94a3b8">Sent from RGM ManageBAC. Reply to this email to reach the sender.</span></div>`;
+};
+
+/** Merge per-recipient results the notifier wrote to S3 into staff_mails. */
+async function collectMailStatus(mailIds: number[]) {
+  const bucket = process.env.UPLOADS_BUCKET_NAME;
+  if (!bucket || !mailIds.length) return;
+  const { ListObjectsV2Command, GetObjectCommand, DeleteObjectCommand } = await import('@aws-sdk/client-s3');
+  const s3 = await notifyS3();
+  for (const id of mailIds) {
+    const list = await s3.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: `notify/mail-status/${id}/` })).catch(() => null);
+    const keys = (list?.Contents || []).map((o: any) => o.Key).filter(Boolean);
+    if (!keys.length) continue;
+    const results: any[] = [];
+    for (const key of keys) {
+      try {
+        const obj = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+        results.push(...(JSON.parse(await obj.Body!.transformToString()).results || []));
+      } catch { /* written again on the next look */ }
+    }
+    const m = (await db.query('SELECT recipients, chunks, chunks_done FROM staff_mails WHERE id = $1', [id])).rows[0];
+    if (!m) continue;
+    const byEmail = new Map(results.map((r: any) => [String(r.email).toLowerCase(), r]));
+    const recipients = (m.recipients || []).map((r: any) => {
+      const x: any = byEmail.get(String(r.email).toLowerCase());
+      return x ? { ...r, status: x.status, error: x.error || null } : r;
+    });
+    const done = Math.min(m.chunks, m.chunks_done + keys.length);
+    const pending = recipients.filter((r: any) => r.status === 'queued').length;
+    const failed = recipients.filter((r: any) => r.status === 'failed').length;
+    const status = pending && done < m.chunks ? 'sending' : failed === 0 ? 'sent' : failed === recipients.length ? 'failed' : 'partial';
+    await db.query(`UPDATE staff_mails SET recipients = $2, chunks_done = $3, status = $4, finished_at = CASE WHEN $4 <> 'sending' THEN NOW() ELSE finished_at END WHERE id = $1`,
+      [id, JSON.stringify(recipients), done, status]);
+    for (const key of keys) await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key })).catch(() => undefined);
+  }
+}
+
+// GET /mail/meta — is sending set up, and which faculty can I email
+app.get('/mail/meta', requireRole(...MAIL_SENDERS), async (req: Request, res: Response) => {
+  try {
+    const scope = await mailScope(req);
+    res.json({ configured: Boolean(process.env.MAIL_FROM), scope: scope || 'All', faculty: await mailFaculty(scope, String(req.query.department || '')) });
+  } catch (err: any) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
+// GET /mail/upload-url?fileName=&contentType=&size= — presigned upload for one attachment
+app.get('/mail/upload-url', requireRole(...MAIL_SENDERS), async (req: Request, res: Response) => {
+  try {
+    const contentType = String(req.query.contentType || '');
+    const size = Number(req.query.size || 0);
+    if (!MAIL_FILE_TYPES.includes(contentType)) return res.status(400).json({ error: 'Attach PDF, Word, Excel, PowerPoint, images, ZIP or text files' });
+    if (!(size > 0) || size > MAIL_MAX_BYTES) return res.status(400).json({ error: 'Each file must be under 25 MB' });
+    const bucket = process.env.UPLOADS_BUCKET_NAME;
+    if (!bucket) return res.status(503).json({ error: 'File storage is not configured' });
+    const safe = String(req.query.fileName || 'file').replace(/[^A-Za-z0-9._ -]+/g, '_').slice(-100);
+    const fileKey = `notify/mail-files/${todayIST().slice(0, 7)}/${crypto.randomBytes(8).toString('hex')}_${safe}`;
+    const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3');
+    const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
+    const uploadUrl = await getSignedUrl(new S3Client({}), new PutObjectCommand({ Bucket: bucket, Key: fileKey, ContentType: contentType }), { expiresIn: 900 });
+    res.json({ uploadUrl, fileKey });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /mail/send { subject, body, recipients: 'all' | string[], department?, attachments: [{ key, name }] }
+app.post('/mail/send', requireRole(...MAIL_SENDERS), async (req: Request, res: Response) => {
+  try {
+    await ensureMailTables();
+    if (!process.env.MAIL_FROM) return res.status(503).json({ error: 'Email sending is not set up yet. Ask the administrator to verify the sender address in Amazon SES.' });
+    const bucket = process.env.UPLOADS_BUCKET_NAME;
+    if (!bucket) return res.status(503).json({ error: 'File storage is not configured' });
+    const b = req.body || {};
+    const subject = clip(b.subject, 200);
+    const body = String(b.body || '').trim().slice(0, 20000);
+    if (!subject || !body) return res.status(400).json({ error: 'Subject and message are required' });
+    const scope = await mailScope(req);
+    const pool = await mailFaculty(scope, String(b.department || ''));
+    const wanted = b.recipients === 'all' ? null : new Set((Array.isArray(b.recipients) ? b.recipients : []).map((x: any) => String(x).toLowerCase()));
+    const to = pool.filter((f: any) => !wanted || wanted.has(f.email));
+    if (!to.length) return res.status(400).json({ error: 'Choose at least one faculty member' });
+    if (wanted && to.length < wanted.size) return res.status(403).json({ error: 'Some selected people are not faculty you can email' });
+
+    // Attachments: only files uploaded through /mail/upload-url; check real sizes
+    const { HeadObjectCommand } = await import('@aws-sdk/client-s3');
+    const s3 = await notifyS3();
+    const attachments: any[] = [];
+    let total = 0;
+    for (const a of (Array.isArray(b.attachments) ? b.attachments : []).slice(0, 10)) {
+      const key = String(a?.key || '');
+      if (!key.startsWith('notify/mail-files/')) return res.status(400).json({ error: 'Invalid attachment' });
+      const head = await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key })).catch(() => null);
+      if (!head) return res.status(400).json({ error: `Attachment ${a?.name || ''} did not finish uploading. Remove it and attach it again.` });
+      total += Number(head.ContentLength || 0);
+      attachments.push({ key, name: clip(a?.name, 120) || key.split('_').slice(1).join('_'), type: head.ContentType || 'application/octet-stream', size: Number(head.ContentLength || 0) });
+    }
+    if (total > MAIL_MAX_BYTES) return res.status(400).json({ error: `Attachments total ${(total / 1048576).toFixed(1)} MB. Keep them under 25 MB.` });
+
+    const a = req.auth!;
+    const name = a.role === 'hod' ? `HOD, ${scope}` : await staffName(a.email || '');
+    const senderName = name && name !== a.email ? name : ({ hod: 'HOD', admin: 'Admin', principal: 'Principal', director: 'Director' } as Record<string, string>)[a.role];
+    const signature = `${senderName}${scope && a.role !== 'hod' ? `\nDepartment of ${scope}` : ''}\nRajeev Gandhi Memorial College of Engineering & Technology`;
+    const recipients = to.map((f: any) => ({ email: f.email, name: f.name, status: 'queued' }));
+    const chunks: any[][] = [];
+    for (let i = 0; i < recipients.length; i += 50) chunks.push(recipients.slice(i, i + 50));
+    const m = (await db.query(
+      `INSERT INTO staff_mails (department, sender_email, sender_name, sender_role, subject, body, recipients, attachments, chunks)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [scope, String(a.email || '').toLowerCase(), senderName, a.role, subject, body, JSON.stringify(recipients), JSON.stringify(attachments), chunks.length])).rows[0];
+
+    const { PutObjectCommand } = await import('@aws-sdk/client-s3');
+    const html = mailHtml(body, signature);
+    const text = `${body}\n\n${signature}\n\n--\nSent from RGM ManageBAC. Reply to this email to reach the sender.`;
+    for (let c = 0; c < chunks.length; c++) {
+      await s3.send(new PutObjectCommand({
+        Bucket: bucket, Key: `notify/outbox/${Date.now()}-mail-${m.id}-${c}.json`, ContentType: 'application/json',
+        Body: JSON.stringify({ kind: 'email', mail_id: m.id, chunk: c, from_name: `${senderName} via RGMCET`, reply_to: String(a.email || '').toLowerCase(),
+          subject, text, html, to: chunks[c].map((r: any) => ({ email: r.email, name: r.name })), attachments: attachments.map(x => ({ key: x.key, name: x.name, type: x.type })) }),
+      }));
+    }
+    await notifyUsers(recipients.map((r: any) => staffKey(r.email)), { title: `Email from ${senderName}`, body: `${subject} — check your college email.`, url: '/dashboard', tag: `mail-${m.id}` });
+    res.status(201).json({ id: m.id, recipients: recipients.length, attachments: attachments.length });
+  } catch (err: any) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
+// GET /mail/sent — mails I sent (HOD/admin: also the department's), with delivery results
+app.get('/mail/sent', requireRole(...MAIL_SENDERS), async (req: Request, res: Response) => {
+  try {
+    await ensureMailTables();
+    const scope = await mailScope(req);
+    const params: any[] = [String(req.auth!.email || '').toLowerCase()];
+    let where = `LOWER(sender_email) = $1`;
+    if (scope) { params.push(normDept(scope)); where = `(${where} OR LOWER(REGEXP_REPLACE(COALESCE(department, ''), '[^a-zA-Z0-9]', '', 'g')) = $2)`; }
+    const pending = (await db.query(`SELECT id FROM staff_mails WHERE ${where} AND status = 'sending' AND created_at > NOW() - INTERVAL '3 days'`, params)).rows.map((r: any) => r.id);
+    await collectMailStatus(pending).catch((e: any) => console.warn('[mail] status merge failed:', e.message));
+    const r = await db.query(`SELECT * FROM staff_mails WHERE ${where} ORDER BY created_at DESC LIMIT 200`, params);
+    res.json(r.rows);
+  } catch (err: any) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
 /** Push a notice-board post (HOD / principal / admin "Broadcast Notice") to its audience's devices. */
 async function notifyNotice(n: any, targeting: { department?: string | null; year?: string | null; roles?: string[] }, senderName: string): Promise<number> {
   try {
@@ -11242,6 +11431,17 @@ function ensureQualityTables(): Promise<void> {
         reviewed_by TEXT, reviewed_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_dept_events_dept ON dept_events (department, start_date DESC);
+      ALTER TABLE dept_events ADD COLUMN IF NOT EXISTS participation TEXT NOT NULL DEFAULT 'organized';
+      ALTER TABLE dept_events ADD COLUMN IF NOT EXISTS expected_outcomes TEXT;
+      CREATE TABLE IF NOT EXISTS subject_syllabi (
+        id SERIAL PRIMARY KEY,
+        department TEXT NOT NULL, dept_key TEXT NOT NULL, semester_label TEXT NOT NULL, subject_name TEXT NOT NULL,
+        subject_code TEXT, regulation TEXT, credits TEXT,
+        objectives TEXT, outcomes JSONB NOT NULL DEFAULT '[]', units JSONB NOT NULL DEFAULT '[]',
+        text_books TEXT, references_text TEXT, file_key TEXT,
+        updated_by TEXT, updated_by_name TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_subject_syllabi ON subject_syllabi (dept_key, semester_label, LOWER(subject_name));
     `).then(() => undefined).catch((err: any) => { qualityTablesReady = null; throw err; });
   }
   return qualityTablesReady;
@@ -11742,6 +11942,7 @@ const EVENT_TYPES: Record<string, string> = {
 };
 
 function cleanEvent(b: any) {
+  const participation = b.participation === 'attended' ? 'attended' : 'organized';
   const people = (arr: any, n: number) => (Array.isArray(arr) ? arr : []).slice(0, n).map((x: any) => ({
     name: clip(x?.name, 120) || '', designation: clip(x?.designation, 120), organization: clip(x?.organization, 200),
     email: String(x?.email || '').toLowerCase().trim() || null, topic: clip(x?.topic, 300),
@@ -11764,6 +11965,7 @@ function cleanEvent(b: any) {
     student_count: num(b.student_count, 100000), faculty_count: num(b.faculty_count, 10000), external_count: num(b.external_count, 100000),
     target_audience: clip(b.target_audience, 300), objectives: clip(b.objectives, 4000), summary: clip(b.summary, 8000),
     outcomes: clip(b.outcomes, 4000), feedback: clip(b.feedback, 3000),
+    participation, expected_outcomes: clip(b.expected_outcomes, 4000),
     budget: Number.isFinite(Number(b.budget)) && Number(b.budget) >= 0 && b.budget !== '' && b.budget != null ? Number(b.budget) : null,
     photos: files(b.photos, 12), attachments: files(b.attachments, 6),
   };
@@ -11777,6 +11979,80 @@ async function eventForEdit(req: Request, id: number) {
   const isOwner = String(e.submitted_by || '').toLowerCase() === me;
   return { e, isHod, isOwner };
 }
+
+// ============================================================================
+// Subject syllabus — one per (department, semester, subject), shared by every section and faculty
+// teaching it. Faculty of the subject and the department's HOD/admin can edit it; the lesson plan
+// can be generated from it.
+// ============================================================================
+function cleanSyllabus(b: any) {
+  const units = (Array.isArray(b.units) ? b.units : []).slice(0, 12).map((u: any, i: number) => ({
+    unit: i + 1,
+    title: clip(u?.title, 200) || '',
+    hours: Number.isFinite(Number(u?.hours)) && Number(u?.hours) > 0 ? Math.min(60, Math.round(Number(u.hours))) : null,
+    topics: (Array.isArray(u?.topics) ? u.topics : []).map((t: any) => clip(t, 300)).filter(Boolean).slice(0, 60),
+  })).filter((u: any) => u.title || u.topics.length);
+  const outcomes = (Array.isArray(b.outcomes) ? b.outcomes : []).slice(0, 12)
+    .map((o: any) => ({ code: clip(o?.code, 12) || '', text: clip(o?.text, 500) || '' })).filter((o: any) => o.text);
+  return {
+    subject_code: clip(b.subject_code, 40), regulation: clip(b.regulation, 40), credits: clip(b.credits, 20),
+    objectives: clip(b.objectives, 4000), outcomes, units,
+    text_books: clip(b.text_books, 4000), references_text: clip(b.references_text, 4000),
+    file_key: String(b.file_key || '').startsWith('academic/lesson-plans/') ? String(b.file_key) : null,
+  };
+}
+/** The allotment, plus whether the caller teaches it or heads its department. */
+async function syllabusAccess(req: Request, allotmentId: string) {
+  const a = (await db.query('SELECT * FROM subject_allotments WHERE id = $1', [allotmentId])).rows[0];
+  if (!a) return null;
+  const me = String(req.auth!.email || '').toLowerCase();
+  const teaches = [a.faculty_email, a.co_faculty_email].some((x: any) => String(x || '').toLowerCase() === me);
+  const dept = await qualityDept(req);
+  const heads = ['hod', 'admin'].includes(req.auth!.role) && (!dept || normDept(dept) === normDept(a.department));
+  const sees = teaches || heads || (QUALITY_OVERSIGHT.includes(req.auth!.role) && (!dept || normDept(dept) === normDept(a.department)));
+  return { a, canEdit: teaches || heads, canView: sees };
+}
+
+// GET /syllabus/:allotmentId — the syllabus for this allotment's subject (shared across sections)
+app.get('/syllabus/:allotmentId', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const acc = await syllabusAccess(req, req.params.allotmentId);
+    if (!acc) return res.status(404).json({ error: 'Subject not found' });
+    if (!acc.canView) return res.status(403).json({ error: 'Not your subject' });
+    const s = (await db.query(
+      `SELECT * FROM subject_syllabi WHERE dept_key = $1 AND semester_label = $2 AND LOWER(subject_name) = LOWER($3)`,
+      [normDept(acc.a.department), acc.a.semester_label, acc.a.subject_name])).rows[0] || null;
+    const fileUrl = s?.file_key ? (await academicViewUrls([s.file_key]).catch(() => ({} as Record<string, string>)))[s.file_key] : null;
+    res.json({ allotment: acc.a, syllabus: s ? { ...s, file_url: fileUrl || null } : null, can_edit: acc.canEdit });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /syllabus/:allotmentId — create or update (faculty of the subject, or the HOD / admin)
+app.put('/syllabus/:allotmentId', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables();
+    const acc = await syllabusAccess(req, req.params.allotmentId);
+    if (!acc) return res.status(404).json({ error: 'Subject not found' });
+    if (!acc.canEdit) return res.status(403).json({ error: 'Only the subject faculty or the HOD can edit this syllabus' });
+    const v = cleanSyllabus(req.body || {});
+    if (!v.units.length) return res.status(400).json({ error: 'Add at least one unit with its topics' });
+    const name = await staffName(req.auth!.email || '');
+    const r = await db.query(
+      `INSERT INTO subject_syllabi (department, dept_key, semester_label, subject_name, subject_code, regulation, credits, objectives, outcomes, units,
+         text_books, references_text, file_key, updated_by, updated_by_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       ON CONFLICT (dept_key, semester_label, LOWER(subject_name)) DO UPDATE SET
+         subject_code = EXCLUDED.subject_code, regulation = EXCLUDED.regulation, credits = EXCLUDED.credits, objectives = EXCLUDED.objectives,
+         outcomes = EXCLUDED.outcomes, units = EXCLUDED.units, text_books = EXCLUDED.text_books, references_text = EXCLUDED.references_text,
+         file_key = COALESCE(EXCLUDED.file_key, subject_syllabi.file_key), updated_by = EXCLUDED.updated_by, updated_by_name = EXCLUDED.updated_by_name,
+         updated_at = NOW()
+       RETURNING *`,
+      [acc.a.department, normDept(acc.a.department), acc.a.semester_label, acc.a.subject_name, v.subject_code, v.regulation, v.credits, v.objectives,
+        JSON.stringify(v.outcomes), JSON.stringify(v.units), v.text_books, v.references_text, v.file_key, String(req.auth!.email || '').toLowerCase(), name]);
+    res.json(r.rows[0]);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
 
 app.get('/events/meta', requireAuth, (_req: Request, res: Response) => res.json({ types: Object.keys(EVENT_TYPES) }));
 
@@ -11798,6 +12074,7 @@ app.get('/events', requireRole(...QUALITY_STAFF), async (req: Request, res: Resp
     if (req.query.type && EVENT_TYPES[String(req.query.type)]) { params.push(String(req.query.type)); where.push(`event_type = $${params.length}`); }
     if (req.query.year && /^\d{4}/.test(String(req.query.year))) { params.push(String(req.query.year).replace(/-/g, '–')); where.push(`academic_year = $${params.length}`); }
     if (req.query.status) { params.push(String(req.query.status)); where.push(`status = $${params.length}`); }
+    if (req.query.participation === 'organized' || req.query.participation === 'attended') { params.push(String(req.query.participation)); where.push(`participation = $${params.length}`); }
     const r = await db.query(`SELECT * FROM dept_events ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY start_date DESC, id DESC LIMIT 2000`, params);
     res.json(r.rows);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
@@ -11831,12 +12108,12 @@ app.post('/events', requireRole(...QUALITY_STAFF), async (req: Request, res: Res
     const r = await db.query(
       `INSERT INTO dept_events (academic_year, department, event_type, title, organized_by, start_date, end_date, duration_hours, mode, venue,
          coordinators, resource_persons, visit, student_count, faculty_count, external_count, target_audience, objectives, summary, outcomes, feedback,
-         budget, photos, attachments, submitted_by, submitted_by_name)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26) RETURNING *`,
+         budget, photos, attachments, submitted_by, submitted_by_name, participation, expected_outcomes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28) RETURNING *`,
       [currentAcademicYear(new Date(v.start_date + 'T00:00:00Z')), dept, v.event_type, v.title, v.organized_by, v.start_date, v.end_date, v.duration_hours, v.mode, v.venue,
         JSON.stringify(v.coordinators), JSON.stringify(v.resource_persons), v.visit ? JSON.stringify(v.visit) : null, v.student_count, v.faculty_count, v.external_count,
         v.target_audience, v.objectives, v.summary, v.outcomes, v.feedback, v.budget, JSON.stringify(v.photos), JSON.stringify(v.attachments),
-        String(req.auth!.email || '').toLowerCase(), name]);
+        String(req.auth!.email || '').toLowerCase(), name, v.participation, v.expected_outcomes]);
     res.status(201).json(r.rows[0]);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -11854,10 +12131,12 @@ app.put('/events/:id', requireRole(...QUALITY_STAFF), async (req: Request, res: 
     const r = await db.query(
       `UPDATE dept_events SET academic_year=$1, event_type=$2, title=$3, organized_by=$4, start_date=$5, end_date=$6, duration_hours=$7, mode=$8, venue=$9,
          coordinators=$10, resource_persons=$11, visit=$12, student_count=$13, faculty_count=$14, external_count=$15, target_audience=$16, objectives=$17,
-         summary=$18, outcomes=$19, feedback=$20, budget=$21, photos=$22, attachments=$23, updated_at=NOW() WHERE id=$24 RETURNING *`,
+         summary=$18, outcomes=$19, feedback=$20, budget=$21, photos=$22, attachments=$23, participation=$25, expected_outcomes=$26,
+         updated_at=NOW() WHERE id=$24 RETURNING *`,
       [currentAcademicYear(new Date(v.start_date + 'T00:00:00Z')), v.event_type, v.title, v.organized_by, v.start_date, v.end_date, v.duration_hours, v.mode, v.venue,
         JSON.stringify(v.coordinators), JSON.stringify(v.resource_persons), v.visit ? JSON.stringify(v.visit) : null, v.student_count, v.faculty_count,
-        v.external_count, v.target_audience, v.objectives, v.summary, v.outcomes, v.feedback, v.budget, JSON.stringify(v.photos), JSON.stringify(v.attachments), f.e.id]);
+        v.external_count, v.target_audience, v.objectives, v.summary, v.outcomes, v.feedback, v.budget, JSON.stringify(v.photos), JSON.stringify(v.attachments), f.e.id,
+        v.participation, v.expected_outcomes]);
     res.json(r.rows[0]);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });

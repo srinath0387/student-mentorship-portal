@@ -275,6 +275,8 @@ export class AdvitiyansStack extends cdk.Stack {
         // Notifications: public halves only — the notifier Lambda holds the private keys / bot token
         VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY || '',
         TELEGRAM_BOT_USERNAME: process.env.TELEGRAM_BOT_USERNAME || '',
+        // Verified SES sender; empty = faculty email shows "not set up yet"
+        MAIL_FROM: process.env.MAIL_FROM || '',
         BUILD_TIMESTAMP: new Date().toISOString(),
       },
     });
@@ -454,9 +456,15 @@ export class AdvitiyansStack extends cdk.Stack {
         VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY || '',
         VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY || '',
         VAPID_SUBJECT: 'mailto:admin@rgmcet.edu.in',
+        MAIL_FROM: process.env.MAIL_FROM || '',
       },
     });
     uploadsBucket.grantReadWrite(notifierLambda, 'notify/*');
+    // Faculty emails (HOD / principal → faculty) through Amazon SES
+    notifierLambda.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['ses:SendEmail', 'ses:SendRawEmail'],
+      resources: ['*'],
+    }));
     uploadsBucket.addEventNotification(s3.EventType.OBJECT_CREATED, new s3n.LambdaDestination(notifierLambda), { prefix: 'notify/outbox/' });
     const notifierUrl = notifierLambda.addFunctionUrl({ authType: lambda.FunctionUrlAuthType.NONE });
 

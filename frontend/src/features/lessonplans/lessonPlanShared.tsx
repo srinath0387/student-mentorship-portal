@@ -99,3 +99,37 @@ export async function lessonPlanPdf(allot: any, plan: any) {
   r.signatures([{ role: 'Faculty', name: allot.faculty_name }, { role: 'HOD', name: `Dept. of ${allot.department}` }, { role: 'Principal' }]);
   r.save(`Lesson Plan - ${allot.subject_name} - ${allot.semester_label} ${allot.section}.pdf`);
 }
+
+/** Lesson plan as an Excel sheet (same columns as the import template, so it can be edited and re-imported). */
+export async function lessonPlanExcel(allot: any, plan: any) {
+  const XLSX = await import('xlsx');
+  const rows = (plan?.topics || []).map((t: Topic, i: number) => ({
+    'S.No': i + 1, Unit: t.unit, 'Unit Title': t.unit_title || '', Topic: t.topic, Periods: t.periods,
+    CO: t.co || '', Method: t.method || '', 'Planned Date': t.planned_date || '', 'Covered On': t.covered_on || '',
+  }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Lesson Plan');
+  XLSX.writeFile(wb, `Lesson Plan - ${allot.subject_name} - ${allot.semester_label} ${allot.section}.xlsx`.replace(/[^A-Za-z0-9._ ()&-]+/g, '_'));
+}
+
+const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
+/** The subject's syllabus on the college letterhead. */
+export async function syllabusPdf(allot: any, s: any) {
+  const r = await ReportPdf.create(allot.department);
+  r.title('Syllabus', allot.subject_name);
+  const hours = (s.units || []).reduce((n: number, u: any) => n + (Number(u.hours) || (u.topics || []).length), 0);
+  r.keyValues([
+    ['Course', `${allot.subject_name}${s.subject_code ? ` (${s.subject_code})` : ''}`],
+    ['Class', `${allot.semester_label} Semester · ${allot.department}`],
+    ['Regulation', s.regulation], ['L-T-P-C', s.credits], ['Total hours', hours ? `${hours} hours` : null],
+  ]);
+  if (s.objectives) { r.heading('Course Objectives'); r.para(s.objectives); }
+  if (s.outcomes?.length) { r.heading('Course Outcomes'); r.table(['CO', 'After completing the course, the student will be able to'], s.outcomes.map((o: any) => [o.code, o.text]), { 0: { cellWidth: 16, fontStyle: 'bold' } }); }
+  (s.units || []).forEach((u: any, i: number) => {
+    r.heading(`UNIT ${ROMAN[i] || i + 1}${u.title ? `: ${u.title}` : ''}${u.hours ? ` (${u.hours} hours)` : ''}`);
+    r.para((u.topics || []).join(', ') + '.');
+  });
+  if (s.text_books) { r.heading('Text Books'); r.para(s.text_books); }
+  if (s.references_text) { r.heading('Reference Books / Resources'); r.para(s.references_text); }
+  r.save(`Syllabus - ${allot.subject_name} - ${allot.semester_label}.pdf`);
+}

@@ -45,6 +45,7 @@ import {
   Presentation,
   NotebookPen,
   Vote,
+  Mail,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext';
@@ -193,6 +194,7 @@ const adminNav: NavGroup[] = [
       { label: 'Lesson Plan Register', path: '/lesson-plans/review', icon: BookOpenCheck },
       { label: 'Events & Activities', path: '/events', icon: Presentation },
       { label: 'Meetings & Minutes', path: '/meetings', icon: NotebookPen },
+      { label: 'Email Faculty', path: '/mail', icon: Mail },
     ],
   },
   {
@@ -303,6 +305,7 @@ const hodNav: NavGroup[] = [
       { label: 'Faculty Selection', path: '/faculty-selection/manage', icon: Vote },
       { label: 'My Selected Students', path: '/faculty-selection/my-students', icon: Users },
       { label: 'Meetings & Minutes', path: '/meetings', icon: NotebookPen },
+      { label: 'Email Faculty', path: '/mail', icon: Mail },
       { label: 'Events & Activities', path: '/events', icon: Presentation },
     ],
   },
@@ -412,6 +415,7 @@ const oversightNav: NavGroup[] = [
       { label: 'Lesson Plan Coverage', path: '/lesson-plans/review', icon: BookOpenCheck },
       { label: 'Events & Activities', path: '/events', icon: Presentation },
       { label: 'Meetings & Minutes', path: '/meetings', icon: NotebookPen },
+      { label: 'Email Faculty', path: '/mail', icon: Mail },
       { label: 'Change Password', path: '/account/password', icon: Settings },
       { label: 'Monthly Principal\'s Report', path: '/reports/monthly', icon: FileBarChart },
       { label: 'NAAC / NBA Data Pack', path: '/accreditation', icon: FileCheck },

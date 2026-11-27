@@ -1116,7 +1116,18 @@ export const api = {
   setMeetingAction: async (id: number, actionId: string, status: 'done' | 'open') =>
     fetchWithAuth(`/meetings/${id}/actions/${actionId}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   getEventMeta: async (): Promise<{ types: string[] }> => fetchWithAuth('/events/meta'),
-  getEvents: async (params: { department?: string; type?: string; year?: string; status?: string } = {}): Promise<any[]> => {
+  getSyllabus: async (allotmentId: string): Promise<{ allotment: any; syllabus: any | null; can_edit: boolean }> =>
+    fetchWithAuth(`/syllabus/${encodeURIComponent(allotmentId)}`),
+  saveSyllabus: async (allotmentId: string, body: any) =>
+    fetchWithAuth(`/syllabus/${encodeURIComponent(allotmentId)}`, { method: 'PUT', body: JSON.stringify(body) }),
+  getMailMeta: async (department?: string): Promise<{ configured: boolean; scope: string; faculty: { name: string; email: string; department: string }[] }> =>
+    fetchWithAuth(`/mail/meta${department && department !== 'All' ? `?department=${encodeURIComponent(department)}` : ''}`),
+  getMailUploadUrl: async (file: File): Promise<{ uploadUrl: string; fileKey: string }> =>
+    fetchWithAuth(`/mail/upload-url?${new URLSearchParams({ fileName: file.name, contentType: file.type || 'application/octet-stream', size: String(file.size) })}`),
+  sendMail: async (body: { subject: string; body: string; recipients: 'all' | string[]; department?: string; attachments: { key: string; name: string }[] }) =>
+    fetchWithAuth('/mail/send', { method: 'POST', body: JSON.stringify(body) }),
+  getSentMail: async (): Promise<any[]> => fetchWithAuth('/mail/sent'),
+  getEvents: async (params: { department?: string; type?: string; year?: string; status?: string; participation?: string } = {}): Promise<any[]> => {
     const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v && v !== 'All') as [string, string][]).toString();
     return fetchWithAuth(`/events${q ? `?${q}` : ''}`);
   },

@@ -4,7 +4,9 @@ import { ArrowLeft, CalendarCheck2, Check, Download, FileSpreadsheet, Loader2, P
 import { api } from '../../lib/api';
 import { uploadAcademicFile } from '../../lib/academicFiles';
 import { fmtD } from '../../lib/pdfReport';
-import { CoverageBar, StatusChip, Topic, autoSchedule, btnGhost, btnPrimary, card, input, lessonPlanPdf, todayIso } from './lessonPlanShared';
+import { CoverageBar, StatusChip, Topic, autoSchedule, btnGhost, btnPrimary, card, input, lessonPlanExcel, lessonPlanPdf, todayIso } from './lessonPlanShared';
+import { SyllabusEditor } from './SyllabusEditor';
+import { NumberedListInput } from '../../components/common/NumberedListInput';
 
 import { BouncingDots } from '../../components/common/BouncingDots';
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -14,7 +16,8 @@ const newId = () => `t${Date.now().toString(36)}${Math.random().toString(36).sli
 export function LessonPlanEditor({ allotmentId, onBack }: { allotmentId: string; onBack: () => void }) {
   const qc = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ['lessonPlan', allotmentId], queryFn: () => api.getLessonPlan(allotmentId) });
-  const [tab, setTab] = useState<'plan' | 'coverage'>('plan');
+  const [tab, setTab] = useState<'syllabus' | 'plan' | 'coverage'>('plan');
+  const [confirmGen, setConfirmGen] = useState<any | null>(null);
   const [f, setF] = useState<{ objectives: string; outcomes: { code: string; text: string }[]; topics: Topic[]; text_books: string; references_text: string; file_key: string | null }>(
     { objectives: '', outcomes: [], topics: [], text_books: '', references_text: '', file_key: null });
   const [dirty, setDirty] = useState(false);
@@ -36,7 +39,22 @@ export function LessonPlanEditor({ allotmentId, onBack }: { allotmentId: string;
     setSched(s => ({ ...s, days, start: semStart && semStart > todayIso() ? semStart : (semStart || todayIso()) }));
     setDirty(false);
     if (data.can_edit === false && data.plan) setTab(data.plan.status === 'approved' ? 'coverage' : 'plan');
+    else if (data.can_edit && !p?.topics?.some((t: Topic) => t.topic)) setTab('syllabus'); // nothing planned yet: start from the syllabus
   }, [data]);
+
+  /** Fill the plan from the syllabus, and the dates from the timetable when the class days are known. */
+  const applyGenerated = (g: { objectives: string; outcomes: { code: string; text: string }[]; topics: Topic[]; text_books: string; references_text: string }) => {
+    const classDays = Object.entries(sched.days).filter(([, n]) => n > 0).map(([day, periods]) => ({ day, periods }));
+    const topics = classDays.length ? autoSchedule(g.topics, classDays, sched.start, data?.holidays || []) : g.topics;
+    upd({ objectives: g.objectives, outcomes: g.outcomes.length ? g.outcomes : f.outcomes, topics, text_books: g.text_books, references_text: g.references_text });
+    setConfirmGen(null);
+    setTab('plan');
+    setMsg({ ok: true, text: `Lesson plan generated: ${topics.length} topics, ${topics.reduce((n, t) => n + (t.periods || 1), 0)} periods${classDays.length ? `, dates from ${fmtD(sched.start)} following the timetable` : ' (use Auto-fill dates to add dates)'}. Check it, then Save draft.` });
+  };
+  const onGenerate = (g: any) => {
+    if (f.topics.some(t => t.topic.trim())) setConfirmGen(g);
+    else applyGenerated(g);
+  };
 
   const refresh = () => { qc.invalidateQueries({ queryKey: ['lessonPlan', allotmentId] }); qc.invalidateQueries({ queryKey: ['myLessonPlans'] }); qc.invalidateQueries({ queryKey: ['deptLessonPlans'] }); };
   const save = useMutation({
@@ -122,8 +140,16 @@ export function LessonPlanEditor({ allotmentId, onBack }: { allotmentId: string;
           <p className="text-xs text-textSecondary">{a.semester_label} · Section {a.section || '—'} · {a.department} · {a.faculty_name}{a.co_faculty_name ? ` & ${a.co_faculty_name}` : ''}</p>
         </div>
         <StatusChip s={status} />
-        <button className={btnGhost} disabled={!p} onClick={() => lessonPlanPdf(a, { ...p, ...(canEdit ? f : {}) })}><Download className="w-3.5 h-3.5 inline mr-1" />PDF</button>
+        <button className={btnGhost} disabled={!p && !f.topics.some(t => t.topic)} onClick={() => lessonPlanPdf(a, { ...p, ...(canEdit ? f : {}) })}><Download className="w-3.5 h-3.5 inline mr-1" />PDF</button>
+        <button className={btnGhost} disabled={!p && !f.topics.some(t => t.topic)} onClick={() => lessonPlanExcel(a, { ...p, ...(canEdit ? f : {}) })}><FileSpreadsheet className="w-3.5 h-3.5 inline mr-1" />Excel</button>
       </div>
+      {confirmGen && (
+        <div className={`${card} p-4 flex flex-wrap items-center gap-3 border-amber-300`}>
+          <p className="text-xs font-bold text-textPrimary flex-1 min-w-[220px]">This subject already has a lesson plan ({f.topics.length} topics). Replace it with the one generated from the syllabus?</p>
+          <button className={btnPrimary} onClick={() => applyGenerated(confirmGen)}>Replace</button>
+          <button className={btnGhost} onClick={() => setConfirmGen(null)}>Keep current plan</button>
+        </div>
+      )}
 
       {p?.status === 'returned' && p.hod_remarks && <div className="rounded-xl px-4 py-2.5 text-xs bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200"><b>HOD's remarks:</b> {p.hod_remarks}</div>}
       {msg && <div className={`rounded-xl px-4 py-2.5 text-xs font-bold ${msg.ok ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'}`}>{msg.text}</div>}
@@ -138,15 +164,18 @@ export function LessonPlanEditor({ allotmentId, onBack }: { allotmentId: string;
       )}
 
       <div className="flex rounded-xl border border-borderLine overflow-hidden text-xs font-bold w-fit">
+        <button onClick={() => setTab('syllabus')} className={`px-4 py-2 ${tab === 'syllabus' ? 'bg-brand-primary text-white' : 'text-textSecondary hover:bg-surface-2'}`}>Syllabus</button>
         <button onClick={() => setTab('plan')} className={`px-4 py-2 ${tab === 'plan' ? 'bg-brand-primary text-white' : 'text-textSecondary hover:bg-surface-2'}`}>Plan</button>
         <button onClick={() => setTab('coverage')} disabled={!p} className={`px-4 py-2 disabled:opacity-40 ${tab === 'coverage' ? 'bg-brand-primary text-white' : 'text-textSecondary hover:bg-surface-2'}`}>Syllabus coverage</button>
       </div>
 
-      {tab === 'plan' ? (
+      {tab === 'syllabus' ? (
+        <SyllabusEditor allotmentId={allotmentId} onGenerate={canEdit ? onGenerate : () => setMsg({ ok: false, text: 'Only the subject faculty can generate the lesson plan.' })} />
+      ) : tab === 'plan' ? (
         <div className="space-y-4">
           <div className={`${card} p-4 space-y-3`}>
             <p className="text-sm font-black text-textPrimary">Course objectives &amp; outcomes</p>
-            <textarea rows={2} disabled={!canEdit} className={`${input} w-full`} placeholder="Course objectives" value={f.objectives} onChange={e => upd({ objectives: e.target.value })} />
+            <NumberedListInput rows={3} disabled={!canEdit} className={`${input} w-full`} placeholder="1. Course objective" value={f.objectives} onChange={v => upd({ objectives: v })} />
             <div className="space-y-1.5">
               {f.outcomes.map((o, i) => (
                 <div key={i} className="flex gap-2">

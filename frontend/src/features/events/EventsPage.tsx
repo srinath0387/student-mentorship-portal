@@ -7,6 +7,7 @@ import { uploadAcademicFile } from '../../lib/academicFiles';
 import { ReportPdf, fmtD } from '../../lib/pdfReport';
 
 import { BouncingDots } from '../../components/common/BouncingDots';
+import { NumberedListInput } from '../../components/common/NumberedListInput';
 const card = 'bg-surface border border-borderLine rounded-2xl shadow-sm';
 const input = 'px-2.5 py-1.5 text-xs rounded-lg border border-borderLine bg-background text-textPrimary focus:outline-none focus:ring-2 focus:ring-brand-primary/30';
 const btn = 'px-3 py-2 rounded-xl text-xs font-bold disabled:opacity-50';
@@ -27,35 +28,42 @@ const Chip = ({ s }: { s: string }) => <span className={`px-2 py-0.5 rounded-ful
 const d10 = (v: any) => String(v || '').slice(0, 10);
 const today = () => new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
 const ayOf = (d: string) => { const [y, m] = d.split('-').map(Number); const s = m >= 6 ? y : y - 1; return `${s}-${String((s + 1) % 100).padStart(2, '0')}`; };
+const attendedOf = (e: any) => e.participation === 'attended';
+const ParticipationChip = ({ e }: { e: any }) => attendedOf(e)
+  ? <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-violet-100 text-violet-800 dark:bg-violet-950/50 dark:text-violet-300">Attended</span>
+  : <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">Organized</span>;
 const participants = (e: any) => [e.student_count != null ? `${e.student_count} students` : '', e.faculty_count != null ? `${e.faculty_count} faculty` : '', e.external_count != null ? `${e.external_count} external` : ''].filter(Boolean).join(' · ');
 
 export async function eventPdf(e: any) {
   const urls: Record<string, string> = e.urls || await api.getAcademicViewUrls([...(e.photos || [])].map((p: any) => p.key)).catch(() => ({}));
   const r = await ReportPdf.create(e.department);
   r.refLine(e.ref_no ? `Ref: ${e.ref_no}` : e.status === 'approved' ? '' : 'DRAFT', `Date: ${fmtD(e.reviewed_at || e.end_date)}`);
-  r.title(`Report on ${e.event_type}`, e.title);
+  const att = attendedOf(e);
+  r.title(`Report on ${e.event_type}${att ? ' Attended' : ''}`, e.title);
   const dates = d10(e.start_date) === d10(e.end_date) ? fmtD(e.start_date) : `${fmtD(e.start_date)} to ${fmtD(e.end_date)}`;
   const iv = e.event_type === 'Industrial Visit';
   r.keyValues([
-    ['Type of event', e.event_type], ['Title', e.title], ['Organised by', e.organized_by || `Department of ${e.department}`],
+    ['Type of event', e.event_type], ['Participation', att ? 'Attended (organised by another institution / organisation)' : 'Organised by the department'],
+    ['Title', e.title], ['Organised by', e.organized_by || (att ? null : `Department of ${e.department}`)],
     ['Date(s)', dates], ['Duration', e.duration_hours ? `${e.duration_hours} hours` : null], ['Mode', e.mode],
     [iv ? 'Place visited' : 'Venue', iv ? [e.visit?.company, e.visit?.location].filter(Boolean).join(', ') : e.venue],
     ...(iv ? [['Contact person at industry', e.visit?.contact_person], ['Faculty accompanied', e.visit?.faculty_accompanied]] as [string, any][] : []),
-    ['Coordinator(s)', (e.coordinators || []).map((c: any) => c.name + (c.designation ? ` (${c.designation})` : '')).join(', ')],
-    ['Target audience', e.target_audience], ['Participants', participants(e)],
-    ['Budget / expenditure', e.budget != null ? `Rs. ${Number(e.budget).toLocaleString('en-IN')}/-` : null],
+    [att ? 'Attended by' : 'Coordinator(s)', (e.coordinators || []).map((c: any) => c.name + (c.designation ? ` (${c.designation})` : '')).join(', ')],
+    ...(att ? [] : [['Target audience', e.target_audience], ['Participants', participants(e)],
+      ['Budget / expenditure', e.budget != null ? `Rs. ${Number(e.budget).toLocaleString('en-IN')}/-` : null]] as [string, any][]),
   ]);
   if (!iv && (e.resource_persons || []).length) {
     r.heading('Resource Person(s)');
     r.table(['S.No', 'Name', 'Designation & Organisation', 'Topic'], e.resource_persons.map((p: any, i: number) => [i + 1, p.name, [p.designation, p.organization].filter(Boolean).join(', '), p.topic || '']), { 0: { cellWidth: 12 } });
   }
   if (e.objectives) { r.heading('Objectives'); r.para(e.objectives); }
+  if (e.expected_outcomes) { r.heading('Expected Outcomes'); r.para(e.expected_outcomes); }
   if (e.summary) { r.heading(iv ? 'About the Visit' : 'Summary of the Event'); r.para(e.summary); }
-  if (e.outcomes) { r.heading('Outcomes'); r.para(e.outcomes); }
-  if (e.feedback) { r.heading('Participant Feedback'); r.para(e.feedback); }
+  if (e.outcomes) { r.heading('Achieved Outcomes'); r.para(e.outcomes); }
+  if (e.feedback) { r.heading(att ? 'Takeaways for the Department' : 'Participant Feedback'); r.para(e.feedback); }
   const photos = (e.photos || []).filter((p: any) => urls[p.key]).map((p: any) => ({ url: urls[p.key], caption: p.caption }));
   if (photos.length) { r.heading('Photographs', 95); await r.photos(photos); }
-  r.signatures([{ role: 'Coordinator', name: e.coordinators?.[0]?.name || e.submitted_by_name }, { role: 'HOD', name: `Dept. of ${e.department}` }, { role: 'Principal' }]);
+  r.signatures([{ role: att ? 'Faculty' : 'Coordinator', name: e.coordinators?.[0]?.name || e.submitted_by_name }, { role: 'HOD', name: `Dept. of ${e.department}` }, { role: 'Principal' }]);
   r.save(`${e.event_type} Report - ${e.title} - ${d10(e.start_date)}.pdf`);
 }
 
@@ -80,7 +88,7 @@ function EventForm({ initial, department, onDone, onCancel }: { initial: any | n
     event_type: 'Workshop', title: '', organized_by: department ? `Department of ${department}` : '', start_date: today(), end_date: today(), duration_hours: '', mode: 'Offline', venue: '',
     coordinators: [{ name: user?.name || '', designation: '', email: user?.email || '' }], resource_persons: [{}], visit: {},
     student_count: '', faculty_count: '', external_count: '', target_audience: '', objectives: '', summary: '', outcomes: '', feedback: '', budget: '', photos: [], attachments: [],
-    department: department || '',
+    department: department || '', participation: 'organized', expected_outcomes: '',
   });
   const [previews, setPreviews] = useState<Record<string, string>>(initial?.urls || {});
   const [busy, setBusy] = useState(0);
@@ -88,6 +96,12 @@ function EventForm({ initial, department, onDone, onCancel }: { initial: any | n
   const set = (p: any) => setE((x: any) => ({ ...x, ...p }));
   const iv = e.event_type === 'Industrial Visit';
   const speakers = SPEAKER_TYPES.includes(e.event_type);
+  const att = e.participation === 'attended';
+  const setParticipation = (p: 'organized' | 'attended') => {
+    if (p === e.participation) return;
+    const ours = department ? `Department of ${department}` : '';
+    set({ participation: p, organized_by: p === 'attended' ? (e.organized_by === ours ? '' : e.organized_by) : (e.organized_by || ours) });
+  };
 
   const addPhotos = async (files: FileList) => {
     const list = Array.from(files).slice(0, 12 - e.photos.length);
@@ -126,14 +140,22 @@ function EventForm({ initial, department, onDone, onCancel }: { initial: any | n
       {initial?.status === 'returned' && initial.hod_remarks && <div className="rounded-xl px-4 py-2.5 text-xs bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200"><b>HOD's remarks:</b> {initial.hod_remarks}</div>}
 
       <div className={`${card} p-4 space-y-3`}>
-        <p className="text-sm font-black text-textPrimary">What was conducted</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-sm font-black text-textPrimary mr-auto">{att ? 'What was attended' : 'What was conducted'}</p>
+          <div className="flex rounded-xl border border-borderLine overflow-hidden text-xs font-bold" role="radiogroup" aria-label="Organized or attended">
+            {([['organized', 'We organized it'], ['attended', 'We attended it']] as const).map(([k, t]) => (
+              <button key={k} role="radio" aria-checked={e.participation === k} onClick={() => setParticipation(k)}
+                className={`px-3 py-1.5 ${e.participation === k ? 'bg-brand-primary text-white' : 'text-textSecondary hover:bg-surface-2'}`}>{t}</button>
+            ))}
+          </div>
+        </div>
         <div className="flex flex-wrap gap-1.5">{TYPES.map(t => (
           <button key={t} onClick={() => set({ event_type: t })} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border ${e.event_type === t ? 'bg-brand-primary text-white border-brand-primary' : 'border-borderLine text-textSecondary'}`}>{EMOJI[t]} {t}</button>
         ))}</div>
         <div className="grid md:grid-cols-4 gap-3">
           {!department && <div className="space-y-1"><p className={lbl}>Department</p><select className={`${input} w-full`} value={e.department} onChange={ev => set({ department: ev.target.value })}><option value="">Choose…</option>{DEPTS.map(d => <option key={d}>{d}</option>)}</select></div>}
           <div className="space-y-1 md:col-span-3"><p className={lbl}>Title</p><input className={`${input} w-full`} value={e.title} onChange={ev => set({ title: ev.target.value })} placeholder={iv ? 'e.g. Industrial visit to Infosys, Mysuru' : 'e.g. Two-day workshop on Generative AI'} /></div>
-          <div className="space-y-1 md:col-span-2"><p className={lbl}>Organised by</p><input className={`${input} w-full`} value={e.organized_by} onChange={ev => set({ organized_by: ev.target.value })} placeholder="Department / club / IEEE student branch" /></div>
+          <div className="space-y-1 md:col-span-2"><p className={lbl}>{att ? 'Organised by (host institution / organisation)' : 'Organised by'}</p><input className={`${input} w-full`} value={e.organized_by} onChange={ev => set({ organized_by: ev.target.value })} placeholder={att ? 'e.g. NIT Warangal / AICTE ATAL Academy / IEEE' : 'Department / club / IEEE student branch'} /></div>
           <div className="space-y-1"><p className={lbl}>From</p><input type="date" className={`${input} w-full`} value={e.start_date} onChange={ev => set({ start_date: ev.target.value, end_date: ev.target.value > e.end_date ? ev.target.value : e.end_date })} /></div>
           <div className="space-y-1"><p className={lbl}>To</p><input type="date" min={e.start_date} className={`${input} w-full`} value={e.end_date} onChange={ev => set({ end_date: ev.target.value })} /></div>
           <div className="space-y-1"><p className={lbl}>Duration (hours)</p><input type="number" min={0} className={`${input} w-full`} value={e.duration_hours ?? ''} onChange={ev => set({ duration_hours: ev.target.value })} /></div>
@@ -157,8 +179,8 @@ function EventForm({ initial, department, onDone, onCancel }: { initial: any | n
           <div className="md:col-span-2"><People label={speakers ? 'Resource person(s) / speaker(s)' : 'Resource person(s) (optional)'} rows={e.resource_persons} onChange={r => set({ resource_persons: r })}
             fields={[['name', 'Name'], ['designation', 'Designation'], ['organization', 'Organisation'], ['topic', 'Topic / session']]} /></div>
         )}
-        <People label="Coordinator(s)" rows={e.coordinators} onChange={r => set({ coordinators: r })} fields={[['name', 'Name'], ['designation', 'Designation']]} />
-        <div className="space-y-1.5">
+        <People label={att ? 'Attended by (faculty / students)' : 'Coordinator(s)'} rows={e.coordinators} onChange={r => set({ coordinators: r })} fields={[['name', 'Name'], ['designation', 'Designation']]} />
+        {!att && <div className="space-y-1.5">
           <p className={lbl}>Participants</p>
           <div className="grid grid-cols-3 gap-2">
             {[['student_count', 'Students'], ['faculty_count', 'Faculty'], ['external_count', 'External']].map(([k, l]) => (
@@ -166,18 +188,22 @@ function EventForm({ initial, department, onDone, onCancel }: { initial: any | n
             ))}
           </div>
           <input className={`${input} w-full`} value={e.target_audience || ''} onChange={ev => set({ target_audience: ev.target.value })} placeholder="Target audience, e.g. III B.Tech CSE (DS) A & B" />
-        </div>
+        </div>}
       </div>
 
       <div className={`${card} p-4 space-y-3`}>
-        <div className="grid md:grid-cols-2 gap-3">
-          <div className="space-y-1"><p className={lbl}>Objectives</p><textarea rows={3} className={`${input} w-full`} value={e.objectives || ''} onChange={ev => set({ objectives: ev.target.value })} placeholder="One per line" /></div>
-          <div className="space-y-1"><p className={lbl}>Outcomes</p><textarea rows={3} className={`${input} w-full`} value={e.outcomes || ''} onChange={ev => set({ outcomes: ev.target.value })} placeholder="What participants learned / achieved" /></div>
+        <div className="grid md:grid-cols-3 gap-3">
+          <div className="space-y-1"><label htmlFor="ev-objectives" className={lbl}>Objectives</label>
+            <NumberedListInput id="ev-objectives" rows={4} className={`${input} w-full`} value={e.objectives || ''} onChange={v => set({ objectives: v })} /></div>
+          <div className="space-y-1"><label htmlFor="ev-expected" className={lbl}>Expected outcomes</label>
+            <NumberedListInput id="ev-expected" rows={4} className={`${input} w-full`} value={e.expected_outcomes || ''} onChange={v => set({ expected_outcomes: v })} placeholder="1. What participants should be able to do…" /></div>
+          <div className="space-y-1"><label htmlFor="ev-achieved" className={lbl}>Achieved outcomes</label>
+            <NumberedListInput id="ev-achieved" rows={4} className={`${input} w-full`} value={e.outcomes || ''} onChange={v => set({ outcomes: v })} placeholder="1. What was actually achieved…" /></div>
         </div>
         <div className="space-y-1"><p className={lbl}>{iv ? 'About the visit' : 'Summary of the event'} *</p><textarea rows={5} className={`${input} w-full`} value={e.summary || ''} onChange={ev => set({ summary: ev.target.value })} placeholder={iv ? 'Departments visited, processes observed, interaction with engineers…' : 'Sessions conducted, hands-on activities, highlights…'} /></div>
-        <div className="grid md:grid-cols-[1fr_200px] gap-3">
-          <div className="space-y-1"><p className={lbl}>Participant feedback (optional)</p><input className={`${input} w-full`} value={e.feedback || ''} onChange={ev => set({ feedback: ev.target.value })} placeholder="e.g. 92% rated the session excellent" /></div>
-          <div className="space-y-1"><p className={lbl}>Budget / spent (₹)</p><input type="number" min={0} className={`${input} w-full`} value={e.budget ?? ''} onChange={ev => set({ budget: ev.target.value })} /></div>
+        <div className={`grid gap-3 ${att ? '' : 'md:grid-cols-[1fr_200px]'}`}>
+          <div className="space-y-1"><p className={lbl}>{att ? 'Takeaways for the department (optional)' : 'Participant feedback (optional)'}</p><input className={`${input} w-full`} value={e.feedback || ''} onChange={ev => set({ feedback: ev.target.value })} placeholder={att ? 'e.g. Will introduce a lab on LLM fine-tuning next semester' : 'e.g. 92% rated the session excellent'} /></div>
+          {!att && <div className="space-y-1"><p className={lbl}>Budget / spent (₹)</p><input type="number" min={0} className={`${input} w-full`} value={e.budget ?? ''} onChange={ev => set({ budget: ev.target.value })} /></div>}
         </div>
       </div>
 
@@ -234,6 +260,7 @@ function EventDetail({ id, onBack, onEdit }: { id: number; onBack: () => void; o
         <button onClick={onBack} className="p-2 rounded-xl border border-borderLine text-textSecondary hover:bg-surface-2" aria-label="Back"><ArrowLeft className="w-4 h-4" /></button>
         <div className="flex-1 min-w-[200px]"><h1 className="text-lg font-black text-textPrimary">{EMOJI[e.event_type]} {e.title}</h1>
           <p className="text-xs text-textSecondary">{e.event_type} · {fmtD(e.start_date)}{d10(e.end_date) !== d10(e.start_date) ? ` – ${fmtD(e.end_date)}` : ''} · {e.department}{e.ref_no ? ` · ${e.ref_no}` : ''}</p></div>
+        <ParticipationChip e={e} />
         <Chip s={e.status} />
         {e.can_edit && <button className={btnGhost} onClick={() => onEdit(e)}><Pencil className="w-3.5 h-3.5 inline mr-1" />Edit</button>}
         <button className={btnPrimary} disabled={pdfBusy} onClick={async () => { setPdfBusy(true); try { await eventPdf(e); } finally { setPdfBusy(false); } }}>
@@ -258,7 +285,7 @@ function EventDetail({ id, onBack, onEdit }: { id: number; onBack: () => void; o
         <div className={`${card} p-4 space-y-2 text-xs`}>
           {[[iv ? 'Place visited' : 'Venue', iv ? [e.visit?.company, e.visit?.location].filter(Boolean).join(', ') : e.venue], ['Organised by', e.organized_by], ['Mode', e.mode],
             ['Duration', e.duration_hours ? `${e.duration_hours} h` : ''], ['Participants', participants(e)], ['Audience', e.target_audience],
-            ['Coordinators', (e.coordinators || []).map((c: any) => c.name).join(', ')], ['Submitted by', e.submitted_by_name]].filter(([, v]) => v).map(([k, v]) => (
+            [attendedOf(e) ? 'Attended by' : 'Coordinators', (e.coordinators || []).map((c: any) => c.name).join(', ')], ['Submitted by', e.submitted_by_name]].filter(([, v]) => v).map(([k, v]) => (
             <div key={k}><p className="text-[10px] font-bold uppercase text-textMuted">{k}</p><p className="text-textPrimary font-semibold">{v}</p></div>
           ))}
           {(e.resource_persons || []).length > 0 && <div><p className="text-[10px] font-bold uppercase text-textMuted">Resource persons</p>
@@ -266,7 +293,8 @@ function EventDetail({ id, onBack, onEdit }: { id: number; onBack: () => void; o
           {(e.attachments || []).map((a: any) => e.urls?.[a.key] && <a key={a.key} href={e.urls[a.key]} target="_blank" rel="noopener noreferrer" className="block font-bold text-brand-primary"><Paperclip className="w-3 h-3 inline" /> {a.name}</a>)}
         </div>
         <div className={`${card} p-4 space-y-3 text-xs lg:col-span-2`}>
-          {[['Objectives', e.objectives], [iv ? 'About the visit' : 'Summary', e.summary], ['Outcomes', e.outcomes], ['Feedback', e.feedback]].filter(([, v]) => v).map(([k, v]) => (
+          {[['Objectives', e.objectives], ['Expected outcomes', e.expected_outcomes], [iv ? 'About the visit' : 'Summary', e.summary], ['Achieved outcomes', e.outcomes],
+            [attendedOf(e) ? 'Takeaways' : 'Feedback', e.feedback]].filter(([, v]) => v).map(([k, v]) => (
             <div key={k}><p className="text-[10px] font-bold uppercase text-textMuted">{k}</p><p className="text-textPrimary whitespace-pre-line">{v}</p></div>
           ))}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
@@ -285,7 +313,7 @@ export default function EventsPage() {
   const { user } = useAuth();
   const role = user?.role || '';
   const ownDept = ['hod', 'faculty', 'coordinator'].includes(role) ? user?.department || null : null;
-  const [f, setF] = useState({ department: 'All', type: 'All', year: 'All', status: 'All' });
+  const [f, setF] = useState({ department: 'All', type: 'All', year: 'All', status: 'All', participation: 'All' });
   const [view, setView] = useState<{ mode: 'list' } | { mode: 'new' } | { mode: 'edit'; e: any } | { mode: 'detail'; id: number }>({ mode: 'list' });
   const { data: events = [], isLoading } = useQuery<any[]>({ queryKey: ['events', f, ownDept], queryFn: () => api.getEvents({ ...f, department: ownDept ? undefined : f.department }) });
   const years = useMemo(() => Array.from(new Set(events.map(e => ayOf(d10(e.start_date))))).sort().reverse(), [events]);
@@ -300,11 +328,13 @@ export default function EventsPage() {
   const exportExcel = async () => {
     const XLSX = await import('xlsx');
     const rows = approved.map((e, i) => ({
-      'S.No': i + 1, 'Academic Year': String(e.academic_year || '').replace('–', '-'), Department: e.department, Type: e.event_type, Title: e.title,
+      'S.No': i + 1, 'Academic Year': String(e.academic_year || '').replace('–', '-'), Department: e.department, Type: e.event_type,
+      'Organized / Attended': attendedOf(e) ? 'Attended' : 'Organized', 'Organised by': e.organized_by || '', Title: e.title,
       'From': d10(e.start_date), 'To': d10(e.end_date), 'Duration (h)': e.duration_hours ?? '',
       'Resource Person / Place Visited': e.event_type === 'Industrial Visit' ? [e.visit?.company, e.visit?.location].filter(Boolean).join(', ') : (e.resource_persons || []).map((p: any) => `${p.name}${p.organization ? ` (${p.organization})` : ''}`).join('; '),
       Students: e.student_count ?? '', Faculty: e.faculty_count ?? '', External: e.external_count ?? '',
-      Coordinators: (e.coordinators || []).map((c: any) => c.name).join(', '), 'Ref No': e.ref_no || '',
+      'Coordinators / Attended by': (e.coordinators || []).map((c: any) => c.name).join(', '),
+      'Expected Outcomes': e.expected_outcomes || '', 'Achieved Outcomes': e.outcomes || '', 'Ref No': e.ref_no || '',
     }));
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Events');
     XLSX.writeFile(wb, `events-register-${f.year === 'All' ? 'all-years' : f.year}.xlsx`);
@@ -334,6 +364,8 @@ export default function EventsPage() {
           <select className={input} value={f.type} onChange={e => setF({ ...f, type: e.target.value })}><option value="All">All types</option>{TYPES.map(t => <option key={t}>{t}</option>)}</select>
           <select className={input} value={f.year} onChange={e => setF({ ...f, year: e.target.value })}><option value="All">All years</option>{years.map(y => <option key={y} value={y}>{y}</option>)}</select>
           <select className={input} value={f.status} onChange={e => setF({ ...f, status: e.target.value })}><option value="All">Any status</option>{Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v.t}</option>)}</select>
+          <select aria-label="Organized or attended" className={input} value={f.participation} onChange={e => setF({ ...f, participation: e.target.value })}>
+            <option value="All">Organized &amp; attended</option><option value="organized">Organized</option><option value="attended">Attended</option></select>
         </div>
         {isLoading ? <div className="p-10 text-center"><BouncingDots size="md" className="text-textMuted" /></div>
           : events.length === 0 ? <div className="p-10 text-center text-xs text-textMuted">No reports yet. Click “New report” after a workshop, FDP, guest lecture or industrial visit.</div>
@@ -343,8 +375,9 @@ export default function EventsPage() {
                 <button key={e.id} onClick={() => setView({ mode: 'detail', id: e.id })} className="w-full text-left px-4 py-3 flex flex-wrap items-center gap-3 hover:bg-surface-2/60">
                   <span className="text-xl w-8 text-center">{EMOJI[e.event_type] || '✨'}</span>
                   <div className="flex-1 min-w-[220px]"><p className="text-sm font-bold text-textPrimary">{e.title}</p>
-                    <p className="text-[11px] text-textSecondary">{e.event_type} · {fmtD(e.start_date)}{!ownDept ? ` · ${e.department}` : ''} · {participants(e) || 'participants not entered'} · by {e.submitted_by_name}</p></div>
+                    <p className="text-[11px] text-textSecondary">{e.event_type} · {fmtD(e.start_date)}{!ownDept ? ` · ${e.department}` : ''} · {attendedOf(e) ? (e.organized_by ? `at ${e.organized_by}` : 'attended') : (participants(e) || 'participants not entered')} · by {e.submitted_by_name}</p></div>
                   <span className="text-[11px] text-textMuted">{(e.photos || []).length} 📷</span>
+                  <ParticipationChip e={e} />
                   <Chip s={e.status} />
                 </button>
               ))}
