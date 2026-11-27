@@ -65,6 +65,8 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
     if (p.startsWith('/coding-analytics')) return { parent: 'Overview', child: 'Coding Leaderboard' };
     if (p.startsWith('/account/password')) return { parent: 'Settings', child: 'Change Password' };
     if (p.startsWith('/lesson-plans/review')) return { parent: 'Academic Quality', child: 'Lesson Plans & Coverage' };
+    if (p.startsWith('/faculty-profile/department')) return { parent: 'Academic Quality', child: 'Faculty Profiles' };
+    if (p.startsWith('/faculty-profile/comprehensive')) return { parent: 'Academic Quality', child: 'Comprehensive Profile' };
     if (p.startsWith('/quality/overview')) return { parent: 'Academic Quality', child: 'Department Progress' };
     if (p.startsWith('/lesson-plans/execution')) return { parent: 'Academic Quality', child: 'Course Execution Plans' };
     if (p.startsWith('/lesson-plans')) return { parent: 'Academic Quality', child: 'My Lesson Plans' };

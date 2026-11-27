@@ -25,7 +25,11 @@ const daysFromNow = (n: number) => ymd(new Date(Date.now() + 5.5 * 3600000 + n *
 
 d('Department progress overview (real Postgres)', () => {
   beforeAll(async () => {
-    pool = new Pool({ connectionString: URL });
+    // a schema of its own, so this test never touches the tables other integration tests use
+    const admin = new Pool({ connectionString: URL });
+    await admin.query('DROP SCHEMA IF EXISTS qo_test CASCADE; CREATE SCHEMA qo_test');
+    await admin.end();
+    pool = new Pool({ connectionString: URL, options: '-c search_path=qo_test' });
     await pool.query(`DROP TABLE IF EXISTS subject_allotments, course_exec_plans, course_exec_settings, lesson_plans, dept_events, event_requests CASCADE`);
     await pool.query(`CREATE TABLE subject_allotments (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), semester_label TEXT NOT NULL DEFAULT '2-2',
       subject_name TEXT NOT NULL DEFAULT 'X', subject_type TEXT NOT NULL DEFAULT 'Theory', section TEXT NOT NULL DEFAULT 'A',

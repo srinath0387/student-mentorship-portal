@@ -12235,6 +12235,147 @@ app.put('/exec-plans/settings', requireRole('hod', 'admin'), async (req: Request
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Faculty Comprehensive Profile — the department's 11-sheet workbook (profile, teaching history, FDPs, trainings,
+// workshops, mentees, top mentees, publications & IP, alumni / industry connections, creative assignments).
+// Faculty fill it once, prefilled from what the portal already has; HOD / Principal see the department.
+// Named-mentee ratings ("Top 5 Mentees") stay with the faculty member and their HOD.
+const FCP_SECTIONS = ['profile', 'teaching', 'fdp', 'training', 'workshops', 'mentees', 'top_mentees', 'papers', 'patents', 'alumni', 'industry', 'creative'];
+/** Keep the shape (objects / arrays of strings), clip every string, cap list sizes — the page owns the field names */
+function cleanFcp(v: any, depth = 0): any {
+  if (depth > 5) return null;
+  if (Array.isArray(v)) return v.slice(0, 80).map(x => cleanFcp(x, depth + 1));
+  if (v && typeof v === 'object') {
+    const o: Record<string, any> = {};
+    for (const [k, x] of Object.entries(v).slice(0, 60)) if (/^[a-z0-9_]{1,40}$/i.test(k)) o[k] = cleanFcp(x, depth + 1);
+    return o;
+  }
+  if (v === null || v === undefined) return '';
+  return cepText(v, 3000);
+}
+function fcpProgress(d: any): number {
+  const has = (x: any): boolean => (Array.isArray(x) ? x.some(has) : x && typeof x === 'object' ? Object.values(x).some(has) : !!String(x ?? '').trim());
+  const profileKeys = ['full_name', 'designation', 'date_joined', 'highest_qualification', 'basic_degree', 'specialization', 'email', 'linkedin', 'orcid', 'area1'];
+  const ratios = FCP_SECTIONS.map(s => {
+    if (s === 'profile') return profileKeys.filter(k => String(d?.profile?.[k] ?? '').trim()).length / profileKeys.length;
+    if (s === 'teaching') return Math.min(1, (Array.isArray(d?.teaching) ? d.teaching.filter((t: any) => String(t?.course || '').trim()).length : 0) / 8);
+    return has(d?.[s]) ? 1 : 0;
+  });
+  return Math.round((ratios.reduce((a, b) => a + b, 0) / ratios.length) * 100);
+}
+async function fcpFacultyRow(email: string) {
+  return (await db.query(`SELECT faculty_id, name, email, department FROM faculty WHERE LOWER(email) = LOWER($1) LIMIT 1`, [email]).catch(() => ({ rows: [] as any[] }))).rows[0] || null;
+}
+let fcpReady: Promise<void> | null = null;
+function ensureFcpTable(): Promise<void> {
+  if (!fcpReady) {
+    fcpReady = db.query(`CREATE TABLE IF NOT EXISTS faculty_comprehensive_profiles (
+        email TEXT PRIMARY KEY, name TEXT, department TEXT, data JSONB NOT NULL DEFAULT '{}', progress INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`).then(() => undefined).catch((e: any) => { fcpReady = null; throw e; });
+  }
+  return fcpReady;
+}
+/** What the form prefills from: profile, allotments, events, mentees and their coding handles, alumni, event speakers */
+async function fcpSources(email: string, fac: any) {
+  const e = email.toLowerCase();
+  const safe = (p: Promise<any>) => p.catch(() => ({ rows: [] as any[] }));
+  const [profile, teaching, events, mentees, alumni, speakers] = await Promise.all([
+    safe(db.query(`SELECT personal, education, publications, domains, activities FROM faculty_full_profiles WHERE LOWER(email) = $1 LIMIT 1`, [e])),
+    safe(db.query(`SELECT semester_label, subject_name, subject_type, department, created_at FROM subject_allotments
+                   WHERE LOWER(faculty_email) = $1 OR LOWER(COALESCE(co_faculty_email, '')) = $1 ORDER BY created_at DESC LIMIT 200`, [e])),
+    safe(db.query(`SELECT event_type, participation, title, organized_by, objectives, start_date::text AS start_date, end_date::text AS end_date, duration_hours, status
+                   FROM dept_events WHERE LOWER(submitted_by) = $1 OR coordinators::text ILIKE $2 ORDER BY start_date DESC LIMIT 200`, [e, `%${e}%`])),
+    fac?.faculty_id ? safe(db.query(
+      `SELECT s.roll_number, s.name, s.year, s.linkedin_url,
+              (SELECT json_object_agg(cp.platform, cp.handle) FROM coding_profiles cp WHERE cp.student_id = s.roll_number) AS handles
+       FROM students s
+       WHERE UPPER(COALESCE(s.faculty_mentor_id, '')) = UPPER($1)
+          OR EXISTS (SELECT 1 FROM mentor_assignments ma WHERE UPPER(ma.roll_number) = UPPER(s.roll_number) AND UPPER(ma.faculty_id) = UPPER($1))
+       ORDER BY s.year DESC, s.roll_number LIMIT 300`, [fac.faculty_id])) : Promise.resolve({ rows: [] as any[] }),
+    fac?.department ? safe(db.query(
+      `SELECT name, organization, role_title, location, linkedin_url, batch FROM alumni
+       WHERE COALESCE(organization, '') <> '' AND LOWER(REGEXP_REPLACE(COALESCE(department, ''), '[^a-zA-Z0-9]', '', 'g')) = $1
+       ORDER BY batch DESC NULLS LAST, name LIMIT 400`, [normDept(fac.department)])) : Promise.resolve({ rows: [] as any[] }),
+    fac?.department ? safe(db.query(
+      `SELECT DISTINCT p->>'name' AS name, p->>'designation' AS designation, p->>'organization' AS organization
+       FROM dept_events d, jsonb_array_elements(COALESCE(d.resource_persons, '[]'::jsonb)) p
+       WHERE LOWER(REGEXP_REPLACE(d.department, '[^a-zA-Z0-9]', '', 'g')) = $1 AND COALESCE(p->>'name', '') <> '' LIMIT 200`, [normDept(fac.department)])) : Promise.resolve({ rows: [] as any[] }),
+  ]);
+  return { faculty: fac, profile: profile.rows[0] || null, teaching: teaching.rows, events: events.rows, mentees: mentees.rows, alumni: alumni.rows, speakers: speakers.rows };
+}
+const fcpStripRatings = (d: any) => (d && typeof d === 'object' ? { ...d, top_mentees: [] } : d);
+
+// GET /comp-profile/me — my saved profile + everything it prefills from
+app.get('/comp-profile/me', requireRole('faculty', 'hod', 'coordinator', 'admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureFcpTable();
+    const email = String(req.auth!.email || '').toLowerCase();
+    const fac = await fcpFacultyRow(email);
+    const [saved, sources] = await Promise.all([
+      db.query('SELECT data, progress, updated_at FROM faculty_comprehensive_profiles WHERE LOWER(email) = $1', [email]),
+      fcpSources(email, fac),
+    ]);
+    res.json({ saved: saved.rows[0] || null, sources, can_edit: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /comp-profile/me — save
+app.put('/comp-profile/me', requireRole('faculty', 'hod', 'coordinator', 'admin'), async (req: Request, res: Response) => {
+  try {
+    await ensureFcpTable();
+    const email = String(req.auth!.email || '').toLowerCase();
+    const raw = req.body?.data && typeof req.body.data === 'object' ? req.body.data : {};
+    const data: Record<string, any> = {};
+    for (const s of FCP_SECTIONS) if (raw[s] !== undefined) data[s] = cleanFcp(raw[s]);
+    const progress = fcpProgress(data);
+    const fac = await fcpFacultyRow(email);
+    const r = await db.query(
+      `INSERT INTO faculty_comprehensive_profiles (email, name, department, data, progress, updated_at) VALUES ($1,$2,$3,$4,$5,NOW())
+       ON CONFLICT (email) DO UPDATE SET data = EXCLUDED.data, progress = EXCLUDED.progress, name = COALESCE(EXCLUDED.name, faculty_comprehensive_profiles.name),
+         department = COALESCE(EXCLUDED.department, faculty_comprehensive_profiles.department), updated_at = NOW()
+       RETURNING progress, updated_at`,
+      [email, fac?.name || await staffName(email), fac?.department || req.auth!.department || null, JSON.stringify(data), progress]);
+    res.json(r.rows[0]);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /comp-profile/department?department=&full=1 — every faculty member of the department with how far their profile is filled
+app.get('/comp-profile/department', requireRole('hod', ...QUALITY_OVERSIGHT), async (req: Request, res: Response) => {
+  try {
+    await ensureFcpTable();
+    const own = await qualityDept(req);
+    const dept = own || (req.query.department && req.query.department !== 'All' ? String(req.query.department) : null);
+    const full = req.query.full === '1';
+    const params: any[] = []; let where = '';
+    if (dept) { params.push(normDept(dept)); where = `WHERE LOWER(REGEXP_REPLACE(COALESCE(f.department, p.department, ''), '[^a-zA-Z0-9]', '', 'g')) = $1`; }
+    const r = await db.query(
+      `SELECT COALESCE(f.email, p.email) AS email, COALESCE(f.name, p.name) AS name, COALESCE(f.department, p.department) AS department,
+              p.progress, p.updated_at${full ? ', p.data' : ''}
+       FROM faculty f FULL OUTER JOIN faculty_comprehensive_profiles p ON LOWER(p.email) = LOWER(f.email)
+       ${where} ORDER BY 2 LIMIT 2000`, params);
+    // ratings of named students: the HOD / department admin only
+    const seesRatings = ['hod', 'admin'].includes(req.auth!.role) && !!own;
+    res.json({ department: dept || 'All', can_see_ratings: seesRatings,
+      rows: r.rows.map((x: any) => (full && !seesRatings ? { ...x, data: fcpStripRatings(x.data) } : x)) });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /comp-profile/faculty/:email — one faculty member's profile (HOD of the department, oversight)
+app.get('/comp-profile/faculty/:email', requireRole('hod', ...QUALITY_OVERSIGHT), async (req: Request, res: Response) => {
+  try {
+    await ensureFcpTable();
+    const email = String(req.params.email || '').toLowerCase();
+    const fac = await fcpFacultyRow(email);
+    const saved = (await db.query('SELECT name, department, data, progress, updated_at FROM faculty_comprehensive_profiles WHERE LOWER(email) = $1', [email])).rows[0];
+    const department = fac?.department || saved?.department;
+    if (!fac && !saved) return res.status(404).json({ error: 'Faculty member not found' });
+    const own = await qualityDept(req);
+    if (own && normDept(own) !== normDept(department)) return res.status(403).json({ error: 'Not your department' });
+    const seesRatings = ['hod', 'admin'].includes(req.auth!.role) && !!own;
+    res.json({ faculty: { email, name: fac?.name || saved?.name, department },
+      saved: saved ? { ...saved, data: seesRatings ? saved.data : fcpStripRatings(saved.data) } : null, can_see_ratings: seesRatings, can_edit: false });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Department progress — one row per department for the principal, director, management, program chair and
 // college admin: execution plans, lesson plans & syllabus coverage, events (this academic year). HOD / dept admin
 // get their own department only. Counts only; the detail stays on the existing pages.

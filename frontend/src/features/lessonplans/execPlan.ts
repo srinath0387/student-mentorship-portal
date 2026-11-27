@@ -218,36 +218,36 @@ const xmlEsc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').rep
 const dmy = (iso: string) => (/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}` : iso);
 const colNum = (col: string) => [...col].reduce((s, ch) => s * 26 + ch.charCodeAt(0) - 64, 0);
 const colOf = (ref: string) => ref.replace(/\d+/g, '');
-type Val = string | number | null | undefined;
+export type Val = string | number | null | undefined;
 const WRAP: Record<string, string> = { '3': '10', '4': '10', '6': '10', '18': '10' };   // template styles → same look with text wrap
 
 /** Column widths (in characters) from <cols> */
-function colWidths(sheet: string): (col: string) => number {
+export function colWidths(sheet: string): (col: string) => number {
   const cols = [...sheet.matchAll(/<col min="(\d+)" max="(\d+)" width="([\d.]+)"/g)].map(m => ({ min: +m[1], max: +m[2], w: +m[3] }));
   return (col: string) => { const i = colNum(col); return cols.find(c => i >= c.min && i <= c.max)?.w ?? 8.43; };
 }
 /** One cell's XML with the template style kept (wrapping text where the style allows) */
-function cellXml(ref: string, style: string | null, v: Val, formula?: string) {
-  const s = style ? ` s="${typeof v === 'string' && v && WRAP[style] ? WRAP[style] : style}"` : '';
+export function cellXml(ref: string, style: string | null, v: Val, formula?: string, wrap: Record<string, string> = WRAP) {
+  const s = style ? ` s="${typeof v === 'string' && v && wrap[style] ? wrap[style] : style}"` : '';
   if (formula) return `<c r="${ref}"${s}><f>${formula}</f><v>${Number(v) || 0}</v></c>`;
   if (v === null || v === undefined || v === '') return `<c r="${ref}"${s}/>`;
   if (typeof v === 'number') return `<c r="${ref}"${s}><v>${v}</v></c>`;
   return `<c r="${ref}"${s} t="inlineStr"><is><t xml:space="preserve">${xmlEsc(v)}</t></is></c>`;
 }
-const asVal = (v: string, numeric = false): Val => {
+export const asVal = (v: string, numeric = false): Val => {
   const t = String(v ?? '').trim();
   if (!t) return '';
   return numeric && /^\d+(\.\d+)?$/.test(t) ? Number(t) : t;
 };
 /** Set cells in one <row>, keeping each cell's template style; inserts missing cells in column order. */
-function setRowCells(rowXml: string, rowNum: number, values: Record<string, Val>, formulas: Record<string, string> = {}): string {
+export function setRowCells(rowXml: string, rowNum: number, values: Record<string, Val>, formulas: Record<string, string> = {}, wrap: Record<string, string> = WRAP): string {
   let xml = rowXml;
   for (const [col, v] of Object.entries(values)) {
     const ref = `${col}${rowNum}`;
     const re = new RegExp(`<c r="${ref}"((?:\\s[^>]*?)?)(?:/>|>[\\s\\S]*?</c>)`);
     const m = xml.match(re);
     const style = m ? (m[1].match(/\ss="(\d+)"/)?.[1] ?? null) : null;
-    const cx = cellXml(ref, style, v, formulas[col]);
+    const cx = cellXml(ref, style, v, formulas[col], wrap);
     if (m) xml = xml.replace(re, cx);
     else {
       const cells = [...xml.matchAll(/<c r="([A-Z]+)\d+"/g)];
@@ -258,7 +258,7 @@ function setRowCells(rowXml: string, rowNum: number, values: Record<string, Val>
   return xml;
 }
 /** Row height so wrapped text shows in full (Excel doesn't resize rows written by other programs) */
-function withHeight(rowXml: string, values: Record<string, Val>, width: (c: string) => number, minHt = 14.4): string {
+export function withHeight(rowXml: string, values: Record<string, Val>, width: (c: string) => number, minHt = 14.4): string {
   let lines = 1;
   for (const [col, v] of Object.entries(values)) {
     if (typeof v !== 'string' || !v) continue;
@@ -269,22 +269,22 @@ function withHeight(rowXml: string, values: Record<string, Val>, width: (c: stri
   return rowXml.replace(/<row ([^>]*?)>/, (_m, attrs: string) =>
     `<row ${attrs.replace(/\s?ht="[\d.]+"/, '').replace(/\s?customHeight="\d"/, '')} ht="${ht}" customHeight="1">`);
 }
-const rowsOf = (sheet: string) => [...sheet.matchAll(/<row r="(\d+)"[^>]*>[\s\S]*?<\/row>/g)].map(m => ({ num: +m[1], xml: m[0] }));
+export const rowsOf = (sheet: string) => [...sheet.matchAll(/<row r="(\d+)"[^>]*>[\s\S]*?<\/row>/g)].map(m => ({ num: +m[1], xml: m[0] }));
 
 /** Fill fixed rows in place (Initial Plan, Industry Experts) */
-function fillInPlace(sheet: string, cells: Record<number, Record<string, Val>>, formulas: Record<number, Record<string, string>> = {}): string {
+export function fillInPlace(sheet: string, cells: Record<number, Record<string, Val>>, formulas: Record<number, Record<string, string>> = {}, wrap: Record<string, string> = WRAP): string {
   const width = colWidths(sheet);
   let out = sheet;
   for (const r of rowsOf(sheet)) {
     const vals = cells[r.num];
     if (!vals) continue;
     const old = +(r.xml.match(/\sht="([\d.]+)"/)?.[1] || 14.4);
-    out = out.replace(r.xml, withHeight(setRowCells(r.xml, r.num, vals, formulas[r.num]), vals, width, old));
+    out = out.replace(r.xml, withHeight(setRowCells(r.xml, r.num, vals, formulas[r.num], wrap), vals, width, old));
   }
   return out;
 }
 /** Replace the data rows of a table sheet with one row per record, cloned from the template's first data row. */
-function fillTable(sheet: string, records: Record<string, Val>[], opts: { dropMerges?: boolean } = {}): string {
+export function fillTable(sheet: string, records: Record<string, Val>[], opts: { dropMerges?: boolean } = {}): string {
   const width = colWidths(sheet);
   const rows = rowsOf(sheet);
   const head = rows.find(r => r.num === 1)!;

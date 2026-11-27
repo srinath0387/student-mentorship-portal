@@ -547,3 +547,63 @@ describe('Event request approval: HOD recommends, Principal approves', () => {
     expect([d.host, d.place, d.mode, d.registration_fee, d.od_days]).toEqual(['NIT Warangal', 'Warangal', '', '1500', '5']);
   });
 });
+
+describe('Faculty Comprehensive Profile', () => {
+  const HOD_CSE = () => `Bearer ${signSessionToken({ role: 'hod', email: 'hodcse@rgmcet.edu.in', department: 'CSE' })}`;
+  const HOD_ECE = () => `Bearer ${signSessionToken({ role: 'hod', email: 'hodece@rgmcet.edu.in', department: 'ECE' })}`;
+  const PRINCIPAL = () => `Bearer ${signSessionToken({ role: 'principal', email: 'principal@rgmcet.edu.in' })}`;
+  const HODS: Route = ['FROM hod_credentials', (_s, p) => [{ email: 'x', department: /hodece/i.test(JSON.stringify(p)) ? 'ECE' : 'CSE' }]];
+  const ratings = { top_mentees: [{ student: '23091A0501, Ravi', ratings: ['5', '4'] }], profile: { full_name: 'Ramesh' } };
+
+  it('saves only the known sections, cleaned, with progress worked out on the server', async () => {
+    const calls = routeDb([
+      [/FROM faculty WHERE LOWER\(email\)/, [{ faculty_id: 'F1', name: 'Ramesh', email: 'ramesh@rgmcet.edu.in', department: 'CSE' }]],
+      ['INSERT INTO faculty_comprehensive_profiles', (_s, p) => [{ progress: p[4], updated_at: '2026-11-28' }]],
+    ]);
+    const res = await request(app).put('/comp-profile/me').set('Authorization', FAC()).send({ data: {
+      profile: { full_name: 'Ramesh', designation: 'AP', 'bad key!': 'x', email: 'r@x\u0000' },
+      teaching: [{ label: 'AY 2026-27 I Semester', course: 'OS' }], evil: { a: 1 }, creative: Array.from({ length: 200 }, () => ({ problem: 'p' })),
+    } });
+    expect(res.status).toBe(200);
+    const ins = calls.find(c => c.sql.includes('INSERT INTO faculty_comprehensive_profiles'))!;
+    const d = JSON.parse(ins.params[3]);
+    expect(Object.keys(d).sort()).toEqual(['creative', 'profile', 'teaching']);
+    expect(d.profile['bad key!']).toBeUndefined();
+    expect(d.profile.email).toBe('r@x');
+    expect(d.creative).toHaveLength(80);
+    expect(ins.params[4]).toBeGreaterThan(0);
+    expect(ins.params[2]).toBe('CSE');
+  });
+
+  it('the HOD sees ratings of named mentees; the Principal does not', async () => {
+    routeDb([HODS, ['FROM faculty f FULL OUTER JOIN', [{ email: 'ramesh@rgmcet.edu.in', name: 'Ramesh', department: 'CSE', progress: 40, data: ratings }]]]);
+    const hod = await request(app).get('/comp-profile/department?full=1').set('Authorization', HOD_CSE());
+    expect(hod.status).toBe(200);
+    expect(hod.body.can_see_ratings).toBe(true);
+    expect(hod.body.rows[0].data.top_mentees).toHaveLength(1);
+    routeDb([['FROM faculty f FULL OUTER JOIN', [{ email: 'ramesh@rgmcet.edu.in', name: 'Ramesh', department: 'CSE', progress: 40, data: ratings }]]]);
+    const pr = await request(app).get('/comp-profile/department?full=1').set('Authorization', PRINCIPAL());
+    expect(pr.status).toBe(200);
+    expect(pr.body.can_see_ratings).toBe(false);
+    expect(pr.body.rows[0].data.top_mentees).toEqual([]);
+    expect(pr.body.rows[0].data.profile.full_name).toBe('Ramesh');
+  });
+
+  it('one profile: another department’s HOD is refused; the Principal sees it without ratings', async () => {
+    const rows: Route[] = [
+      [/FROM faculty WHERE LOWER\(email\)/, [{ faculty_id: 'F1', name: 'Ramesh', email: 'ramesh@rgmcet.edu.in', department: 'CSE' }]],
+      ['FROM faculty_comprehensive_profiles WHERE', [{ name: 'Ramesh', department: 'CSE', data: ratings, progress: 40 }]],
+    ];
+    routeDb([HODS, ...rows]);
+    expect((await request(app).get('/comp-profile/faculty/ramesh@rgmcet.edu.in').set('Authorization', HOD_ECE())).status).toBe(403);
+    routeDb(rows);
+    const pr = await request(app).get('/comp-profile/faculty/ramesh@rgmcet.edu.in').set('Authorization', PRINCIPAL());
+    expect(pr.status).toBe(200);
+    expect(pr.body.saved.data.top_mentees).toEqual([]);
+  });
+
+  it('faculty cannot list the department', async () => {
+    routeDb([]);
+    expect((await request(app).get('/comp-profile/department').set('Authorization', FAC())).status).toBe(403);
+  });
+});

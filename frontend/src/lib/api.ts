@@ -1135,6 +1135,16 @@ export const api = {
     fetchWithAuth(`/exec-plans/allotment/${encodeURIComponent(allotmentId)}`),
   saveExecPlan: async (allotmentId: string, data: any): Promise<{ progress: number; updated_at: string }> =>
     fetchWithAuth(`/exec-plans/allotment/${encodeURIComponent(allotmentId)}`, { method: 'PUT', body: JSON.stringify({ data }) }),
+  getMyCompProfile: async (): Promise<{ saved: { data: any; progress: number; updated_at: string } | null; sources: any; can_edit: boolean }> => fetchWithAuth('/comp-profile/me'),
+  saveMyCompProfile: async (data: any): Promise<{ progress: number; updated_at: string }> => fetchWithAuth('/comp-profile/me', { method: 'PUT', body: JSON.stringify({ data }) }),
+  getCompProfileOf: async (email: string): Promise<{ faculty: any; saved: { data: any; progress: number; updated_at: string } | null; can_see_ratings: boolean; can_edit: boolean }> =>
+    fetchWithAuth(`/comp-profile/faculty/${encodeURIComponent(email)}`),
+  getDeptCompProfiles: async (department?: string, full = false): Promise<{ department: string; can_see_ratings: boolean; rows: any[] }> => {
+    const q = new URLSearchParams();
+    if (department && department !== 'All') q.set('department', department);
+    if (full) q.set('full', '1');
+    return fetchWithAuth(`/comp-profile/department${q.toString() ? `?${q}` : ''}`);
+  },
   getQualityOverview: async (): Promise<{ academic_year: string; today: string; scope: string; departments: any[] }> => fetchWithAuth('/quality/overview'),
   getDeptExecPlans: async (department?: string, full = false): Promise<{ department: string; catalog: any[]; due_date: string | null; rows: any[] }> => {
     const q = new URLSearchParams();
