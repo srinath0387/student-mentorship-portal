@@ -23,6 +23,7 @@ export class FsError extends Error {
 }
 
 import { FS_DDL } from './facultySelection.schema';
+import { AY_NOW_SQL } from '../db/allotmentYear';
 export { FS_DDL, FS_ROLLBACK } from './facultySelection.schema';
 
 let tablesReady: Promise<void> | null = null;
@@ -71,13 +72,14 @@ export async function isEligible(q: Q, roundId: string, roll: string): Promise<b
 
 /**
  * Would a (semester, subject, section, faculty) class collide with a class of another department?
- * subject_allotments is unique on (semester_label, subject_name, section, faculty_email) without
- * department, so two departments must never share one row.
+ * subject_allotments is unique on (academic_year, semester_label, subject_name, section, faculty_email) without
+ * department, so two departments must never share one row in the same academic year.
  */
 export async function findDeptClash(q: Q, p: { semester: string; subject: string; section: string; facultyEmail: string; department: string }) {
   const r = await q.query(
     `SELECT id, department FROM subject_allotments
-      WHERE semester_label = $1 AND LOWER(subject_name) = LOWER($2) AND UPPER(section) = $3 AND LOWER(faculty_email) = LOWER($4)`,
+      WHERE semester_label = $1 AND LOWER(subject_name) = LOWER($2) AND UPPER(section) = $3 AND LOWER(faculty_email) = LOWER($4)
+        AND academic_year = ${AY_NOW_SQL}`,
     [p.semester, p.subject, normSection(p.section), p.facultyEmail]
   );
   return r.rows.find((x: any) => normDept(x.department) !== normDept(p.department)) || null;
@@ -170,10 +172,11 @@ export async function pickInTx(q: Q, p: PickInput) {
     }
   }
 
-  // Attendance class for the student's own section (find-or-create; departments never share one)
+  // Attendance class for the student's own section in this academic year (find-or-create; departments never share one)
   const existing = (await q.query(
     `SELECT id, department FROM subject_allotments
       WHERE semester_label = $1 AND LOWER(subject_name) = LOWER($2) AND UPPER(section) = $3 AND LOWER(faculty_email) = LOWER($4)
+        AND academic_year = ${AY_NOW_SQL}
       ORDER BY created_at LIMIT 1`,
     [o.semester_label, o.subject_name, section, o.faculty_email]
   )).rows[0];
@@ -189,7 +192,7 @@ export async function pickInTx(q: Q, p: PickInput) {
     const ins = (await q.query(
       `INSERT INTO subject_allotments (semester_label, subject_name, subject_type, section, faculty_email, faculty_name, department)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
-       ON CONFLICT (semester_label, subject_name, section, faculty_email) DO NOTHING
+       ON CONFLICT (academic_year, semester_label, subject_name, section, faculty_email) DO NOTHING
        RETURNING id`,
       [o.semester_label, o.subject_name, o.subject_type, section, o.faculty_email, o.faculty_name, o.department]
     )).rows[0];
@@ -199,7 +202,8 @@ export async function pickInTx(q: Q, p: PickInput) {
     } else {
       // Created by a parallel pick a moment ago — reuse it
       const again = (await q.query(
-        `SELECT id, department FROM subject_allotments WHERE semester_label = $1 AND subject_name = $2 AND section = $3 AND faculty_email = $4`,
+        `SELECT id, department FROM subject_allotments WHERE semester_label = $1 AND subject_name = $2 AND section = $3 AND faculty_email = $4
+           AND academic_year = ${AY_NOW_SQL}`,
         [o.semester_label, o.subject_name, section, o.faculty_email]
       )).rows[0];
       if (!again) throw new Error('Could not create the attendance class');

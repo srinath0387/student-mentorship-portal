@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { AttendanceChip } from '../students/AttendanceChip';
+import { StudentAttendanceDialog } from '../students/StudentDirectoryPage';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext';
@@ -167,6 +169,7 @@ export const HodDashboardPage: React.FC = () => {
     queryFn: () => user?.email ? api.getMenteesByEmail(user.email) : Promise.resolve([]),
     enabled: Boolean(user?.email),
   });
+  const [menteeAttendance, setMenteeAttendance] = useState<any | null>(null);
 
   const [inspectStudent, setInspectStudent] = useState<HodStudentEntry | null>(null);
   const [inspectTab, setInspectTab] = useState('academics-graph');
@@ -1336,6 +1339,7 @@ export const HodDashboardPage: React.FC = () => {
       )}
 
       {/* ── TAB: My Mentees ── */}
+      {menteeAttendance && <StudentAttendanceDialog student={menteeAttendance} onClose={() => setMenteeAttendance(null)} />}
       {activeTab === 'mentees' && (
         <div className="bg-surface border border-borderLine rounded-2xl p-6 shadow-sm">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
@@ -1433,6 +1437,7 @@ export const HodDashboardPage: React.FC = () => {
                                 <th className="py-3 px-4">Roll No</th>
                                 <th className="py-3 px-4">Batch / Sec</th>
                                 <th className="py-3 px-4">CGPA</th>
+                                <th className="py-3 px-4">Attendance</th>
                                 <th className="py-3 px-4">Standing</th>
                                 <th className="py-3 px-4 text-right">Action</th>
                               </tr>
@@ -1453,6 +1458,7 @@ export const HodDashboardPage: React.FC = () => {
                                         </div>
                                       </td>
                                       <td className="py-3.5 px-4 font-bold text-amber-600 text-xs font-mono">{m.roll_number}</td>
+                                      <td className="py-3.5 px-4 text-xs text-textSecondary">—</td>
                                       <td className="py-3.5 px-4 text-xs text-textSecondary">—</td>
                                       <td className="py-3.5 px-4 text-xs text-textSecondary">—</td>
                                       <td className="py-3.5 px-4">
@@ -1492,6 +1498,10 @@ export const HodDashboardPage: React.FC = () => {
                                     <td className="py-3.5 px-4 text-xs text-textSecondary">{m.batch || '2023-2027'} • Sec {m.section || 'A'}</td>
                                     <td className="py-3.5 px-4 text-sm font-extrabold text-brand-primary">{cgpa > 0 ? cgpa.toFixed(2) : '—'}</td>
                                     <td className="py-3.5 px-4">
+                                      <AttendanceChip a={m.attendance} />
+                                      {m.attendance?.pct_30 != null && <p className="text-[10px] text-textMuted mt-0.5 tabular-nums">Last 30 days: {m.attendance.pct_30}%</p>}
+                                    </td>
+                                    <td className="py-3.5 px-4">
                                       <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
                                         standing === 'Distinction' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800' :
                                         standing === 'First Class' ? 'bg-brand-soft text-brand-primary dark:bg-indigo-950/40 dark:text-indigo-400 border border-brand-primary/20' :
@@ -1502,7 +1512,9 @@ export const HodDashboardPage: React.FC = () => {
                                         {standing}
                                       </span>
                                     </td>
-                                    <td className="py-3.5 px-4 text-right">
+                                    <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                                      <button onClick={() => setMenteeAttendance(m)} title="Subject-wise attendance" aria-label={`Attendance of ${m.name}`}
+                                        className="mr-1.5 px-2.5 py-1.5 rounded-xl border border-borderLine text-emerald-700 dark:text-emerald-300 text-xs font-bold hover:bg-emerald-50 dark:hover:bg-emerald-950/40">Attendance</button>
                                       <button
                                         onClick={() => {
                                           setInspectStudent(mapStudentToHodEntry(m, 0));

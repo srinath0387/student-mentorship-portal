@@ -116,6 +116,7 @@ const facultyNav: NavGroup[] = [
     icon: LayoutDashboard,
     items: [
       { label: 'Assigned Mentees', path: '/faculty/dashboard?tab=mentees', icon: Users },
+      { label: 'Mentee Attendance', path: '/faculty/dashboard?tab=mentees&low=1', icon: CalendarCheck },
       { label: 'Mentee Clubs', path: '/clubs/students', icon: Sparkles },
       { label: 'At-Risk Mentees', path: '/risk', icon: ShieldCheck },
       { label: 'Placement Eligibility', path: '/faculty/dashboard?tab=placement', icon: Award },
@@ -436,6 +437,7 @@ const oversightNav: NavGroup[] = [
       { label: 'Exams & Invigilation', path: '/exams', icon: ClipboardList },
       { label: 'Student Feedback', path: '/feedback', icon: Star },
       { label: 'Faculty Appraisal', path: '/appraisal', icon: ClipboardCheck },
+      { label: 'Student Directory', path: '/students/directory', icon: Users },
       { label: 'Student Analytics', path: '/oversight/dashboard?tab=students', icon: Users },
       { label: 'At-Risk Students', path: '/risk', icon: ShieldCheck },
       { label: 'Faculty Analytics', path: '/oversight/dashboard?tab=faculty', icon: User },

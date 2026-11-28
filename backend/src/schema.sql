@@ -215,7 +215,10 @@ CREATE TABLE IF NOT EXISTS subject_allotments (
     faculty_name VARCHAR(100) NOT NULL DEFAULT '',
     department VARCHAR(50) NOT NULL DEFAULT '',
     -- academic year, e.g. '2026–27' (June–May): the same subject next year is a fresh allotment
-    academic_year VARCHAR(9),
+    -- (default: the academic year in progress, India time — same as db/allotmentYear.ts)
+    academic_year VARCHAR(9) DEFAULT (
+      (EXTRACT(YEAR FROM (NOW() AT TIME ZONE 'Asia/Kolkata'))::int - CASE WHEN EXTRACT(MONTH FROM (NOW() AT TIME ZONE 'Asia/Kolkata')) >= 6 THEN 0 ELSE 1 END)::text
+      || '–' || LPAD((((EXTRACT(YEAR FROM (NOW() AT TIME ZONE 'Asia/Kolkata'))::int - CASE WHEN EXTRACT(MONTH FROM (NOW() AT TIME ZONE 'Asia/Kolkata')) >= 6 THEN 0 ELSE 1 END) + 1) % 100)::text, 2, '0')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(academic_year, semester_label, subject_name, section, faculty_email)
 );

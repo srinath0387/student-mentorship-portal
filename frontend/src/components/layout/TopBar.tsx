@@ -68,6 +68,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onMenuToggle }) => {
     if (p.startsWith('/faculty-profile/department')) return { parent: 'Academic Quality', child: 'Faculty Profiles' };
     if (p.startsWith('/faculty-profile/comprehensive')) return { parent: 'Academic Quality', child: 'Comprehensive Profile' };
     if (p.startsWith('/quality/overview')) return { parent: 'Academic Quality', child: 'Department Progress' };
+    if (p.startsWith('/students/directory')) return { parent: 'Students', child: 'Student Directory' };
     if (p.startsWith('/lesson-plans/execution')) return { parent: 'Academic Quality', child: 'Course Execution Plans' };
     if (p.startsWith('/lesson-plans')) return { parent: 'Academic Quality', child: 'My Lesson Plans' };
     if (p.startsWith('/meetings')) return { parent: 'Academic Quality', child: 'Meetings & Minutes' };

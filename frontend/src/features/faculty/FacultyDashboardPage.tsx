@@ -1,4 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { AttendanceChip } from '../students/AttendanceChip';
+import { StudentAttendanceDialog } from '../students/StudentDirectoryPage';
 import { useAuth } from '../../context/AuthContext';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -33,6 +35,7 @@ import {
   Microscope,
   MessageSquare,
   Download,
+  CalendarCheck,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { StudentProfile } from '../../types';
@@ -82,6 +85,10 @@ export const FacultyDashboardPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [sectionFilter, setSectionFilter] = useState('');
   const [yearFilter, setYearFilter] = useState('');
+  // mentees below 75% attendance only (also opened from the menu with ?low=1)
+  const [lowAttendance, setLowAttendance] = useState(() => searchParams.get('low') === '1');
+  useEffect(() => { setLowAttendance(searchParams.get('low') === '1'); }, [searchParams]);
+  const [attendanceOf, setAttendanceOf] = useState<any | null>(null);
   const [selectedMentee, setSelectedMentee] = useState<StudentProfile | null>(null);
   const [inspectMentee, setInspectMentee] = useState<StudentProfile | null>(null);
   const [meetingLogMentee, setMeetingLogMentee] = useState<{ roll_number: string; name: string } | null>(null);
@@ -262,8 +269,12 @@ export const FacultyDashboardPage: React.FC = () => {
     const matchesSearch = !q || m.name.toLowerCase().includes(q) || m.roll_number.toLowerCase().includes(q);
     const matchesSection = !sectionFilter || m.section === sectionFilter;
     const matchesYear = !yearFilter || m.year === yearFilter;
-    return matchesSearch && matchesSection && matchesYear;
+    const pct = (m as any).attendance?.pct;
+    const matchesAttendance = !lowAttendance || (pct != null && pct < 75);
+    return matchesSearch && matchesSection && matchesYear && matchesAttendance;
   });
+  const lowCount = mentees.filter((m: any) => m.attendance?.pct != null && m.attendance.pct < 75).length;
+  const absentToday = mentees.filter((m: any) => (m.attendance?.absent_today || 0) > 0);
 
   const handleDownloadMentorReport = async () => {
     if (!user?.email || mentees.length === 0) return;
@@ -1235,6 +1246,8 @@ export const FacultyDashboardPage: React.FC = () => {
         </div>
       )}
 
+      {attendanceOf && <StudentAttendanceDialog student={attendanceOf} onClose={() => setAttendanceOf(null)} />}
+
       {/* Tab 1: Assigned Mentee Directory */}
       {activeTab === 'mentees' && (
         <div className="space-y-6">
@@ -1339,6 +1352,20 @@ export const FacultyDashboardPage: React.FC = () => {
           subtext={`Avg GPA: ${realAvgGpa || '—'}`}
         />
       </div>
+
+      {(lowCount > 0 || absentToday.length > 0) && (
+        <div role="status" className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+          <CalendarCheck className="w-4 h-4 shrink-0" />
+          <span className="flex-1 min-w-[200px]">
+            {lowCount > 0 && <><strong>{lowCount} mentee{lowCount === 1 ? ' is' : 's are'} below 75% attendance</strong> this academic year. </>}
+            {absentToday.length > 0 && <>Absent today: {absentToday.slice(0, 6).map((m: any) => m.name || m.roll_number).join(', ')}{absentToday.length > 6 ? ` and ${absentToday.length - 6} more` : ''}.</>}
+          </span>
+          {lowCount > 0 && (
+            <button type="button" onClick={() => setLowAttendance(v => !v)} className="rounded-lg bg-amber-600 px-3 py-1.5 font-bold text-white hover:bg-amber-700">
+              {lowAttendance ? 'Show all mentees' : 'Show only them'}</button>
+          )}
+        </div>
+      )}
 
       {/* Mentee Directory — Year-Grouped */}
         <div className="bg-surface border border-borderLine rounded-xl p-6 shadow-sm">
@@ -1451,6 +1478,7 @@ export const FacultyDashboardPage: React.FC = () => {
                             <th className="py-3 px-4">Registration No</th>
                             <th className="py-3 px-4">Dept / Batch / Sec</th>
                             <th className="py-3 px-4">CGPA</th>
+                            <th className="py-3 px-4">Attendance</th>
                             <th className="py-3 px-4">Academic Standing</th>
                             <th className="py-3 px-4 text-right">Actions</th>
                           </tr>
@@ -1473,6 +1501,7 @@ export const FacultyDashboardPage: React.FC = () => {
                                     </div>
                                   </td>
                                   <td className="py-3.5 px-4 font-bold text-amber-600 text-xs">{mentee.roll_number}</td>
+                                  <td className="py-3.5 px-4 text-xs text-textSecondary">—</td>
                                   <td className="py-3.5 px-4 text-xs text-textSecondary">—</td>
                                   <td className="py-3.5 px-4 text-xs text-textSecondary">—</td>
                                   <td className="py-3.5 px-4">
@@ -1509,6 +1538,10 @@ export const FacultyDashboardPage: React.FC = () => {
                                 <td className="py-3.5 px-4 text-xs">{mentee.department} • {mentee.batch} • Sec {mentee.section}</td>
                                 <td className="py-3.5 px-4 text-sm font-bold text-textPrimary">{cgpa > 0 ? cgpa.toFixed(2) : '—'}</td>
                                 <td className="py-3.5 px-4">
+                                  <AttendanceChip a={(mentee as any).attendance} />
+                                  {(mentee as any).attendance?.pct_30 != null && <p className="text-[10px] text-textMuted mt-0.5 tabular-nums">Last 30 days: {(mentee as any).attendance.pct_30}%</p>}
+                                </td>
+                                <td className="py-3.5 px-4">
                                   {(() => {
                                     const standing = getStanding((mentee as any).cgpa);
                                     return (
@@ -1526,6 +1559,13 @@ export const FacultyDashboardPage: React.FC = () => {
                                       title="View 360° Profile"
                                     >
                                       <Eye className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      onClick={() => setAttendanceOf(mentee)}
+                                      className="p-1.5 rounded-lg border border-borderLine text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
+                                      title="Subject-wise attendance" aria-label={`Attendance of ${mentee.name}`}
+                                    >
+                                      <CalendarCheck className="w-4 h-4" />
                                     </button>
                                     <button
                                       onClick={() => setMeetingLogMentee({ roll_number: mentee.roll_number, name: mentee.name })}

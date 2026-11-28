@@ -954,6 +954,17 @@ export const api = {
       body: JSON.stringify({ semester, allotments, academic_year }),
     });
   },
+  /** Read-only student list with CGPA, this year's attendance and mentor (oversight: all departments; HOD/admin: theirs) */
+  getStudentDirectory: async (f: { department?: string; year?: string; section?: string; search?: string; low?: boolean; page?: number }) => {
+    const q = new URLSearchParams();
+    if (f.department && f.department !== 'All') q.set('department', f.department);
+    if (f.year && f.year !== 'All') q.set('year', f.year);
+    if (f.section) q.set('section', f.section);
+    if (f.search) q.set('search', f.search);
+    if (f.low) q.set('low', '1');
+    if (f.page) q.set('page', String(f.page));
+    return fetchWithAuth(`/student-directory${q.toString() ? `?${q}` : ''}`);
+  },
   /** AI first drafts: is it switched on, and how many drafts are left today */
   getAiStatus: async (): Promise<{ enabled: boolean; limit: number; remaining: number }> => fetchWithAuth('/ai/status'),
   /** A 10-minute ticket for one AI draft, with the AI function's address */

@@ -6234,6 +6234,16 @@ app.get('/faculty/mentees/by-email/:email', requireAuth, async (req: Request, re
       if (r.year && yearBreakdown[r.year] !== undefined) yearBreakdown[r.year]++;
     }
 
+    // Attendance of the mentees (this academic year) — only for the mentor themself and for HOD / admin / oversight
+    const callerEmail = String(req.auth?.email || '').toLowerCase();
+    const mayseeAttendance = callerEmail === email || ['hod', 'admin', 'coordinator', 'principal', 'director', 'management', 'program_chair'].includes(String(req.auth?.role));
+    if (mayseeAttendance) {
+      const ay = ayOf(req);
+      const att = await studentsAttendance(rows.filter((r: any) => r.registered).map((r: any) => r.roll_number), ay);
+      for (const r of rows as any[]) r.attendance = att.get(String(r.roll_number).toUpperCase()) || null;
+      return res.json({ mentees: rows, yearBreakdown, total: rows.length, academic_year: ay });
+    }
+
     res.json({ mentees: rows, yearBreakdown, total: rows.length });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -9055,6 +9065,36 @@ function cleanAY(v: any): string | null {
 }
 /** The academic year a list should show: ?ay= when given, otherwise the year in progress */
 const ayOf = (req: Request): string => cleanAY(req.query.ay) || currentAcademicYear();
+
+interface StudentAttendance { held: number; attended: number; pct: number | null; held_30: number; attended_30: number; pct_30: number | null; absent_today: number; last_absent: string | null }
+/** Attendance of these students over their subject rosters in one academic year (from each roster's joining date),
+ *  the last 30 days, periods absent today and the last day absent. Keyed by upper-case roll number. */
+async function studentsAttendance(rolls: string[], ay: string): Promise<Map<string, StudentAttendance>> {
+  const out = new Map<string, StudentAttendance>();
+  const list = Array.from(new Set(rolls.map(r => String(r || '').toUpperCase()).filter(Boolean)));
+  if (!list.length) return out;
+  const today = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
+  const r = await db.query(
+    `SELECT UPPER(sr.roll_number) AS roll,
+       COALESCE(SUM(s.num_periods) FILTER (WHERE s.session_date >= COALESCE(sr.joining_date, '1970-01-01'::date)), 0)::int AS held,
+       COALESCE(SUM(s.num_periods) FILTER (WHERE s.session_date >= COALESCE(sr.joining_date, '1970-01-01'::date) AND ar.is_present = true), 0)::int AS attended,
+       COALESCE(SUM(s.num_periods) FILTER (WHERE s.session_date >= GREATEST(COALESCE(sr.joining_date, '1970-01-01'::date), $3::date - 30)), 0)::int AS held_30,
+       COALESCE(SUM(s.num_periods) FILTER (WHERE s.session_date >= GREATEST(COALESCE(sr.joining_date, '1970-01-01'::date), $3::date - 30) AND ar.is_present = true), 0)::int AS attended_30,
+       COALESCE(SUM(s.num_periods) FILTER (WHERE s.session_date = $3::date AND ar.is_present = false), 0)::int AS absent_today,
+       MAX(s.session_date) FILTER (WHERE ar.is_present = false)::text AS last_absent
+     FROM subject_rosters sr
+     JOIN subject_allotments a ON a.id = sr.allotment_id AND a.academic_year = $2
+     JOIN attendance_sessions s ON s.allotment_id = a.id
+     LEFT JOIN attendance_records ar ON ar.session_id = s.id AND UPPER(ar.roll_number) = UPPER(sr.roll_number)
+     WHERE UPPER(sr.roll_number) = ANY($1)
+     GROUP BY 1`, [list, ay, today]).catch(() => ({ rows: [] as any[] }));
+  const pct = (a: number, h: number) => (h > 0 ? Math.round((a / h) * 1000) / 10 : null);
+  for (const x of r.rows) {
+    out.set(x.roll, { held: x.held, attended: x.attended, pct: pct(x.attended, x.held), held_30: x.held_30, attended_30: x.attended_30,
+      pct_30: pct(x.attended_30, x.held_30), absent_today: x.absent_today, last_absent: x.last_absent || null });
+  }
+  return out;
+}
 function academicYearRange(ay: string): { from: string; to: string } | null {
   const m = /^(\d{4})[–-](\d{2})$/.exec(ay.trim());
   if (!m) return null;
@@ -12499,6 +12539,64 @@ async function fcpSources(email: string, fac: any) {
   return { faculty: fac, profile: profile.rows[0] || null, teaching: allotted.rows, handled: handled.rows, events: events.rows, mentees: mentees.rows, alumni: alumni.rows, speakers: speakers.rows };
 }
 const fcpStripRatings = (d: any) => (d && typeof d === 'object' ? { ...d, top_mentees: [] } : d);
+
+// ── Student Directory (Principal, Director, Management, Program Chair; HOD / admin see their department) ──────
+// GET /student-directory?department=&year=&section=&search=&low=1&page=&ay= — read-only list with CGPA, attendance and mentor
+app.get('/student-directory', requireRole('hod', 'admin', 'coordinator', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
+  try {
+    const role = req.auth!.role;
+    const own = await qualityDept(req);   // HOD / department admin: their department; oversight: none
+    const params: any[] = []; const where: string[] = [];
+    const add = (sql: string, v: any) => { params.push(v); where.push(sql.replace('?', `$${params.length}`)); };
+    const KEY = `LOWER(REGEXP_REPLACE(COALESCE(s.department, ''), '[^a-zA-Z0-9]', '', 'g'))`;
+    if (own && role !== 'coordinator') add(`${KEY} = ?`, normDept(own));
+    else if (role === 'program_chair') add(`${KEY} = ANY(?)`, CSE_ALLIED_DEPTS.map(normDept));
+    if (role === 'coordinator') where.push(`(s.year = '1st Year' OR s.year ILIKE '1%')`);
+    const dept = String(req.query.department || '');
+    if (dept && dept !== 'All' && !(own && role !== 'coordinator')) add(`${KEY} = ?`, normDept(dept));
+    if (req.query.year && req.query.year !== 'All') add('s.year = ?', String(req.query.year));
+    if (req.query.section && req.query.section !== 'All') {   // 'A', 'Sec A' and 'Section A' are the same section
+      params.push(String(req.query.section).replace(/^sec(tion)?\s*/i, ''));
+      where.push(`REGEXP_REPLACE(UPPER(COALESCE(s.section, '')), '^SEC(TION)?\\s*', '') = UPPER($${params.length})`);
+    }
+    const q = String(req.query.search || '').trim().toLowerCase();
+    if (q) { params.push(`%${q}%`); where.push(`(LOWER(s.name) LIKE $${params.length} OR LOWER(s.roll_number) LIKE $${params.length})`); }
+    const W = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const ay = ayOf(req);
+    const low = req.query.low === '1';
+    const page = Math.max(0, parseInt(String(req.query.page || '0'), 10) || 0);
+    const size = 50;
+
+    const base = `
+      SELECT s.roll_number, s.name, s.email, s.phone, s.department, s.year, s.section, s.batch,
+             COALESCE((SELECT ROUND(AVG(ac.semester_gpa), 2) FROM academics ac WHERE ac.student_id = s.roll_number), s.cgpa, 0)::float AS cgpa,
+             COALESCE(f1.name, f2.name) AS mentor_name, COALESCE(f1.email, f2.email) AS mentor_email
+      FROM students s
+      LEFT JOIN mentor_assignments ma ON UPPER(ma.roll_number) = UPPER(s.roll_number)
+      LEFT JOIN faculty f1 ON UPPER(f1.faculty_id) = UPPER(ma.faculty_id)
+      LEFT JOIN faculty f2 ON f1.faculty_id IS NULL AND UPPER(f2.faculty_id) = UPPER(s.faculty_mentor_id)
+      ${W}`;
+    let rows: any[]; let total: number;
+    if (low) {
+      // below 75%: needs attendance for everyone in scope first (capped), then pages the matches
+      const all = (await db.query(`${base} ORDER BY s.department, s.year, s.section, s.roll_number LIMIT 5000`, params)).rows;
+      const att = await studentsAttendance(all.map(r => r.roll_number), ay);
+      const lowRows = all.map(r => ({ ...r, attendance: att.get(String(r.roll_number).toUpperCase()) || null }))
+        .filter(r => r.attendance?.pct != null && r.attendance.pct < 75)
+        .sort((a, b) => a.attendance.pct - b.attendance.pct);
+      total = lowRows.length; rows = lowRows.slice(page * size, page * size + size);
+    } else {
+      const [list, count] = await Promise.all([
+        db.query(`${base} ORDER BY s.department, s.year, s.section, s.roll_number LIMIT ${size} OFFSET ${page * size}`, params),
+        db.query(`SELECT COUNT(*)::int AS n FROM students s ${W}`, params),
+      ]);
+      const att = await studentsAttendance(list.rows.map((r: any) => r.roll_number), ay);
+      rows = list.rows.map((r: any) => ({ ...r, attendance: att.get(String(r.roll_number).toUpperCase()) || null }));
+      total = count.rows[0]?.n || 0;
+    }
+    res.json({ scope: own && role !== 'coordinator' ? own : role === 'program_chair' ? 'CSE allied' : role === 'coordinator' ? '1st Year' : 'All', academic_year: ay, page, page_size: size, total, rows });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
 
 // ── AI first drafts (execution plan, comprehensive profile) ──────────────────────────────────────────────────
 // The AI function runs outside the VPC (AI_URL, a Lambda Function URL). The API checks who is asking and how many

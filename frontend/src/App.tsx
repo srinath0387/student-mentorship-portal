@@ -40,6 +40,7 @@ const MyOfficeOrdersPage = lazy(() => import('./features/duties/MyOfficeOrdersPa
 const ClubsPage = lazy(() => import('./features/clubs/ClubsPage'));
 const NotificationsPage = lazy(() => import('./features/notifications/NotificationsPage'));
 const LessonPlansPage = lazy(() => import('./features/lessonplans/LessonPlansPage'));
+const StudentDirectoryPage = lazy(() => import('./features/students/StudentDirectoryPage'));
 const ExecPlansPage = lazy(() => import('./features/lessonplans/ExecPlansPage'));
 const QualityOverviewPage = lazy(() => import('./features/quality/QualityOverviewPage'));
 const ComprehensiveProfilePage = lazy(() => import('./features/compprofile/ComprehensiveProfilePage'));
@@ -420,6 +421,7 @@ export const App: React.FC = () => {
                 <Route path="/lesson-plans/review" element={<LessonPlanReviewPage />} />
                 <Route path="/lesson-plans/execution" element={<ExecPlansPage />} />
                 <Route path="/quality/overview" element={<QualityOverviewPage />} />
+                <Route path="/students/directory" element={<StudentDirectoryPage />} />
                 <Route path="/faculty-profile/department" element={<CompProfilesDeptPage />} />
               </Route>
               <Route element={<ProtectedRoute allowedRoles={['faculty', 'hod', 'coordinator', 'admin', 'principal', 'director', 'management', 'program_chair']} />}>
