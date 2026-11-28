@@ -12278,10 +12278,20 @@ function ensureFcpTable(): Promise<void> {
 async function fcpSources(email: string, fac: any) {
   const e = email.toLowerCase();
   const safe = (p: Promise<any>) => p.catch(() => ({ rows: [] as any[] }));
-  const [profile, teaching, events, mentees, alumni, speakers] = await Promise.all([
+  await ensureQualityTables().catch(() => {});   // lesson_plans / subject_syllabi, read for the academic year and regulation
+  const [profile, allotted, handled, events, mentees, alumni, speakers] = await Promise.all([
     safe(db.query(`SELECT personal, education, publications, domains, activities FROM faculty_full_profiles WHERE LOWER(email) = $1 LIMIT 1`, [e])),
-    safe(db.query(`SELECT semester_label, subject_name, subject_type, department, created_at FROM subject_allotments
-                   WHERE LOWER(faculty_email) = $1 OR LOWER(COALESCE(co_faculty_email, '')) = $1 ORDER BY created_at DESC LIMIT 200`, [e])),
+    // this and recent semesters' allotments — the lesson plan knows the academic year, the syllabus the regulation
+    safe(db.query(`SELECT a.semester_label, a.subject_name, a.subject_type, a.section, a.department, a.created_at,
+                          (SELECT lp.academic_year FROM lesson_plans lp WHERE lp.allotment_id = a.id LIMIT 1) AS academic_year,
+                          (SELECT ss.regulation FROM subject_syllabi ss
+                            WHERE ss.dept_key = LOWER(REGEXP_REPLACE(a.department, '[^a-zA-Z0-9]', '', 'g')) AND ss.semester_label = a.semester_label
+                              AND LOWER(ss.subject_name) = LOWER(a.subject_name) LIMIT 1) AS regulation
+                   FROM subject_allotments a
+                   WHERE LOWER(a.faculty_email) = $1 OR LOWER(COALESCE(a.co_faculty_email, '')) = $1 ORDER BY a.created_at DESC LIMIT 200`, [e])),
+    // past semesters the faculty member entered under Subjects Handled (results)
+    safe(db.query(`SELECT year_batch, subject, branch, section, created_at FROM faculty_subjects_handled
+                   WHERE LOWER(faculty_email) = $1 ORDER BY created_at DESC LIMIT 300`, [e])),
     safe(db.query(`SELECT event_type, participation, title, organized_by, objectives, start_date::text AS start_date, end_date::text AS end_date, duration_hours, status
                    FROM dept_events WHERE LOWER(submitted_by) = $1 OR coordinators::text ILIKE $2 ORDER BY start_date DESC LIMIT 200`, [e, `%${e}%`])),
     fac?.faculty_id ? safe(db.query(
@@ -12300,7 +12310,7 @@ async function fcpSources(email: string, fac: any) {
        FROM dept_events d, jsonb_array_elements(COALESCE(d.resource_persons, '[]'::jsonb)) p
        WHERE LOWER(REGEXP_REPLACE(d.department, '[^a-zA-Z0-9]', '', 'g')) = $1 AND COALESCE(p->>'name', '') <> '' LIMIT 200`, [normDept(fac.department)])) : Promise.resolve({ rows: [] as any[] }),
   ]);
-  return { faculty: fac, profile: profile.rows[0] || null, teaching: teaching.rows, events: events.rows, mentees: mentees.rows, alumni: alumni.rows, speakers: speakers.rows };
+  return { faculty: fac, profile: profile.rows[0] || null, teaching: allotted.rows, handled: handled.rows, events: events.rows, mentees: mentees.rows, alumni: alumni.rows, speakers: speakers.rows };
 }
 const fcpStripRatings = (d: any) => (d && typeof d === 'object' ? { ...d, top_mentees: [] } : d);
 

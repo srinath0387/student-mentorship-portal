@@ -226,7 +226,7 @@ export default function ComprehensiveProfilePage() {
 
         {tab === 'teaching' && (
           <div className="space-y-2">
-            <p className="text-[11px] text-textMuted">The past eight semesters, including the one just finished. Course titles come from your subject allotments where the portal has them.</p>
+            <p className="text-[11px] text-textMuted">The past eight semesters, including the one just finished. Courses fill in from your subject allotments and from the Subjects Handled records on your faculty profile (e.g. “II B.Tech. I Sem. &amp; 2024”). Add the missing ones there, or type them here.</p>
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
               {p.teaching.map((t, i) => {
                 const st2 = (k: string, v: string) => set({ teaching: p.teaching.map((x, j) => (j === i ? { ...x, [k]: v } : x)) });

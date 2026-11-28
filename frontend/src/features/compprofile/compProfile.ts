@@ -95,13 +95,48 @@ const dmyDash = (iso?: string | null) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.
 const dateRange = (a?: string, b?: string) => { const x = dmyDash(a); const y = dmyDash(b); return x && y && x !== y ? `${x} to ${y}` : x; };
 const days = (a?: string, b?: string) => { if (!a) return ''; const d = b ? Math.round((Date.parse(b) - Date.parse(a)) / 86400000) + 1 : 1; return d > 0 ? String(d) : ''; };
 const ayOfYear = (y: number) => (y ? `${y - 1}-${String(y % 100).padStart(2, '0')}` : '');
+const semLabel = (ayStart: number, sem: 'I' | 'II') => `AY ${ayStart}-${String((ayStart + 1) % 100).padStart(2, '0')} ${sem} Semester`;
+/** "2025–26", "2025-2026", "AY 2025-26" → 2025 */
+const ayStartOf = (s: any) => { const m = /(20\d{2})\s*[-–/]\s*(\d{2,4})\b/.exec(String(s || '')); return m ? Number(m[1]) : 0; };
+/** The latest I / II semester that had begun by this date (I runs Jul–Dec, II Jan–May) */
+const ayStartAt = (iso: any, sem: 'I' | 'II') => {
+  const d = new Date(iso || Date.now()); const y = d.getFullYear();
+  return sem === 'II' ? y - 1 : d.getMonth() + 1 >= 7 ? y : y - 1;
+};
+const ROMAN_N: Record<string, number> = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8 };
+const num = (t: string) => (/^\d$/.test(t) ? Number(t) : ROMAN_N[t.toUpperCase()] || 0);
+/** I or II semester of the year from free text: "II Sem.", "Sem-3", "5th Sem", "II-I", "Even" */
+export function semFromText(text: any): 'I' | 'II' | '' {
+  const t = String(text || '');
+  const m = /\b([IVX]{1,4}|\d)(?:st|nd|rd|th)?\.?\s*sem/i.exec(t) || /\bsem(?:ester)?\.?\s*[-:]?\s*([IVX]{1,4}|\d)\b/i.exec(t)
+    || /\b(?:[IVX]{1,3}|[1-4])\s*[-–/]\s*([IVX]{1,2}|[12])\b/i.exec(t);
+  const n = m ? num(m[1]!) : 0;
+  if (n) return n % 2 ? 'I' : 'II';
+  return /\beven\b/i.test(t) ? 'II' : /\bodd\b/i.test(t) ? 'I' : '';
+}
 /** A subject allotment → which of the eight semesters it belongs to (odd semester_label "x-1" = I semester) */
 const semOf = (a: any) => {
-  const d = new Date(a.created_at || Date.now()); const y = d.getFullYear(); const m = d.getMonth() + 1;
-  const isFirst = /-1$/.test(String(a.semester_label || ''));
-  const ayStart = m >= 6 ? y : y - 1;
-  // an even-semester allotment made in Nov–Dec belongs to the coming II semester of the same academic year
-  return `AY ${ayStart}-${String((ayStart + 1) % 100).padStart(2, '0')} ${isFirst ? 'I' : 'II'} Semester`;
+  const sem: 'I' | 'II' = /-1$/.test(String(a.semester_label || '')) ? 'I' : 'II';
+  return semLabel(ayStartOf(a.academic_year) || ayStartAt(a.created_at, sem), sem);
+};
+/** A Subjects Handled record ("I B.Tech. II Sem. & 2025", "III-I 2024-25") → its semester, or '' when it can't be told */
+export function semOfHandled(r: any): string {
+  const t = String(r?.year_batch || '');
+  const sem = semFromText(t);
+  if (!sem) return '';
+  const ay = ayStartOf(t);
+  if (ay) return semLabel(ay, sem);
+  const years = t.match(/\b20\d{2}\b/g);
+  // a plain year is the calendar year the semester ran in: I semester Jul–Dec of it, II semester Jan–May of it
+  if (years) { const y = Number(years[years.length - 1]); return semLabel(sem === 'I' ? y : y - 1, sem); }
+  return semLabel(ayStartAt(r.created_at, sem), sem);
+}
+const programmeOf = (text: any, dept?: any) => {
+  const t = `${text || ''}`;
+  if (/\bM\.?\s*Tech/i.test(t)) return 'M.Tech.';
+  if (/\bMCA\b/i.test(t) || /^MCA$/i.test(String(dept || '').trim())) return 'MCA';
+  if (/\bMBA\b/i.test(t) || /^MBA$/i.test(String(dept || '').trim())) return 'MBA';
+  return 'B.Tech.';
 };
 const handleUrl: Record<string, (h: string) => string> = {
   GitHub: h => `https://github.com/${h}`, LeetCode: h => `https://leetcode.com/u/${h}`, HackerRank: h => `https://www.hackerrank.com/profile/${h}`,
@@ -130,14 +165,22 @@ export function prefill(sources: any): CompProfile {
     h_index: metrics.h_index != null ? String(metrics.h_index) : '', i10_index: metrics.i10_index != null ? String(metrics.i10_index) : '',
     area1: domains[0] || '', area2: domains[1] || '', area3: domains[2] || '',
   });
-  // teaching: course titles of the semesters the portal knows
-  const bySem = new Map<string, string[]>();
-  for (const a of sources?.teaching || []) {
-    const k = semOf(a); const list = bySem.get(k) || [];
-    if (!list.includes(a.subject_name)) list.push(a.subject_name);
-    bySem.set(k, list);
-  }
-  p.teaching = p.teaching.map(t => ({ ...t, course: (bySem.get(t.label) || []).join('; '), programme: bySem.has(t.label) ? 'B.Tech.' : '' }));
+  // teaching: subject allotments (this and recent semesters) and the Subjects Handled records faculty entered for past ones
+  const bySem = new Map<string, { courses: string[]; regs: string[]; progs: string[] }>();
+  const add = (label: string, course: any, reg: any, prog: string) => {
+    const c = String(course || '').trim(); if (!label || !c) return;
+    const e = bySem.get(label) || { courses: [], regs: [], progs: [] };
+    if (!e.courses.some(x => x.toLowerCase() === c.toLowerCase())) e.courses.push(c);
+    const r = String(reg || '').trim(); if (r && !e.regs.includes(r)) e.regs.push(r);
+    if (!e.progs.includes(prog)) e.progs.push(prog);
+    bySem.set(label, e);
+  };
+  for (const a of sources?.teaching || []) add(semOf(a), a.subject_name, a.regulation, programmeOf('', a.department));
+  for (const h of sources?.handled || []) add(semOfHandled(h), h.subject, '', programmeOf(h.year_batch, h.branch));
+  p.teaching = p.teaching.map(t => {
+    const e = bySem.get(t.label);
+    return e ? { ...t, course: e.courses.join('; '), regulation: e.regs.join(', '), programme: e.progs.join(', ') } : t;
+  });
   // FDPs / trainings / workshops from event reports and the profile's activities
   const put = (prog: Programme, attended: boolean, row: Partial<Attended & Organised>) => {
     const list: any[] = attended ? prog.attended : prog.organised;
@@ -185,7 +228,13 @@ export function merge(saved: any, base: CompProfile): CompProfile {
   return {
     profile: { ...base.profile, ...(saved.profile || {}) },
     // the semester columns always follow today's date; saved entries move with their label
-    teaching: labels.map((l, i) => ({ ...base.teaching[i]!, ...(teachSaved.find(t => t?.label === l) || {}), label: l })),
+    // what the faculty member typed wins; a column they left empty still picks up what the portal now knows
+    teaching: labels.map((l, i) => {
+      const b = base.teaching[i]!; const sv = teachSaved.find(t => t?.label === l) || {};
+      const out: Semester = { ...b, ...sv, label: l };
+      for (const k of ['course', 'regulation', 'programme'] as const) if (!String(sv[k] ?? '').trim()) out[k] = b[k];
+      return out;
+    }),
     fdp: prog(saved.fdp, base.fdp), training: prog(saved.training, base.training), workshops: prog(saved.workshops, base.workshops),
     mentees: Array.isArray(saved.mentees) && saved.mentees.length ? saved.mentees.map((m: any) => ({ ...blank(MENTEE_KEYS), ...m })) : base.mentees,
     top_mentees: Array.from({ length: 5 }, (_, i) => ({ ...base.top_mentees[i]!, ...(saved.top_mentees?.[i] || {}),
