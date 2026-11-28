@@ -14662,78 +14662,7 @@ app.get('/attendance/rosters/:allotmentId', requireRole('admin', 'hod', 'faculty
       [allotmentId]
     );
 
-    // If subject_rosters has no rows for this allotment, automatically retrieve matching students from the students master table!
-    if (result.rows.length === 0) {
-      const dept = allotmentRow.department || '';
-      const sec = allotmentRow.section || 'A';
-      const semLabel = allotmentRow.semester_label || '';
-
-      let yearFilter = '';
-      if (['1-1', '1-2'].includes(semLabel)) yearFilter = '1st Year';
-      else if (['2-1', '2-2'].includes(semLabel)) yearFilter = '2nd Year';
-      else if (['3-1', '3-2'].includes(semLabel)) yearFilter = '3rd Year';
-      else if (['4-1', '4-2'].includes(semLabel)) yearFilter = '4th Year';
-
-      let autoStudentsRes = await db.query(
-        `SELECT roll_number, name as student_name, email as student_email, department as student_department, section as student_section, created_at as joining_date
-         FROM students
-         WHERE (
-           ($1 <> '' AND (year ILIKE '%' || $1 || '%' OR year = $1 OR SUBSTRING(year, 1, 1) = SUBSTRING($1, 1, 1)))
-           OR $1 = ''
-         )
-         AND (
-           LOWER(REPLACE(department, ' ', '')) ILIKE '%' || LOWER(REPLACE($2, ' ', '')) || '%'
-           OR LOWER(REPLACE($2, ' ', '')) ILIKE '%' || LOWER(REPLACE(department, ' ', '')) || '%'
-           OR $2 = '' OR $2 = 'General'
-         )
-         AND (section = $3 OR $3 = '' OR $3 = 'All')
-         ORDER BY roll_number ASC`,
-        [yearFilter, dept, sec]
-      );
-
-      if (autoStudentsRes.rows.length === 0) {
-        autoStudentsRes = await db.query(
-          `SELECT roll_number, name as student_name, email as student_email, department as student_department, section as student_section, created_at as joining_date
-           FROM students
-           WHERE (
-             LOWER(REPLACE(department, ' ', '')) ILIKE '%' || LOWER(REPLACE($1, ' ', '')) || '%'
-             OR LOWER(REPLACE($1, ' ', '')) ILIKE '%' || LOWER(REPLACE(department, ' ', '')) || '%'
-             OR $1 = '' OR $1 = 'General'
-           )
-           AND (section = $2 OR $2 = '' OR $2 = 'All')
-           ORDER BY roll_number ASC`,
-          [dept, sec]
-        );
-      }
-
-      if (autoStudentsRes.rows.length === 0) {
-        autoStudentsRes = await db.query(
-          `SELECT roll_number, name as student_name, email as student_email, department as student_department, section as student_section, created_at as joining_date
-           FROM students
-           WHERE section = $1
-           ORDER BY roll_number ASC`,
-          [sec]
-        );
-      }
-
-      return res.json(autoStudentsRes.rows.map((f: any) => {
-        const rollUpper = (f.roll_number || '').trim().toUpperCase();
-        const odInfo = approvedODMap.get(rollUpper);
-        return {
-          id: `auto_${f.roll_number}`,
-          allotment_id: allotmentId,
-          roll_number: f.roll_number,
-          student_name: f.student_name,
-          student_email: f.student_email,
-          student_department: f.student_department,
-          student_section: f.student_section,
-          joining_date: f.joining_date,
-          is_on_od: Boolean(odInfo),
-          od_type: odInfo?.permission_type || null,
-          od_reason: odInfo?.reason || null,
-        };
-      }));
-    }
+    // Only the roster the admin / HOD added for this subject — no roster, no students (never guessed from the class list)
 
     const rowsWithOD = result.rows.map((r: any) => {
       const rollUpper = (r.roll_number || '').trim().toUpperCase();
@@ -14897,6 +14826,16 @@ app.post('/attendance/sessions', requireRole('faculty', 'hod', 'admin', 'coordin
       if (hodDept && allotDept && hodDept !== allotDept && !allotDept.includes(hodDept) && !hodDept.includes(allotDept)) {
         return res.status(403).json({ error: 'You can only post attendance for your own department.' });
       }
+    }
+
+    // Attendance is taken only for the subject's roster (added by the admin / HOD)
+    const onRoster = new Set((await db.query('SELECT UPPER(roll_number) AS r FROM subject_rosters WHERE allotment_id = $1', [allotment_id])).rows.map((x: any) => x.r));
+    if (onRoster.size === 0) {
+      return res.status(400).json({ error: 'No student roster for this subject yet. Attendance can be taken once the admin adds the roster for this subject.' });
+    }
+    const notOnRoster = records.map((r: any) => String(r?.roll_number || '').trim().toUpperCase()).filter((r: string) => r && !onRoster.has(r));
+    if (notOnRoster.length) {
+      return res.status(400).json({ error: `Not on this subject's roster: ${notOnRoster.slice(0, 10).join(', ')}${notOnRoster.length > 10 ? ` and ${notOnRoster.length - 10} more` : ''}. Refresh the page and try again.` });
     }
 
     // 1. Holiday Check — Attendance cannot be marked on declared public/institutional holidays
@@ -16834,20 +16773,14 @@ app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res
         FROM subject_allotments a
         LEFT JOIN attendance_sessions s ON s.allotment_id = a.id
         LEFT JOIN attendance_records r ON r.session_id = s.id AND UPPER(r.roll_number) = $1
-        WHERE (
-          EXISTS (SELECT 1 FROM attendance_records ar JOIN attendance_sessions sess ON sess.id = ar.session_id WHERE sess.allotment_id = a.id AND UPPER(ar.roll_number) = $1)
-          OR (
-            ($2 <> '' AND (LOWER(REPLACE(a.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($2, ' ', '')) || '%' OR LOWER(REPLACE($2, ' ', '')) ILIKE '%' || LOWER(REPLACE(a.department, ' ', '')) || '%'))
-            AND ($3 <> '' AND a.section = $3)
-          )
-        )
+        -- not on any roster: only subjects this student has already been marked in
+        WHERE EXISTS (SELECT 1 FROM attendance_records ar JOIN attendance_sessions sess ON sess.id = ar.session_id WHERE sess.allotment_id = a.id AND UPPER(ar.roll_number) = $1)
         GROUP BY a.id, a.subject_name, a.subject_type, a.semester_label, a.faculty_name
         ORDER BY a.semester_label, a.subject_name`,
-        [rollNumber, dept, sec]
+        [rollNumber]
       );
     } else {
-      // A student on some rosters (e.g. faculty-selection electives) still belongs to their section's
-      // whole-class subjects that have no roster at all (faculty mark those from the section list).
+      // Subjects without a roster where this student was marked before rosters were required
       const wholeSection = await db.query(
         `SELECT a.id AS allotment_id, a.subject_name, a.subject_type, a.semester_label, a.faculty_name, NULL as joining_date,
           COALESCE(SUM(s.num_periods), 0) AS total_periods_held,
@@ -16856,16 +16789,9 @@ app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res
         LEFT JOIN attendance_sessions s ON s.allotment_id = a.id
         LEFT JOIN attendance_records r ON r.session_id = s.id AND UPPER(r.roll_number) = $1
         WHERE NOT EXISTS (SELECT 1 FROM subject_rosters x WHERE x.allotment_id = a.id)
-          AND (
-            EXISTS (SELECT 1 FROM attendance_records ar JOIN attendance_sessions sess ON sess.id = ar.session_id WHERE sess.allotment_id = a.id AND UPPER(ar.roll_number) = $1)
-            OR (
-              ($2 <> '' AND (LOWER(REPLACE(a.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($2, ' ', '')) || '%' OR LOWER(REPLACE($2, ' ', '')) ILIKE '%' || LOWER(REPLACE(a.department, ' ', '')) || '%'))
-              AND ($3 <> '' AND UPPER(a.section) = UPPER($3))
-              AND ($4 = '' OR LEFT(a.semester_label, 1) = $4)
-            )
-          )
+          AND EXISTS (SELECT 1 FROM attendance_records ar JOIN attendance_sessions sess ON sess.id = ar.session_id WHERE sess.allotment_id = a.id AND UPPER(ar.roll_number) = $1)
         GROUP BY a.id, a.subject_name, a.subject_type, a.semester_label, a.faculty_name`,
-        [rollNumber, dept, sec, String(student.year || '').charAt(0).replace(/[^1-4]/, '')]
+        [rollNumber]
       ).catch(() => ({ rows: [] as any[] }));
       if (wholeSection.rows.length) {
         const have = new Set(subjectsRes.rows.map((x: any) => x.allotment_id));
@@ -17051,43 +16977,19 @@ app.get('/attendance/subject/:allotmentId/summary', requireRole('faculty', 'hod'
       [allotmentId, allotment.section]
     );
 
-    // Fallback: If no subject_rosters rows exist, pull from master students table
+    // No roster: list only students already marked in this subject's sessions, so past attendance still shows
     if (studentsRes.rows.length === 0) {
-      const dept = allotment.department || '';
-      const sec = allotment.section || 'A';
-      const semLabel = allotment.semester_label || '';
-
-      let yearFilter = '';
-      if (['1-1', '1-2'].includes(semLabel)) yearFilter = '1st Year';
-      else if (['2-1', '2-2'].includes(semLabel)) yearFilter = '2nd Year';
-      else if (['3-1', '3-2'].includes(semLabel)) yearFilter = '3rd Year';
-      else if (['4-1', '4-2'].includes(semLabel)) yearFilter = '4th Year';
-
       studentsRes = await db.query(
-        `SELECT 
-          CONCAT('auto_', st.roll_number) AS roster_id,
-          st.roll_number,
-          st.created_at AS joining_date,
-          COALESCE(st.name, st.roll_number) AS student_name,
-          $2::text AS section,
+        `SELECT CONCAT('rec_', UPPER(ar.roll_number)) AS roster_id, UPPER(ar.roll_number) AS roll_number, NULL AS joining_date,
+          COALESCE(MAX(st.name), UPPER(ar.roll_number)) AS student_name, $2::text AS section,
           COALESCE(SUM(s.num_periods), 0) AS student_periods_held,
           COALESCE(SUM(CASE WHEN ar.is_present = true THEN s.num_periods ELSE 0 END), 0) AS periods_attended
-         FROM students st
-         LEFT JOIN attendance_sessions s ON s.allotment_id = $1
-         LEFT JOIN attendance_records ar ON ar.session_id = s.id AND ar.roll_number = st.roll_number
-         WHERE (
-           ($3 <> '' AND (st.year ILIKE '%' || $3 || '%' OR st.year = $3 OR SUBSTRING(st.year, 1, 1) = SUBSTRING($3, 1, 1)))
-           OR $3 = ''
-         )
-         AND (
-           LOWER(REPLACE(st.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($4, ' ', '')) || '%'
-           OR LOWER(REPLACE($4, ' ', '')) ILIKE '%' || LOWER(REPLACE(st.department, ' ', '')) || '%'
-           OR $4 = '' OR $4 = 'General'
-         )
-         AND (st.section = $2 OR $2 = '' OR $2 = 'All')
-         GROUP BY st.roll_number, st.created_at, st.name
-         ORDER BY st.roll_number`,
-        [allotmentId, sec, yearFilter, dept]
+         FROM attendance_records ar
+         JOIN attendance_sessions s ON s.id = ar.session_id AND s.allotment_id = $1
+         LEFT JOIN students st ON UPPER(st.roll_number) = UPPER(ar.roll_number)
+         GROUP BY UPPER(ar.roll_number)
+         ORDER BY UPPER(ar.roll_number)`,
+        [allotmentId, allotment.section]
       );
     }
 
@@ -17166,33 +17068,17 @@ app.get('/attendance/subject/:allotmentId/daywise', requireRole('faculty', 'hod'
       [allotmentId, allotment.section]
     );
 
-    // Fallback if no roster entries exist
+    // No roster: list only students already marked in this subject's sessions, so past attendance still shows
     if (rosterRes.rows.length === 0) {
-      const dept = allotment.department || '';
-      const sec = allotment.section || 'A';
-      const semLabel = allotment.semester_label || '';
-
-      let yearFilter = '';
-      if (['1-1', '1-2'].includes(semLabel)) yearFilter = '1st Year';
-      else if (['2-1', '2-2'].includes(semLabel)) yearFilter = '2nd Year';
-      else if (['3-1', '3-2'].includes(semLabel)) yearFilter = '3rd Year';
-      else if (['4-1', '4-2'].includes(semLabel)) yearFilter = '4th Year';
-
       rosterRes = await db.query(
-        `SELECT CONCAT('auto_', st.roll_number) as roster_id, st.roll_number, st.created_at as joining_date, COALESCE(st.name, st.roll_number) as student_name, $2::text as section
-         FROM students st
-         WHERE (
-           ($3 <> '' AND (st.year ILIKE '%' || $3 || '%' OR st.year = $3 OR SUBSTRING(st.year, 1, 1) = SUBSTRING($3, 1, 1)))
-           OR $3 = ''
-         )
-         AND (
-           LOWER(REPLACE(st.department, ' ', '')) ILIKE '%' || LOWER(REPLACE($4, ' ', '')) || '%'
-           OR LOWER(REPLACE($4, ' ', '')) ILIKE '%' || LOWER(REPLACE(st.department, ' ', '')) || '%'
-           OR $4 = '' OR $4 = 'General'
-         )
-         AND (st.section = $2 OR $2 = '' OR $2 = 'All')
-         ORDER BY st.roll_number ASC`,
-        [allotmentId, sec, yearFilter, dept]
+        `SELECT CONCAT('rec_', UPPER(ar.roll_number)) AS roster_id, UPPER(ar.roll_number) AS roll_number, NULL AS joining_date,
+                COALESCE(MAX(st.name), UPPER(ar.roll_number)) AS student_name, $2::text AS section
+         FROM attendance_records ar
+         JOIN attendance_sessions s ON s.id = ar.session_id AND s.allotment_id = $1
+         LEFT JOIN students st ON UPPER(st.roll_number) = UPPER(ar.roll_number)
+         GROUP BY UPPER(ar.roll_number)
+         ORDER BY UPPER(ar.roll_number)`,
+        [allotmentId, allotment.section]
       );
     }
 

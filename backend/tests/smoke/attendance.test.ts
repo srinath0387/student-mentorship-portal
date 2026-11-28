@@ -99,6 +99,7 @@ describe('Academic-calendar posting lock', () => {
   const body = { allotment_id: 'AL1', session_date: '2026-11-09', num_periods: 1, period_start: 1, records: [{ roll_number: '23091a3201', is_present: true }] };
   const baseRoutes = (calendar: any[], lateStatus?: string): Route[] => [
     ['FROM subject_allotments WHERE id', [allotment]],
+    ['FROM subject_rosters WHERE allotment_id', [{ r: '23091A3201' }]],
     ['FROM academic_calendar', calendar],
     ['SELECT status FROM attendance_late_post_requests', lateStatus ? [{ status: lateStatus }] : []],
     ['INSERT INTO attendance_sessions', [{ id: 'S1' }]],
@@ -136,6 +137,27 @@ describe('Academic-calendar posting lock', () => {
     routeDb(baseRoutes([]));
     const res = await request(app).post('/attendance/sessions').set('Authorization', FACULTY()).send(body);
     expect(res.status).toBe(200);
+  });
+
+  it('refuses attendance for a subject with no roster, and students not on its roster', async () => {
+    routeDb([['FROM subject_allotments WHERE id', [allotment]], ['FROM subject_rosters WHERE allotment_id', []]]);
+    const none = await request(app).post('/attendance/sessions').set('Authorization', FACULTY()).send(body);
+    expect(none.status).toBe(400);
+    expect(none.body.error).toContain('No student roster');
+    routeDb([['FROM subject_allotments WHERE id', [allotment]], ['FROM subject_rosters WHERE allotment_id', [{ r: '23091A3201' }]]]);
+    const extra = await request(app).post('/attendance/sessions').set('Authorization', FACULTY())
+      .send({ ...body, records: [...body.records, { roll_number: '22091A0599', is_present: true }] });
+    expect(extra.status).toBe(400);
+    expect(extra.body.error).toContain('22091A0599');
+  });
+
+  it('shows no students for a subject with no roster', async () => {
+    const calls = routeDb([['FROM subject_allotments WHERE id', [allotment]], ['FROM subject_rosters r', []],
+      ['FROM students', [{ roll_number: '23091A3201', student_name: 'Should not appear' }]]]);
+    const res = await request(app).get('/attendance/rosters/AL1').set('Authorization', FACULTY());
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+    expect(calls.some((c: any) => /FROM students\s+WHERE/.test(c.sql))).toBe(false);
   });
 
   it('lets faculty request approval only for their own subjects; only admin can approve', async () => {

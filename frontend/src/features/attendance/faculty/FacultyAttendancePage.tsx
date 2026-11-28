@@ -753,7 +753,7 @@ export const FacultyAttendancePage: React.FC = () => {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-borderLine">
-                          {rosterLoading?<tr><td colSpan={6} className="p-8 text-center text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading students…" /></td></tr>:records.length===0?<tr><td colSpan={6} className="p-8 text-center text-textMuted">No students enrolled for this subject.</td></tr>:records.map((r,idx)=>(
+                          {rosterLoading?<tr><td colSpan={6} className="p-8 text-center text-textMuted"><BouncingDots size="sm" className="text-brand-primary" label="Loading students…" /></td></tr>:records.length===0?<tr><td colSpan={6} className="p-8 text-center"><p className="text-sm font-bold text-textPrimary">No student roster for this subject yet</p><p className="mt-1 text-xs text-textMuted">Students appear here once the admin adds the roster for this subject. Attendance can be taken after that.</p></td></tr>:records.map((r,idx)=>(
                             <tr key={r.roll_number} className={`hover:bg-surface-2 transition-colors ${r.is_on_od ? 'bg-indigo-50/50 dark:bg-indigo-950/30' : (!r.h1 || (hour2 && !r.h2) || (hour3 && !r.h3))?'bg-rose-50/60 dark:bg-rose-950/20':''}`}>
                               <td className="px-4 py-3 text-center text-textMuted font-bold">{idx+1}</td>
                               <td className="px-4 py-3 font-mono font-black text-textPrimary">{r.roll_number}</td>
@@ -814,7 +814,7 @@ export const FacultyAttendancePage: React.FC = () => {
                       <span className="text-xs font-bold text-textSecondary">Total: {records.length} | Present: {presentCount} {odCount>0&&`(${odCount} on OD)`} | Absentees: {absentList.length}</span>
                       <button
                         onClick={()=>setShowAbsentModal(true)}
-                        disabled={(isNonWorkingDay && !allowOverrideExtraClass) || postingLocked}
+                        disabled={(isNonWorkingDay && !allowOverrideExtraClass) || postingLocked || records.length === 0}
                         className={`px-5 py-2.5 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-sm ${isPosted ? 'bg-amber-600 hover:bg-amber-500' : 'bg-[#007bff] hover:bg-blue-600'}`}
                       >
                         {isPosted ? `✏️ Review & Update Attendance (${totalActiveHours} Hr${totalActiveHours>1?'s':''})` : `Review & Submit Attendance (${totalActiveHours} Hr${totalActiveHours>1?'s':''})`}
