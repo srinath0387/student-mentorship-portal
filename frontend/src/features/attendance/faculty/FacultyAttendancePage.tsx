@@ -162,6 +162,15 @@ export const FacultyAttendancePage: React.FC = () => {
     return myTimetable.filter((t: TimetableEntry) => t.day_of_week === todayDay);
   }, [myTimetable, todayDay]);
 
+  // My classes on the date picked in Take Attendance, in period order
+  const daySlots = useMemo(() => myTimetable.filter((t: any) => t.day_of_week === selectedDay)
+    .sort((a: any, b: any) => Number(a.period_start) - Number(b.period_start)), [myTimetable, selectedDay]);
+  /** The allotted subject a timetable slot belongs to (same subject, section and class) */
+  const subjectForSlot = (t: any) => mySubjects.find(s =>
+    s.subject_name?.toLowerCase().trim() === String(t.subject_name || '').toLowerCase().trim()
+    && (!t.section || s.section?.toUpperCase() === String(t.section).toUpperCase())
+    && (!t.semester_label || s.semester_label === t.semester_label));
+
   // Timetable slots belonging to the active subject: same subject, section and semester.
   // (Matching on the faculty email alone picked ANY of the faculty's classes that day, so attendance
   // could be saved against another subject's period.)
@@ -226,26 +235,13 @@ export const FacultyAttendancePage: React.FC = () => {
   }, [sessionDetailsList, basePeriod]);
   const sessionDetailsLoaded = !isPosted || Array.isArray(sessionDetailsList);
 
-  // Dynamically set Hour checkboxes based on timetable scheduled duration (e.g. Mon: 1 hr, Wed: 2 hrs)
+  // Hour checkboxes follow the subject's timetable slot on the chosen day (1 hr → Hr1, 2 → Hr1–2, lab 3 → Hr1–3).
+  // One effect for both triggers: a separate "reset on subject change" effect used to run after this one and
+  // switch Hr2/Hr3 off again, so 2-hour classes and labs were saved as 1 hour.
   useEffect(() => {
-    if (matchedSlot) {
-      const dur = matchedSlot.num_periods || 1;
-      if (dur === 1) {
-        setHour1(true); setHour2(false); setHour3(false);
-      } else if (dur === 2) {
-        setHour1(true); setHour2(true); setHour3(false);
-      } else if (dur >= 3) {
-        setHour1(true); setHour2(true); setHour3(true);
-      }
-    } else {
-      setHour1(true); setHour2(false); setHour3(false);
-    }
-  }, [matchedSlot]);
-
-  // ATT-BUG-04 fix: reset hour toggles whenever subject changes so lab hours don't bleed into theory
-  useEffect(() => {
-    setHour1(true); setHour2(false); setHour3(false);
-  }, [subjectId]);
+    const dur = matchedSlot ? Math.max(1, Number(matchedSlot.num_periods) || 1) : 1;
+    setHour1(true); setHour2(dur >= 2); setHour3(dur >= 3);
+  }, [matchedSlot, subjectId]);
 
   // Not posted
   // Last 14 days of my classes that still have no attendance
@@ -551,7 +547,7 @@ export const FacultyAttendancePage: React.FC = () => {
                 </div>
                 <div className="divide-y divide-borderLine">
                   {todaySlots.length===0?(
-                    <div className="p-8 text-center text-textMuted text-xs">No classes scheduled in timetable for today ({todayDay}).</div>
+                    <div className="p-8 text-center text-xs"><p className="text-sm font-black text-textPrimary">No classes for you today</p><p className="text-textMuted mt-0.5">Your timetable has no periods on {todayDay}.</p></div>
                   ):todaySlots.map((slot:TimetableEntry,i:number)=>(
                     <div key={i} className="p-4 flex items-center justify-between hover:bg-surface-2 transition-colors">
                       <div className="flex items-center gap-3">
@@ -663,6 +659,39 @@ export const FacultyAttendancePage: React.FC = () => {
                   <button onClick={()=>{if(!subjectId){setFeedback({type:'error',text:'Select a subject first.'});return;}setIsLoaded(true);}} className="px-4 py-2 bg-[#007bff] hover:bg-blue-600 text-white font-bold text-xs rounded-xl shadow-sm">Load Students</button>
                 </div>
               </div>
+
+              {/* My classes on the chosen date — or a clear "no classes" note */}
+              {!isNonWorkingDay && (myTimetable.length === 0 ? (
+                <div role="status" className="rounded-2xl border border-borderLine bg-surface p-4 text-xs text-textSecondary">
+                  <p className="font-black text-textPrimary">Your timetable is not in the portal yet</p>
+                  <p className="mt-0.5">Classes can't be matched to periods until the HOD or admin adds this semester's timetable. You can still take attendance: pick the subject above.</p>
+                </div>
+              ) : daySlots.length === 0 ? (
+                <div role="status" className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-xs text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
+                  <p className="text-sm font-black">No classes for you on {selectedDay}, {new Date(date + 'T12:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+                  <p className="mt-0.5">Your timetable has no periods that day, so there is no attendance to take. If you held an extra class, pick its subject above: it is recorded as an extra session.</p>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-borderLine bg-surface p-3 space-y-2">
+                  <p className="text-[11px] font-black uppercase tracking-wider text-textSecondary">Your classes on {selectedDay}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {daySlots.map((t: any) => {
+                      const subj = subjectForSlot(t);
+                      const n = Math.max(1, Number(t.num_periods) || 1);
+                      const active = subj && subj.id === subjectId && (!preferredPeriod || preferredPeriod === Number(t.period_start));
+                      return (
+                        <button key={t.id} type="button" disabled={!subj}
+                          title={subj ? 'Take attendance for this class' : 'This slot has no matching allotted subject'}
+                          onClick={() => { if (!subj) return; setSubjectId(subj.id); setSem(subj.semester_label as any); setSection(subj.section); setPreferredPeriod(Number(t.period_start)); setIsLoaded(true); }}
+                          className={`text-left rounded-xl border px-3 py-2 text-xs transition-colors disabled:opacity-50 ${active ? 'border-brand-primary bg-brand-soft' : 'border-borderLine hover:bg-surface-2'}`}>
+                          <span className="block font-black text-textPrimary">P{t.period_start}{n > 1 ? `–${Number(t.period_start) + n - 1}` : ''} · {t.subject_name}</span>
+                          <span className="block text-[11px] text-textMuted">{t.semester_label} Sec {t.section} · {n} hour{n > 1 ? 's' : ''} → Hr1{n > 1 ? `–Hr${n}` : ''}{t.subject_type === 'Lab' ? ' · Lab' : ''}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
 
               {/* Sunday / Holiday Non-Working Day Warning Banner */}
               {isNonWorkingDay && (

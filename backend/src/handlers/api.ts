@@ -9,6 +9,7 @@ import routes from '../routes';
 import { db } from '../db';
 import { AY_NOW_SQL } from '../db/allotmentYear';
 import { signAiTicket, AiKind } from '../lib/aiTicket';
+import { planTimetableMerge, MergePlan } from '../lib/timetableMerge';
 import { calculateEmployabilityScore, calculateRPGScore, RPG_LEVELS } from '../services/employability';
 import { runCodingProfileCronSync, fetchLeetCodeStatsDirect, fetchGitHubStatsDirect, fetchEduSkillsStatsDirect, cleanEduSkillsHandle } from '../services/cronSync';
 import { cachedFetch } from '../services/platformCache';
@@ -17520,6 +17521,37 @@ app.get('/attendance/subject/:allotmentId/daywise', requireRole('faculty', 'hod'
 });
 
 // 14. Timetable: Upload Timetable Schedule (Admin / HOD / Coordinator)
+// Back-to-back periods of the same subject, section and faculty → one 2- or 3-hour class (see lib/timetableMerge)
+async function mergeClassTimetable(q: { query: (t: string, p?: any[]) => Promise<any> }, semester: string, department: string, section: string): Promise<MergePlan> {
+  await q.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`timetable:${semester}|${department}|${section}`]);
+  const rows = (await q.query(
+    `SELECT id::text AS id, day_of_week, period_start, num_periods, subject_name, subject_type, faculty_email, room_no
+     FROM timetable_entries WHERE semester_label = $1 AND COALESCE(department, '') = $2 AND COALESCE(section, '') = $3`,
+    [semester, department || '', section || ''])).rows;
+  const plan = planTimetableMerge(rows);
+  for (const u of plan.updates) {
+    await q.query('UPDATE timetable_entries SET num_periods = $2, room_no = $3, subject_type = $4 WHERE id::text = $1', [u.id, u.num_periods, u.room_no, u.subject_type]);
+  }
+  if (plan.deletes.length) await q.query('DELETE FROM timetable_entries WHERE id::text = ANY($1)', [plan.deletes]);
+  return plan;
+}
+/** Once ever: merge the timetables entered before merging existed (one class at a time) */
+let timetableMergeStarted = false;
+async function mergeAllTimetablesOnce(): Promise<void> {
+  if (timetableMergeStarted) return;
+  timetableMergeStarted = true;
+  await db.query('CREATE TABLE IF NOT EXISTS app_migrations (name TEXT PRIMARY KEY, done_at TIMESTAMPTZ DEFAULT NOW(), note TEXT)');
+  await db.transaction(async (q: any) => {
+    await q.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['timetable-merge-v1']);
+    if ((await q.query(`SELECT 1 FROM app_migrations WHERE name = 'timetable-merge-v1'`)).rows.length) return;
+    const classes = (await q.query(`SELECT DISTINCT semester_label, COALESCE(department, '') AS department, COALESCE(section, '') AS section FROM timetable_entries`)).rows;
+    let merged = 0;
+    for (const c of classes) merged += (await mergeClassTimetable(q, c.semester_label, c.department, c.section)).merged.length;
+    await q.query(`INSERT INTO app_migrations (name, note) VALUES ('timetable-merge-v1', $1) ON CONFLICT DO NOTHING`, [`${merged} classes merged`]);
+    console.log(`[timetable] merged ${merged} back-to-back classes in ${classes.length} timetables`);
+  });
+}
+
 app.post('/attendance/timetable/upload', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
   try {
     const { semester, department, section, entries } = req.body;
@@ -17536,6 +17568,7 @@ app.post('/attendance/timetable/upload', requireRole('admin', 'hod', 'coordinato
     const errors: { row: number; reason: string; item: any }[] = [];
 
     const validDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const touched = new Set<string>();
 
     for (let i = 0; i < entries.length; i++) {
       const row = entries[i];
@@ -17572,14 +17605,27 @@ app.post('/attendance/timetable/upload', requireRole('admin', 'hod', 'coordinato
           [semester, targetDept, rowSec, dayOfWeek, periodStart, validNumPeriods, subjectName, subjectType, facultyEmail, facultyName, roomNo]
         );
         addedCount++;
+        touched.add(JSON.stringify([semester, targetDept, rowSec]));
       } catch (err: any) {
         errors.push({ row: i + 1, reason: err.message, item: row });
       }
     }
 
+    // back-to-back periods of the same subject + faculty become one class; flag labs of one hour
+    const merged: string[] = []; const warnings: string[] = [];
+    for (const t of touched) {
+      const [sem, dept, sec] = JSON.parse(t);
+      try {
+        const plan = await db.transaction((q: any) => mergeClassTimetable(q, sem, dept, sec));
+        merged.push(...plan.merged); warnings.push(...plan.warnings);
+      } catch (err: any) { console.warn('[timetable] merge failed', err.message); }
+    }
+
     res.json({
-      message: `Timetable processed: ${addedCount} slots saved.`,
+      message: `Timetable processed: ${addedCount} slots saved.${merged.length ? ` Joined back-to-back periods: ${merged.join('; ')}.` : ''}`,
       addedCount,
+      merged,
+      warnings,
       errorsCount: errors.length,
       errors,
     });
@@ -17590,6 +17636,8 @@ app.post('/attendance/timetable/upload', requireRole('admin', 'hod', 'coordinato
 
 // 15. Timetable: Get Timetable Entries (Filterable)
 app.get('/attendance/timetable', requireAuth, async (req: Request, res: Response) => {
+  // the first request of each server instance makes sure older timetables were merged (a no-op after the first time)
+  await mergeAllTimetablesOnce().catch((e: any) => { timetableMergeStarted = false; console.warn('[timetable] one-time merge failed', e?.message); });
   try {
     const semester = (req.query.semester as string) || '';
     const section = (req.query.section as string) || '';

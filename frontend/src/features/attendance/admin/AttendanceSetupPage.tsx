@@ -302,13 +302,21 @@ export const AttendanceSetupPage: React.FC = () => {
     return grid;
   },[timetable,ttSem,ttSection]);
 
+  // Lab or theory, from the subject catalog (or the allotment) — labs are usually 3 hours
+  const ttSubjectType: 'Lab' | 'Theory' = (() => {
+    const m = masterSubjects.find((x: any) => x.subject_name === ttSubject && (!ttSem || x.semester_label === ttSem));
+    const a = ttAllotments.find((x: any) => x.subject_name === ttSubject);
+    return String(m?.subject_type || a?.subject_type || '').toLowerCase().includes('lab') ? 'Lab' : 'Theory';
+  })();
   const handleSaveSlot = async (e:React.FormEvent) => {
     e.preventDefault();
     if(!ttSubject||!ttFacEmail) { setTtStatus({type:'error',message:'Subject and Faculty Email required.'}); return; }
     try {
-      await api.uploadTimetable(ttSem,ttSection,ttDept,[{ day_of_week:ttDay, period_start:ttPeriod, num_periods:ttNumPeriods, subject_name:ttSubject, subject_type:'Theory', faculty_email:ttFacEmail, room_no:ttRoom }]);
+      const r:any = await api.uploadTimetable(ttSem,ttSection,ttDept,[{ day_of_week:ttDay, period_start:ttPeriod, num_periods:ttNumPeriods, subject_name:ttSubject, subject_type:ttSubjectType, faculty_email:ttFacEmail, room_no:ttRoom }]);
       qc.invalidateQueries({queryKey:['attendanceTimetable']});
-      setTtStatus({type:'success',message:`Slot saved: ${ttDay} P${ttPeriod}.`});
+      const joined = (r?.merged || []).length ? ` Joined back-to-back periods into one class: ${r.merged.join('; ')}.` : '';
+      const warn = (r?.warnings || []).length ? ` Check: ${r.warnings.join(' ')}` : '';
+      setTtStatus({type: warn ? 'error' : 'success', message:`Slot saved: ${ttDay} P${ttPeriod}.${joined}${warn}`});
       setTtSubject(''); setTtFacEmail(''); setTtRoom('');
       // ATT-BUG-11 fix: clear stale clash result after successful save
       setClashResult(null);
@@ -671,6 +679,11 @@ export const AttendanceSetupPage: React.FC = () => {
         <div className="space-y-4">
           <form onSubmit={handleSaveSlot} className="bg-surface border border-borderLine rounded-2xl p-4 space-y-3">
             <h3 className="text-sm font-bold text-textPrimary">Add Timetable Slot</h3>
+            <p className="text-[11px] text-textMuted">Back-to-back periods of the same subject, section and faculty are joined into one class automatically (for example P3 + P4 → a 2-hour class, P5–P7 → a 3-hour lab), so Take Attendance shows Hr1, Hr2 and Hr3. Classes never run across lunch.</p>
+            {ttSubject && ttSubjectType === 'Lab' && ttNumPeriods === 1 && (
+              <p role="alert" className="text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2 dark:bg-amber-950/40 dark:text-amber-200 dark:border-amber-800">
+                {ttSubject} is a lab but this slot is only 1 hour. Labs are usually 3 hours: choose "3 Hours (Lab)", or add the next periods for the same lab.</p>
+            )}
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
               <select value={ttSem} onChange={e=>setTtSem(e.target.value)} className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold">
                 <option value="">Class *</option>{SEMESTERS.map(s=><option key={s} value={s}>{s}</option>)}
@@ -699,7 +712,12 @@ export const AttendanceSetupPage: React.FC = () => {
               {/* Subject dropdown from master catalog */}
               <select
                 value={ttSubject}
-                onChange={e => { setTtSubject(e.target.value); setTtFacEmail(''); }}
+                onChange={e => {
+                  setTtSubject(e.target.value); setTtFacEmail('');
+                  // labs default to 3 hours
+                  const m = masterSubjects.find((x: any) => x.subject_name === e.target.value && (!ttSem || x.semester_label === ttSem));
+                  if (String(m?.subject_type || '').toLowerCase().includes('lab') && ttNumPeriods === 1) setTtNumPeriods(3);
+                }}
                 className="px-3 py-2 text-xs rounded-xl border border-borderLine bg-background focus:outline-none font-semibold"
                 required
               >
