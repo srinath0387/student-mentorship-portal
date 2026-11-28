@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { CopyFromEarlier } from './CopyFromEarlier';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, CalendarCheck2, Check, Download, FileSpreadsheet, FileText, Loader2, Paperclip, Plus, Trash2, Undo2, Upload, Wand2 } from 'lucide-react';
 import { api } from '../../lib/api';
@@ -24,6 +25,7 @@ export function LessonPlanEditor({ allotmentId, onBack, initialTab }: { allotmen
   useEffect(() => { if (tab === 'execution') setExecOpened(true); }, [tab]);
   const [confirmGen, setConfirmGen] = useState<any | null>(null);
   const [sessionsOpen, setSessionsOpen] = useState(false);
+  const [execKey, setExecKey] = useState(0);   // remounts the Execution Plan tab after a plan is copied in
   const [f, setF] = useState<{ objectives: string; outcomes: { code: string; text: string }[]; topics: Topic[]; text_books: string; references_text: string; file_key: string | null }>(
     { objectives: '', outcomes: [], topics: [], text_books: '', references_text: '', file_key: null });
   const [dirty, setDirty] = useState(false);
@@ -169,6 +171,8 @@ export function LessonPlanEditor({ allotmentId, onBack, initialTab }: { allotmen
       )}
 
       {p?.status === 'returned' && p.hod_remarks && <div className="rounded-xl px-4 py-2.5 text-xs bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200"><b>HOD's remarks:</b> {p.hod_remarks}</div>}
+      {canEdit && <CopyFromEarlier allotmentId={allotmentId} blocked={dirty ? 'Save or discard your changes first.' : undefined}
+        onCopied={copied => { if (copied.includes('exec_plan')) setExecKey(k => k + 1); }} />}
       {msg && <div className={`rounded-xl px-4 py-2.5 text-xs font-bold ${msg.ok ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'}`}>{msg.text}</div>}
 
       {data.can_review && p?.status === 'submitted' && (
@@ -188,7 +192,7 @@ export function LessonPlanEditor({ allotmentId, onBack, initialTab }: { allotmen
       </div>
 
       {/* kept mounted once opened, so moving between tabs never drops what was typed */}
-      {execOpened && <div hidden={tab !== 'execution'}><ExecutionPlanTab allotmentId={allotmentId} lp={data} /></div>}
+      {execOpened && <div hidden={tab !== 'execution'}><ExecutionPlanTab key={execKey} allotmentId={allotmentId} lp={data} /></div>}
       {tab === 'execution' ? null : tab === 'syllabus' ? (
         <SyllabusEditor allotmentId={allotmentId} onGenerate={canEdit ? onGenerate : () => setMsg({ ok: false, text: 'Only the subject faculty can generate the lesson plan.' })} />
       ) : tab === 'plan' ? (

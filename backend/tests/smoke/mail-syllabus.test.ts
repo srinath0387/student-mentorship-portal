@@ -369,7 +369,9 @@ describe('Course Execution Plan', () => {
     expect(res.status).toBe(200);
     expect(res.body.department).toBe('CSE');
     const q = calls.find(c => c.sql.includes('LEFT JOIN course_exec_plans'))!;
-    expect(q.params[0]).toBe('cse');
+    expect(q.params[1]).toBe('cse');
+    expect(q.sql).toContain('a.academic_year = $1');   // one academic year at a time
+    expect(q.params[0]).toMatch(/^\d{4}–\d{2}$/);
     expect(q.sql).toMatch(/p\.data/);
     expect(q.sql).toMatch(/p\.allotment_id IS NOT NULL/);
     expect((await request(app).get('/exec-plans/department').set('Authorization', FAC())).status).toBe(403);

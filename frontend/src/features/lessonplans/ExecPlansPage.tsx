@@ -2,6 +2,7 @@
  * Course Execution Plans — HOD / oversight view: how far every subject's plan is filled, download one or
  * all of them in the department template, and keep the department's subject catalog (sheet 1) and due date.
  */
+import { AcademicYearPicker } from '../../components/common/AcademicYearPicker';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -120,6 +121,7 @@ export default function ExecPlansPage() {
           <p className="text-xs text-textSecondary">{data?.department || '…'} · faculty fill their plan under My Lesson Plans → subject → Execution Plan</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <AcademicYearPicker />
           {!locked && (
             <select aria-label="Department" className={input} value={dept} onChange={e => setDept(e.target.value)}>
               <option value="All">All departments</option>{(DEPTS.includes(dept) || dept === 'All' ? DEPTS : [dept, ...DEPTS]).map(d => <option key={d} value={d}>{d}</option>)}

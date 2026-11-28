@@ -9,6 +9,8 @@ import { VALID_DEPARTMENT_NAMES } from '../../../lib/validation/auth';
 import { useAuth } from '../../../context/AuthContext';
 
 import { BouncingDots } from '../../../components/common/BouncingDots';
+import { AcademicYearPicker } from '../../../components/common/AcademicYearPicker';
+import { shiftAY, useViewAY } from '../../../lib/academicYear';
 const DEPARTMENTS = VALID_DEPARTMENT_NAMES;
 const SEMESTERS = ['1-1','1-2','2-1','2-2','3-1','3-2','4-1','4-2'];
 const SECTIONS = ['A','B','C','D','E'];
@@ -116,6 +118,8 @@ export const AttendanceSetupPage: React.FC = () => {
   };
 
   // ── TAB 2: FACULTY ALLOTMENT ───────────────────────────────────────────────
+  const { ay: viewYear } = useViewAY();
+  const [copyingYear, setCopyingYear] = useState(false);
   const [allotSem, setAllotSem] = useState('');
   const [allotDept, setAllotDept] = useState('CSE'); // synced to userDept for non-admin via useEffect
   const [allotSection, setAllotSection] = useState('A');
@@ -124,7 +128,7 @@ export const AttendanceSetupPage: React.FC = () => {
   const [allotCoFaculty, setAllotCoFaculty] = useState('');
   const [allotStatus, setAllotStatus] = useState<{type:string;message:string}|null>(null);
 
-  const {data:rawAllotments=[]} = useQuery({ queryKey:['attendanceAllotments',allotSem,allotDept], queryFn:()=>api.getAllotments(allotSem||undefined,allotDept||undefined).catch(()=>[]) });
+  const {data:rawAllotments=[]} = useQuery({ queryKey:['attendanceAllotments',allotSem,allotDept,viewYear], queryFn:()=>api.getAllotments(allotSem||undefined,allotDept||undefined).catch(()=>[]) });
   const allAllotments = Array.isArray(rawAllotments)?rawAllotments:[];
   const [allotSearch, setAllotSearch] = useState('');
   const allotments = allotSearch.trim()
@@ -156,7 +160,7 @@ export const AttendanceSetupPage: React.FC = () => {
     const coFaculty = isLab && allotCoFaculty ? facultyList.find((f:any)=>f.email===allotCoFaculty) : null;
     if (coFaculty && coFaculty.email === allotFaculty) { setAllotStatus({type:'error',message:'Co-faculty must be different from the main faculty.'}); return; }
     try {
-      await api.createSingleAllotment({ semester:allotSem||sub.semester_label, department:allotDept, section:allotSection, subject_name:sub.subject_name, subject_type:sub.subject_type, faculty_name:faculty?.name||allotFaculty, faculty_email:allotFaculty,
+      await api.createSingleAllotment({ semester:allotSem||sub.semester_label, department:allotDept, section:allotSection, subject_name:sub.subject_name, subject_type:sub.subject_type, faculty_name:faculty?.name||allotFaculty, faculty_email:allotFaculty, academic_year: viewYear,
         ...(coFaculty ? { co_faculty_email: coFaculty.email, co_faculty_name: coFaculty.name || coFaculty.email } : {}) });
       qc.invalidateQueries({queryKey:['attendanceAllotments']});
       setAllotStatus({type:'success',message: coFaculty ? 'Lab allotted with co-faculty. Only the main faculty posts attendance; both get the lab hours in workload.' : 'Allotment created.'});
@@ -167,7 +171,17 @@ export const AttendanceSetupPage: React.FC = () => {
   const handleDeleteAllotment = async (id:string) => {
     if(!window.confirm('Remove this allotment? Its timetable slots for this class are removed too.')) return;
     try {
-      const r:any = await api.deleteAllotment(id);
+      let r:any;
+      try { r = await api.deleteAllotment(id); }
+      catch (err:any) {
+        if (err?.body?.code !== 'HAS_ATTENDANCE') throw err;
+        // the subject already has attendance: deleting it deletes that attendance too, so ask for the subject name
+        const a:any = rawAllotments.find((x:any)=>x.id===id);
+        const typed = window.prompt(`${err.message}\n\nThis cannot be undone. Type the subject name (${a?.subject_name||''}) to delete it with its attendance:`);
+        if (typed === null) return;
+        if (typed.trim().toLowerCase() !== String(a?.subject_name||'').trim().toLowerCase()) { setAllotStatus({type:'error',message:'The subject name did not match, so nothing was deleted.'}); return; }
+        r = await api.deleteAllotment(id, true);
+      }
       qc.invalidateQueries({queryKey:['attendanceAllotments']});
       qc.invalidateQueries({queryKey:['orphanTimetableSlots']});
       qc.invalidateQueries({queryKey:['attendanceTimetable']});
@@ -184,7 +198,7 @@ export const AttendanceSetupPage: React.FC = () => {
         const rows:any[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
         if(rows.length===0){setAllotStatus({type:'error',message:'No rows found in the uploaded file.'});return;}
         const result = await api.uploadAllotments(allotSem, rows.map(r=>({ subject_name:r['Subject Name']||r['subject_name']||'', subject_type:(r['Subject Type']||'Theory').toLowerCase().includes('lab')?'Lab':'Theory', faculty_email:r['Faculty Email']||r['faculty_email']||'', faculty_name:r['Faculty Name']||r['faculty_name']||'', section:r['Section']||allotSection, department:allotDept,
-          co_faculty_email:r['Co-Faculty Email']||r['Co Faculty Email']||r['co_faculty_email']||'', co_faculty_name:r['Co-Faculty Name']||r['Co Faculty Name']||r['co_faculty_name']||'' })));
+          co_faculty_email:r['Co-Faculty Email']||r['Co Faculty Email']||r['co_faculty_email']||'', co_faculty_name:r['Co-Faculty Name']||r['Co Faculty Name']||r['co_faculty_name']||'' })), viewYear);
         qc.invalidateQueries({queryKey:['attendanceAllotments']});
         // BUG-14 fix: show real imported/error counts from backend response
         const imported = result?.importedCount ?? result?.addedCount ?? rows.length;
@@ -437,6 +451,26 @@ export const AttendanceSetupPage: React.FC = () => {
       {/* ── TAB 2: FACULTY ALLOTMENT ── */}
       {tab==='allotment' && (
         <div className="space-y-4">
+          <div className="bg-surface border border-borderLine rounded-2xl p-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <AcademicYearPicker />
+              <span className="text-[11px] text-textMuted">Allotments listed and added here are for <strong className="text-textPrimary tabular-nums">{viewYear}</strong>. Each year has its own rosters and attendance.</span>
+            </div>
+            <button type="button" disabled={copyingYear} onClick={async()=>{
+                const from = shiftAY(viewYear,-1);
+                if(!window.confirm(`Copy ${from}'s allotments into ${viewYear}${isAdmin && allotDept ? ` for ${allotDept}` : ''}? Same faculty, subjects and sections; nothing already allotted in ${viewYear} is duplicated. Student rosters are not copied.`)) return;
+                setCopyingYear(true);
+                try {
+                  const r:any = await api.copyAllotmentsYear({ from, to: viewYear, department: allotDept || undefined, semester: allotSem || undefined });
+                  qc.invalidateQueries({queryKey:['attendanceAllotments']});
+                  setAllotStatus({type:'success',message:r?.created ? r.message : `Nothing to copy: every ${from} allotment${allotSem?` of ${allotSem}`:''} is already in ${viewYear}.`});
+                } catch(err:any) { setAllotStatus({type:'error',message:err.message||'Copy failed.'}); }
+                finally { setCopyingYear(false); }
+              }}
+              className="px-3 py-2 text-xs font-bold rounded-xl border border-borderLine text-textSecondary hover:bg-surface-2 disabled:opacity-50">
+              {copyingYear ? 'Copying…' : `Copy ${shiftAY(viewYear,-1)} allotments into ${viewYear}`}
+            </button>
+          </div>
           <form onSubmit={handleAllot} className="bg-surface border border-borderLine rounded-2xl p-4 space-y-3">
             <h3 className="text-sm font-bold text-textPrimary">Allot Subject to Faculty</h3>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">

@@ -5,6 +5,7 @@
  */
 import request from 'supertest';
 import { Pool } from 'pg';
+import { AY_NOW_SQL } from '../../src/db/allotmentYear';
 
 const URL = process.env.FS_TEST_DATABASE_URL;
 const d = URL ? describe : describe.skip;
@@ -33,7 +34,7 @@ d('Department progress overview (real Postgres)', () => {
     await pool.query(`DROP TABLE IF EXISTS subject_allotments, course_exec_plans, course_exec_settings, lesson_plans, dept_events, event_requests CASCADE`);
     await pool.query(`CREATE TABLE subject_allotments (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), semester_label TEXT NOT NULL DEFAULT '2-2',
       subject_name TEXT NOT NULL DEFAULT 'X', subject_type TEXT NOT NULL DEFAULT 'Theory', section TEXT NOT NULL DEFAULT 'A',
-      faculty_email TEXT NOT NULL DEFAULT 'f@x', faculty_name TEXT NOT NULL DEFAULT '', department TEXT NOT NULL DEFAULT '', co_faculty_email TEXT)`);
+      faculty_email TEXT NOT NULL DEFAULT 'f@x', faculty_name TEXT NOT NULL DEFAULT '', department TEXT NOT NULL DEFAULT '', co_faculty_email TEXT, academic_year TEXT DEFAULT ${AY_NOW_SQL})`);
     // forward the app's queries on these tables to the real database; answer login checks here
     db.query.mockReset();
     db.query.mockImplementation(async (sql: string, params: any[] = []) => {

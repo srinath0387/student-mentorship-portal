@@ -3,6 +3,7 @@
  * Every department side by side: course execution plans, lesson plans & syllabus coverage, events this year,
  * plus an automatic "needs attention" list. Every number opens the department's detail page.
  */
+import { AcademicYearPicker } from '../../components/common/AcademicYearPicker';
 import React, { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -138,7 +139,10 @@ export default function QualityOverviewPage() {
           <h1 className="text-xl font-black text-textPrimary">Department Progress</h1>
           <p className="text-xs text-textSecondary">Academic year {data.academic_year} · {data.scope === 'All' ? 'all departments' : data.scope} · as of {fmtDate(data.today)}. Click any number to open the details.</p>
         </div>
-        <button className={btnGhost} onClick={exportExcel} disabled={!rows.length}><FileSpreadsheet className="w-3.5 h-3.5 inline mr-1" />Download Excel</button>
+        <div className="flex flex-wrap items-center gap-2">
+          <AcademicYearPicker value={data.academic_year} />
+          <button className={btnGhost} onClick={exportExcel} disabled={!rows.length}><FileSpreadsheet className="w-3.5 h-3.5 inline mr-1" />Download Excel</button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">

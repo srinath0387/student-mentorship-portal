@@ -7,6 +7,7 @@ import cors from 'cors';
 import serverless from 'serverless-http';
 import routes from '../routes';
 import { db } from '../db';
+import { AY_NOW_SQL } from '../db/allotmentYear';
 import { calculateEmployabilityScore, calculateRPGScore, RPG_LEVELS } from '../services/employability';
 import { runCodingProfileCronSync, fetchLeetCodeStatsDirect, fetchGitHubStatsDirect, fetchEduSkillsStatsDirect, cleanEduSkillsHandle } from '../services/cronSync';
 import { cachedFetch } from '../services/platformCache';
@@ -7475,10 +7476,10 @@ async function fetchCurrentSemesterAttendance(depts: string[] | null): Promise<S
   }
   const result = await db.query(`
     WITH cur AS (
-      SELECT r.roll_number, MAX(a.semester_label) AS semester
+      SELECT DISTINCT ON (r.roll_number) r.roll_number, a.academic_year, a.semester_label AS semester
       FROM subject_rosters r
       JOIN subject_allotments a ON a.id = r.allotment_id
-      GROUP BY r.roll_number
+      ORDER BY r.roll_number, a.academic_year DESC NULLS LAST, a.semester_label DESC
     ),
     agg AS (
       SELECT r.roll_number,
@@ -7486,7 +7487,7 @@ async function fetchCurrentSemesterAttendance(depts: string[] | null): Promise<S
              COALESCE(SUM(CASE WHEN s.session_date >= COALESCE(r.joining_date, '1970-01-01'::date) AND ar.is_present = true THEN s.num_periods ELSE 0 END), 0) AS attended
       FROM subject_rosters r
       JOIN subject_allotments a ON a.id = r.allotment_id
-      JOIN cur ON cur.roll_number = r.roll_number AND cur.semester = a.semester_label
+      JOIN cur ON cur.roll_number = r.roll_number AND cur.semester = a.semester_label AND cur.academic_year IS NOT DISTINCT FROM a.academic_year
       LEFT JOIN attendance_sessions s ON s.allotment_id = a.id
       LEFT JOIN attendance_records ar ON ar.session_id = s.id AND UPPER(ar.roll_number) = UPPER(r.roll_number)
       GROUP BY r.roll_number
@@ -8631,6 +8632,7 @@ app.get('/feedback/cycles/:id/my-subjects', requireRole('student'), async (req: 
     let filter = '';
     if (cycle.department && cycle.department !== 'All') { params.push(cycle.department); filter += ` AND a.department = $${params.length}`; }
     if (cycle.semester_label && cycle.semester_label !== 'All') { params.push(cycle.semester_label); filter += ` AND a.semester_label = $${params.length}`; }
+    params.push(currentAcademicYear(new Date(`${String(cycle.start_date).slice(0, 10)}T12:00:00Z`))); filter += ` AND a.academic_year = $${params.length}`;
     const r = await db.query(
       `SELECT a.id AS allotment_id, a.subject_name, a.subject_type, a.semester_label, a.section, a.faculty_name, a.faculty_email,
               EXISTS (SELECT 1 FROM feedback_submissions fs WHERE fs.cycle_id = $2 AND fs.roll_number = $1 AND fs.allotment_id = a.id::text) AS submitted
@@ -9034,10 +9036,24 @@ function ensureAppraisalTable(): Promise<void> {
 }
 
 /** "2026–27" style (en dash, as used in faculty profile records). */
+/** The academic year a date falls in — June to May, India time — e.g. "2026–27" */
 function currentAcademicYear(d = new Date()): string {
-  const y = d.getUTCFullYear(); const start = d.getUTCMonth() + 1 >= 6 ? y : y - 1;
+  const ist = new Date(d.getTime() + 330 * 60000);
+  const y = ist.getUTCFullYear(); const start = ist.getUTCMonth() + 1 >= 6 ? y : y - 1;
   return `${start}–${String(start + 1).slice(-2)}`;
 }
+const AY_RE = /^\d{4}\s*[–-]\s*\d{2}$/;
+/** "2026-27" / "2026–27" / "2026-2027" → "2026–27"; null when it isn't an academic year */
+function cleanAY(v: any): string | null {
+  const t = String(v ?? '').trim();
+  const long = /^(\d{4})\s*[–-]\s*(\d{4})$/.exec(t);
+  if (long && Number(long[2]) === Number(long[1]) + 1) return `${long[1]}–${long[2].slice(-2)}`;
+  if (!AY_RE.test(t)) return null;
+  const [a, b] = t.split(/\s*[–-]\s*/);
+  return Number(b) === (Number(a) + 1) % 100 ? `${a}–${b}` : null;
+}
+/** The academic year a list should show: ?ay= when given, otherwise the year in progress */
+const ayOf = (req: Request): string => cleanAY(req.query.ay) || currentAcademicYear();
 function academicYearRange(ay: string): { from: string; to: string } | null {
   const m = /^(\d{4})[–-](\d{2})$/.exec(ay.trim());
   if (!m) return null;
@@ -9707,10 +9723,10 @@ async function obeAccess(req: Request, allotmentId: string): Promise<{ allot: an
 app.get('/obe/courses', requireRole('faculty', 'hod', 'admin', 'principal', 'director', 'management', 'program_chair'), async (req: Request, res: Response) => {
   try {
     await ensureObeTable();
-    const role = req.auth!.role; const params: any[] = []; let where = 'TRUE';
-    if (role === 'faculty') { params.push(req.auth!.email.toLowerCase()); where = `LOWER(a.faculty_email) = $1`; }
-    else if (role === 'hod' && req.auth!.department && req.auth!.department !== '*') { params.push(req.auth!.department); where = `a.department = $1`; }
-    else if (role === 'program_chair') { params.push(CSE_ALLIED_DEPTS); where = `a.department = ANY($1)`; }
+    const role = req.auth!.role; const params: any[] = [ayOf(req)]; let where = 'a.academic_year = $1';
+    if (role === 'faculty') { params.push(req.auth!.email.toLowerCase()); where += ` AND LOWER(a.faculty_email) = $2`; }
+    else if (role === 'hod' && req.auth!.department && req.auth!.department !== '*') { params.push(req.auth!.department); where += ` AND a.department = $2`; }
+    else if (role === 'program_chair') { params.push(CSE_ALLIED_DEPTS); where += ` AND a.department = ANY($2)`; }
     if (req.query.department && req.query.department !== 'All' && role !== 'faculty' && role !== 'hod') { params.push(String(req.query.department)); where += ` AND a.department = $${params.length}`; }
     const r = await db.query(
       `SELECT a.id AS allotment_id, a.subject_name, a.subject_type, a.semester_label, a.section, a.department, a.faculty_name, a.faculty_email,
@@ -11553,8 +11569,8 @@ app.get('/lesson-plans/my', requireRole(...QUALITY_STAFF), async (req: Request, 
               (LOWER(COALESCE(a.co_faculty_email, '')) = $1) AS is_co_faculty,
               p.id AS plan_id, p.status, p.hod_remarks, p.topics, p.updated_at
        FROM subject_allotments a LEFT JOIN lesson_plans p ON p.allotment_id = a.id
-       WHERE LOWER(a.faculty_email) = $1 OR LOWER(COALESCE(a.co_faculty_email, '')) = $1
-       ORDER BY a.semester_label, a.subject_name, a.section`, [String(req.auth!.email || '').toLowerCase()]);
+       WHERE (LOWER(a.faculty_email) = $1 OR LOWER(COALESCE(a.co_faculty_email, '')) = $1) AND a.academic_year = $2
+       ORDER BY a.semester_label, a.subject_name, a.section`, [String(req.auth!.email || '').toLowerCase(), ayOf(req)]);
     res.json(r.rows.map((x: any) => { const { topics, ...rest } = x; return { ...rest, status: x.status || 'not_started', ...lpSummary(Array.isArray(topics) ? topics : []) }; }));
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -11565,7 +11581,7 @@ app.get('/lesson-plans/department', requireRole('hod', ...QUALITY_OVERSIGHT), as
     await ensureQualityTables();
     const own = await qualityDept(req);
     const dept = own || (req.query.department && req.query.department !== 'All' ? String(req.query.department) : null);
-    const params: any[] = []; const where: string[] = [];
+    const params: any[] = [ayOf(req)]; const where: string[] = ['a.academic_year = $1'];
     if (dept) { params.push(normDept(dept)); where.push(`LOWER(REGEXP_REPLACE(a.department, '[^a-zA-Z0-9]', '', 'g')) = $${params.length}`); }
     if (req.query.semester) { params.push(String(req.query.semester)); where.push(`a.semester_label = $${params.length}`); }
     const r = await db.query(
@@ -11653,7 +11669,7 @@ app.put('/lesson-plans/allotment/:aid', requireRole(...QUALITY_STAFF), async (re
          text_books = EXCLUDED.text_books, references_text = EXCLUDED.references_text, file_key = EXCLUDED.file_key,
          status = EXCLUDED.status, updated_at = NOW()
        RETURNING *`,
-      [a.id, String(a.faculty_email).toLowerCase(), a.faculty_name, a.department, a.semester_label, a.section, a.subject_name, currentAcademicYear(),
+      [a.id, String(a.faculty_email).toLowerCase(), a.faculty_name, a.department, a.semester_label, a.section, a.subject_name, a.academic_year || currentAcademicYear(),
         clip(b.objectives, 3000), JSON.stringify(outcomes), JSON.stringify(topics), clip(b.text_books, 2000), clip(b.references_text, 2000),
         b.file_key || null, status]);
     res.json({ ...r.rows[0], resubmitted: cur?.status === 'approved' });
@@ -12193,6 +12209,175 @@ app.put('/exec-plans/allotment/:aid', requireRole(...QUALITY_STAFF), async (req:
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Teaching the same subject again: start from an earlier plan ─────────────────────────────────────────────
+// Same department + semester + subject — another section this year, or any section in an earlier academic year.
+const SAME_SUBJECT_SQL = `LOWER(REGEXP_REPLACE(COALESCE(a.department, ''), '[^a-zA-Z0-9]', '', 'g')) = $2 AND a.semester_label = $3
+  AND LOWER(TRIM(a.subject_name)) = LOWER(TRIM($4))`;
+const CEP_CLASS_KEYS = ['faculty_name', 'class_section', 'strength', 'sem_start', 'sem_end', 'submission_date'];
+const COPY_PARTS = ['lesson_plan', 'exec_plan', 'obe'] as const;
+
+// GET /allotments/:aid/copy-sources — earlier plans of this subject that can be copied in
+app.get('/allotments/:aid/copy-sources', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables(); await ensureObeTable();
+    const a = await lpAllotment(req.params.aid);
+    if (!a) return res.status(404).json({ error: 'Subject allotment not found' });
+    if (!(await lpCanView(req, a))) return res.status(403).json({ error: 'Not your subject' });
+    const me = String(req.auth!.email || '').toLowerCase();
+    const [target, rows] = await Promise.all([
+      db.query(`SELECT
+          EXISTS (SELECT 1 FROM lesson_plans p WHERE p.allotment_id = $1 AND jsonb_array_length(COALESCE(p.topics, '[]'::jsonb)) > 0) AS lesson_plan,
+          EXISTS (SELECT 1 FROM course_exec_plans c WHERE c.allotment_id = $1 AND c.progress > 0) AS exec_plan,
+          EXISTS (SELECT 1 FROM obe_courses o WHERE o.allotment_id = $1::text AND jsonb_array_length(COALESCE(o.cos, '[]'::jsonb)) > 0) AS obe`, [a.id]),
+      db.query(
+        `SELECT a.id AS allotment_id, a.academic_year, a.section, a.faculty_name, a.faculty_email,
+                (LOWER(a.faculty_email) = $5 OR LOWER(COALESCE(a.co_faculty_email, '')) = $5) AS mine,
+                (SELECT jsonb_array_length(COALESCE(p.topics, '[]'::jsonb)) FROM lesson_plans p WHERE p.allotment_id = a.id) AS lesson_topics,
+                (SELECT c.progress FROM course_exec_plans c WHERE c.allotment_id = a.id) AS exec_progress,
+                (SELECT jsonb_array_length(COALESCE(o.cos, '[]'::jsonb)) FROM obe_courses o WHERE o.allotment_id = a.id::text) AS obe_cos
+         FROM subject_allotments a
+         WHERE a.id <> $1 AND ${SAME_SUBJECT_SQL} AND COALESCE(a.academic_year, '') <= $6
+         ORDER BY (a.academic_year = $6) DESC, mine DESC, a.academic_year DESC, a.section LIMIT 30`,
+        [a.id, normDept(a.department), a.semester_label, a.subject_name, me, a.academic_year || currentAcademicYear()]),
+    ]);
+    const sources = rows.rows
+      .map((x: any) => ({ ...x, lesson_topics: Number(x.lesson_topics || 0), exec_progress: Number(x.exec_progress || 0), obe_cos: Number(x.obe_cos || 0) }))
+      .filter((x: any) => x.lesson_topics || x.exec_progress || x.obe_cos);
+    res.json({ academic_year: a.academic_year, can_copy: lpIsOwner(req, a), filled: target.rows[0] || {}, sources });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /allotments/:aid/copy-from { source, parts? } — copy an earlier lesson plan / execution plan / CO set into this subject.
+// Only fills what is still empty here; dates, coverage, attainment and class details start fresh.
+app.post('/allotments/:aid/copy-from', requireRole(...QUALITY_STAFF), async (req: Request, res: Response) => {
+  try {
+    await ensureQualityTables(); await ensureObeTable();
+    const t = await lpAllotment(req.params.aid);
+    if (!t) return res.status(404).json({ error: 'Subject allotment not found' });
+    if (!lpIsOwner(req, t)) return res.status(403).json({ error: 'Only the faculty of this subject can copy plans into it' });
+    const src = await lpAllotment(String(req.body?.source || ''));
+    if (!src || src.id === t.id) return res.status(400).json({ error: 'Pick the earlier subject to copy from' });
+    const same = normDept(src.department) === normDept(t.department) && src.semester_label === t.semester_label
+      && String(src.subject_name || '').trim().toLowerCase() === String(t.subject_name || '').trim().toLowerCase();
+    if (!same) return res.status(400).json({ error: 'You can copy only from the same subject (department, semester and subject name).' });
+    const parts: string[] = Array.isArray(req.body?.parts) && req.body.parts.length ? req.body.parts.filter((x: any) => (COPY_PARTS as readonly string[]).includes(x)) : [...COPY_PARTS];
+    const by = String(req.auth!.email || '').toLowerCase();
+    const copied: string[] = []; const skipped: string[] = [];
+
+    if (parts.includes('lesson_plan')) {
+      const [from, here] = await Promise.all([
+        db.query('SELECT * FROM lesson_plans WHERE allotment_id = $1', [src.id]),
+        db.query('SELECT topics FROM lesson_plans WHERE allotment_id = $1', [t.id]),
+      ]);
+      const f = from.rows[0];
+      const hereTopics = Array.isArray(here.rows[0]?.topics) ? here.rows[0].topics : [];
+      if (!f || !(Array.isArray(f.topics) && f.topics.length)) skipped.push('lesson_plan: nothing to copy');
+      else if (hereTopics.length) skipped.push('lesson_plan: already has topics');
+      else {
+        const stamp = Date.now().toString(36);
+        const topics = f.topics.map((x: any, i: number) => ({ ...x, id: `t${stamp}${i}`, planned_date: null, covered_on: null, coverage_remarks: null }));
+        await db.query(
+          `INSERT INTO lesson_plans (allotment_id, faculty_email, faculty_name, department, semester_label, section, subject_name, academic_year,
+             objectives, outcomes, topics, text_books, references_text, status, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'draft',NOW())
+           ON CONFLICT (allotment_id) DO UPDATE SET objectives = EXCLUDED.objectives, outcomes = EXCLUDED.outcomes, topics = EXCLUDED.topics,
+             text_books = EXCLUDED.text_books, references_text = EXCLUDED.references_text, status = 'draft', updated_at = NOW()`,
+          [t.id, String(t.faculty_email).toLowerCase(), t.faculty_name, t.department, t.semester_label, t.section, t.subject_name,
+            t.academic_year || currentAcademicYear(), f.objectives, JSON.stringify(f.outcomes || []), JSON.stringify(topics), f.text_books, f.references_text]);
+        copied.push('lesson_plan');
+      }
+    }
+
+    if (parts.includes('exec_plan')) {
+      const [from, here] = await Promise.all([
+        db.query('SELECT data, progress FROM course_exec_plans WHERE allotment_id = $1', [src.id]),
+        db.query('SELECT progress FROM course_exec_plans WHERE allotment_id = $1', [t.id]),
+      ]);
+      const f = from.rows[0];
+      if (!f || !Number(f.progress)) skipped.push('exec_plan: nothing to copy');
+      else if (Number(here.rows[0]?.progress || 0) > 0) skipped.push('exec_plan: already started');
+      else {
+        const d = f.data || {};
+        const initial = { ...(d.initial || {}) };
+        for (const k of CEP_CLASS_KEYS) initial[k] = '';     // this class's own details come from the portal again
+        const { data, progress } = cleanExecPlan({
+          ...d, initial,
+          experts: (Array.isArray(d.experts) ? d.experts : []).map((x: any) => ({ ...x, date: '' })),
+          teams: [],                                         // student teams belong to last year's class
+        });
+        await db.query(
+          `INSERT INTO course_exec_plans (allotment_id, department, semester_label, section, subject_name, faculty_email, faculty_name, data, progress, updated_by, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+           ON CONFLICT (allotment_id) DO UPDATE SET data = EXCLUDED.data, progress = EXCLUDED.progress, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+          [t.id, t.department, t.semester_label, t.section, t.subject_name, String(t.faculty_email || '').toLowerCase(), t.faculty_name,
+            JSON.stringify(data), progress, by]);
+        copied.push('exec_plan');
+      }
+    }
+
+    if (parts.includes('obe')) {
+      const [from, here] = await Promise.all([
+        db.query('SELECT settings, cos, mapping FROM obe_courses WHERE allotment_id = $1', [String(src.id)]),
+        db.query('SELECT cos FROM obe_courses WHERE allotment_id = $1', [String(t.id)]),
+      ]);
+      const f = from.rows[0];
+      if (!f || !(Array.isArray(f.cos) && f.cos.length)) skipped.push('obe: nothing to copy');
+      else if (Array.isArray(here.rows[0]?.cos) && here.rows[0].cos.length) skipped.push('obe: already has COs');
+      else {
+        await db.query(
+          `INSERT INTO obe_courses (allotment_id, settings, cos, mapping, attainment, updated_by, updated_at) VALUES ($1,$2,$3,$4,'{}',$5,NOW())
+           ON CONFLICT (allotment_id) DO UPDATE SET settings = EXCLUDED.settings, cos = EXCLUDED.cos, mapping = EXCLUDED.mapping,
+             attainment = '{}', updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+          [String(t.id), JSON.stringify(f.settings || {}), JSON.stringify(f.cos), JSON.stringify(f.mapping || {}), by]);
+        copied.push('obe');
+      }
+    }
+    res.json({ copied, skipped, from: { allotment_id: src.id, academic_year: src.academic_year, section: src.section, faculty_name: src.faculty_name } });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Academic years ────────────────────────────────────────────────────────────────────────────────────────
+// GET /academic-years — the year in progress, and every year that has allotments (plus next year, to allot in advance)
+app.get('/academic-years', requireAuth, async (_req: Request, res: Response) => {
+  try {
+    const current = currentAcademicYear();
+    const next = `${Number(current.slice(0, 4)) + 1}–${String(Number(current.slice(0, 4)) + 2).slice(-2)}`;
+    const r = await db.query(`SELECT DISTINCT academic_year FROM subject_allotments WHERE academic_year IS NOT NULL`).catch(() => ({ rows: [] as any[] }));
+    const years = Array.from(new Set([next, current, ...r.rows.map((x: any) => x.academic_year)])).filter(y => cleanAY(y)).sort().reverse();
+    res.json({ current, next, years });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /attendance/allotments/copy-year { from, to, department?, semester? } — start a new year's allotments from last year's
+// (same faculty, subjects and sections; rosters are not copied — the admin adds each new class's roster)
+app.post('/attendance/allotments/copy-year', requireRole('admin', 'hod', 'coordinator'), async (req: Request, res: Response) => {
+  try {
+    await ensureCoFacultyColumns();
+    const from = cleanAY(req.body?.from); const to = cleanAY(req.body?.to);
+    if (!from || !to) return res.status(400).json({ error: 'Pick the year to copy from and the year to copy into (e.g. 2026-27).' });
+    if (from === to) return res.status(400).json({ error: 'Pick two different academic years.' });
+    const callerDept = req.auth?.department || '';
+    const scoped = req.auth?.role === 'hod' && callerDept && callerDept !== '*' && callerDept !== 'All';
+    const dept = scoped ? callerDept : (req.body?.department && req.body.department !== 'All' ? String(req.body.department) : '');
+    const semester = /^\d-\d$/.test(String(req.body?.semester || '')) ? String(req.body.semester) : '';
+    const params: any[] = [from, to]; let where = 'a.academic_year = $1';
+    if (dept) { params.push(normDept(dept)); where += ` AND LOWER(REGEXP_REPLACE(COALESCE(a.department, ''), '[^a-zA-Z0-9]', '', 'g')) = $${params.length}`; }
+    if (semester) { params.push(semester); where += ` AND a.semester_label = $${params.length}`; }
+    const r = await db.query(
+      `INSERT INTO subject_allotments (semester_label, subject_name, subject_type, section, faculty_email, faculty_name, department, co_faculty_email, co_faculty_name, academic_year)
+       SELECT a.semester_label, a.subject_name, a.subject_type, a.section, a.faculty_email, a.faculty_name, a.department, a.co_faculty_email, a.co_faculty_name, $2::varchar
+       FROM subject_allotments a
+       WHERE ${where}
+         AND NOT EXISTS (SELECT 1 FROM subject_allotments b WHERE b.academic_year = $2::varchar AND b.semester_label = a.semester_label
+                           AND LOWER(b.subject_name) = LOWER(a.subject_name) AND b.section = a.section AND LOWER(b.faculty_email) = LOWER(a.faculty_email))
+       ON CONFLICT DO NOTHING
+       RETURNING id`, params);
+    const total = await db.query(`SELECT COUNT(*)::int AS n FROM subject_allotments a WHERE ${where} AND $2::text IS NOT NULL`, params).catch(() => ({ rows: [{ n: 0 }] }));
+    res.json({ success: true, created: r.rowCount || 0, source_count: total.rows[0]?.n || 0, from, to, department: dept || 'All',
+      message: `${r.rowCount || 0} allotment${r.rowCount === 1 ? '' : 's'} created for ${to} from ${from}. Add each class's student roster before taking attendance.` });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 // GET /exec-plans/department?department=&semester=&full=1 — every allotted subject with how far its plan is filled
 app.get('/exec-plans/department', requireRole('hod', ...QUALITY_OVERSIGHT), async (req: Request, res: Response) => {
   try {
@@ -12200,7 +12385,7 @@ app.get('/exec-plans/department', requireRole('hod', ...QUALITY_OVERSIGHT), asyn
     const own = await qualityDept(req);
     const dept = own || (req.query.department && req.query.department !== 'All' ? String(req.query.department) : null);
     const full = req.query.full === '1';
-    const params: any[] = []; const where: string[] = [];
+    const params: any[] = [ayOf(req)]; const where: string[] = ['a.academic_year = $1'];
     if (dept) { params.push(normDept(dept)); where.push(`LOWER(REGEXP_REPLACE(a.department, '[^a-zA-Z0-9]', '', 'g')) = $${params.length}`); }
     if (req.query.semester) { params.push(String(req.query.semester)); where.push(`a.semester_label = $${params.length}`); }
     if (full) where.push('p.allotment_id IS NOT NULL');
@@ -12283,7 +12468,7 @@ async function fcpSources(email: string, fac: any) {
     safe(db.query(`SELECT personal, education, publications, domains, activities FROM faculty_full_profiles WHERE LOWER(email) = $1 LIMIT 1`, [e])),
     // this and recent semesters' allotments — the lesson plan knows the academic year, the syllabus the regulation
     safe(db.query(`SELECT a.semester_label, a.subject_name, a.subject_type, a.section, a.department, a.created_at,
-                          (SELECT lp.academic_year FROM lesson_plans lp WHERE lp.allotment_id = a.id LIMIT 1) AS academic_year,
+                          COALESCE(a.academic_year, (SELECT lp.academic_year FROM lesson_plans lp WHERE lp.allotment_id = a.id LIMIT 1)) AS academic_year,
                           (SELECT ss.regulation FROM subject_syllabi ss
                             WHERE ss.dept_key = LOWER(REGEXP_REPLACE(a.department, '[^a-zA-Z0-9]', '', 'g')) AND ss.semester_label = a.semester_label
                               AND LOWER(ss.subject_name) = LOWER(a.subject_name) LIMIT 1) AS regulation
@@ -12393,7 +12578,7 @@ app.get('/quality/overview', requireRole('hod', ...QUALITY_OVERSIGHT), async (re
   try {
     await ensureQualityTables();
     const own = await qualityDept(req);
-    const ay = currentAcademicYear();
+    const ay = ayOf(req);
     const range = academicYearRange(ay);
     const today = todayIST();
     const KEY = (col: string) => `LOWER(REGEXP_REPLACE(COALESCE(${col}, ''), '[^a-zA-Z0-9]', '', 'g'))`;
@@ -12408,7 +12593,7 @@ app.get('/quality/overview', requireRole('hod', ...QUALITY_OVERSIGHT), async (re
                 COUNT(*) FILTER (WHERE p.progress < 90)::int AS in_progress,
                 COUNT(*) FILTER (WHERE p.progress >= 90)::int AS ready
          FROM subject_allotments a LEFT JOIN course_exec_plans p ON p.allotment_id = a.id
-         ${deptWhere('a.department')} GROUP BY 1`, params),
+         WHERE a.academic_year = ${p(1)} ${deptWhere('a.department', 'AND')} GROUP BY 1`, [...params, ay]),
       db.query(
         `SELECT ${KEY('a.department')} AS k, MIN(a.department) AS name, COUNT(*)::int AS total,
                 COUNT(*) FILTER (WHERE lp.status = 'approved')::int AS approved,
@@ -12419,7 +12604,7 @@ app.get('/quality/overview', requireRole('hod', ...QUALITY_OVERSIGHT), async (re
                 COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(lp.topics, '[]'::jsonb)) t
                                                WHERE COALESCE(t->>'planned_date', '') <> '' AND t->>'planned_date' <= ${p(1)} AND COALESCE(t->>'covered_on', '') = ''))::int AS behind
          FROM subject_allotments a LEFT JOIN lesson_plans lp ON lp.allotment_id = a.id
-         ${deptWhere('a.department')} GROUP BY 1`, [...params, today]),
+         WHERE a.academic_year = ${p(2)} ${deptWhere('a.department', 'AND')} GROUP BY 1`, [...params, today, ay]),
       db.query(`SELECT dept_key AS k, due_date FROM course_exec_settings ${own ? 'WHERE dept_key = $1' : ''}`, params),
       db.query(
         `SELECT ${KEY('department')} AS k, MIN(department) AS name, COUNT(*)::int AS total,
@@ -13419,9 +13604,9 @@ app.get('/hod/at-risk-students', requireRole('hod', 'admin', 'principal', 'direc
       JOIN subject_allotments a  ON a.id = sr.allotment_id
       JOIN attendance_sessions s ON s.allotment_id = a.id
       LEFT JOIN attendance_records ar ON ar.session_id = s.id AND UPPER(ar.roll_number) = UPPER(sr.roll_number)
-      WHERE UPPER(sr.roll_number) = ANY($1)
+      WHERE UPPER(sr.roll_number) = ANY($1) AND a.academic_year = $2
       GROUP BY sr.roll_number
-    `, [rollNumbers]);
+    `, [rollNumbers, ayOf(req)]);
 
     // Also fetch directly from attendance_records (handles students without roster entry)
     const attRes2 = await db.query(`
@@ -14066,6 +14251,8 @@ app.post('/attendance/allotments/upload', requireRole('admin', 'hod', 'coordinat
     if (!semester || !Array.isArray(allotments) || allotments.length === 0) {
       return res.status(400).json({ error: 'Semester and non-empty allotments array are required' });
     }
+    if (req.body.academic_year && !cleanAY(req.body.academic_year)) return res.status(400).json({ error: `Invalid academic year "${req.body.academic_year}". Use the form 2026-27.` });
+    const academicYear = cleanAY(req.body.academic_year) || currentAcademicYear();
 
     const callerDept = req.auth?.department;
     const isSuper = req.auth?.isSuperAdmin || callerDept === '*' || req.auth?.role === 'admin' || req.auth?.role === 'coordinator';
@@ -14119,8 +14306,9 @@ app.post('/attendance/allotments/upload', requireRole('admin', 'hod', 'coordinat
              AND LOWER(COALESCE(department, '')) = LOWER($2) 
              AND section = $3 
              AND LOWER(subject_name) = LOWER($4) 
-             AND LOWER(faculty_email) = LOWER($5)`,
-          [semester, department || 'General', section, subjectName, facultyEmail]
+             AND LOWER(faculty_email) = LOWER($5)
+             AND academic_year = $6`,
+          [semester, department || 'General', section, subjectName, facultyEmail, academicYear]
         );
 
         if (existing.rows.length > 0) {
@@ -14133,9 +14321,9 @@ app.post('/attendance/allotments/upload', requireRole('admin', 'hod', 'coordinat
           updatedCount++;
         } else {
           await db.query(
-            `INSERT INTO subject_allotments (semester_label, subject_name, subject_type, section, faculty_email, faculty_name, department, co_faculty_email, co_faculty_name)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-            [semester, subjectName, subjectType, section, facultyEmail, facultyName, department || 'General', coFacultyEmail || null, coFacultyEmail ? coFacultyName : null]
+            `INSERT INTO subject_allotments (semester_label, subject_name, subject_type, section, faculty_email, faculty_name, department, co_faculty_email, co_faculty_name, academic_year)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            [semester, subjectName, subjectType, section, facultyEmail, facultyName, department || 'General', coFacultyEmail || null, coFacultyEmail ? coFacultyName : null, academicYear]
           );
           addedCount++;
         }
@@ -14199,6 +14387,7 @@ const CREDITED_TIMETABLE_SQL = `
    AND UPPER(a.section) = UPPER(t.section)
    AND LOWER(TRIM(a.subject_name)) = LOWER(TRIM(t.subject_name))
    AND (COALESCE(a.department, '') = '' OR COALESCE(t.department, '') = '' OR LOWER(a.department) = LOWER(t.department))
+   AND a.academic_year = ${AY_NOW_SQL}
   WHERE t.subject_type = 'Lab'
 `;
 
@@ -14229,6 +14418,8 @@ app.post('/attendance/allotments/single', requireRole('admin', 'hod', 'coordinat
     const cleanCoName = cleanCoEmail ? String(co_faculty_name || cleanCoEmail.split('@')[0]).trim() : null;
     const coErr = coFacultyError(cleanCoEmail, cleanEmail, cleanType);
     if (coErr) return res.status(400).json({ error: coErr });
+    if (req.body.academic_year && !cleanAY(req.body.academic_year)) return res.status(400).json({ error: `Invalid academic year "${req.body.academic_year}". Use the form 2026-27.` });
+    const academicYear = cleanAY(req.body.academic_year) || currentAcademicYear();
 
     // MED-6: Validate semester_label format (must be like 1-1, 2-2, 3-1, 4-2)
     if (!/^\d-\d$/.test(semester.trim())) {
@@ -14261,8 +14452,9 @@ app.post('/attendance/allotments/single', requireRole('admin', 'hod', 'coordinat
          AND LOWER(COALESCE(department, '')) = LOWER($2) 
          AND section = $3 
          AND LOWER(subject_name) = LOWER($4) 
-         AND LOWER(faculty_email) = LOWER($5)`,
-      [semester, cleanDept, cleanSection, cleanSubj, cleanEmail]
+         AND LOWER(faculty_email) = LOWER($5)
+         AND academic_year = $6`,
+      [semester, cleanDept, cleanSection, cleanSubj, cleanEmail, academicYear]
     );
 
     let allotmentId: string;
@@ -14276,10 +14468,10 @@ app.post('/attendance/allotments/single', requireRole('admin', 'hod', 'coordinat
       );
     } else {
       const insertRes = await db.query(
-        `INSERT INTO subject_allotments (semester_label, subject_name, subject_type, section, faculty_email, faculty_name, department, co_faculty_email, co_faculty_name)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        `INSERT INTO subject_allotments (semester_label, subject_name, subject_type, section, faculty_email, faculty_name, department, co_faculty_email, co_faculty_name, academic_year)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING id`,
-        [semester, cleanSubj, cleanType, cleanSection, cleanEmail, cleanFacName, cleanDept, cleanCoEmail || null, cleanCoName]
+        [semester, cleanSubj, cleanType, cleanSection, cleanEmail, cleanFacName, cleanDept, cleanCoEmail || null, cleanCoName, academicYear]
       );
       allotmentId = insertRes.rows[0].id;
     }
@@ -14287,7 +14479,7 @@ app.post('/attendance/allotments/single', requireRole('admin', 'hod', 'coordinat
     const fullAllotment = await db.query('SELECT * FROM subject_allotments WHERE id = $1', [allotmentId]);
     res.json({
       success: true,
-      message: `Subject allocation for "${cleanSubj}" (${cleanDept} Section ${cleanSection}) saved successfully.`,
+      message: `Subject allocation for "${cleanSubj}" (${cleanDept} Section ${cleanSection}, ${academicYear}) saved successfully.`,
       allotment: fullAllotment.rows[0],
     });
   } catch (err: any) {
@@ -14341,9 +14533,9 @@ app.get('/attendance/allotments', requireRole('admin', 'hod', 'coordinator', 'fa
         (SELECT COUNT(*) FROM subject_rosters r WHERE r.allotment_id = a.id) AS roster_count,
         (SELECT COUNT(*) FROM attendance_sessions s WHERE s.allotment_id = a.id) AS sessions_count
       FROM subject_allotments a
-      WHERE 1=1
+      WHERE a.academic_year = $1
     `;
-    const params: any[] = [];
+    const params: any[] = [ayOf(req)];
 
     if (semester) {
       params.push(semester);
@@ -14387,16 +14579,27 @@ app.delete('/attendance/allotments/:id', requireRole('admin', 'hod', 'coordinato
       }
     }
 
+    // Deleting an allotment deletes its roster and every attendance class with it — ask first
+    const held = Number((await db.query('SELECT COUNT(*)::int AS n FROM attendance_sessions WHERE allotment_id = $1', [id])).rows[0]?.n || 0);
+    if (held > 0 && String(req.query.confirm || '') !== '1') {
+      return res.status(409).json({
+        code: 'HAS_ATTENDANCE', sessions: held,
+        error: `${allot.subject_name} (${allot.semester_label} ${allot.section || ''}, ${allot.academic_year || ''}) has ${held} class${held === 1 ? '' : 'es'} of attendance. Deleting it deletes that attendance too.`,
+      });
+    }
+
     await db.query('DELETE FROM subject_allotments WHERE id = $1', [id]);
 
     // Timetable slots are not linked to the allotment by id — remove this class's slots for the
     // subject + faculty too, unless another allotment still covers the same class/subject/faculty.
     // Otherwise the subject keeps showing in the faculty timetable, not-posted tracker and workload.
+    // (the timetable is this year's — deleting a past year's allotment leaves it alone)
     let slotsRemoved = 0;
     const key = [allot.semester_label, allot.department || '', allot.section || '', allot.subject_name, allot.faculty_email || ''];
-    const still = await db.query(
+    const thisYear = !allot.academic_year || allot.academic_year === currentAcademicYear();
+    const still = thisYear ? await db.query(
       `SELECT 1 FROM subject_allotments WHERE semester_label = $1 AND COALESCE(department,'') = $2 AND COALESCE(section,'') = $3
-         AND LOWER(subject_name) = LOWER($4) AND LOWER(faculty_email) = LOWER($5) LIMIT 1`, key);
+         AND LOWER(subject_name) = LOWER($4) AND LOWER(faculty_email) = LOWER($5) AND academic_year = $6 LIMIT 1`, [...key, currentAcademicYear()]) : { rows: [1] };
     if (!still.rows.length) {
       const del = await db.query(
         `DELETE FROM timetable_entries WHERE semester_label = $1 AND COALESCE(department,'') = $2 AND COALESCE(section,'') = $3
@@ -14696,9 +14899,9 @@ app.get('/attendance/my-subjects', requireRole('faculty', 'hod', 'admin', 'coord
         (SELECT COUNT(*) FROM subject_rosters r WHERE r.allotment_id = a.id) AS roster_count,
         (SELECT COUNT(*) FROM attendance_sessions s WHERE s.allotment_id = a.id) AS sessions_count
       FROM subject_allotments a
-      WHERE 1=1
+      WHERE a.academic_year = $1
     `;
-    const params: any[] = [];
+    const params: any[] = [ayOf(req)];
     if (semester) {
       params.push(semester);
       allQuery += ` AND a.semester_label = $${params.length}`;
@@ -16738,6 +16941,14 @@ app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res
     const dept = student.department || '';
     const sec = student.section || '';
 
+    // One academic year at a time: ?ay= or the student's latest year
+    const yearsRes = await db.query(
+      `SELECT DISTINCT a.academic_year FROM subject_rosters sr JOIN subject_allotments a ON a.id = sr.allotment_id WHERE UPPER(sr.roll_number) = $1
+       UNION SELECT DISTINCT a.academic_year FROM attendance_records r JOIN attendance_sessions s ON s.id = r.session_id
+         JOIN subject_allotments a ON a.id = s.allotment_id WHERE UPPER(r.roll_number) = $1`, [rollNumber]).catch(() => ({ rows: [] as any[] }));
+    const academicYears: string[] = yearsRes.rows.map((x: any) => x.academic_year).filter(Boolean).sort().reverse();
+    const studentAY = cleanAY(req.query.ay) || academicYears[0] || currentAcademicYear();
+
     // Query subjects: first by subject_rosters, fallback to records / department allotments
     let subjectsRes = await db.query(
       `SELECT 
@@ -16753,10 +16964,10 @@ app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res
       JOIN subject_allotments a ON a.id = sr.allotment_id
       LEFT JOIN attendance_sessions s ON s.allotment_id = a.id
       LEFT JOIN attendance_records r ON r.session_id = s.id AND UPPER(r.roll_number) = UPPER(sr.roll_number)
-      WHERE UPPER(sr.roll_number) = $1
+      WHERE UPPER(sr.roll_number) = $1 AND a.academic_year = $2
       GROUP BY a.id, a.subject_name, a.subject_type, a.semester_label, a.faculty_name, sr.joining_date
       ORDER BY a.semester_label, a.subject_name`,
-      [rollNumber]
+      [rollNumber, studentAY]
     );
 
     if (subjectsRes.rows.length === 0) {
@@ -16775,9 +16986,10 @@ app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res
         LEFT JOIN attendance_records r ON r.session_id = s.id AND UPPER(r.roll_number) = $1
         -- not on any roster: only subjects this student has already been marked in
         WHERE EXISTS (SELECT 1 FROM attendance_records ar JOIN attendance_sessions sess ON sess.id = ar.session_id WHERE sess.allotment_id = a.id AND UPPER(ar.roll_number) = $1)
+          AND a.academic_year = $2
         GROUP BY a.id, a.subject_name, a.subject_type, a.semester_label, a.faculty_name
         ORDER BY a.semester_label, a.subject_name`,
-        [rollNumber]
+        [rollNumber, studentAY]
       );
     } else {
       // Subjects without a roster where this student was marked before rosters were required
@@ -16790,8 +17002,9 @@ app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res
         LEFT JOIN attendance_records r ON r.session_id = s.id AND UPPER(r.roll_number) = $1
         WHERE NOT EXISTS (SELECT 1 FROM subject_rosters x WHERE x.allotment_id = a.id)
           AND EXISTS (SELECT 1 FROM attendance_records ar JOIN attendance_sessions sess ON sess.id = ar.session_id WHERE sess.allotment_id = a.id AND UPPER(ar.roll_number) = $1)
+          AND a.academic_year = $2
         GROUP BY a.id, a.subject_name, a.subject_type, a.semester_label, a.faculty_name`,
-        [rollNumber]
+        [rollNumber, studentAY]
       ).catch(() => ({ rows: [] as any[] }));
       if (wholeSection.rows.length) {
         const have = new Set(subjectsRes.rows.map((x: any) => x.allotment_id));
@@ -16835,6 +17048,8 @@ app.get('/attendance/student/:rollNumber', requireAuth, async (req: Request, res
       total_periods_held: grandTotalHeld,
       total_periods_attended: grandTotalAttended,
       subjects,
+      academic_year: studentAY,
+      academic_years: academicYears.length ? academicYears : [studentAY],
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -17267,6 +17482,7 @@ app.get('/attendance/timetable', requireAuth, async (req: Request, res: Response
             AND sa.semester_label = timetable_entries.semester_label 
             AND sa.section = timetable_entries.section 
             AND LOWER(sa.subject_name) = LOWER(timetable_entries.subject_name)
+            AND sa.academic_year = ${AY_NOW_SQL}
         )
       )`;
 
@@ -17281,7 +17497,7 @@ app.get('/attendance/timetable', requireAuth, async (req: Request, res: Response
          FROM timetable_entries t
          JOIN subject_allotments a ON a.subject_type = 'Lab' AND LOWER(COALESCE(a.co_faculty_email, '')) = $1
           AND a.semester_label = t.semester_label AND UPPER(a.section) = UPPER(t.section)
-          AND LOWER(TRIM(a.subject_name)) = LOWER(TRIM(t.subject_name))
+          AND LOWER(TRIM(a.subject_name)) = LOWER(TRIM(t.subject_name)) AND a.academic_year = ${AY_NOW_SQL}
          WHERE t.subject_type = 'Lab' AND LOWER(COALESCE(t.faculty_email, '')) <> $1 ${coWhere}`,
         coParams
       ).catch(() => ({ rows: [] as any[] }));
@@ -17330,6 +17546,7 @@ app.get('/attendance/timetable/orphans', requireRole('admin', 'hod', 'coordinato
            SELECT 1 FROM subject_allotments a
            WHERE a.semester_label = t.semester_label AND COALESCE(a.department,'') = COALESCE(t.department,'')
              AND COALESCE(a.section,'') = COALESCE(t.section,'') AND LOWER(a.subject_name) = LOWER(t.subject_name)
+             AND a.academic_year = ${AY_NOW_SQL}
              AND (LOWER(a.faculty_email) = LOWER(t.faculty_email) OR LOWER(COALESCE(a.co_faculty_email,'')) = LOWER(t.faculty_email)))
        ORDER BY t.faculty_name, t.semester_label, t.section, t.day_of_week, t.period_start
        LIMIT 500`, params);
@@ -17851,9 +18068,9 @@ app.get('/attendance/reports/year-summary', requireRole('admin', 'hod', 'faculty
     let subjQuery = `
       SELECT a.id, a.subject_name, a.subject_type, a.semester_label, a.section, a.faculty_name, a.faculty_email, a.department
       FROM subject_allotments a
-      WHERE a.semester_label = ANY($1)
+      WHERE a.semester_label = ANY($1) AND a.academic_year = $2
     `;
-    const subjParams: any[] = [semesterLabels];
+    const subjParams: any[] = [semesterLabels, ayOf(req)];
 
     if (targetDept && targetDept !== 'All') {
       subjParams.push(targetDept);
@@ -18048,12 +18265,12 @@ app.get('/attendance/analytics/semester-summary', requireRole('admin', 'hod', 'f
         JOIN students st ON st.roll_number = r.roll_number
         LEFT JOIN attendance_sessions s ON s.allotment_id = a.id
         LEFT JOIN attendance_records ar ON ar.session_id = s.id AND UPPER(ar.roll_number) = UPPER(r.roll_number)
-        WHERE a.semester_label = $1 AND r.roll_number = ANY($2)
+        WHERE a.semester_label = $1 AND r.roll_number = ANY($2) AND a.academic_year = $3
         GROUP BY st.roll_number, st.name, st.section, st.department, a.id, a.subject_name, a.subject_type, a.faculty_name
         ORDER BY st.roll_number, a.subject_name
       `;
 
-      const menteeDataRes = await db.query(menteeDataQuery, [semester, menteeRolls]);
+      const menteeDataRes = await db.query(menteeDataQuery, [semester, menteeRolls, ayOf(req)]);
 
       const menteeMap: Record<string, any> = {};
       let totalHeld = 0;
@@ -18140,9 +18357,9 @@ app.get('/attendance/analytics/semester-summary', requireRole('admin', 'hod', 'f
     let subjQuery = `
       SELECT a.id, a.subject_name, a.subject_type, a.semester_label, a.section, a.faculty_name, a.faculty_email, a.department
       FROM subject_allotments a
-      WHERE a.semester_label = $1
+      WHERE a.semester_label = $1 AND a.academic_year = $2
     `;
-    const subjParams: any[] = [semester];
+    const subjParams: any[] = [semester, ayOf(req)];
 
     if (targetDept && targetDept !== 'All') {
       subjParams.push(`%${targetDept}%`);
@@ -19137,9 +19354,9 @@ app.get('/faculty/incharge-section-analytics', requireAuth, async (req: Request,
     const subjectsRes = await db.query(
       `SELECT id, subject_name, subject_type, faculty_name, faculty_email, department, section
        FROM subject_allotments
-       WHERE semester_label = $1 AND department ILIKE $2 AND section = $3
+       WHERE semester_label = $1 AND department ILIKE $2 AND section = $3 AND academic_year = $4
        ORDER BY subject_name ASC`,
-      [semester, `%${department}%`, section.toUpperCase()]
+      [semester, `%${department}%`, section.toUpperCase(), ayOf(req)]
     );
     const subjects = subjectsRes.rows;
 
@@ -19295,8 +19512,9 @@ app.post('/attendance/allotments/fresher-section-sync', requireRole('coordinator
        FROM subject_allotments
        WHERE semester_label = $1
          AND (LOWER(department) = LOWER($2) OR LOWER(REPLACE(department, ' ', '')) = LOWER(REPLACE($2, ' ', '')) OR $2 = 'All' OR $2 = 'General')
-         AND (section = $3 OR $3 = 'All')`,
-      [semester, department, section.toUpperCase()]
+         AND (section = $3 OR $3 = 'All')
+         AND academic_year = $4`,
+      [semester, department, section.toUpperCase(), currentAcademicYear()]
     );
 
     if (allotmentsRes.rows.length === 0) {
@@ -19346,9 +19564,9 @@ app.get('/coordinator/fresher-attendance', requireRole('coordinator', 'admin', '
         (SELECT COUNT(*) FROM attendance_sessions s WHERE s.allotment_id = a.id) as total_sessions,
         (SELECT COALESCE(SUM(s.num_periods), 0) FROM attendance_sessions s WHERE s.allotment_id = a.id) as total_periods_held
       FROM subject_allotments a
-      WHERE a.semester_label = $1
+      WHERE a.semester_label = $1 AND a.academic_year = $2
     `;
-    const params: any[] = [semester];
+    const params: any[] = [semester, ayOf(req)];
 
     if (department && department !== 'All') {
       params.push(department);
@@ -19479,8 +19697,9 @@ app.get('/freshers/my-attendance', requireAuth, async (req: Request, res: Respon
        WHERE a.semester_label IN ('1-1', '1-2')
          AND (LOWER(a.department) = LOWER($1) OR LOWER(REPLACE(a.department, ' ', '')) = LOWER(REPLACE($1, ' ', '')))
          AND a.section = $2
+         AND a.academic_year = $3
        ORDER BY a.semester_label ASC, a.subject_name ASC`,
-      [stu.department, stu.section]
+      [stu.department, stu.section, ayOf(req)]
     );
 
     const subjectsAttendance: any[] = [];

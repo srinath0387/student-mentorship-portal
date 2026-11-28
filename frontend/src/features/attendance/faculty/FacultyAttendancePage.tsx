@@ -7,6 +7,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { LiveCodePanel } from './LiveCodePanel';
 
 import { BouncingDots } from '../../../components/common/BouncingDots';
+import { AcademicYearPicker } from '../../../components/common/AcademicYearPicker';
 const ALL_SEMESTERS: SemesterLabel[] = ['1-1','1-2','2-1','2-2','3-1','3-2','4-1','4-2'];
 const PERIOD_TIMES: Record<number,string> = {
   1:'09:00–09:50',2:'09:50–10:40',3:'10:55–11:45',
@@ -478,7 +479,10 @@ export const FacultyAttendancePage: React.FC = () => {
               {nav==='students'&&'My Students'}
             </h1>
           </div>
-          <span className="text-xs text-textSecondary font-bold">{user?.name} ({user?.department})</span>
+          <div className="flex items-center gap-3 flex-wrap">
+            <AcademicYearPicker />
+            <span className="text-xs text-textSecondary font-bold">{user?.name} ({user?.department})</span>
+          </div>
         </header>
 
         {/* Mobile: the side menu is hidden below md, so show the sections as a scrollable tab bar */}

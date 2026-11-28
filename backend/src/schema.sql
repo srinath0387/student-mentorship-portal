@@ -214,8 +214,10 @@ CREATE TABLE IF NOT EXISTS subject_allotments (
     faculty_email VARCHAR(100) NOT NULL,
     faculty_name VARCHAR(100) NOT NULL DEFAULT '',
     department VARCHAR(50) NOT NULL DEFAULT '',
+    -- academic year, e.g. '2026–27' (June–May): the same subject next year is a fresh allotment
+    academic_year VARCHAR(9),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(semester_label, subject_name, section, faculty_email)
+    UNIQUE(academic_year, semester_label, subject_name, section, faculty_email)
 );
 
 -- 14. Subject Rosters (Students Enrolled in Subject)

@@ -11,6 +11,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
+import { withViewAY } from './academicYear';
 import { getIdToken } from './cognitoAuth';
 
 export const API_BASE_URL =
@@ -115,7 +116,10 @@ export async function fetchWithAuth(
   };
 
   try {
-    const { response, body: responseText } = await fetchWithRetry(`${API_BASE_URL}${endpoint}`, {
+    // lists follow the academic year being viewed (see lib/academicYear)
+    const method = String(options.method || 'GET').toUpperCase();
+    const url = method === 'GET' ? withViewAY(endpoint) : endpoint;
+    const { response, body: responseText } = await fetchWithRetry(`${API_BASE_URL}${url}`, {
       ...options,
       headers,
     });
@@ -157,7 +161,10 @@ export async function fetchWithAuth(
       } else if (response.status === 403) {
         errMsg = 'Permission denied. Please ensure you are logged in as Admin or HOD.';
       }
-      throw new Error(errMsg);
+      const error: any = new Error(errMsg);
+      error.status = response.status;
+      try { error.body = responseText ? JSON.parse(responseText) : null; } catch { error.body = null; }
+      throw error;
     }
 
     return responseText ? JSON.parse(responseText) : null;

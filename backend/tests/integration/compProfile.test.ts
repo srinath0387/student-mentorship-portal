@@ -5,6 +5,7 @@
  */
 import request from 'supertest';
 import { Pool } from 'pg';
+import { AY_NOW_SQL } from '../../src/db/allotmentYear';
 
 const URL = process.env.FS_TEST_DATABASE_URL;
 const d = URL ? describe : describe.skip;
@@ -36,7 +37,7 @@ d('Comprehensive profile prefill (real Postgres)', () => {
       CREATE TABLE mentor_assignments (roll_number TEXT PRIMARY KEY, faculty_id TEXT);
       CREATE TABLE alumni (id SERIAL PRIMARY KEY, name TEXT, organization TEXT, role_title TEXT, location TEXT, linkedin_url TEXT, batch TEXT, department TEXT);
       CREATE TABLE subject_allotments (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), semester_label TEXT, subject_name TEXT, subject_type TEXT, section TEXT,
-        faculty_email TEXT, co_faculty_email TEXT, department TEXT, created_at TIMESTAMPTZ DEFAULT NOW());
+        faculty_email TEXT, co_faculty_email TEXT, department TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), academic_year TEXT DEFAULT ${AY_NOW_SQL});
       CREATE TABLE faculty_subjects_handled (id TEXT PRIMARY KEY, faculty_email TEXT, year_batch TEXT, section TEXT, subject TEXT, branch TEXT, created_at TIMESTAMPTZ DEFAULT NOW());
       INSERT INTO faculty_subjects_handled (id, faculty_email, year_batch, section, subject, branch) VALUES ('S1','Ramesh@rgmcet.edu.in','I B.Tech. II Sem. & 2025','A','C Programming','CSE (DS)'), ('S2','other@x','II B.Tech I Sem 2024','A','Not mine','CSE');
       CREATE TABLE faculty_full_profiles (email TEXT PRIMARY KEY, personal JSONB DEFAULT '{}', education JSONB DEFAULT '{}', publications JSONB DEFAULT '[]', domains JSONB DEFAULT '[]', activities JSONB DEFAULT '[]');
@@ -45,7 +46,7 @@ d('Comprehensive profile prefill (real Postgres)', () => {
       INSERT INTO mentor_assignments VALUES ('24091A0502','F1');
       INSERT INTO coding_profiles VALUES ('23091A0501','LeetCode','ravi_lc'), ('23091A0501','GitHub','ravigh');
       INSERT INTO alumni (name, organization, role_title, location, batch, department) VALUES ('Anil','Infosys','SDE','Pune','2019','CSE(Data Science)'), ('NoOrg',NULL,NULL,NULL,'2019','CSE (Data Science)'), ('ECE alum','TCS','QA','Hyd','2018','ECE');
-      INSERT INTO subject_allotments (semester_label, subject_name, faculty_email, department) VALUES ('2-1','Operating Systems','ramesh@rgmcet.edu.in','CSE (Data Science)');
+      INSERT INTO subject_allotments (semester_label, subject_name, faculty_email, department, academic_year) VALUES ('2-1','Operating Systems','ramesh@rgmcet.edu.in','CSE (Data Science)','2025–26');
       INSERT INTO faculty_full_profiles (email, personal, domains) VALUES ('ramesh@rgmcet.edu.in','{"designation":"Assistant Professor","orcid_id":"0000-0001"}','["Machine Learning"]');`);
     db.query.mockReset();
     db.query.mockImplementation(async (sql: string, params: any[] = []) => (OURS.test(sql) ? pool.query(sql, params) : { rows: [], rowCount: 0 }));

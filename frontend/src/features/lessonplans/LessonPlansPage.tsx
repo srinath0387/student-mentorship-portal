@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { AcademicYearPicker } from '../../components/common/AcademicYearPicker';
 import { useQuery } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { BookOpenCheck, ChevronRight, Download, Loader2, Search } from 'lucide-react';
@@ -19,9 +20,12 @@ export default function LessonPlansPage() {
   const pending = rows.filter(r => ['not_started', 'draft', 'returned'].includes(r.status)).length;
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-black text-textPrimary">My Lesson Plans</h1>
-        <p className="text-xs text-textSecondary">One plan per allotted subject. Prepare it, submit it to the HOD, then tick topics as you teach them.</p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-black text-textPrimary">My Lesson Plans</h1>
+          <p className="text-xs text-textSecondary">One plan per allotted subject. Prepare it, submit it to the HOD, then tick topics as you teach them.</p>
+        </div>
+        <AcademicYearPicker />
       </div>
       {pending > 0 && <div className="rounded-xl px-4 py-2.5 text-xs font-bold bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">{pending} subject{pending === 1 ? '' : 's'} still need a lesson plan.</div>}
       {isLoading ? <div className="p-10 text-center"><BouncingDots size="md" className="text-textMuted" /></div>
@@ -88,11 +92,14 @@ export function LessonPlanReviewPage() {
           <h1 className="text-xl font-black text-textPrimary">Lesson Plans &amp; Syllabus Coverage</h1>
           <p className="text-xs text-textSecondary">{data?.department || '…'} · approve plans and see which classes are behind schedule</p>
         </div>
-        {!locked && (
-          <select className={input} value={dept} onChange={e => setDept(e.target.value)}>
-            <option value="All">All departments</option>{(DEPTS.includes(dept) || dept === 'All' ? DEPTS : [dept, ...DEPTS]).map(d => <option key={d} value={d}>{d}</option>)}
-          </select>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <AcademicYearPicker />
+          {!locked && (
+            <select className={input} value={dept} onChange={e => setDept(e.target.value)}>
+              <option value="All">All departments</option>{(DEPTS.includes(dept) || dept === 'All' ? DEPTS : [dept, ...DEPTS]).map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          )}
+        </div>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         {[['Subjects', k.total, ''], ['Approved', k.approved, 'text-emerald-600'], ['To approve', k.submitted, 'text-sky-600'], ['No plan yet', k.missing, 'text-amber-600'], ['Behind schedule', k.behind, 'text-rose-600'], ['Syllabus covered', `${k.coverage}%`, '']].map(([l, v, c]) => (

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, Suspense, lazy } from 'react';
+import { OtherYearBanner } from './components/common/AcademicYearPicker';
 import { ROLE_THEME_CLASSES } from './lib/pageTheme';
 import { HashRouter as Router, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider, useQueryClient, useQuery } from '@tanstack/react-query';
@@ -290,6 +291,7 @@ const MainLayout: React.FC = () => {
         />
         <main ref={mainRef} className="flex-1 overflow-y-auto p-4 md:p-8 print:overflow-visible print:p-0">
           <div className="max-w-7xl w-full mx-auto">
+            <OtherYearBanner />
             <Suspense fallback={<PageLoader />}>
               <Outlet />
             </Suspense>

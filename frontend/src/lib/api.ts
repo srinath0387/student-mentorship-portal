@@ -948,12 +948,22 @@ export const api = {
   },
 
   // ── Attendance Management System API ───────────────────────────────────────
-  uploadAllotments: async (semester: string, allotments: any[]) => {
+  uploadAllotments: async (semester: string, allotments: any[], academic_year?: string) => {
     return fetchWithAuth('/attendance/allotments/upload', {
       method: 'POST',
-      body: JSON.stringify({ semester, allotments }),
+      body: JSON.stringify({ semester, allotments, academic_year }),
     });
   },
+  /** The year in progress, next year, and every year that has allotments */
+  getAcademicYears: async (): Promise<{ current: string; next: string; years: string[] }> => fetchWithAuth('/academic-years'),
+  /** Start a year's allotments from another year's (same faculty, subjects, sections; no rosters) */
+  copyAllotmentsYear: async (body: { from: string; to: string; department?: string; semester?: string }) =>
+    fetchWithAuth('/attendance/allotments/copy-year', { method: 'POST', body: JSON.stringify(body) }),
+  /** Earlier plans of the same subject (another section this year, or an earlier year) */
+  getCopySources: async (allotmentId: string): Promise<{ academic_year: string; can_copy: boolean; filled: Record<string, boolean>; sources: any[] }> =>
+    fetchWithAuth(`/allotments/${encodeURIComponent(allotmentId)}/copy-sources`),
+  copyPlansFrom: async (allotmentId: string, source: string, parts?: string[]): Promise<{ copied: string[]; skipped: string[] }> =>
+    fetchWithAuth(`/allotments/${encodeURIComponent(allotmentId)}/copy-from`, { method: 'POST', body: JSON.stringify({ source, parts }) }),
 
   getAllotments: async (semester?: string, department?: string) => {
     const params = new URLSearchParams();
@@ -973,6 +983,7 @@ export const api = {
     faculty_email: string;
     co_faculty_email?: string;
     co_faculty_name?: string;
+    academic_year?: string;
   }) => {
     return fetchWithAuth('/attendance/allotments/single', {
       method: 'POST',
@@ -984,8 +995,9 @@ export const api = {
   setAllotmentCoFaculty: async (id: string, co_faculty_email: string | null, co_faculty_name?: string) =>
     fetchWithAuth(`/attendance/allotments/${id}/co-faculty`, { method: 'PATCH', body: JSON.stringify({ co_faculty_email, co_faculty_name }) }),
 
-  deleteAllotment: async (id: string) => {
-    return fetchWithAuth(`/attendance/allotments/${id}`, {
+  /** Without `confirm`, a subject that already has attendance is refused (409, code HAS_ATTENDANCE) */
+  deleteAllotment: async (id: string, confirm = false) => {
+    return fetchWithAuth(`/attendance/allotments/${id}${confirm ? '?confirm=1' : ''}`, {
       method: 'DELETE',
     });
   },

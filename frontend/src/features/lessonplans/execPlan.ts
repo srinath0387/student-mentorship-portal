@@ -171,10 +171,14 @@ export function spreadWeeks(units: { title: string; topics: string[]; hours: num
 }
 
 /** Fill in whatever is missing from a saved plan (older saves, new rows) */
+/** This class's own details — when left empty (e.g. a plan copied from last year) they come from the portal again */
+const CLASS_KEYS = ['faculty_name', 'class_section', 'strength', 'sem_start', 'sem_end', 'submission_date'];
 export function normalizePlan(raw: any, fallback: ExecPlan): ExecPlan {
   if (!raw || typeof raw !== 'object' || !raw.initial) return fallback;
+  const saved = Object.fromEntries(Object.entries(raw.initial).map(([k, v]) => [k, String(v ?? '')])
+    .filter(([k, v]) => !(CLASS_KEYS.includes(k) && !v)));
   return {
-    initial: { ...fallback.initial, ...Object.fromEntries(Object.entries(raw.initial).map(([k, v]) => [k, String(v ?? '')])) } as Initial,
+    initial: { ...fallback.initial, ...saved } as Initial,
     brief: Array.isArray(raw.brief) && raw.brief.length ? raw.brief.map((r: any, i: number) => ({ ...emptyBrief(i + 1), ...r })) : fallback.brief,
     weekly: Array.isArray(raw.weekly) && raw.weekly.length ? raw.weekly.map((r: any, i: number) => ({ ...emptyWeek(i + 1), ...r })) : fallback.weekly,
     experts: [0, 1].map(i => ({ ...emptyExpert(), ...(raw.experts?.[i] || {}) })),

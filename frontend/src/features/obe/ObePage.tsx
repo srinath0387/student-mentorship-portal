@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { CopyFromEarlier } from '../lessonplans/CopyFromEarlier';
+import { AcademicYearPicker } from '../../components/common/AcademicYearPicker';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Target, Plus, Trash2, Save, Loader2, Table2 } from 'lucide-react';
 import { api } from '../../lib/api';
@@ -58,6 +60,7 @@ function CourseEditor({ allotmentId }: { allotmentId: string }) {
 
   return (
     <div className="space-y-4">
+      {edit && <CopyFromEarlier allotmentId={allotmentId} parts={['obe']} />}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="text-sm font-black text-textPrimary">{data.course.subject_name} · {data.course.semester_label} {data.course.section}</div>
@@ -191,6 +194,7 @@ export const ObePage: React.FC = () => {
           <h1 className="text-lg font-black text-textPrimary flex items-center gap-2"><Target className="w-5 h-5 text-brand-primary" />CO–PO Attainment</h1>
           <p className="text-xs text-textMuted mt-0.5">Outcome-based education: course outcomes, mapping to programme outcomes, and attainment (NBA)</p>
         </div>
+        <AcademicYearPicker />
         {role !== 'faculty' && (
           <div className="flex gap-1.5">
             <button onClick={() => setMode('summary')} className={`px-3 py-1.5 rounded-lg text-xs font-bold inline-flex items-center gap-1 ${mode === 'summary' ? 'bg-brand-primary text-white' : 'text-textSecondary bg-surface-2'}`}><Table2 className="w-3.5 h-3.5" />Department summary</button>

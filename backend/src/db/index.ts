@@ -1,5 +1,6 @@
 import { Pool, QueryResult } from 'pg';
 import dotenv from 'dotenv';
+import { ALLOTMENT_YEAR_DDL } from './allotmentYear';
 
 dotenv.config();
 
@@ -578,6 +579,8 @@ async function ensureSchema(p: Pool) {
     `CREATE INDEX IF NOT EXISTS idx_rosters_roll ON subject_rosters(roll_number);`,
     `CREATE INDEX IF NOT EXISTS idx_sessions_allotment ON attendance_sessions(allotment_id);`,
     `CREATE INDEX IF NOT EXISTS idx_sessions_date ON attendance_sessions(session_date);`,
+    // Allotments belong to an academic year (same subject next year = a fresh allotment)
+    ...ALLOTMENT_YEAR_DDL,
     `CREATE INDEX IF NOT EXISTS idx_records_session ON attendance_records(session_id);`,
     `CREATE INDEX IF NOT EXISTS idx_timetable_lookup ON timetable_entries(semester_label, department, section, day_of_week);`,
     `CREATE INDEX IF NOT EXISTS idx_timetable_faculty ON timetable_entries(faculty_email);`,

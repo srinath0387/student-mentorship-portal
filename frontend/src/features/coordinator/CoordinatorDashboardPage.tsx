@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { viewAY } from '../../lib/academicYear';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext';
@@ -321,6 +322,7 @@ export const CoordinatorDashboardPage: React.FC = () => {
         subject_type: data.subject_type,
         faculty_email: data.faculty_email,
         faculty_name: data.faculty_name || '',
+        academic_year: viewAY(),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['coordinator-subjects'] });
@@ -332,7 +334,15 @@ export const CoordinatorDashboardPage: React.FC = () => {
   });
 
   const deleteSubjectMutation = useMutation({
-    mutationFn: (id: string) => api.deleteAllotment(id),
+    mutationFn: async (id: string) => {
+      try { return await api.deleteAllotment(id); }
+      catch (err: any) {
+        if (err?.body?.code !== 'HAS_ATTENDANCE') throw err;
+        // deleting a subject that has attendance deletes that attendance too — make sure
+        if (!window.confirm(`${err.message}\n\nThis cannot be undone. Delete it with its attendance?`)) return null;
+        return api.deleteAllotment(id, true);
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['coordinator-subjects'] });
     },

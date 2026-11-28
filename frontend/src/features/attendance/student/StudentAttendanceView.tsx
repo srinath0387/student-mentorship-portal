@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { AcademicYearPicker } from '../../../components/common/AcademicYearPicker';
 import { MyRiskCard } from '../../risk/RiskAlertsPage';
 import { LiveCheckinCard } from './LiveCheckinCard';
 import { useAuth as useAuthForCheckin } from '../../../context/AuthContext';
@@ -84,6 +85,8 @@ export const StudentAttendanceView: React.FC<Props> = ({ rollNumber }) => {
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-surface-2 text-textSecondary border border-borderLine">
                   {rollNumber}
                 </span>
+                {/* one academic year at a time; earlier years stay here to look back at */}
+                {(rawData?.academic_years?.length || 0) > 1 && <AcademicYearPicker years={rawData.academic_years} value={rawData.academic_year} />}
               </div>
               <p className="text-xs text-textMuted">
                 {rawData?.student?.name ? `${rawData.student.name} • ` : ''}

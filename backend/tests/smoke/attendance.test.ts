@@ -244,13 +244,20 @@ describe('Student / parent attendance view', () => {
   it('reports periods held/attended from posted sessions, matching roll numbers case-insensitively', async () => {
     const calls = routeDb([
       ['FROM students WHERE UPPER(roll_number)', [{ roll_number: '23091A3201', name: 'Aarav', department: 'CSE (Data Science)', section: 'A' }]],
+      ['SELECT DISTINCT a.academic_year', [{ academic_year: '2025–26' }, { academic_year: '2026–27' }]],
       ['FROM subject_rosters sr', [{ allotment_id: 'AL1', subject_name: 'DBMS Lab', subject_type: 'Lab', semester_label: '3-1', faculty_name: 'Dr. Ramesh', total_periods_held: '4', periods_attended: '3' }]],
     ]);
     const res = await request(app).get('/attendance/student/23091a3201').set('Authorization', PARENT());
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ overall_percentage: 75, total_periods_held: 4, total_periods_attended: 3 });
-    const q = calls.find(c => c.sql.includes('FROM subject_rosters sr'))!.sql;
-    expect(q).toContain('UPPER(r.roll_number) = UPPER(sr.roll_number)');
+    const main = calls.find(c => c.sql.includes('FROM subject_rosters sr') && c.sql.includes('GROUP BY a.id'))!;
+    expect(main.sql).toContain('UPPER(r.roll_number) = UPPER(sr.roll_number)');
+    // the student's latest academic year by default, with the others listed
+    expect(main.params[1]).toBe('2026–27');
+    expect(res.body).toMatchObject({ academic_year: '2026–27', academic_years: ['2026–27', '2025–26'] });
+    const past = routeDb([['FROM subject_rosters sr', []]]);
+    await request(app).get('/attendance/student/23091a3201?ay=2025-26').set('Authorization', PARENT());
+    expect(past.find(c => c.sql.includes('GROUP BY a.id'))!.params[1]).toBe('2025–26');
   });
 
   it('stops a parent reading another student’s attendance', async () => {
@@ -277,7 +284,8 @@ describe('Lab co-faculty', () => {
     const res = await allot({ subject_name: 'DBMS Lab', subject_type: 'Lab', co_faculty_email: 'Ramesh@rgmcet.edu.in', co_faculty_name: 'Dr. Ramesh' });
     expect(res.status).toBe(200);
     const ins = calls.find(c => c.sql.includes('INSERT INTO subject_allotments'))!;
-    expect(ins.params.slice(7)).toEqual(['ramesh@rgmcet.edu.in', 'Dr. Ramesh']);
+    expect(ins.params.slice(7, 9)).toEqual(['ramesh@rgmcet.edu.in', 'Dr. Ramesh']);
+    expect(ins.params[9]).toMatch(/^\d{4}–\d{2}$/);   // the year in progress
   });
 
   it('does not let the co-faculty post attendance for the lab', async () => {

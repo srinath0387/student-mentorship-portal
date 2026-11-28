@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { AcademicYearPicker } from '../../../components/common/AcademicYearPicker';
 import { useQuery } from '@tanstack/react-query';
 import { BarChart2, AlertTriangle, Calendar, Download, Users, BookOpen, TrendingDown, Settings, CheckCircle2, RotateCcw, Printer, FileSpreadsheet } from 'lucide-react';
 import { api } from '../../../lib/api';
@@ -97,7 +98,8 @@ export const HodAttendancePage: React.FC = () => {
           <h2 className="text-lg font-black text-textPrimary">{user?.department || 'Department'} Attendance Control</h2>
           <p className="text-xs text-textMuted mt-0.5">Real-time attendance tracking, subject allocation, timetables, and defaulters analysis.</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <AcademicYearPicker />
           <button onClick={() => { refetchAllotments(); refetchSummary(); }} className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-borderLine hover:bg-surface-2 text-textSecondary font-bold text-xs">
             <RotateCcw className={`w-3.5 h-3.5 ${isAllotLoading ? 'animate-spin text-brand-primary' : ''}`} /> Refresh Data
           </button>
