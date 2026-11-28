@@ -954,6 +954,11 @@ export const api = {
       body: JSON.stringify({ semester, allotments, academic_year }),
     });
   },
+  /** AI first drafts: is it switched on, and how many drafts are left today */
+  getAiStatus: async (): Promise<{ enabled: boolean; limit: number; remaining: number }> => fetchWithAuth('/ai/status'),
+  /** A 10-minute ticket for one AI draft, with the AI function's address */
+  getAiTicket: async (kind: 'exec_plan' | 'profile', ref?: string): Promise<{ ticket: string; url: string; remaining: number }> =>
+    fetchWithAuth('/ai/ticket', { method: 'POST', body: JSON.stringify({ kind, ref }) }),
   /** The year in progress, next year, and every year that has allotments */
   getAcademicYears: async (): Promise<{ current: string; next: string; years: string[] }> => fetchWithAuth('/academic-years'),
   /** Start a year's allotments from another year's (same faculty, subjects, sections; no rosters) */

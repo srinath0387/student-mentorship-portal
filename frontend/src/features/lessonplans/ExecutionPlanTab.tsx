@@ -4,7 +4,9 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ArrowRight, Check, Download, Plus, RotateCcw, Save, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Check, Download, Plus, RotateCcw, Save, Sparkles, Trash2, Users, X } from 'lucide-react';
+import { requestAiDraft } from '../../lib/aiDraft';
+import { applyExecDraft, execAiInput, fillNamesFromClass, ExecDraft } from './execPlanAi';
 import { api } from '../../lib/api';
 import { BouncingDots } from '../../components/common/BouncingDots';
 import { btnGhost, btnPrimary, card, input } from './lessonPlanShared';
@@ -69,7 +71,8 @@ export function ExecutionPlanTab({ allotmentId, lp }: { allotmentId: string; lp:
   const [plan, setPlan] = useState<ExecPlan | null>(null);
   const [sheet, setSheet] = useState<Sheet>('initial');
   const [dirty, setDirty] = useState(false);
-  const [busy, setBusy] = useState<'download' | null>(null);
+  const [busy, setBusy] = useState<'download' | 'ai' | null>(null);
+  const ai = useQuery({ queryKey: ['aiStatus'], queryFn: () => api.getAiStatus().catch(() => ({ enabled: false, limit: 0, remaining: 0 })), staleTime: 60_000 });
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   // saving: automatic (shortly after typing stops), on every sheet's Save button, and before leaving
@@ -221,6 +224,28 @@ export function ExecutionPlanTab({ allotmentId, lp }: { allotmentId: string; lp:
   };
   const pct = progressOf(plan);
 
+  /** AI first draft of every planning cell that is still empty (from the syllabus, outcomes and weekly topics) */
+  const draftWithAi = async () => {
+    setBusy('ai'); setMsg(null);
+    try {
+      const { draft, remaining } = await requestAiDraft<ExecDraft>('exec_plan', allotmentId,
+        execAiInput(plan, { allot: lp.allotment, syllabus: sy.data?.syllabus, lessonPlan: lp.plan, deptTools: cat?.tools }));
+      const r = applyExecDraft(planRef.current || plan, draft);
+      if (r.filled) set(r.plan);
+      void qc.invalidateQueries({ queryKey: ['aiStatus'] });
+      setMsg(r.filled
+        ? { ok: true, text: `AI drafted ${r.filled} empty cells on all five sheets. Read them through and change anything that doesn't fit your class. Your own entries were not touched. It saves automatically. (${remaining} AI drafts left today.)` }
+        : { ok: true, text: 'Every cell the AI drafts is already filled, so nothing was changed.' });
+    } catch (e: any) { setMsg({ ok: false, text: e?.message || 'The AI could not draft this.' }); }
+    finally { setBusy(null); }
+  };
+  /** Student names for the weekly groups and team demonstrations, in turn from the class list */
+  const fillNames = () => {
+    const r = fillNamesFromClass(plan, students);
+    if (r.filled) set(r.plan);
+    setMsg({ ok: true, text: r.filled ? `Filled ${r.filled} student cells from the class list, in turn so that everyone gets a turn. Change any names you like.` : 'The group and team cells already have names.' });
+  };
+
   return (
     <div className={`space-y-3 ${canEdit ? 'pb-24 sm:pb-16' : ''}`}>
       <div className={`${card} p-3 flex flex-wrap items-center gap-3`}>
@@ -233,6 +258,11 @@ export function ExecutionPlanTab({ allotmentId, lp }: { allotmentId: string; lp:
             {ex.data?.due_date && <span className="text-[11px] font-bold text-amber-700 dark:text-amber-300">Due {new Date(ex.data.due_date + 'T00:00:00').toLocaleDateString('en-IN', { dateStyle: 'medium' })}</span>}
           </div>
         </div>
+        {canEdit && ai.data?.enabled && (
+          <button className={`${btnPrimary} bg-violet-600 hover:bg-violet-700`} disabled={!!busy} onClick={draftWithAi} title="Fills the empty cells from the syllabus and lesson plan; your entries stay">
+            {busy === 'ai' ? <BouncingDots size="xs" /> : <Sparkles className="w-3.5 h-3.5 inline mr-1" />}{busy === 'ai' ? 'Drafting… (about a minute)' : 'Draft with AI'}</button>
+        )}
+        {canEdit && students.length > 0 && <button className={btnGhost} disabled={!!busy} onClick={fillNames}><Users className="w-3.5 h-3.5 inline mr-1" />Fill names from class list</button>}
         {canEdit && <button className={btnGhost} disabled={!!busy} onClick={() => setConfirmReset(true)}><RotateCcw className="w-3.5 h-3.5 inline mr-1" />Refill from syllabus</button>}
         {canEdit && <button className={btnGhost} disabled={saveState.s === 'saving' || (!dirty && !neverSaved && saveState.s !== 'error')} onClick={save}>{saveState.s === 'saving' ? <BouncingDots size="xs" /> : <Save className="w-3.5 h-3.5 inline mr-1" />}Save</button>}
         <button className={btnPrimary} disabled={!!busy} onClick={download}>{busy === 'download' ? <BouncingDots size="xs" /> : <Download className="w-3.5 h-3.5 inline mr-1" />}Download Excel</button>

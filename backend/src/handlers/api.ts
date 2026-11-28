@@ -8,6 +8,7 @@ import serverless from 'serverless-http';
 import routes from '../routes';
 import { db } from '../db';
 import { AY_NOW_SQL } from '../db/allotmentYear';
+import { signAiTicket, AiKind } from '../lib/aiTicket';
 import { calculateEmployabilityScore, calculateRPGScore, RPG_LEVELS } from '../services/employability';
 import { runCodingProfileCronSync, fetchLeetCodeStatsDirect, fetchGitHubStatsDirect, fetchEduSkillsStatsDirect, cleanEduSkillsHandle } from '../services/cronSync';
 import { cachedFetch } from '../services/platformCache';
@@ -12498,6 +12499,63 @@ async function fcpSources(email: string, fac: any) {
   return { faculty: fac, profile: profile.rows[0] || null, teaching: allotted.rows, handled: handled.rows, events: events.rows, mentees: mentees.rows, alumni: alumni.rows, speakers: speakers.rows };
 }
 const fcpStripRatings = (d: any) => (d && typeof d === 'object' ? { ...d, top_mentees: [] } : d);
+
+// ── AI first drafts (execution plan, comprehensive profile) ──────────────────────────────────────────────────
+// The AI function runs outside the VPC (AI_URL, a Lambda Function URL). The API checks who is asking and how many
+// drafts they made today, then hands out a 10-minute ticket that the AI function verifies.
+let aiUsageReady: Promise<void> | null = null;
+function ensureAiUsage(): Promise<void> {
+  if (!aiUsageReady) {
+    aiUsageReady = db.query(`
+      CREATE TABLE IF NOT EXISTS ai_usage (id SERIAL PRIMARY KEY, email TEXT NOT NULL, kind TEXT NOT NULL, ref TEXT, created_at TIMESTAMPTZ DEFAULT NOW());
+      CREATE INDEX IF NOT EXISTS idx_ai_usage_email_day ON ai_usage (LOWER(email), created_at);
+    `).then(() => undefined).catch((e: any) => { aiUsageReady = null; throw e; });
+  }
+  return aiUsageReady;
+}
+const aiDailyLimit = () => Math.max(1, Number(process.env.AI_DAILY_LIMIT) || 20);
+
+// GET /ai/status — is AI drafting switched on, and how many drafts are left today
+app.get('/ai/status', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const enabled = !!process.env.AI_URL;
+    let used = 0;
+    if (enabled) {
+      await ensureAiUsage();
+      used = Number((await db.query(`SELECT COUNT(*)::int AS n FROM ai_usage WHERE LOWER(email) = LOWER($1) AND created_at >= (date_trunc('day', NOW() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')`,
+        [req.auth!.email || ''])).rows[0]?.n || 0);
+    }
+    res.json({ enabled, limit: aiDailyLimit(), remaining: Math.max(0, aiDailyLimit() - used) });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /ai/ticket { kind: 'exec_plan' | 'profile', ref } — permission for one AI draft
+app.post('/ai/ticket', requireRole('faculty', 'hod', 'coordinator', 'admin'), async (req: Request, res: Response) => {
+  try {
+    if (!process.env.AI_URL) return res.status(503).json({ error: 'AI drafting is not set up yet. Please tell the portal admin.' });
+    const kind = String(req.body?.kind || '');
+    const email = String(req.auth!.email || '').toLowerCase();
+    let ref = '';
+    if (kind === 'exec_plan') {
+      await ensureQualityTables();
+      const a = await lpAllotment(String(req.body?.ref || ''));
+      if (!a) return res.status(404).json({ error: 'Subject allotment not found' });
+      if (!lpIsOwner(req, a)) return res.status(403).json({ error: 'Only the faculty of this subject can draft its execution plan' });
+      ref = a.id;
+    } else if (kind === 'profile') {
+      ref = email;
+    } else return res.status(400).json({ error: 'Unknown form' });
+
+    await ensureAiUsage();
+    const used = Number((await db.query(`SELECT COUNT(*)::int AS n FROM ai_usage WHERE LOWER(email) = $1 AND created_at >= (date_trunc('day', NOW() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')`,
+      [email])).rows[0]?.n || 0);
+    if (used >= aiDailyLimit()) return res.status(429).json({ error: `You have used today's ${aiDailyLimit()} AI drafts. You can draft again tomorrow.` });
+    const ticket = signAiTicket({ email, role: req.auth!.role, kind: kind as AiKind, ref });
+    if (!ticket) return res.status(500).json({ error: 'AI drafting is not configured on the server' });
+    await db.query('INSERT INTO ai_usage (email, kind, ref) VALUES ($1, $2, $3)', [email, kind, ref]);
+    res.json({ ticket, url: process.env.AI_URL, remaining: aiDailyLimit() - used - 1 });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
 
 // GET /comp-profile/me — my saved profile + everything it prefills from
 app.get('/comp-profile/me', requireRole('faculty', 'hod', 'coordinator', 'admin'), async (req: Request, res: Response) => {

@@ -5,7 +5,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Check, Download, Plus, RefreshCw, Save, ShieldCheck, Trash2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Download, Plus, RefreshCw, Save, ShieldCheck, Sparkles, Trash2 } from 'lucide-react';
+import { requestAiDraft } from '../../lib/aiDraft';
+import { applyProfileDraft, profileAiHasWork, profileAiInput, ProfileDraft } from './compProfileAi';
 import { saveAs } from 'file-saver';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
@@ -144,7 +146,7 @@ export default function ComprehensiveProfilePage() {
   const canEdit = !viewing && !!q.data?.can_edit;
   const doc = useAutosaveDoc<CompProfile>({ draftKey: `fcp-draft:${user?.email || 'me'}`, canEdit, save: async v => { await api.saveMyCompProfile(v); qc.invalidateQueries({ queryKey: ['deptCompProfiles'] }); } });
   const [tab, setTab] = useState<Tab>('profile');
-  const [busy, setBusy] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null | 'ai'>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const footerH = useFooterHeight();
   const sources = (q.data as any)?.sources || null;
@@ -157,6 +159,7 @@ export default function ComprehensiveProfilePage() {
   }, [q.data]);
 
   const p = doc.value;
+  const ai = useQuery({ queryKey: ['aiStatus'], queryFn: () => api.getAiStatus().catch(() => ({ enabled: false, limit: 0, remaining: 0 })), staleTime: 60_000, enabled: canEdit });
   const menteeNames = useMemo(() => (p?.mentees || []).map(m => [m.roll, m.name].filter(Boolean).join(', ')), [p?.mentees]);
   if (q.isLoading || (!p && !q.error)) return <div className="p-10 text-center"><BouncingDots size="md" className="text-textMuted" /></div>;
   if (q.error || !p) return <div className={`${card} p-6 text-sm text-rose-600`}>{(q.error as any)?.message || 'Could not load'}</div>;
@@ -174,6 +177,22 @@ export default function ComprehensiveProfilePage() {
       saveAs(await buildCompProfileXlsx(p, { author: name || undefined, hideRatings }), profileFileName(p, name || 'Faculty'));
       setMsg(saved ? { ok: true, text: 'Downloaded: all sheets with everything on screen.' } : { ok: false, text: 'Downloaded, but saving to the portal failed. Your entries are kept on this device; press Save to try again.' });
     } catch (e: any) { setMsg({ ok: false, text: e.message || 'Could not build the Excel file' }); } finally { setBusy(null); }
+  };
+  /** AI help with the descriptive cells only (programme objectives & technologies, connection details, creative ideas) */
+  const aiInput = canEdit ? profileAiInput(p) : null;
+  const draftWithAi = async () => {
+    if (!aiInput) return;
+    setBusy('ai'); setMsg(null);
+    try {
+      const { draft, remaining } = await requestAiDraft<ProfileDraft>('profile', undefined, aiInput);
+      const r = applyProfileDraft(doc.value || p, draft);
+      if (r.filled) doc.update(r.profile);
+      void qc.invalidateQueries({ queryKey: ['aiStatus'] });
+      setMsg({ ok: true, text: r.filled
+        ? `AI filled ${r.filled} descriptive cells: objectives and technologies of your FDPs, trainings and workshops, your connections' industry type, expertise and domain, and creative assignment ideas. Check them before you download. Facts like dates, people, papers and ratings stay yours to enter. (${remaining} AI drafts left today.)`
+        : 'Nothing was changed: those cells are already filled.' });
+    } catch (e: any) { setMsg({ ok: false, text: e?.message || 'The AI could not draft this.' }); }
+    finally { setBusy(null); }
   };
   const go = async (t: Tab) => { if (canEdit) await doc.saveNow(doc.neverSaved); setTab(t); window.scrollTo({ top: 0, behavior: 'smooth' }); };
   const st = doc.saveState;
@@ -196,6 +215,10 @@ export default function ComprehensiveProfilePage() {
             <span className="text-[11px] font-bold">{status}</span>
           </div>
         </div>
+        {canEdit && ai.data?.enabled && aiInput && profileAiHasWork(aiInput) && (
+          <button className={`${btnPrimary} bg-violet-600 hover:bg-violet-700`} disabled={!!busy} onClick={draftWithAi} title="Writes descriptions into empty cells; your entries stay">
+            {busy === 'ai' ? <BouncingDots size="xs" /> : <Sparkles className="w-3.5 h-3.5 inline mr-1" />}{busy === 'ai' ? 'Drafting…' : 'Fill descriptions with AI'}</button>
+        )}
         {canEdit && <button className={btnGhost} disabled={st.s === 'saving' || (!doc.dirty && !doc.neverSaved && st.s !== 'error')} onClick={() => doc.saveNow(doc.neverSaved)}><Save className="w-3.5 h-3.5 inline mr-1" />Save</button>}
         <button className={btnPrimary} disabled={!!busy} onClick={download}>{busy === 'download' ? <BouncingDots size="xs" /> : <Download className="w-3.5 h-3.5 inline mr-1" />}Download Excel</button>
       </div>

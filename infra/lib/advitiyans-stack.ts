@@ -477,6 +477,38 @@ export class AdvitiyansStack extends cdk.Stack {
       event: events.RuleTargetInput.fromObject({ job: 'daily-notify' }),
     }));
 
+    // ========================================================================
+    // 15. AI drafting Lambda (outside the VPC — reaches Claude in Amazon Bedrock without a NAT)
+    //     Browser → API /ai/ticket (login check + daily limit) → this Function URL with the ticket → Bedrock.
+    //     Drafts execution plans and profile descriptions; stores nothing. Model access must be enabled
+    //     once in the Bedrock console for the account (Claude Opus 5.5, and Opus 4.8 as the fallback).
+    // ========================================================================
+    const aiLambda = new lambda.Function(this, 'AdvitiyansAi', {
+      runtime: lambda.Runtime.NODEJS_22_X,
+      handler: 'handlers/ai.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../backend/dist')),
+      timeout: cdk.Duration.seconds(300),       // a full execution plan takes about a minute
+      memorySize: 512,
+      reservedConcurrentExecutions: 20,         // caps spend and Bedrock load even if many press the button at once
+      environment: {
+        SESSION_SIGNING_SECRET: sessionSigningSecret.secretValue.unsafeUnwrap(),   // verifies AI tickets from the API
+        AI_MODEL: process.env.AI_MODEL || 'anthropic.claude-opus-5-5',
+        AI_FALLBACK_MODEL: process.env.AI_FALLBACK_MODEL || 'anthropic.claude-opus-4-8',
+        BEDROCK_REGION: process.env.BEDROCK_REGION || this.region,
+      },
+    });
+    aiLambda.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['bedrock-mantle:CreateInference'],
+      resources: ['*'],
+    }));
+    const aiUrl = aiLambda.addFunctionUrl({
+      authType: lambda.FunctionUrlAuthType.NONE,   // each request carries a signed, 10-minute AI ticket
+      cors: { allowedOrigins: ['*'], allowedMethods: [lambda.HttpMethod.POST], allowedHeaders: ['content-type', 'authorization'], maxAge: cdk.Duration.hours(1) },
+    });
+    apiLambda.addEnvironment('AI_URL', aiUrl.url);
+    if (process.env.AI_DAILY_LIMIT) apiLambda.addEnvironment('AI_DAILY_LIMIT', process.env.AI_DAILY_LIMIT);
+    new cdk.CfnOutput(this, 'AiUrl', { value: aiUrl.url });
+
     new cdk.CfnOutput(this, 'NotifierUrl', { value: notifierUrl.url });
     new cdk.CfnOutput(this, 'ApiGatewayUrl', { value: api.url });
     new cdk.CfnOutput(this, 'UserPoolId', { value: userPool.userPoolId });

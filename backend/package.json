@@ -4,7 +4,7 @@
   "description": "Advitiyans Student 360 & Placement Readiness Platform API",
   "main": "dist/handlers/api.js",
   "scripts": {
-    "build": "tsc && esbuild src/handlers/api.ts --bundle --minify --keep-names --platform=node --target=node20 --outfile=dist/handlers/api.js --external:pg-native --external:compression && esbuild src/handlers/notifier.ts --bundle --minify --keep-names --platform=node --target=node20 --outfile=dist/handlers/notifier.js && esbuild src/handlers/cognito-pre-signup.ts --bundle --platform=node --target=node20 --outfile=dist/handlers/cognito-pre-signup.js",
+    "build": "tsc && esbuild src/handlers/api.ts --bundle --minify --keep-names --platform=node --target=node20 --outfile=dist/handlers/api.js --external:pg-native --external:compression && esbuild src/handlers/notifier.ts --bundle --minify --keep-names --platform=node --target=node20 --outfile=dist/handlers/notifier.js && esbuild src/handlers/ai.ts --bundle --minify --keep-names --platform=node --target=node20 --outfile=dist/handlers/ai.js && esbuild src/handlers/cognito-pre-signup.ts --bundle --platform=node --target=node20 --outfile=dist/handlers/cognito-pre-signup.js",
     "test": "jest --passWithNoTests",
     "test:smoke": "jest --testPathPattern=tests/smoke --passWithNoTests",
     "test:unit": "jest --testPathPattern=tests/unit --passWithNoTests",
@@ -57,6 +57,8 @@
     ]
   },
   "dependencies": {
+    "@anthropic-ai/bedrock-sdk": "^1.1.3",
+    "@anthropic-ai/sdk": "^1.14.0",
     "@aws-sdk/client-cognito-identity-provider": "^3.1110.0",
     "@aws-sdk/client-dynamodb": "^3.1111.0",
     "@aws-sdk/client-s3": "^3.500.0",
